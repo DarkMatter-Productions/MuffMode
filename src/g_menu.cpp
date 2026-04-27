@@ -684,7 +684,7 @@ void G_Menu_CallVote_Map_Selection(gentity_t *ent, menu_hnd_t *p) {
 	if (!MenuVote_ReadSelection(ent, p, value, sizeof(value)))
 		return;
 
-	if (strstr(value, "..") || strpbrk(value, ":?*\"<>|/\\")) {
+	if (strstr(value, "..") || strpbrk(value, ":?*\"<>|")) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid characters in map name.\n");
 		return;
 	}
