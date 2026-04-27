@@ -10,7 +10,7 @@
 constexpr const char *GAMEVERSION = "baseq2";
 
 constexpr const char *GAMEMOD_TITLE = "Muff Mode";
-constexpr const char *GAMEMOD_VERSION = "0.22.11";
+constexpr const char *GAMEMOD_VERSION = "0.22.13";
 
 //==================================================================
 
@@ -2605,6 +2605,7 @@ void VoteCommandStore(gentity_t *ent);
 void TransitionVoteState(VoteState new_state);
 void ClearVote();
 vcmds_t *FindVoteCmdByName(const char *name);
+bool ValidateMenuVoteCommand(gentity_t *ent, vcmds_t *cc, const char *arg);
 bool IsGametypeVotable(gametype_t gt);
 bool IsRulesetVotable(ruleset_t rs);
 void Vote_Pass_Map();

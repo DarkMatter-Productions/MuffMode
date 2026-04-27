@@ -661,7 +661,14 @@ static bool MenuVote_ReadSelection(gentity_t *ent, menu_hnd_t *p, char *out, siz
 
 // Shared helper: set vote command + arg and call VoteCommandStore.
 static void MenuVote_Initiate(gentity_t *ent, const char *cmd_name, const char *arg) {
-	level.vote_state.command = FindVoteCmdByName(cmd_name);
+	vcmds_t *cc = FindVoteCmdByName(cmd_name);
+	if (!cc) {
+		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid vote command: {}\n", cmd_name ? cmd_name : "(null)");
+		return;
+	}
+	if (!ValidateMenuVoteCommand(ent, cc, arg))
+		return;
+	level.vote_state.command = cc;
 	level.vote_state.arg = arg ? arg : "";
 	VoteCommandStore(ent);
 }
@@ -677,7 +684,7 @@ void G_Menu_CallVote_Map_Selection(gentity_t *ent, menu_hnd_t *p) {
 	if (!MenuVote_ReadSelection(ent, p, value, sizeof(value)))
 		return;
 
-	if (strstr(value, "..") || strpbrk(value, ":?*\"<>|")) {
+	if (strstr(value, "..") || strpbrk(value, ":?*\"<>|/\\")) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid characters in map name.\n");
 		return;
 	}

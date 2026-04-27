@@ -2601,6 +2601,53 @@ static bool Vote_Val_None(gentity_t *ent) {
 	return true;
 }
 
+// Validation helpers so menu votes can run the same val_func logic as cmd votes.
+// In menu context, val_func calls that read gi.argc/gi.argv are fed from the
+// selected menu command/arg pair.
+static bool s_menu_vote_validation_active = false;
+static vcmds_t *s_menu_vote_validation_cmd = nullptr;
+static std::string s_menu_vote_validation_arg;
+
+static inline int VoteVal_Argc() {
+	if (!s_menu_vote_validation_active)
+		return gi.argc();
+	return s_menu_vote_validation_arg.empty() ? 2 : 3;
+}
+
+static inline const char *VoteVal_Argv(int index) {
+	if (!s_menu_vote_validation_active)
+		return gi.argv(index);
+	if (index == 0)
+		return "callvote";
+	if (index == 1)
+		return (s_menu_vote_validation_cmd && s_menu_vote_validation_cmd->name) ? s_menu_vote_validation_cmd->name : "";
+	if (index == 2)
+		return s_menu_vote_validation_arg.c_str();
+	return "";
+}
+
+bool ValidateMenuVoteCommand(gentity_t *ent, vcmds_t *cc, const char *arg) {
+	if (!ent || !ent->client || !cc)
+		return false;
+
+	const char *menu_arg = arg ? arg : "";
+	const int provided_argc = menu_arg[0] ? 3 : 2;
+
+	if (cc->args && provided_argc < (1 + cc->min_args)) {
+		gi.LocClient_Print(ent, PRINT_HIGH, "{}: {}\nUsage: {} {}\n", cc->name, cc->help, cc->name, cc->args);
+		return false;
+	}
+
+	s_menu_vote_validation_active = true;
+	s_menu_vote_validation_cmd = cc;
+	s_menu_vote_validation_arg = menu_arg;
+	const bool ok = cc->val_func(ent);
+	s_menu_vote_validation_active = false;
+	s_menu_vote_validation_cmd = nullptr;
+	s_menu_vote_validation_arg.clear();
+	return ok;
+}
+
 void Vote_Pass_Map() {
 	MuffModeLog("DEBUG", "Vote_Pass_Map: enter, arg='%s' (len=%d, ptr=%p)",
 	           level.vote_state.arg.c_str(), (int)level.vote_state.arg.length(),
@@ -2687,12 +2734,12 @@ static void PrintAvailableMaps(gentity_t *ent) {
 }
 
 static bool Vote_Val_Map(gentity_t *ent) {
-	if (gi.argc() < 3 || !gi.argv(2)[0]) {
+	if (VoteVal_Argc() < 3 || !VoteVal_Argv(2)[0]) {
 		PrintAvailableMaps(ent);
 		return false;
 	}
 
-	if (!IsMapValid(gi.argv(2))) {
+	if (!IsMapValid(VoteVal_Argv(2))) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "Unknown map.\n");
 		PrintAvailableMaps(ent);
 		return false;
@@ -2835,7 +2882,7 @@ static std::string GetVotableRulesetsList() {
 
 static bool Vote_Val_Gametype(gentity_t *ent) {
 	// Ensure exactly 3 arguments: callvote, gametype, <gametype_name>
-	if (gi.argc() != 3) {
+	if (VoteVal_Argc() != 3) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "Usage: callvote gametype <gametype_name>\n");
 		std::string votable_list = GetVotableGametypesList();
 		if (!votable_list.empty()) {
@@ -2844,10 +2891,10 @@ static bool Vote_Val_Gametype(gentity_t *ent) {
 		return false;
 	}
 	
-	gametype_t gt = GT_IndexFromString(gi.argv(2));
+	gametype_t gt = GT_IndexFromString(VoteVal_Argv(2));
 	
 	if (gt == GT_NONE) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid gametype: '{}'\n", gi.argv(2));
+		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid gametype: '{}'\n", VoteVal_Argv(2));
 		std::string votable_list = GetVotableGametypesList();
 		if (!votable_list.empty()) {
 			gi.LocClient_Print(ent, PRINT_HIGH, "Valid gametypes are: {}\n", votable_list.c_str());
@@ -2886,9 +2933,9 @@ static void Vote_Pass_Ruleset() {
 }
 
 static bool Vote_Val_Ruleset(gentity_t *ent) {
-	ruleset_t desired_rs = RS_IndexFromString(gi.argv(2));
+	ruleset_t desired_rs = RS_IndexFromString(VoteVal_Argv(2));
 	if (desired_rs == ruleset_t::RS_NONE) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid ruleset: '{}'\n", gi.argv(2));
+		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid ruleset: '{}'\n", VoteVal_Argv(2));
 		std::string votable_list = GetVotableRulesetsList();
 		if (!votable_list.empty()) {
 			gi.LocClient_Print(ent, PRINT_HIGH, "Valid rulesets are: {}\n", votable_list.c_str());
@@ -2945,7 +2992,7 @@ static void Vote_Pass_Unlagged() {
 }
 
 static bool Vote_Val_Unlagged(gentity_t *ent) {
-	int arg = strtoul(gi.argv(2), nullptr, 10);
+	int arg = strtoul(VoteVal_Argv(2), nullptr, 10);
 	
 	if ((g_lag_compensation->integer && arg)
 			|| (!g_lag_compensation->integer && !arg)) {
@@ -2957,7 +3004,7 @@ static bool Vote_Val_Unlagged(gentity_t *ent) {
 }
 
 static bool Vote_Val_Random(gentity_t *ent) {
-	int arg = strtoul(gi.argv(2), nullptr, 10);
+	int arg = strtoul(VoteVal_Argv(2), nullptr, 10);
 
 	if (arg > 100 || arg < 2)
 		return false;
@@ -2986,7 +3033,7 @@ void Vote_Pass_Timelimit() {
 }
 
 static bool Vote_Val_Timelimit(gentity_t *ent) {
-	int argi = strtoul(gi.argv(2), nullptr, 10);
+	int argi = strtoul(VoteVal_Argv(2), nullptr, 10);
 	
 	if (argi < 0 || argi > 1440) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid time limit value.\n");
@@ -3012,7 +3059,7 @@ void Vote_Pass_Scorelimit() {
 }
 
 static bool Vote_Val_Scorelimit(gentity_t *ent) {
-	int argi = strtoul(gi.argv(2), nullptr, 10);
+	int argi = strtoul(VoteVal_Argv(2), nullptr, 10);
 	
 	if (argi < 0) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid score limit value.\n");
@@ -3082,7 +3129,7 @@ static bool Vote_Val_FriendlyFire(gentity_t *ent) {
 		return false;
 	}
 
-	int arg = strtoul(gi.argv(2), nullptr, 10);
+	int arg = strtoul(VoteVal_Argv(2), nullptr, 10);
 	
 	if (arg != 0 && arg != 1) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid argument. Use 0 to disable or 1 to enable friendly fire.\n");
@@ -3101,7 +3148,7 @@ static bool Vote_Val_FriendlyFire(gentity_t *ent) {
 }
 
 static bool Vote_Val_Powerups(gentity_t *ent) {
-	int arg = strtoul(gi.argv(2), nullptr, 10);
+	int arg = strtoul(VoteVal_Argv(2), nullptr, 10);
 	
 	if (arg != 0 && arg != 1) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid argument. Use 0 to disable or 1 to enable powerups.\n");
@@ -3132,15 +3179,15 @@ static bool Vote_Val_Handicap(gentity_t *ent) {
 	}
 
 	// Check argument count
-	if (gi.argc() < 5) {
+	if (VoteVal_Argc() < 5) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "Usage: callvote handicap <player> <weapon> <on|off>\n");
 		gi.LocClient_Print(ent, PRINT_HIGH, "Weapons: railgun, chaingun, rlauncher, all\n");
 		return false;
 	}
 
-	const char *player_name = gi.argv(2);
-	const char *weapon_name = gi.argv(3);
-	const char *onoff = gi.argv(4);
+	const char *player_name = VoteVal_Argv(2);
+	const char *weapon_name = VoteVal_Argv(3);
+	const char *onoff = VoteVal_Argv(4);
 
 	// Find target player
 	int clientnum = Handicap_ClientNumberFromName(ent, player_name);
