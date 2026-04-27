@@ -695,6 +695,21 @@ void ChangeGametype(gametype_t gt) {
 		           gt_short_name[g_gametype->integer], g_gametype->integer,
 		           gt_short_name[(int)gt], (int)gt);
 		gi.cvar_forceset("g_gametype", G_Fmt("{}", (int)gt).data());
+
+		// Force all human clients through explicit join flow after gametype change.
+		// Without this, existing session state (team + initialised) can carry across
+		// map reloads and spawn players directly in-game even when auto-join is off.
+		for (auto ec : active_clients()) {
+			if (!ec->client)
+				continue;
+			if (ec->client->sess.is_a_bot || (ec->svflags & SVF_BOT))
+				continue;
+			ec->client->sess.team = TEAM_NONE;
+			ec->client->sess.duel_queued = false;
+			ec->client->sess.initialised = false;
+			ec->client->initial_menu_shown = false;
+			ec->client->initial_menu_delay = level.time + 10_hz;
+		}
 		
 		// Sync g_instagib cvar when switching to/from instagib gametype
 		if (gt == gametype_t::GT_INSTAGIB) {
@@ -1062,7 +1077,7 @@ static void InitGame() {
 	g_disable_player_collision = gi.cvar("g_disable_player_collision", "0", CVAR_NOFLAGS);
 	g_dm_allow_exit = gi.cvar("g_dm_allow_exit", "0", CVAR_NOFLAGS);
 	g_dm_allow_no_humans = gi.cvar("g_dm_allow_no_humans", "1", CVAR_NOFLAGS);
-	g_dm_auto_join = gi.cvar("g_dm_auto_join", "1", CVAR_NOFLAGS);
+	g_dm_auto_join = gi.cvar("g_dm_auto_join", "0", CVAR_NOFLAGS);
 	g_dm_crosshair_id = gi.cvar("g_dm_crosshair_id", "1", CVAR_NOFLAGS);
 	g_dm_do_readyup = gi.cvar("g_dm_do_readyup", "0", CVAR_NOFLAGS);
 	g_dm_do_warmup = gi.cvar("g_dm_do_warmup", "1", CVAR_NOFLAGS);
