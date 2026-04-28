@@ -125,6 +125,7 @@ cvar_t *g_dm_no_quad_drop;
 cvar_t *g_dm_no_self_damage;
 cvar_t *g_dm_no_stack_double;
 cvar_t *g_dm_overtime;
+cvar_t *g_dm_tie_max_time;
 cvar_t *g_dm_powerup_drop;
 cvar_t *g_dm_powerups_minplayers;
 cvar_t *g_dm_random_items;
@@ -1094,6 +1095,7 @@ static void InitGame() {
 	g_dm_no_self_damage = gi.cvar("g_dm_no_self_damage", "0", CVAR_NOFLAGS);
 	g_dm_no_stack_double = gi.cvar("g_dm_no_stack_double", "0", CVAR_NOFLAGS);
 	g_dm_overtime = gi.cvar("g_dm_overtime", "120", CVAR_NOFLAGS);
+	g_dm_tie_max_time = gi.cvar("g_dm_tie_max_time", "1800", CVAR_NOFLAGS);
 	g_dm_powerup_drop = gi.cvar("g_dm_powerup_drop", "1", CVAR_NOFLAGS);
 	g_dm_powerups_minplayers = gi.cvar("g_dm_powerups_minplayers", "0", CVAR_NOFLAGS);
 	g_dm_respawn_delay_min = gi.cvar("g_dm_respawn_delay_min", "1", CVAR_NOFLAGS);
@@ -1669,6 +1671,7 @@ void Match_Start() {
 	level.match_time = level.time;
 	level.match_start_time = level.time;
 	level.overtime = 0_sec;
+	level.tied_overtime_start = 0_sec;
 
 	const char *s = G_TimeString(timelimit->value ? timelimit->value * 1000 : 0, true);
 	gi.configstring(CONFIG_MATCH_STATE, s);
@@ -1737,6 +1740,7 @@ void Match_Reset() {
 	level.intermission_queued = 0_sec;
 	level.intermission_exit = false;
 	level.intermission_time = 0_sec;
+	level.tied_overtime_start = 0_sec;
 
 	CalculateRanks();
 
@@ -3439,6 +3443,8 @@ void QueueIntermission(const char *msg, bool boo, bool reset) {
 	if (level.intermission_queued || level.match_state < matchst_t::MATCH_IN_PROGRESS)
 		return;
 
+	level.tied_overtime_start = 0_sec;
+
 	Q_strlcpy(level.intermission_victor_msg, msg, sizeof(level.intermission_victor_msg));
 
 	//gi.LocBroadcast_Print(PRINT_CHAT, "MATCH END: {}\n", level.intermission_victor_msg[0] ? level.intermission_victor_msg : "Unknown Reason");
@@ -3556,24 +3562,29 @@ void CheckDMExitRules() {
 			if (level.time >= level.match_time + gtime_t::from_min(timelimit->value) + level.overtime) {
 				// check for overtime
 				if (ScoreIsTied()) {
-					bool play = false;
+					if (g_dm_tie_max_time->integer > 0) {
+						if (!level.tied_overtime_start) {
+							level.tied_overtime_start = level.time;
+						} else if (level.time - level.tied_overtime_start >= gtime_t::from_sec(g_dm_tie_max_time->integer)) {
+							QueueIntermission("Tie timeout reached. Match ends in a draw.", false, false);
+							return;
+						}
+					}
 
 					if (GT(GT_DUEL) && g_dm_overtime->integer > 0) {
 						level.overtime += gtime_t::from_sec(g_dm_overtime->integer);
 						gi.LocBroadcast_Print(PRINT_CENTER, "Overtime!\n{} added", G_TimeString(g_dm_overtime->integer * 1000, false));
 						AnnouncerSound(world, "overtime", "world/klaxon2.wav", true);
-						play = true;
 					} else if (!level.suddendeath) {
 						gi.LocBroadcast_Print(PRINT_CENTER, "Sudden Death!");
 						AnnouncerSound(world, "sudden_death", "world/klaxon2.wav", true);
 						level.suddendeath = true;
-						play = true;
 					}
 
-					//if (play)
-						//gi.positioned_sound(world->s.origin, world, CHAN_RELIABLE | CHAN_NO_PHS_ADD | CHAN_AUX, gi.soundindex("world/klaxon2.wav"), 1, ATTN_NONE, 0);
 					return;
 				}
+
+				level.tied_overtime_start = 0_sec;
 
 				// find the winner and broadcast it
 				if (teams) {

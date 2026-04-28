@@ -1712,6 +1712,7 @@ struct level_locals_t {
 
 	gtime_t		overtime;
 	bool		suddendeath;
+	gtime_t		tied_overtime_start;
 
 	int			count_living[TEAM_NUM_TEAMS];
 
@@ -2458,6 +2459,7 @@ extern cvar_t *g_dm_no_quad_drop;
 extern cvar_t *g_dm_no_self_damage;
 extern cvar_t *g_dm_no_stack_double;
 extern cvar_t *g_dm_overtime;
+extern cvar_t *g_dm_tie_max_time;
 extern cvar_t *g_dm_powerup_drop;
 extern cvar_t *g_dm_powerups_minplayers;
 extern cvar_t *g_dm_random_items;
