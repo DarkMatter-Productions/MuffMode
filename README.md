@@ -251,6 +251,10 @@ Use **callvote [command] [arg]** for the below listed vote commands:
  - **random**: randomly returns a number from 2 to argument value, 100 max.
  - **ruleset <q2re|mm|q3a|q2reb|qc>**: changes gameplay style
 
+Voting control cvars:
+- **g_allow_vote_midgame**: allows/prohibits starting votes during an active match state (default 0)
+- **g_allow_voting**: global voting enable/disable switch; when 0, voting is fully disabled (default 0)
+
 ### Cvar Changes
  - g_dm_spawn_farthest: added an option, valid values are as follows:
 	- 0: high random (selects random spawn point except the 2 nearest)
@@ -283,6 +287,7 @@ Use **callvote [command] [arg]** for the below listed vote commands:
  - **g_dm_holdable_adrenaline** : when set to 1, allows holdable Adrenaline during deathmatch (default 1)
  - **g_dm_no_self_damage**: when set to 1, disables any self damage after calculating knockback (default: 0)
  - **g_dm_overtime**: Set stoppage time for each overtime session in seconds. Currently only applies to Duels. (default 120)
+ - **g_dm_tie_max_time**: sets the maximum total tied-overtime duration in seconds before forcing match resolution, 0 disables the limit. (default 1800)
  - **g_dm_powerup_drop**: when set to 1, drops carried powerups upon death (default: 1)
  - **g_dm_powerups_minplayers**: Sets minimum current player load to allow powerup pickups, 0 to disable (default 0)
  - **g_dm_respawn_delay_min**: the counterpart to g_dm_force_respawn_time, this sets a minimum respawn delay after dying (default: 1)
