@@ -431,11 +431,10 @@ void G_TouchTriggers(gentity_t *ent) {
 	static gentity_t	*touch[MAX_ENTITIES];
 	gentity_t			*hit;
 
-	if (ent->client && ent->client->eliminated);
-	else
-		// dead things don't activate triggers!
-		if ((ent->client || (ent->svflags & SVF_MONSTER)) && (ent->health <= 0))
-			return;
+	// Dead or eliminated things don't activate triggers.
+	if ((ent->client && ent->client->eliminated) ||
+			((ent->client || (ent->svflags & SVF_MONSTER)) && ent->health <= 0))
+		return;
 
 	num = gi.BoxEntities(ent->absmin, ent->absmax, touch, MAX_ENTITIES, AREA_TRIGGERS, G_TouchTriggers_BoxFilter, nullptr);
 
