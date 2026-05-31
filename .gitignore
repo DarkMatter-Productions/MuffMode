@@ -408,6 +408,7 @@ game_x64.exp
 changes_v0.19.60_to_v0.21.0.patch
 patches_v0.19.60_to_v0.21.0/
 build.bat
+build_dev.bat
 
 # Local vcpkg artifacts
 src/vcpkg_installed/
