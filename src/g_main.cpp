@@ -1997,22 +1997,25 @@ static void CheckDMRoundState(void) {
 
 	// end round
 	if (level.round_state == roundst_t::ROUND_IN_PROGRESS) {
+		auto is_living_round_player = [](gentity_t *ent) {
+			return ent->client && ClientIsPlaying(ent->client) &&
+				!ent->client->eliminated && ent->health > 0;
+		};
+
 		switch (g_gametype->integer) {
 		case GT_CA:
+		case GT_STRIKE:
 		{
-			int8_t count_red = 0, count_blue = 0;
-			int8_t count_living_red = 0, count_living_blue = 0;
+			int count_living_red = 0, count_living_blue = 0;
 
 			for (auto ec : active_clients()) {
 				switch (ec->client->sess.team) {
 				case TEAM_RED:
-					count_red++;
-					if (!ec->client->eliminated)
+					if (is_living_round_player(ec))
 						count_living_red++;
 					break;
 				case TEAM_BLUE:
-					count_blue++;
-					if (!ec->client->eliminated)
+					if (is_living_round_player(ec))
 						count_living_blue++;
 					break;
 				}
@@ -2083,7 +2086,7 @@ static void CheckDMRoundState(void) {
 				int living_red = 0, living_blue = 0;
 
 				for (auto ec : active_clients()) {
-					if (ec->health <= 0 || ec->client->eliminated)
+					if (!is_living_round_player(ec))
 						continue;
 
 					switch (ec->client->sess.team) {
@@ -2110,7 +2113,7 @@ static void CheckDMRoundState(void) {
 					int total_health_red = 0, total_health_blue = 0;
 
 					for (auto ec : active_players()) {
-						if (ec->health <= 0)
+						if (!is_living_round_player(ec))
 							continue;
 						switch (ec->client->sess.team) {
 						case TEAM_RED:

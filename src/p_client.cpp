@@ -1072,6 +1072,15 @@ DIE(player_die) (gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 
 	self->svflags |= SVF_DEADMONSTER;
 
+	if (GTF(GTF_ROUNDS) && GTF(GTF_ELIMINATION) &&
+			level.match_state == matchst_t::MATCH_IN_PROGRESS &&
+			level.round_state == roundst_t::ROUND_IN_PROGRESS &&
+			notGT(GT_HORDE) && ClientIsPlaying(self->client) &&
+			!self->client->eliminated) {
+		ClientSetEliminated(self);
+		CalculateRanks();
+	}
+
 	if (!self->deadflag) {
 		self->client->respawn_time = (level.time + 1_sec);
 
@@ -4279,11 +4288,18 @@ void ClientThink(gentity_t *ent, usercmd_t *ucmd) {
 	// check for queued follow targets
 	if (!ClientIsPlaying(client) || client->eliminated) {
 		if (client->follow_queued_target && level.time > client->follow_queued_time + 500_ms) {
-			client->follow_target = client->follow_queued_target;
-			client->follow_update = true;
+			// eliminated players in team elimination modes may only follow their own team
+			bool queued_allowed = true;
+			if (client->eliminated && Teams() && client->follow_queued_target->client)
+				queued_allowed = (client->follow_queued_target->client->sess.team == client->sess.team);
+
+			if (queued_allowed) {
+				client->follow_target = client->follow_queued_target;
+				client->follow_update = true;
+				UpdateChaseCam(ent);
+			}
 			client->follow_queued_target = nullptr;
 			client->follow_queued_time = 0_sec;
-			UpdateChaseCam(ent);
 		}
 	}
 	
