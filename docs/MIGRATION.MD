@@ -57,8 +57,10 @@ This document tracks migration progress from a monolithic fork style toward thin
 
 - Added vote module API:
   - `src/muffmode/mm_vote.h`
+  - `src/muffmode/mm_vote_menu.h`
 - Added vote module implementation:
   - `src/muffmode/mm_vote.cpp`
+  - `src/muffmode/mm_vote_menu.cpp`
 
 #### Migrations completed in this subsystem
 
@@ -130,6 +132,11 @@ This document tracks migration progress from a monolithic fork style toward thin
    - `g_cmds.cpp` no longer owns vote registry internals; it now remains focused on orchestration/admin paths.
    - Vote command table entries now point directly to `MM_*` handlers.
 
+16. **Vote menu extraction**
+   - Callvote menu definitions, selection handlers, vote menu display/update logic, and submenu return flow now live in `mm_vote_menu.cpp`.
+   - `g_menu.cpp` now includes `muffmode/mm_vote_menu.h` and retains only the join-menu callvote entry hook.
+   - `muffmode/muffmode.h`, `game.vcxproj`, and `game.vcxproj.filters` include the new vote-menu module.
+
 #### Validation completed so far
 
 - Build passes after each extraction step.
@@ -142,6 +149,9 @@ This document tracks migration progress from a monolithic fork style toward thin
   - vote lifecycle (active/passed/failed/complete)
   - gametype/ruleset vote pass/reject behavior
   - handicap vote parser path (`callvote handicap "Player Name" <weapon|all> <on|off>`)
+- Build validation passed for vote-menu extraction:
+  - `build.bat Debug x64 v145`
+  - `0 Warning(s), 0 Error(s)`
 
 ## Current Thin-Hook Pattern
 
@@ -152,10 +162,15 @@ This document tracks migration progress from a monolithic fork style toward thin
 
 ## Next Recommended Targets
 
-- Vote flow extraction boundaries from `g_cmds.cpp` into `src/muffmode/`:
-  - grouped migration of remaining `Vote_Val_*` / `Vote_Pass_*` handlers
-  - potential relocation or encapsulation strategy for `vote_cmds[]`
-- Menu integration boundary cleanup (`g_menu.cpp`/`p_menu.cpp`) as a separate slice.
+- Vote lifecycle ticking from `g_main.cpp` into the MuffMode vote module:
+  - `UpdateActiveVote()`
+  - `CheckVote()`
+  - keep `G_RunFrame_()` as a thin hook.
+- Admin command extraction from `g_cmds.cpp` into MuffMode modules:
+  - gametype/ruleset/setmap admin commands
+  - handicap admin commands
+  - MuffMode Doctor diagnostics.
+- Gametype/ruleset orchestration from `g_main.cpp` as a later, higher-risk slice.
 
 ## Notes
 

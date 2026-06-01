@@ -155,6 +155,7 @@
     <ClInclude Include="muffmode\mm_debug.h" />
     <ClInclude Include="muffmode\mm_maps.h" />
     <ClInclude Include="muffmode\mm_vote.h" />
+    <ClInclude Include="muffmode\mm_vote_menu.h" />
     <ClInclude Include="muffmode\muffmode.h" />
     <ClInclude Include="p_menu.h" />
     <ClInclude Include="q_std.h" />
@@ -226,6 +227,7 @@
     <ClCompile Include="muffmode\mm_debug.cpp" />
     <ClCompile Include="muffmode\mm_maps.cpp" />
     <ClCompile Include="muffmode\mm_vote.cpp" />
+    <ClCompile Include="muffmode\mm_vote_menu.cpp" />
     <ClCompile Include="p_client.cpp" />
     <ClCompile Include="p_hud.cpp" />
     <ClCompile Include="p_menu.cpp" />
