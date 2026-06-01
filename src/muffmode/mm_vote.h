@@ -21,4 +21,6 @@ bool MM_IsRulesetVotable(ruleset_t rs);
 std::string MM_GetVotableGametypesList();
 std::string MM_GetVotableRulesetsList();
 bool MM_ValidVoteCommand(gentity_t *ent);
+void MM_VoteCommandStore(gentity_t *ent);
+void MM_CmdCallVote(gentity_t *ent);
 

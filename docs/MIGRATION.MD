@@ -82,6 +82,14 @@ This document tracks migration progress from a monolithic fork style toward thin
    - `ValidVoteCommand()` in `g_cmds.cpp` is now a thin hook to `MM_ValidVoteCommand()`.
    - Existing argument behavior is preserved, including the quoted-name `handicap` path.
 
+5. **Vote startup/storage path extracted**
+   - `VoteCommandStore()` in `g_cmds.cpp` is now a thin hook to `MM_VoteCommandStore()`.
+   - Vote menu/broadcast/reset behavior is preserved.
+
+6. **Callvote entry orchestration extracted**
+   - `Cmd_CallVote_f()` in `g_cmds.cpp` is now a thin hook to `MM_CmdCallVote()`.
+   - Added a null sentinel to `vote_cmds[]` so module code can iterate command entries safely.
+
 #### Validation completed so far
 
 - Build passes after each extraction step.
@@ -105,8 +113,9 @@ This document tracks migration progress from a monolithic fork style toward thin
 ## Next Recommended Targets
 
 - Vote flow extraction boundaries from `g_cmds.cpp` into `src/muffmode/`:
-  - vote startup/storage path (`VoteCommandStore`)
-  - final callvote entry orchestration cleanup
+  - `Cmd_Vote_f` and vote-casting decision path cleanup
+  - grouped migration of remaining `Vote_Val_*` / `Vote_Pass_*` handlers
+  - potential relocation or encapsulation strategy for `vote_cmds[]`
 - Menu integration boundary cleanup (`g_menu.cpp`/`p_menu.cpp`) as a separate slice.
 
 ## Notes
