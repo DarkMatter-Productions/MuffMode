@@ -2602,31 +2602,6 @@ static bool Vote_Val_None(gentity_t *ent) {
 	return true;
 }
 
-// Validation helpers so menu votes can run the same val_func logic as cmd votes.
-// In menu context, val_func calls that read gi.argc/gi.argv are fed from the
-// selected menu command/arg pair.
-static bool s_menu_vote_validation_active = false;
-static vcmds_t *s_menu_vote_validation_cmd = nullptr;
-static std::string s_menu_vote_validation_arg;
-
-static inline int VoteVal_Argc() {
-	if (!s_menu_vote_validation_active)
-		return gi.argc();
-	return s_menu_vote_validation_arg.empty() ? 2 : 3;
-}
-
-static inline const char *VoteVal_Argv(int index) {
-	if (!s_menu_vote_validation_active)
-		return gi.argv(index);
-	if (index == 0)
-		return "callvote";
-	if (index == 1)
-		return (s_menu_vote_validation_cmd && s_menu_vote_validation_cmd->name) ? s_menu_vote_validation_cmd->name : "";
-	if (index == 2)
-		return s_menu_vote_validation_arg.c_str();
-	return "";
-}
-
 bool ValidateMenuVoteCommand(gentity_t *ent, vcmds_t *cc, const char *arg) {
 	if (!ent || !ent->client || !cc)
 		return false;
@@ -2639,118 +2614,26 @@ bool ValidateMenuVoteCommand(gentity_t *ent, vcmds_t *cc, const char *arg) {
 		return false;
 	}
 
-	s_menu_vote_validation_active = true;
-	s_menu_vote_validation_cmd = cc;
-	s_menu_vote_validation_arg = menu_arg;
+	MM_BeginVoteValidationContext(cc, menu_arg);
 	const bool ok = cc->val_func(ent);
-	s_menu_vote_validation_active = false;
-	s_menu_vote_validation_cmd = nullptr;
-	s_menu_vote_validation_arg.clear();
+	MM_EndVoteValidationContext();
 	return ok;
 }
 
 void Vote_Pass_Map() {
-	MuffModeLog("DEBUG", "Vote_Pass_Map: enter, arg='%s' (len=%d, ptr=%p)",
-	           level.vote_state.arg.c_str(), (int)level.vote_state.arg.length(),
-	           (void*)level.vote_state.arg.c_str());
-
-	if (level.vote_state.arg.empty() || level.vote_state.arg.length() >= sizeof(level.nextmap)) {
-		gi.LocBroadcast_Print(PRINT_HIGH, "Map vote failed: invalid map name.\n");
-		return;
-	}
-
-	Q_strlcpy(level.nextmap, level.vote_state.arg.c_str(), sizeof(level.nextmap));
-	MuffModeLog("DEBUG", "Vote_Pass_Map: queuing gamemap for '%s'", level.nextmap);
-	gi.AddCommandString(G_Fmt("gamemap \"{}\"\n", level.nextmap).data());
+	MM_VotePassMap();
 }
 
-// Helper function to validate a map name using two-tier system:
-// First checks g_map_pool (all available maps), then falls back to g_map_list (rotation maps)
 static bool IsMapValid(const char *mapname) {
-	if (!mapname || !mapname[0])
-		return false;
-
-	char *token;
-
-	// First check g_map_pool if it exists and is non-empty
-	if (g_map_pool->string[0]) {
-		const char *pool = g_map_pool->string;
-
-		while ((token = COM_Parse(&pool)) && *token) {
-			if (!Q_strcasecmp(token, mapname))
-				return true;
-		}
-	}
-
-	// Fall back to g_map_list if pool didn't have it (or pool was empty)
-	if (g_map_list->string[0]) {
-		const char *mlist = g_map_list->string;
-
-		while ((token = COM_Parse(&mlist)) && *token) {
-			if (!Q_strcasecmp(token, mapname))
-				return true;
-		}
-	}
-
-	return false;
-}
-
-static void PrintAvailableMaps(gentity_t *ent) {
-	std::vector<std::string> all_maps;
-	char *token;
-
-	auto map_exists = [&all_maps](const char *map) -> bool {
-		for (const auto &existing : all_maps)
-			if (!Q_strcasecmp(existing.c_str(), map))
-				return true;
-		return false;
-	};
-
-	if (g_map_pool->string[0]) {
-		const char *pool = g_map_pool->string;
-		while ((token = COM_Parse(&pool)) && *token)
-			if (!map_exists(token))
-				all_maps.push_back(token);
-	}
-	if (g_map_list->string[0]) {
-		const char *mlist = g_map_list->string;
-		while ((token = COM_Parse(&mlist)) && *token)
-			if (!map_exists(token))
-				all_maps.push_back(token);
-	}
-
-	if (all_maps.empty()) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "No map list or pool configured.\n");
-		return;
-	}
-
-	std::sort(all_maps.begin(), all_maps.end(), [](const std::string &a, const std::string &b) {
-		return Q_strcasecmp(a.c_str(), b.c_str()) < 0;
-	});
-
-	std::string display = join_strings(all_maps, " ");
-	if (display.length() > 256)
-		display = display.substr(0, 256) + "...";
-	gi.LocClient_Print(ent, PRINT_HIGH, "Valid maps are: {}\n", display.c_str());
+	return MM_IsMapValid(mapname);
 }
 
 static bool Vote_Val_Map(gentity_t *ent) {
-	if (VoteVal_Argc() < 3 || !VoteVal_Argv(2)[0]) {
-		PrintAvailableMaps(ent);
-		return false;
-	}
-
-	if (!IsMapValid(VoteVal_Argv(2))) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "Unknown map.\n");
-		PrintAvailableMaps(ent);
-		return false;
-	}
-
-	return true;
+	return MM_VoteValMap(ent);
 }
 
 void Vote_Pass_RestartMatch() {
-	Match_Reset();
+	MM_VotePassRestartMatch();
 }
 
 void Vote_Pass_Gametype() {
@@ -2778,38 +2661,7 @@ static std::string GetVotableRulesetsList() {
 }
 
 static bool Vote_Val_Gametype(gentity_t *ent) {
-	// Ensure exactly 3 arguments: callvote, gametype, <gametype_name>
-	if (VoteVal_Argc() != 3) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "Usage: callvote gametype <gametype_name>\n");
-		std::string votable_list = GetVotableGametypesList();
-		if (!votable_list.empty()) {
-			gi.LocClient_Print(ent, PRINT_HIGH, "Valid gametypes are: {}\n", votable_list.c_str());
-		}
-		return false;
-	}
-	
-	gametype_t gt = GT_IndexFromString(VoteVal_Argv(2));
-	
-	if (gt == GT_NONE) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid gametype: '{}'\n", VoteVal_Argv(2));
-		std::string votable_list = GetVotableGametypesList();
-		if (!votable_list.empty()) {
-			gi.LocClient_Print(ent, PRINT_HIGH, "Valid gametypes are: {}\n", votable_list.c_str());
-		}
-		return false;
-	}
-
-	// Check if gametype is votable
-	if (!IsGametypeVotable(gt)) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "This gametype is not available for voting.\n");
-		std::string votable_list = GetVotableGametypesList();
-		if (!votable_list.empty()) {
-			gi.LocClient_Print(ent, PRINT_HIGH, "Valid gametypes are: {}\n", votable_list.c_str());
-		}
-		return false;
-	}
-
-	return true;
+	return MM_VoteValGametype(ent);
 }
 
 static void Vote_Pass_Ruleset() {
@@ -2817,36 +2669,11 @@ static void Vote_Pass_Ruleset() {
 }
 
 static bool Vote_Val_Ruleset(gentity_t *ent) {
-	ruleset_t desired_rs = RS_IndexFromString(VoteVal_Argv(2));
-	if (desired_rs == ruleset_t::RS_NONE) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid ruleset: '{}'\n", VoteVal_Argv(2));
-		std::string votable_list = GetVotableRulesetsList();
-		if (!votable_list.empty()) {
-			gi.LocClient_Print(ent, PRINT_HIGH, "Valid rulesets are: {}\n", votable_list.c_str());
-		}
-		return false;
-	}
-	if ((int)desired_rs == game.ruleset) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "Ruleset currently active.\n");
-		return false;
-	}
-
-	// Check if ruleset is votable
-	if (!IsRulesetVotable(desired_rs)) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "This ruleset is not available for voting.\n");
-		std::string votable_list = GetVotableRulesetsList();
-		if (!votable_list.empty()) {
-			gi.LocClient_Print(ent, PRINT_HIGH, "Valid rulesets are: {}\n", votable_list.c_str());
-		}
-		return false;
-	}
-
-	return true;
+	return MM_VoteValRuleset(ent);
 }
 
 void Vote_Pass_NextMap() {
-	Match_End();
-	level.intermission_exit = true;
+	MM_VotePassNextMap();
 }
 
 void Vote_Pass_ShuffleTeams() {
@@ -2866,20 +2693,15 @@ static bool Vote_Val_Unlagged(gentity_t *ent) {
 }
 
 static bool Vote_Val_Random(gentity_t *ent) {
-	int arg = strtoul(VoteVal_Argv(2), nullptr, 10);
-
-	if (arg > 100 || arg < 2)
-		return false;
-
-	return true;
+	return MM_VoteValRandom(ent);
 }
 
 void Vote_Pass_Cointoss() {
-	gi.LocBroadcast_Print(PRINT_HIGH, "The coin is: {}\n", brandom() ? "HEADS" : "TAILS");
+	MM_VotePassCointoss();
 }
 
 void Vote_Pass_Random() {
-	gi.LocBroadcast_Print(PRINT_HIGH, "The random number is: {}\n", irandom(2, atoi(level.vote_state.arg.data())));
+	MM_VotePassRandom();
 }
 
 void Vote_Pass_Timelimit() {
@@ -2936,179 +2758,11 @@ static item_id_t Handicap_WeaponIDFromName(const char *name);
 static void Handicap_ApplyWeaponRestriction(gentity_t *target, item_id_t weapon_id, bool restrict);
 
 static bool Vote_Val_Handicap(gentity_t *ent) {
-	// Must be in duel mode
-	if (notGT(GT_DUEL)) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "Handicap system only works in duel mode.\n");
-		return false;
-	}
-
-	// Check argument count
-	if (VoteVal_Argc() < 5) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "Usage: callvote handicap <player> <weapon> <on|off>\n");
-		gi.LocClient_Print(ent, PRINT_HIGH, "Weapons: railgun, chaingun, rlauncher, all\n");
-		return false;
-	}
-
-	const char *player_name = VoteVal_Argv(2);
-	const char *weapon_name = VoteVal_Argv(3);
-	const char *onoff = VoteVal_Argv(4);
-
-	// Find target player
-	int clientnum = Handicap_ClientNumberFromName(ent, player_name);
-	if (clientnum < 0) {
-		return false;
-	}
-
-	gentity_t *target = &g_entities[1 + clientnum];
-	if (!target->inuse || !target->client || !ClientIsPlaying(target->client)) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "Player '{}' is not playing.\n", player_name);
-		return false;
-	}
-
-	// Validate weapon
-	item_id_t weapon_id = Handicap_WeaponIDFromName(weapon_name);
-	if (weapon_id == IT_NULL && Q_strcasecmp(weapon_name, "all")) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid weapon '{}'. Valid: railgun, chaingun, rlauncher, all\n", weapon_name);
-		return false;
-	}
-
-	// Validate on/off
-	bool restrict = false;
-	if (!Q_strcasecmp(onoff, "on") || !Q_strcasecmp(onoff, "1")) {
-		restrict = true;
-	} else if (!Q_strcasecmp(onoff, "off") || !Q_strcasecmp(onoff, "0")) {
-		restrict = false;
-	} else {
-		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid value '{}'. Use 'on' or 'off'.\n", onoff);
-		return false;
-	}
-
-	// Check if restriction would change anything
-	if (weapon_id == IT_NULL) {
-		// "all" case
-		constexpr uint32_t HANDICAP_ALL_WEAPONS = 
-			(1U << (IT_WEAPON_RAILGUN - FIRST_WEAPON)) |
-			(1U << (IT_WEAPON_CHAINGUN - FIRST_WEAPON)) |
-			(1U << (IT_WEAPON_RLAUNCHER - FIRST_WEAPON));
-		
-		bool currently_restricted = (target->client->handicap.restricted_weapons & HANDICAP_ALL_WEAPONS) == HANDICAP_ALL_WEAPONS;
-		if (currently_restricted == restrict) {
-			gi.LocClient_Print(ent, PRINT_HIGH, "All handicap weapons are already {} for {}.\n", 
-				restrict ? "restricted" : "unrestricted", target->client->resp.netname);
-			return false;
-		}
-	} else {
-		uint32_t weapon_bit = 1U << (weapon_id - FIRST_WEAPON);
-		bool currently_restricted = (target->client->handicap.restricted_weapons & weapon_bit) != 0;
-		if (currently_restricted == restrict) {
-			gitem_t *weapon_item = GetItemByIndex(weapon_id);
-			gi.LocClient_Print(ent, PRINT_HIGH, "{} is already {} for {}.\n", 
-				weapon_item ? weapon_item->pickup_name : weapon_name,
-				restrict ? "restricted" : "unrestricted", 
-				target->client->resp.netname);
-			return false;
-		}
-	}
-
-	return true;
+	return MM_VoteValHandicap(ent);
 }
 
 static void Vote_Pass_Handicap() {
-	// Parse the stored argument string
-	// Format: "playername weaponname on|off" or "player name" weaponname on|off
-	std::string arg = level.vote_state.arg;
-	
-	std::string player_name, weapon_name, onoff;
-	
-	// Handle quoted player names
-	if (arg.length() > 0 && arg[0] == '"') {
-		// Find closing quote
-		size_t quote_end = arg.find('"', 1);
-		if (quote_end == std::string::npos) {
-			gi.LocBroadcast_Print(PRINT_HIGH, "Handicap vote failed: invalid argument format (unclosed quote).\n");
-			return;
-		}
-		
-		// Extract player name (without quotes)
-		player_name = arg.substr(1, quote_end - 1);
-		
-		// Find next space after closing quote
-		size_t space_after_quote = arg.find(' ', quote_end + 1);
-		if (space_after_quote == std::string::npos) {
-			gi.LocBroadcast_Print(PRINT_HIGH, "Handicap vote failed: invalid argument format.\n");
-			return;
-		}
-		
-		// Find space after weapon name
-		size_t space_after_weapon = arg.find(' ', space_after_quote + 1);
-		if (space_after_weapon == std::string::npos) {
-			gi.LocBroadcast_Print(PRINT_HIGH, "Handicap vote failed: invalid argument format.\n");
-			return;
-		}
-		
-		weapon_name = arg.substr(space_after_quote + 1, space_after_weapon - space_after_quote - 1);
-		onoff = arg.substr(space_after_weapon + 1);
-	} else {
-		// No quotes - split by spaces normally
-		size_t space1 = arg.find(' ');
-		if (space1 == std::string::npos) {
-			gi.LocBroadcast_Print(PRINT_HIGH, "Handicap vote failed: invalid argument format.\n");
-			return;
-		}
-		
-		size_t space2 = arg.find(' ', space1 + 1);
-		if (space2 == std::string::npos) {
-			gi.LocBroadcast_Print(PRINT_HIGH, "Handicap vote failed: invalid argument format.\n");
-			return;
-		}
-		
-		player_name = arg.substr(0, space1);
-		weapon_name = arg.substr(space1 + 1, space2 - space1 - 1);
-		onoff = arg.substr(space2 + 1);
-	}
-
-	// Find target player (use a dummy entity for the helper function)
-	gentity_t *dummy_ent = nullptr;
-	for (auto ec : active_clients()) {
-		dummy_ent = ec;
-		break;
-	}
-	if (!dummy_ent) {
-		gi.LocBroadcast_Print(PRINT_HIGH, "Handicap vote failed: no players found.\n");
-		return;
-	}
-
-	int clientnum = Handicap_ClientNumberFromName(dummy_ent, player_name.c_str());
-	if (clientnum < 0) {
-		gi.LocBroadcast_Print(PRINT_HIGH, "Handicap vote failed: player not found.\n");
-		return;
-	}
-
-	gentity_t *target = &g_entities[1 + clientnum];
-	if (!target->inuse || !target->client) {
-		gi.LocBroadcast_Print(PRINT_HIGH, "Handicap vote failed: player not active.\n");
-		return;
-	}
-
-	item_id_t weapon_id = Handicap_WeaponIDFromName(weapon_name.c_str());
-	bool restrict = (!Q_strcasecmp(onoff.c_str(), "on") || !Q_strcasecmp(onoff.c_str(), "1"));
-
-	// Apply restriction
-	Handicap_ApplyWeaponRestriction(target, weapon_id, restrict);
-
-	// Broadcast result
-	const char *weapon_display = weapon_name.c_str();
-	if (weapon_id != IT_NULL) {
-		gitem_t *weapon_item = GetItemByIndex(weapon_id);
-		if (weapon_item)
-			weapon_display = weapon_item->pickup_name;
-	} else {
-		weapon_display = "all handicap weapons (railgun, chaingun, rlauncher)";
-	}
-
-	gi.LocBroadcast_Print(PRINT_HIGH, "[VOTE]: {} {} for {}.\n", 
-		weapon_display, restrict ? "restricted" : "unrestricted", 
-		target->client->resp.netname);
+	MM_VotePassHandicap();
 }
 
 vcmds_t vote_cmds[] = {

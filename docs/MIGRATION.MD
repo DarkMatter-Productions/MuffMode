@@ -106,6 +106,25 @@ This document tracks migration progress from a monolithic fork style toward thin
    - `shuffle`, `balanceteams`, and `readyall` validation/pass handlers now execute in `mm_vote.cpp`.
    - `g_cmds.cpp` retains thin wrappers to preserve command table and behavior.
 
+11. **Random/nextmap vote handlers extracted**
+   - `nextmap`, `random`, and `cointoss` pass handlers now execute in `mm_vote.cpp`.
+   - `random` argument validation now executes in `mm_vote.cpp`.
+
+12. **Map/restart vote handlers extracted**
+   - `map` vote pass + validation logic now executes in `mm_vote.cpp` (including map pool/list validation and help-list printing).
+   - `restart` vote pass logic now executes in `mm_vote.cpp`.
+   - `g_cmds.cpp` keeps a thin `IsMapValid` bridge so admin setmap uses the same map validation path.
+
+13. **Handicap vote handlers extracted**
+   - `handicap` vote validation and pass execution now execute in `mm_vote.cpp`.
+   - Existing quoted-name parsing and weapon restriction behavior are preserved.
+   - `g_cmds.cpp` retains standalone handicap admin helpers/commands while vote path is now a thin wrapper.
+
+14. **Final vote validation context + handlers extracted**
+   - `gametype` and `ruleset` vote validation now execute in `mm_vote.cpp`.
+   - Menu vote validation context is now bridged through `mm_vote` (`MM_BeginVoteValidationContext` / `MM_EndVoteValidationContext`) so menu and console vote validation share the same parser path.
+   - `g_cmds.cpp` keeps thin wrapper entrypoints and `vote_cmds[]` wiring.
+
 #### Validation completed so far
 
 - Build passes after each extraction step.

@@ -6,6 +6,10 @@
 #include "muffmode/mm_vote.h"
 
 namespace {
+bool s_vote_validation_context_active = false;
+vcmds_t *s_vote_validation_cmd = nullptr;
+std::string s_vote_validation_arg;
+
 bool MM_IsValidVoteTransition(VoteState from, VoteState to)
 {
 	switch (from)
@@ -29,6 +33,179 @@ bool MM_IsValidVoteTransition(VoteState from, VoteState to)
 
 	default:
 		return false;
+	}
+}
+
+int MM_VoteArgc()
+{
+	if (!s_vote_validation_context_active)
+		return gi.argc();
+	return s_vote_validation_arg.empty() ? 2 : 3;
+}
+
+const char *MM_VoteArgv(int index)
+{
+	if (!s_vote_validation_context_active)
+		return gi.argv(index);
+	if (index == 0)
+		return "callvote";
+	if (index == 1)
+		return (s_vote_validation_cmd && s_vote_validation_cmd->name) ? s_vote_validation_cmd->name : "";
+	if (index == 2)
+		return s_vote_validation_arg.c_str();
+	return "";
+}
+
+bool MM_IsMapValidImpl(const char *mapname)
+{
+	if (!mapname || !mapname[0])
+		return false;
+
+	char *token;
+
+	// First check g_map_pool if it exists and is non-empty.
+	if (g_map_pool->string[0])
+	{
+		const char *pool = g_map_pool->string;
+
+		while ((token = COM_Parse(&pool)) && *token)
+		{
+			if (!Q_strcasecmp(token, mapname))
+				return true;
+		}
+	}
+
+	// Fall back to g_map_list if pool did not have it (or pool was empty).
+	if (g_map_list->string[0])
+	{
+		const char *mlist = g_map_list->string;
+
+		while ((token = COM_Parse(&mlist)) && *token)
+		{
+			if (!Q_strcasecmp(token, mapname))
+				return true;
+		}
+	}
+
+	return false;
+}
+
+void MM_PrintAvailableMaps(gentity_t *ent)
+{
+	std::vector<std::string> all_maps;
+	char *token;
+
+	auto map_exists = [&all_maps](const char *map) -> bool
+	{
+		for (const auto &existing : all_maps)
+		{
+			if (!Q_strcasecmp(existing.c_str(), map))
+				return true;
+		}
+		return false;
+	};
+
+	if (g_map_pool->string[0])
+	{
+		const char *pool = g_map_pool->string;
+		while ((token = COM_Parse(&pool)) && *token)
+		{
+			if (!map_exists(token))
+				all_maps.push_back(token);
+		}
+	}
+	if (g_map_list->string[0])
+	{
+		const char *mlist = g_map_list->string;
+		while ((token = COM_Parse(&mlist)) && *token)
+		{
+			if (!map_exists(token))
+				all_maps.push_back(token);
+		}
+	}
+
+	if (all_maps.empty())
+	{
+		gi.LocClient_Print(ent, PRINT_HIGH, "No map list or pool configured.\n");
+		return;
+	}
+
+	std::sort(all_maps.begin(), all_maps.end(), [](const std::string &a, const std::string &b)
+	{
+		return Q_strcasecmp(a.c_str(), b.c_str()) < 0;
+	});
+
+	std::string display = join_strings(all_maps, " ");
+	if (display.length() > 256)
+		display = display.substr(0, 256) + "...";
+	gi.LocClient_Print(ent, PRINT_HIGH, "Valid maps are: {}\n", display.c_str());
+}
+
+int MM_HandicapClientNumberFromName(gentity_t *to, const char *name)
+{
+	if (!name || !name[0])
+		return -1;
+
+	// Numeric slot support first.
+	char *endptr = nullptr;
+	long cnum = strtol(name, &endptr, 10);
+	if (endptr && *endptr == '\0' && cnum >= 0 && (uint32_t)cnum < game.maxclients)
+	{
+		gentity_t *ent = &g_entities[1 + cnum];
+		if (ent->inuse && ent->client && ent->client->pers.connected)
+			return (int)cnum;
+	}
+
+	gentity_t *target = ClientEntFromString(name);
+	if (!target || !target->client)
+	{
+		if (to)
+			gi.LocClient_Print(to, PRINT_HIGH, "Player '{}' not found.\n", name);
+		return -1;
+	}
+
+	return (int)(target->client - game.clients);
+}
+
+item_id_t MM_HandicapWeaponIDFromName(const char *name)
+{
+	if (!name)
+		return IT_NULL;
+
+	if (!Q_strcasecmp(name, "railgun"))
+		return IT_WEAPON_RAILGUN;
+	if (!Q_strcasecmp(name, "chaingun"))
+		return IT_WEAPON_CHAINGUN;
+	if (!Q_strcasecmp(name, "rlauncher") || !Q_strcasecmp(name, "rocketlauncher"))
+		return IT_WEAPON_RLAUNCHER;
+	return IT_NULL;
+}
+
+void MM_HandicapApplyWeaponRestriction(gentity_t *target, item_id_t weapon_id, bool restrict)
+{
+	if (!target || !target->client)
+		return;
+
+	if (weapon_id == IT_NULL)
+	{
+		// "all" case: apply to all supported handicap weapons.
+		constexpr uint32_t HANDICAP_ALL_WEAPONS =
+			(1U << (IT_WEAPON_RAILGUN - FIRST_WEAPON)) |
+			(1U << (IT_WEAPON_CHAINGUN - FIRST_WEAPON)) |
+			(1U << (IT_WEAPON_RLAUNCHER - FIRST_WEAPON));
+
+		if (restrict)
+			target->client->handicap.restricted_weapons |= HANDICAP_ALL_WEAPONS;
+		else
+			target->client->handicap.restricted_weapons &= ~HANDICAP_ALL_WEAPONS;
+	}
+	else
+	{
+		uint32_t weapon_bit = 1U << (weapon_id - FIRST_WEAPON);
+		if (restrict)
+			target->client->handicap.restricted_weapons |= weapon_bit;
+		else
+			target->client->handicap.restricted_weapons &= ~weapon_bit;
 	}
 }
 } // namespace
@@ -80,6 +257,20 @@ void MM_ClearVote()
 	MM_TransitionVoteState(VoteState::IDLE);
 }
 
+void MM_BeginVoteValidationContext(vcmds_t *cc, const char *arg)
+{
+	s_vote_validation_context_active = true;
+	s_vote_validation_cmd = cc;
+	s_vote_validation_arg = arg ? arg : "";
+}
+
+void MM_EndVoteValidationContext()
+{
+	s_vote_validation_context_active = false;
+	s_vote_validation_cmd = nullptr;
+	s_vote_validation_arg.clear();
+}
+
 void MM_VotePassed()
 {
 	if (!level.vote_state.command)
@@ -126,6 +317,42 @@ void MM_VotePassGametype()
 	// Note: "sv" prefix is required to invoke ServerCommand() handler
 	gi.AddCommandString("sv gt_changemap_first\n");
 	MuffModeLog("DEBUG", "Vote_Pass_Gametype: done");
+}
+
+bool MM_VoteValGametype(gentity_t *ent)
+{
+	// Ensure exactly 3 arguments: callvote, gametype, <gametype_name>.
+	if (MM_VoteArgc() != 3)
+	{
+		gi.LocClient_Print(ent, PRINT_HIGH, "Usage: callvote gametype <gametype_name>\n");
+		std::string votable_list = MM_GetVotableGametypesList();
+		if (!votable_list.empty())
+			gi.LocClient_Print(ent, PRINT_HIGH, "Valid gametypes are: {}\n", votable_list.c_str());
+		return false;
+	}
+
+	gametype_t gt = GT_IndexFromString(MM_VoteArgv(2));
+
+	if (gt == GT_NONE)
+	{
+		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid gametype: '{}'\n", MM_VoteArgv(2));
+		std::string votable_list = MM_GetVotableGametypesList();
+		if (!votable_list.empty())
+			gi.LocClient_Print(ent, PRINT_HIGH, "Valid gametypes are: {}\n", votable_list.c_str());
+		return false;
+	}
+
+	// Check if gametype is votable.
+	if (!MM_IsGametypeVotable(gt))
+	{
+		gi.LocClient_Print(ent, PRINT_HIGH, "This gametype is not available for voting.\n");
+		std::string votable_list = MM_GetVotableGametypesList();
+		if (!votable_list.empty())
+			gi.LocClient_Print(ent, PRINT_HIGH, "Valid gametypes are: {}\n", votable_list.c_str());
+		return false;
+	}
+
+	return true;
 }
 
 bool MM_IsGametypeVotable(gametype_t gt)
@@ -256,6 +483,107 @@ void MM_VotePassRuleset()
 	gi.cvar_forceset("g_ruleset", G_Fmt("{}", (int)rs).data());
 }
 
+bool MM_VoteValRuleset(gentity_t *ent)
+{
+	ruleset_t desired_rs = RS_IndexFromString(MM_VoteArgv(2));
+	if (desired_rs == ruleset_t::RS_NONE)
+	{
+		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid ruleset: '{}'\n", MM_VoteArgv(2));
+		std::string votable_list = MM_GetVotableRulesetsList();
+		if (!votable_list.empty())
+			gi.LocClient_Print(ent, PRINT_HIGH, "Valid rulesets are: {}\n", votable_list.c_str());
+		return false;
+	}
+	if ((int)desired_rs == game.ruleset)
+	{
+		gi.LocClient_Print(ent, PRINT_HIGH, "Ruleset currently active.\n");
+		return false;
+	}
+
+	// Check if ruleset is votable.
+	if (!MM_IsRulesetVotable(desired_rs))
+	{
+		gi.LocClient_Print(ent, PRINT_HIGH, "This ruleset is not available for voting.\n");
+		std::string votable_list = MM_GetVotableRulesetsList();
+		if (!votable_list.empty())
+			gi.LocClient_Print(ent, PRINT_HIGH, "Valid rulesets are: {}\n", votable_list.c_str());
+		return false;
+	}
+
+	return true;
+}
+
+void MM_VotePassMap()
+{
+	MuffModeLog("DEBUG", "Vote_Pass_Map: enter, arg='%s' (len=%d, ptr=%p)",
+		level.vote_state.arg.c_str(), (int)level.vote_state.arg.length(),
+		(void *)level.vote_state.arg.c_str());
+
+	if (level.vote_state.arg.empty() || level.vote_state.arg.length() >= sizeof(level.nextmap))
+	{
+		gi.LocBroadcast_Print(PRINT_HIGH, "Map vote failed: invalid map name.\n");
+		return;
+	}
+
+	Q_strlcpy(level.nextmap, level.vote_state.arg.c_str(), sizeof(level.nextmap));
+	MuffModeLog("DEBUG", "Vote_Pass_Map: queuing gamemap for '%s'", level.nextmap);
+	gi.AddCommandString(G_Fmt("gamemap \"{}\"\n", level.nextmap).data());
+}
+
+bool MM_VoteValMap(gentity_t *ent)
+{
+	if (MM_VoteArgc() < 3 || !MM_VoteArgv(2)[0])
+	{
+		MM_PrintAvailableMaps(ent);
+		return false;
+	}
+
+	if (!MM_IsMapValidImpl(MM_VoteArgv(2)))
+	{
+		gi.LocClient_Print(ent, PRINT_HIGH, "Unknown map.\n");
+		MM_PrintAvailableMaps(ent);
+		return false;
+	}
+
+	return true;
+}
+
+bool MM_IsMapValid(const char *mapname)
+{
+	return MM_IsMapValidImpl(mapname);
+}
+
+void MM_VotePassRestartMatch()
+{
+	Match_Reset();
+}
+
+void MM_VotePassNextMap()
+{
+	Match_End();
+	level.intermission_exit = true;
+}
+
+bool MM_VoteValRandom(gentity_t *ent)
+{
+	int arg = strtoul(MM_VoteArgv(2), nullptr, 10);
+
+	if (arg > 100 || arg < 2)
+		return false;
+
+	return true;
+}
+
+void MM_VotePassCointoss()
+{
+	gi.LocBroadcast_Print(PRINT_HIGH, "The coin is: {}\n", brandom() ? "HEADS" : "TAILS");
+}
+
+void MM_VotePassRandom()
+{
+	gi.LocBroadcast_Print(PRINT_HIGH, "The random number is: {}\n", irandom(2, atoi(level.vote_state.arg.data())));
+}
+
 void MM_VotePassUnlagged()
 {
 	int argi = strtoul(level.vote_state.arg.data(), nullptr, 10);
@@ -267,7 +595,7 @@ void MM_VotePassUnlagged()
 
 bool MM_VoteValUnlagged(gentity_t *ent)
 {
-	int arg = strtoul(gi.argv(2), nullptr, 10);
+	int arg = strtoul(MM_VoteArgv(2), nullptr, 10);
 
 	if ((g_lag_compensation->integer && arg)
 		|| (!g_lag_compensation->integer && !arg))
@@ -294,7 +622,7 @@ void MM_VotePassTimelimit()
 
 bool MM_VoteValTimelimit(gentity_t *ent)
 {
-	int argi = strtoul(gi.argv(2), nullptr, 10);
+	int argi = strtoul(MM_VoteArgv(2), nullptr, 10);
 
 	if (argi < 0 || argi > 1440)
 	{
@@ -324,7 +652,7 @@ void MM_VotePassScorelimit()
 
 bool MM_VoteValScorelimit(gentity_t *ent)
 {
-	int argi = strtoul(gi.argv(2), nullptr, 10);
+	int argi = strtoul(MM_VoteArgv(2), nullptr, 10);
 
 	if (argi < 0)
 	{
@@ -355,7 +683,7 @@ void MM_VotePassPowerups()
 
 bool MM_VoteValPowerups(gentity_t *ent)
 {
-	int arg = strtoul(gi.argv(2), nullptr, 10);
+	int arg = strtoul(MM_VoteArgv(2), nullptr, 10);
 
 	if (arg != 0 && arg != 1)
 	{
@@ -392,7 +720,7 @@ bool MM_VoteValFriendlyFire(gentity_t *ent)
 		return false;
 	}
 
-	int arg = strtoul(gi.argv(2), nullptr, 10);
+	int arg = strtoul(MM_VoteArgv(2), nullptr, 10);
 
 	if (arg != 0 && arg != 1)
 	{
@@ -410,6 +738,197 @@ bool MM_VoteValFriendlyFire(gentity_t *ent)
 	}
 
 	return true;
+}
+
+bool MM_VoteValHandicap(gentity_t *ent)
+{
+	// Must be in duel mode.
+	if (notGT(GT_DUEL))
+	{
+		gi.LocClient_Print(ent, PRINT_HIGH, "Handicap system only works in duel mode.\n");
+		return false;
+	}
+
+	// Check argument count.
+	if (MM_VoteArgc() < 5)
+	{
+		gi.LocClient_Print(ent, PRINT_HIGH, "Usage: callvote handicap <player> <weapon> <on|off>\n");
+		gi.LocClient_Print(ent, PRINT_HIGH, "Weapons: railgun, chaingun, rlauncher, all\n");
+		return false;
+	}
+
+	const char *player_name = MM_VoteArgv(2);
+	const char *weapon_name = MM_VoteArgv(3);
+	const char *onoff = MM_VoteArgv(4);
+
+	// Find target player.
+	int clientnum = MM_HandicapClientNumberFromName(ent, player_name);
+	if (clientnum < 0)
+		return false;
+
+	gentity_t *target = &g_entities[1 + clientnum];
+	if (!target->inuse || !target->client || !ClientIsPlaying(target->client))
+	{
+		gi.LocClient_Print(ent, PRINT_HIGH, "Player '{}' is not playing.\n", player_name);
+		return false;
+	}
+
+	// Validate weapon.
+	item_id_t weapon_id = MM_HandicapWeaponIDFromName(weapon_name);
+	if (weapon_id == IT_NULL && Q_strcasecmp(weapon_name, "all"))
+	{
+		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid weapon '{}'. Valid: railgun, chaingun, rlauncher, all\n", weapon_name);
+		return false;
+	}
+
+	// Validate on/off.
+	bool restrict = false;
+	if (!Q_strcasecmp(onoff, "on") || !Q_strcasecmp(onoff, "1"))
+		restrict = true;
+	else if (!Q_strcasecmp(onoff, "off") || !Q_strcasecmp(onoff, "0"))
+		restrict = false;
+	else
+	{
+		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid value '{}'. Use 'on' or 'off'.\n", onoff);
+		return false;
+	}
+
+	// Check if restriction would change anything.
+	if (weapon_id == IT_NULL)
+	{
+		constexpr uint32_t HANDICAP_ALL_WEAPONS =
+			(1U << (IT_WEAPON_RAILGUN - FIRST_WEAPON)) |
+			(1U << (IT_WEAPON_CHAINGUN - FIRST_WEAPON)) |
+			(1U << (IT_WEAPON_RLAUNCHER - FIRST_WEAPON));
+
+		bool currently_restricted = (target->client->handicap.restricted_weapons & HANDICAP_ALL_WEAPONS) == HANDICAP_ALL_WEAPONS;
+		if (currently_restricted == restrict)
+		{
+			gi.LocClient_Print(ent, PRINT_HIGH, "All handicap weapons are already {} for {}.\n",
+				restrict ? "restricted" : "unrestricted", target->client->resp.netname);
+			return false;
+		}
+	}
+	else
+	{
+		uint32_t weapon_bit = 1U << (weapon_id - FIRST_WEAPON);
+		bool currently_restricted = (target->client->handicap.restricted_weapons & weapon_bit) != 0;
+		if (currently_restricted == restrict)
+		{
+			gitem_t *weapon_item = GetItemByIndex(weapon_id);
+			gi.LocClient_Print(ent, PRINT_HIGH, "{} is already {} for {}.\n",
+				weapon_item ? weapon_item->pickup_name : weapon_name,
+				restrict ? "restricted" : "unrestricted",
+				target->client->resp.netname);
+			return false;
+		}
+	}
+
+	return true;
+}
+
+void MM_VotePassHandicap()
+{
+	// Parse stored argument: "player weapon on|off" with optional quoted player name.
+	std::string arg = level.vote_state.arg;
+	std::string player_name, weapon_name, onoff;
+
+	if (!arg.empty() && arg[0] == '"')
+	{
+		size_t quote_end = arg.find('"', 1);
+		if (quote_end == std::string::npos)
+		{
+			gi.LocBroadcast_Print(PRINT_HIGH, "Handicap vote failed: invalid argument format (unclosed quote).\n");
+			return;
+		}
+
+		player_name = arg.substr(1, quote_end - 1);
+
+		size_t space_after_quote = arg.find(' ', quote_end + 1);
+		if (space_after_quote == std::string::npos)
+		{
+			gi.LocBroadcast_Print(PRINT_HIGH, "Handicap vote failed: invalid argument format.\n");
+			return;
+		}
+
+		size_t space_after_weapon = arg.find(' ', space_after_quote + 1);
+		if (space_after_weapon == std::string::npos)
+		{
+			gi.LocBroadcast_Print(PRINT_HIGH, "Handicap vote failed: invalid argument format.\n");
+			return;
+		}
+
+		weapon_name = arg.substr(space_after_quote + 1, space_after_weapon - space_after_quote - 1);
+		onoff = arg.substr(space_after_weapon + 1);
+	}
+	else
+	{
+		size_t space1 = arg.find(' ');
+		if (space1 == std::string::npos)
+		{
+			gi.LocBroadcast_Print(PRINT_HIGH, "Handicap vote failed: invalid argument format.\n");
+			return;
+		}
+
+		size_t space2 = arg.find(' ', space1 + 1);
+		if (space2 == std::string::npos)
+		{
+			gi.LocBroadcast_Print(PRINT_HIGH, "Handicap vote failed: invalid argument format.\n");
+			return;
+		}
+
+		player_name = arg.substr(0, space1);
+		weapon_name = arg.substr(space1 + 1, space2 - space1 - 1);
+		onoff = arg.substr(space2 + 1);
+	}
+
+	// Find a dummy entity context for lookup helpers.
+	gentity_t *dummy_ent = nullptr;
+	for (auto ec : active_clients())
+	{
+		dummy_ent = ec;
+		break;
+	}
+	if (!dummy_ent)
+	{
+		gi.LocBroadcast_Print(PRINT_HIGH, "Handicap vote failed: no players found.\n");
+		return;
+	}
+
+	int clientnum = MM_HandicapClientNumberFromName(dummy_ent, player_name.c_str());
+	if (clientnum < 0)
+	{
+		gi.LocBroadcast_Print(PRINT_HIGH, "Handicap vote failed: player not found.\n");
+		return;
+	}
+
+	gentity_t *target = &g_entities[1 + clientnum];
+	if (!target->inuse || !target->client)
+	{
+		gi.LocBroadcast_Print(PRINT_HIGH, "Handicap vote failed: player not active.\n");
+		return;
+	}
+
+	item_id_t weapon_id = MM_HandicapWeaponIDFromName(weapon_name.c_str());
+	bool restrict = (!Q_strcasecmp(onoff.c_str(), "on") || !Q_strcasecmp(onoff.c_str(), "1"));
+
+	MM_HandicapApplyWeaponRestriction(target, weapon_id, restrict);
+
+	const char *weapon_display = weapon_name.c_str();
+	if (weapon_id != IT_NULL)
+	{
+		gitem_t *weapon_item = GetItemByIndex(weapon_id);
+		if (weapon_item)
+			weapon_display = weapon_item->pickup_name;
+	}
+	else
+	{
+		weapon_display = "all handicap weapons (railgun, chaingun, rlauncher)";
+	}
+
+	gi.LocBroadcast_Print(PRINT_HIGH, "[VOTE]: {} {} for {}.\n",
+		weapon_display, restrict ? "restricted" : "unrestricted",
+		target->client->resp.netname);
 }
 
 void MM_VotePassShuffleTeams()
