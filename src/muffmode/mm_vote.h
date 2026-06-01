@@ -3,14 +3,8 @@
 
 #pragma once
 
+#include "g_local.h"
 #include <string>
-
-enum gametype_t;
-enum ruleset_t;
-enum class VoteState;
-struct gclient_t;
-struct gentity_t;
-struct vcmds_t;
 
 // [MuffMode] Vote state machine implementation hooks.
 void MM_TransitionVoteState(VoteState new_state);

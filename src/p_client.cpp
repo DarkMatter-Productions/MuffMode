@@ -1429,7 +1429,7 @@ void InitClientPersistant(gentity_t *ent, gclient_t *client) {
 				client->pers.inventory[IT_WEAPON_GLAUNCHER] = 1;
 				client->pers.inventory[IT_WEAPON_RLAUNCHER] = 1;
 				client->pers.inventory[IT_WEAPON_HYPERBLASTER] = 1;
-				if (!GT(GT_CA))
+				if (notGT(GT_CA))
 					client->pers.inventory[IT_WEAPON_PLASMABEAM] = 1;
 				if (!(RS(RS_Q1)))
 					client->pers.inventory[IT_WEAPON_RAILGUN] = 1;

@@ -25,6 +25,27 @@ This ensures `msbuild` and compiler toolchains are configured.
 
 ## Build Commands
 
+### Using `build.bat` (recommended)
+
+From `MuffMode/`:
+
+```bat
+build.bat
+```
+
+Optional args:
+
+```bat
+build.bat [Configuration] [Platform] [PlatformToolset]
+```
+
+Examples:
+
+```bat
+build.bat Debug x64 v145
+build.bat Release x64 v145
+```
+
 ### Release build
 
 ```bat
