@@ -3,6 +3,7 @@
 
 #include "g_local.h"
 #include "g_debug_log.h"
+#include "muffmode/mm_maps.h"
 #include "bots/bot_includes.h"
 #include "monsters/m_player.h"	// match starts
 
@@ -3273,18 +3274,6 @@ gentity_t *CreateTargetChangeLevel(const char *map) {
 	return ent;
 }
 
-inline std::vector<std::string> str_split(const std::string_view &str, char by) {
-	std::vector<std::string> out;
-	size_t start, end = 0;
-
-	while ((start = str.find_first_not_of(by, end)) != std::string_view::npos) {
-		end = str.find(by, start);
-		out.push_back(std::string{ str.substr(start, end - start) });
-	}
-
-	return out;
-}
-
 /*
 =================
 G_ShuffleMapList
@@ -3293,23 +3282,8 @@ Shuffle the map list in place, avoiding the current map at the front.
 =================
 */
 void G_ShuffleMapList() {
-	if (!*g_map_list->string)
-		return;
-
-	auto values = str_split(g_map_list->string, ' ');
-
-	if (values.size() <= 1)
-		return;
-
-	std::shuffle(values.begin(), values.end(), mt_rand);
-
-	// if the current map ended up at the front, push it to the end
-	if (values[0] == level.mapname)
-		std::swap(values[0], values[values.size() - 1]);
-
-	gi.cvar_forceset("g_map_list", fmt::format("{}", join_strings(values, " ")).data());
-
-	gi.Com_PrintFmt("Map list shuffled: {}\n", g_map_list->string);
+	// [MuffMode] Thin vanilla hook; implementation lives in muffmode/mm_maps.cpp.
+	MM_ShuffleMapList();
 }
 
 /*
@@ -3342,62 +3316,9 @@ void Match_End() {
 		return;
 	}
 
-	// see if it's in the map list
-	if (*g_map_list->string) {
-		const char *str = g_map_list->string;
-		char first_map[MAX_QPATH]{ 0 };
-		char *map;
-
-		while (1) {
-			map = COM_ParseEx(&str, " ");
-
-			if (!*map)
-				break;
-
-			if (Q_strcasecmp(map, level.mapname) == 0) {
-				// it's in the list, go to the next one
-				map = COM_ParseEx(&str, " ");
-				if (!*map) {
-					// end of list, go to first one
-					if (!first_map[0]) // there isn't a first one, same level
-					{
-						BeginIntermission(CreateTargetChangeLevel(level.mapname));
-						return;
-					} else {
-						// End of list wrap-around: shuffle if enabled
-						// g_map_list_shuffle 1 = shuffle every wrap-around
-						// g_map_list_shuffle 2 = shuffle once per gametype (lazy)
-						if (g_map_list_shuffle->integer == 1) {
-							G_ShuffleMapList();
-						} else if (g_map_list_shuffle->integer == 2 && !g_map_list_shuffled) {
-							G_ShuffleMapList();
-							g_map_list_shuffled = true;
-						}
-
-						// Re-read first map from (possibly shuffled) list
-						const char *reshuffled_str = g_map_list->string;
-						char *reshuffled_first = COM_ParseEx(&reshuffled_str, " ");
-						if (reshuffled_first && *reshuffled_first)
-							BeginIntermission(CreateTargetChangeLevel(reshuffled_first));
-						else
-							BeginIntermission(CreateTargetChangeLevel(first_map));
-						return;
-					}
-				} else {
-					BeginIntermission(CreateTargetChangeLevel(map));
-					return;
-				}
-			}
-			if (!first_map[0])
-				Q_strlcpy(first_map, map, sizeof(first_map));
-		}
-
-		// Current map not in g_map_list (e.g. voted from pool) - rejoin rotation at first map
-		if (first_map[0]) {
-			BeginIntermission(CreateTargetChangeLevel(first_map));
-			return;
-		}
-	}
+	// [MuffMode] Thin vanilla hook for map-list rotation selection.
+	if (MM_TryBeginIntermissionFromMapList())
+		return;
 
 	if (level.nextmap[0]) // go to a specific map
 	{

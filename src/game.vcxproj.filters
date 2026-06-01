@@ -129,6 +129,9 @@
     <ClInclude Include="muffmode\mm_debug.h">
       <Filter>muffmode</Filter>
     </ClInclude>
+    <ClInclude Include="muffmode\mm_maps.h">
+      <Filter>muffmode</Filter>
+    </ClInclude>
     <ClInclude Include="muffmode\muffmode.h">
       <Filter>muffmode</Filter>
     </ClInclude>
@@ -281,6 +284,9 @@
     <ClCompile Include="g_menu.cpp" />
     <ClCompile Include="g_ctf.cpp" />
     <ClCompile Include="muffmode\mm_debug.cpp">
+      <Filter>muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="muffmode\mm_maps.cpp">
       <Filter>muffmode</Filter>
     </ClCompile>
   </ItemGroup>

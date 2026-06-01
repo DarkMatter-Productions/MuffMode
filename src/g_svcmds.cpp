@@ -3,6 +3,7 @@
 
 #include "g_local.h"
 #include "g_debug_log.h"
+#include "muffmode/mm_maps.h"
 
 static void Svcmd_Test_f() {
 	gi.LocClient_Print(nullptr, PRINT_HIGH, "Svcmd_Test_f()\n");
@@ -262,51 +263,8 @@ of the parameters
 */
 // Server command to change to first map in g_map_list after gametype config executes
 static void SVCmd_GametypeChangeMapFirst_f() {
-	MuffModeLog("DEBUG", "SVCmd_GametypeChangeMapFirst_f: enter, g_map_list='%s', g_map_list_shuffle=%d",
-	           g_map_list->string, g_map_list_shuffle->integer);
-
-	// This executes AFTER the gametype config has set the new g_map_list
-	// Shuffle the list if shuffle is enabled (mode 1 or 2)
-	if (g_map_list_shuffle->integer >= 1) {
-		G_ShuffleMapList();
-		if (g_map_list_shuffle->integer == 2) {
-			extern bool g_map_list_shuffled;
-			g_map_list_shuffled = true;
-		}
-	}
-
-	const char *first_map = nullptr;
-	
-	// Try to get first map from g_map_list (now shuffled if enabled)
-	if (g_map_list->string[0]) {
-		const char *mlist = g_map_list->string;
-		char *token;
-		
-		if ((token = COM_Parse(&mlist)) && *token) {
-			first_map = token;
-			MuffModeLog("GAMETYPE", "SVCmd_GametypeChangeMapFirst_f: Found map '%s' from g_map_list", first_map);
-		}
-	}
-	
-	// If no map found in g_map_list, fall back to current map
-	if (!first_map || !first_map[0]) {
-		first_map = level.mapname;
-		MuffModeLog("GAMETYPE", "SVCmd_GametypeChangeMapFirst_f: No map in g_map_list, reloading current map '%s'", first_map);
-	}
-	
-	// Store in safe storage
-	if (strlen(first_map) >= sizeof(level.nextmap)) {
-		gi.Com_PrintFmt("ERROR: Map name too long: {}\n", first_map);
-		MuffModeLog("GAMETYPE", "ERROR: Map name too long: %s", first_map);
-		return;
-	}
-	
-	MuffModeLog("GAMETYPE", "Gametype change complete, loading map: %s", first_map);
-	
-	// Issue gamemap directly instead of ExitLevel() — ExitLevel does too much
-	// (screenshots, ClientEndServerFrames, Duel_RemoveLoser) that assumes
-	// intermission context and causes crashes when called outside normal match flow.
-	gi.AddCommandString(G_Fmt("gamemap \"{}\"\n", first_map).data());
+	// [MuffMode] Thin vanilla hook; implementation lives in muffmode/mm_maps.cpp.
+	MM_GametypeChangeMapFirst();
 }
 
 void ServerCommand() {

@@ -153,6 +153,7 @@
     <ClInclude Include="monsters\m_widow.h" />
     <ClInclude Include="monsters\m_widow2.h" />
     <ClInclude Include="muffmode\mm_debug.h" />
+    <ClInclude Include="muffmode\mm_maps.h" />
     <ClInclude Include="muffmode\muffmode.h" />
     <ClInclude Include="p_menu.h" />
     <ClInclude Include="q_std.h" />
@@ -222,6 +223,7 @@
     <ClCompile Include="monsters\m_widow.cpp" />
     <ClCompile Include="monsters\m_widow2.cpp" />
     <ClCompile Include="muffmode\mm_debug.cpp" />
+    <ClCompile Include="muffmode\mm_maps.cpp" />
     <ClCompile Include="p_client.cpp" />
     <ClCompile Include="p_hud.cpp" />
     <ClCompile Include="p_menu.cpp" />
