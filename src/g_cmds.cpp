@@ -2850,41 +2850,19 @@ void Vote_Pass_NextMap() {
 }
 
 void Vote_Pass_ShuffleTeams() {
-	if (!Teams()) {
-		gi.LocBroadcast_Print(PRINT_HIGH, "Shuffle vote failed: not a team gametype.\n");
-		return;
-	}
-	TeamShuffle();
-	Match_Reset();
-	gi.LocBroadcast_Print(PRINT_HIGH, "Teams have been shuffled.\n");
+	MM_VotePassShuffleTeams();
 }
 
 static bool Vote_Val_ShuffleTeams(gentity_t *ent) {
-	if (!Teams()) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "Shuffle teams is only available in team gametypes.\n");
-		return false;
-	}
-	return true;
+	return MM_VoteValShuffleTeams(ent);
 }
 
 static void Vote_Pass_Unlagged() {
-	int argi = strtoul(level.vote_state.arg.data(), nullptr, 10);
-	
-	gi.LocBroadcast_Print(PRINT_HIGH, "Lag compensation has been {}.\n", argi ? "ENABLED" : "DISABLED");
-
-	gi.cvar_forceset("g_lag_compensation", argi ? "1" : "0");
+	MM_VotePassUnlagged();
 }
 
 static bool Vote_Val_Unlagged(gentity_t *ent) {
-	int arg = strtoul(VoteVal_Argv(2), nullptr, 10);
-	
-	if ((g_lag_compensation->integer && arg)
-			|| (!g_lag_compensation->integer && !arg)) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "Lag compensation is already {}.\n", arg ? "ENABLED" : "DISABLED");
-		return false;
-	}
-
-	return true;
+	return MM_VoteValUnlagged(ent);
 }
 
 static bool Vote_Val_Random(gentity_t *ent) {
@@ -2905,149 +2883,51 @@ void Vote_Pass_Random() {
 }
 
 void Vote_Pass_Timelimit() {
-	const char *s = level.vote_state.arg.data();
-	int argi = strtoul(s, nullptr, 10);
-	
-	if (!argi)
-		gi.LocBroadcast_Print(PRINT_HIGH, "Time limit has been DISABLED.\n");
-	else
-		gi.LocBroadcast_Print(PRINT_HIGH, "Time limit has been set to {}.\n", G_TimeString(argi * 60000, false));
-
-	gi.cvar_forceset("timelimit", s);
+	MM_VotePassTimelimit();
 }
 
 static bool Vote_Val_Timelimit(gentity_t *ent) {
-	int argi = strtoul(VoteVal_Argv(2), nullptr, 10);
-	
-	if (argi < 0 || argi > 1440) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid time limit value.\n");
-		return false;
-	}
-	
-	if (argi == timelimit->integer) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "Time limit is already set to {}.\n", G_TimeString(argi * 60000, false));
-		return false;
-	}
-	return true;
+	return MM_VoteValTimelimit(ent);
 }
 
 void Vote_Pass_Scorelimit() {
-	int argi = strtoul(level.vote_state.arg.data(), nullptr, 10);
-	
-	if (argi)
-		gi.LocBroadcast_Print(PRINT_HIGH, "Score limit has been set to {}.\n", argi);
-	else
-		gi.LocBroadcast_Print(PRINT_HIGH, "Score limit has been DISABLED.\n");
-
-	gi.cvar_forceset(G_Fmt("{}limit", GT_ScoreLimitString()).data(), level.vote_state.arg.data());
+	MM_VotePassScorelimit();
 }
 
 static bool Vote_Val_Scorelimit(gentity_t *ent) {
-	int argi = strtoul(VoteVal_Argv(2), nullptr, 10);
-	
-	if (argi < 0) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid score limit value.\n");
-		return false;
-	}
-
-	if (argi == GT_ScoreLimit()) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "Score limit is already set to {}.\n", argi);
-		return false;
-	}
-
-	return true;
+	return MM_VoteValScorelimit(ent);
 }
 
 static void Vote_Pass_BalanceTeams() {
-	TeamBalance(true);
+	MM_VotePassBalanceTeams();
 }
 
 void Vote_Pass_ReadyAll() {
-	if (!g_dm_do_readyup->integer || level.match_state != matchst_t::MATCH_WARMUP_READYUP) {
-		gi.LocBroadcast_Print(PRINT_HIGH, "Ready all vote failed: not in ready-up warmup.\n");
-		return;
-	}
-	ReadyAll();
-	gi.LocBroadcast_Print(PRINT_HIGH, "All players have been readied.\n");
+	MM_VotePassReadyAll();
 }
 
 static bool Vote_Val_ReadyAll(gentity_t *ent) {
-	if (!g_dm_do_readyup->integer || level.match_state != matchst_t::MATCH_WARMUP_READYUP) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "Ready all is only available during ready-up warmup.\n");
-		return false;
-	}
-	return true;
+	return MM_VoteValReadyAll(ent);
 }
 
 static bool Vote_Val_BalanceTeams(gentity_t *ent) {
-	if (!Teams())
-		return false;
-
-	return true;
+	return MM_VoteValBalanceTeams(ent);
 }
 
 static void Vote_Pass_Powerups() {
-	int argi = strtoul(level.vote_state.arg.data(), nullptr, 10);
-	
-	gi.LocBroadcast_Print(PRINT_HIGH, "Powerups have been {}.\n", argi ? "ENABLED" : "DISABLED");
-
-	gi.cvar_forceset("g_no_powerups", argi ? "0" : "1");
-	
-	// Restart the map so powerup changes take effect immediately
-	gi.AddCommandString(G_Fmt("gamemap {}\n", level.mapname).data());
+	MM_VotePassPowerups();
 }
 
 static void Vote_Pass_FriendlyFire() {
-	int argi = strtoul(level.vote_state.arg.data(), nullptr, 10);
-	
-	gi.LocBroadcast_Print(PRINT_HIGH, "Friendly fire has been {}.\n", argi ? "ENABLED" : "DISABLED");
-
-	gi.cvar_forceset("g_friendly_fire", argi ? "1" : "0");
-	
-	// Friendly fire changes take effect immediately, no map restart needed
+	MM_VotePassFriendlyFire();
 }
 
 static bool Vote_Val_FriendlyFire(gentity_t *ent) {
-	if (notGT(GT_TDM) && notGT(GT_CTF)) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "Friendly fire can only be changed in TDM or CTF gametypes.\n");
-		return false;
-	}
-
-	int arg = strtoul(VoteVal_Argv(2), nullptr, 10);
-	
-	if (arg != 0 && arg != 1) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid argument. Use 0 to disable or 1 to enable friendly fire.\n");
-		return false;
-	}
-	
-	bool currently_enabled = g_friendly_fire->integer != 0;
-	bool will_be_enabled = (arg == 1);
-	
-	if (currently_enabled == will_be_enabled) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "Friendly fire is already {}.\n", will_be_enabled ? "ENABLED" : "DISABLED");
-		return false;
-	}
-
-	return true;
+	return MM_VoteValFriendlyFire(ent);
 }
 
 static bool Vote_Val_Powerups(gentity_t *ent) {
-	int arg = strtoul(VoteVal_Argv(2), nullptr, 10);
-	
-	if (arg != 0 && arg != 1) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid argument. Use 0 to disable or 1 to enable powerups.\n");
-		return false;
-	}
-	
-	bool currently_disabled = g_no_powerups->integer != 0;
-	bool will_be_disabled = (arg == 0);
-	
-	if (currently_disabled == will_be_disabled) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "Powerups are already {}.\n", will_be_disabled ? "DISABLED" : "ENABLED");
-		return false;
-	}
-
-	return true;
+	return MM_VoteValPowerups(ent);
 }
 
 // Forward declarations for handicap helper functions
@@ -3339,15 +3219,7 @@ static void Cmd_Vote_f(gentity_t *ent) {
 }
 
 void G_RevertVote(gclient_t *client) {
-	if (level.vote_state.state != VoteState::ACTIVE)
-		return;
-
-	if (!level.vote_state.caller)
-		return;
-
-	if (client->pers.voted != 0) {
-		client->pers.voted = 0;
-	}
+	MM_RevertVote(client);
 }
 
 /*

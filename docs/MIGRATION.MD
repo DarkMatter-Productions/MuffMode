@@ -94,6 +94,18 @@ This document tracks migration progress from a monolithic fork style toward thin
    - `Cmd_Vote_f()` in `g_cmds.cpp` is now a thin hook to `MM_CmdVote()`.
    - Yes/no vote-casting behavior and guard checks are preserved.
 
+8. **Vote cleanup helper extracted**
+   - `G_RevertVote()` in `g_cmds.cpp` is now a thin hook to `MM_RevertVote()`.
+   - Active-vote-only revert behavior is preserved.
+
+9. **Simple vote handlers extracted**
+   - `timelimit`, `scorelimit`/`fraglimit`, `unlagged`, `powerups`, and `friendlyfire` validation/pass handlers now execute in `mm_vote.cpp`.
+   - `g_cmds.cpp` retains thin wrappers so `vote_cmds[]` wiring stays unchanged.
+
+10. **Team-flow vote handlers extracted**
+   - `shuffle`, `balanceteams`, and `readyall` validation/pass handlers now execute in `mm_vote.cpp`.
+   - `g_cmds.cpp` retains thin wrappers to preserve command table and behavior.
+
 #### Validation completed so far
 
 - Build passes after each extraction step.
