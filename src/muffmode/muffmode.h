@@ -6,4 +6,5 @@
 // [MuffMode] Shared module includes for MuffMode-only systems.
 #include "mm_debug.h"
 #include "mm_maps.h"
+#include "mm_vote.h"
 

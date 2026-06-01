@@ -53,6 +53,31 @@ This document tracks migration progress from a monolithic fork style toward thin
 4. **Shuffle cvar-change handling extracted**
    - `GT_Changes()` in `g_main.cpp` now delegates to `MM_HandleMapShuffleCvarChange()`.
 
+#### Extracted vote subsystem (partial)
+
+- Added vote module API:
+  - `src/muffmode/mm_vote.h`
+- Added vote module implementation:
+  - `src/muffmode/mm_vote.cpp`
+
+#### Migrations completed in this subsystem
+
+1. **Vote state machine extracted**
+   - `TransitionVoteState()` in `g_cmds.cpp` is now a thin hook to `MM_TransitionVoteState()`.
+   - `ClearVote()` in `g_cmds.cpp` is now a thin hook to `MM_ClearVote()`.
+   - `Vote_Passed()` in `g_cmds.cpp` is now a thin hook to `MM_VotePassed()`.
+
+2. **Gametype/ruleset vote execution extracted**
+   - `Vote_Pass_Gametype()` in `g_cmds.cpp` now delegates to `MM_VotePassGametype()`.
+   - `Vote_Pass_Ruleset()` in `g_cmds.cpp` now delegates to `MM_VotePassRuleset()`.
+
+3. **Votability/list helpers extracted**
+   - `IsGametypeVotable()` now delegates to `MM_IsGametypeVotable()`.
+   - `IsRulesetVotable()` now delegates to `MM_IsRulesetVotable()`.
+   - votable-list help builders now delegate to:
+     - `MM_GetVotableGametypesList()`
+     - `MM_GetVotableRulesetsList()`
+
 #### Validation completed so far
 
 - Build passes after each extraction step.
@@ -62,6 +87,8 @@ This document tracks migration progress from a monolithic fork style toward thin
   - wrap-around behavior
   - fallback behavior when list is missing or map is not in list
   - `gt_changemap_first` flow
+  - vote lifecycle (active/passed/failed/complete)
+  - gametype/ruleset vote pass/reject behavior
 
 ## Current Thin-Hook Pattern
 
@@ -73,9 +100,9 @@ This document tracks migration progress from a monolithic fork style toward thin
 ## Next Recommended Targets
 
 - Vote flow extraction boundaries from `g_cmds.cpp` into `src/muffmode/`:
-  - command validation
-  - vote state transitions
-  - map/gametype vote execution helpers
+  - command validation and argument-building (`ValidVoteCommand`)
+  - vote startup/storage path (`VoteCommandStore`)
+  - final callvote entry orchestration cleanup
 - Menu integration boundary cleanup (`g_menu.cpp`/`p_menu.cpp`) as a separate slice.
 
 ## Notes

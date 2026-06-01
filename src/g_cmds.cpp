@@ -2,6 +2,7 @@
 // Licensed under the GNU General Public License 2.0.
 #include "g_local.h"
 #include "g_debug_log.h"
+#include "muffmode/mm_vote.h"
 #include "monsters/m_player.h"
 /*freeze*/
 #if 0
@@ -2753,131 +2754,27 @@ void Vote_Pass_RestartMatch() {
 }
 
 void Vote_Pass_Gametype() {
-	gametype_t gt = GT_IndexFromString(level.vote_state.arg.data());
-	MuffModeLog("DEBUG", "Vote_Pass_Gametype: enter, arg='%s', gt=%d", level.vote_state.arg.data(), (int)gt);
-	if (gt == GT_NONE) {
-		MuffModeLog("DEBUG", "Vote_Pass_Gametype: GT_NONE, aborting");
-		return;
-	}
-
-	// Re-check votability at execution time in case g_votable_gametypes changed
-	// during the 3-second PASSED->EXECUTING window, or the vote arrived via the
-	// menu path which does not run val_func.
-	if (!IsGametypeVotable(gt)) {
-		gi.LocBroadcast_Print(PRINT_HIGH, "Gametype vote rejected: gametype is no longer votable.\n");
-		MuffModeLog("VOTE", "Vote_Pass_Gametype: gametype %d rejected by IsGametypeVotable at execution", (int)gt);
-		return;
-	}
-
-	// Change the gametype (this sets cvars and queues config exec)
-	MuffModeLog("DEBUG", "Vote_Pass_Gametype: calling ChangeGametype(%d)", (int)gt);
-	ChangeGametype(gt);
-	MuffModeLog("DEBUG", "Vote_Pass_Gametype: ChangeGametype returned, queuing sv gt_changemap_first");
-	
-	// Queue a special server command that will execute AFTER the gametype config
-	// This command will read the NEW g_map_list and change to the first map in it
-	// Note: "sv" prefix is required to invoke ServerCommand() handler
-	gi.AddCommandString("sv gt_changemap_first\n");
-	MuffModeLog("DEBUG", "Vote_Pass_Gametype: done");
+	MM_VotePassGametype();
 }
 
 // Helper function to check if a gametype is votable
 bool IsGametypeVotable(gametype_t gt) {
-	// If no votable list is set, allow all gametypes (backward compatible)
-	if (!g_votable_gametypes->string[0])
-		return true;
-
-	// Check if the gametype's short name is in the votable list
-	const char *votable_list = g_votable_gametypes->string;
-	char *token;
-
-	while ((token = COM_Parse(&votable_list)) && *token) {
-		if (!Q_strcasecmp(token, gt_short_name[(int)gt]))
-			return true;
-	}
-
-	return false;
+	return MM_IsGametypeVotable(gt);
 }
 
 // Helper function to build list of votable gametypes for help text
 static std::string GetVotableGametypesList() {
-	std::string result;
-
-	if (!g_votable_gametypes->string[0]) {
-		// If no restriction, show all implemented gametypes
-		for (int i = (int)GT_FIRST; i <= (int)GT_LAST; i++) {
-			// Skip GT_NONE, GT_STRIKE, GT_RR, GT_LMS, GT_BALL (not fully implemented)
-			if (i == GT_NONE || i == GT_STRIKE || i == GT_RR || i == GT_LMS || i == GT_BALL)
-				continue;
-			// Include GT_INSTAGIB in the list
-			if (!result.empty())
-				result += "|";
-			result += gt_short_name[i];
-		}
-	} else {
-		// Show only votable gametypes
-		const char *votable_list = g_votable_gametypes->string;
-		char *token;
-		bool first = true;
-
-		while ((token = COM_Parse(&votable_list)) && *token) {
-			if (!first)
-				result += "|";
-			result += token;
-			first = false;
-		}
-	}
-
-	return result;
+	return MM_GetVotableGametypesList();
 }
 
 // Helper function to check if a ruleset is votable
 bool IsRulesetVotable(ruleset_t rs) {
-	// If no votable list is set, allow all rulesets (backward compatible)
-	if (!g_votable_rulesets->string[0])
-		return true;
-
-	// Check if the ruleset's short name is in the votable list
-	const char *votable_list = g_votable_rulesets->string;
-	char *token;
-
-	while ((token = COM_Parse(&votable_list)) && *token) {
-		if (!Q_strcasecmp(token, rs_short_name[(int)rs]))
-			return true;
-	}
-
-	return false;
+	return MM_IsRulesetVotable(rs);
 }
 
 // Helper function to build list of votable rulesets for help text
 static std::string GetVotableRulesetsList() {
-	std::string result;
-
-	if (!g_votable_rulesets->string[0]) {
-		// If no restriction, show all implemented rulesets (skip RS_NONE)
-		for (int i = (int)RS_NONE + 1; i < (int)RS_NUM_RULESETS; i++) {
-			// Skip RS_NONE
-			if (i == RS_NONE)
-				continue;
-			if (!result.empty())
-				result += "|";
-			result += rs_short_name[i];
-		}
-	} else {
-		// Show only votable rulesets
-		const char *votable_list = g_votable_rulesets->string;
-		char *token;
-		bool first = true;
-
-		while ((token = COM_Parse(&votable_list)) && *token) {
-			if (!first)
-				result += "|";
-			result += token;
-			first = false;
-		}
-	}
-
-	return result;
+	return MM_GetVotableRulesetsList();
 }
 
 static bool Vote_Val_Gametype(gentity_t *ent) {
@@ -2916,20 +2813,7 @@ static bool Vote_Val_Gametype(gentity_t *ent) {
 }
 
 static void Vote_Pass_Ruleset() {
-	ruleset_t rs = RS_IndexFromString(level.vote_state.arg.data());
-	if (rs == ruleset_t::RS_NONE)
-		return;
-
-	// Re-check votability at execution time in case g_votable_rulesets changed
-	// during the 3-second PASSED->EXECUTING window, or the vote arrived via the
-	// menu path which does not run val_func.
-	if (!IsRulesetVotable(rs)) {
-		gi.LocBroadcast_Print(PRINT_HIGH, "Ruleset vote rejected: ruleset is no longer votable.\n");
-		MuffModeLog("VOTE", "Vote_Pass_Ruleset: ruleset %d rejected by IsRulesetVotable at execution", (int)rs);
-		return;
-	}
-
-	gi.cvar_forceset("g_ruleset", G_Fmt("{}", (int)rs).data());
+	MM_VotePassRuleset();
 }
 
 static bool Vote_Val_Ruleset(gentity_t *ent) {
@@ -3388,79 +3272,13 @@ vcmds_t *FindVoteCmdByName(const char *name) {
 
 /*
 ===============
-IsValidVoteTransition
-
-Validates that a state transition is legal
-===============
-*/
-static bool IsValidVoteTransition(VoteState from, VoteState to) {
-	switch (from) {
-		case VoteState::IDLE:
-			// Allow IDLE -> IDLE (harmless, happens during level init after memset)
-			return to == VoteState::ACTIVE || to == VoteState::IDLE;
-			
-		case VoteState::ACTIVE:
-			return to == VoteState::PASSED || 
-			       to == VoteState::FAILED;
-			       
-		case VoteState::PASSED:
-			return to == VoteState::EXECUTING ||
-			       to == VoteState::FAILED;  // if caller disconnects
-			       
-		case VoteState::EXECUTING:
-			return to == VoteState::COMPLETE ||
-			       to == VoteState::FAILED;
-			       
-		case VoteState::FAILED:
-		case VoteState::COMPLETE:
-			return to == VoteState::IDLE;
-			
-		default:
-			return false;
-	}
-}
-
-/*
-===============
 TransitionVoteState
 
-Centralized state transition function
+Thin vanilla hook for MuffMode vote state machine
 ===============
 */
 void TransitionVoteState(VoteState new_state) {
-	VoteState old_state = level.vote_state.state;
-
-	if (old_state == new_state)
-		return;
-
-	if (!IsValidVoteTransition(old_state, new_state)) {
-		MuffModeLog("VOTE", "Invalid state transition: %d -> %d", (int)old_state, (int)new_state);
-		return;
-	}
-
-	level.vote_state.state = new_state;
-
-	// Entry actions for new state
-	switch (new_state) {
-		case VoteState::IDLE:
-			level.vote_state.command = nullptr;
-			level.vote_state.arg.clear();
-			level.vote_state.caller = nullptr;
-			level.vote_state.start_time = 0_sec;
-			level.vote_state.execute_time = 0_sec;
-			level.vote_state.yes_votes = 0;
-			level.vote_state.no_votes = 0;
-			level.vote_state.num_eligible = 0;
-			break;
-		case VoteState::PASSED:
-			level.vote_state.execute_time = level.time + 3_sec;
-			break;
-		case VoteState::FAILED:
-			level.vote_state.caller = nullptr;
-			break;
-		default:
-			break;
-	}
+	MM_TransitionVoteState(new_state);
 }
 
 /*
@@ -3471,7 +3289,7 @@ Convenience function to clear vote state
 ===============
 */
 void ClearVote() {
-	TransitionVoteState(VoteState::IDLE);
+	MM_ClearVote();
 }
 
 /*
@@ -3480,17 +3298,7 @@ Vote_Passed
 ==================
 */
 void Vote_Passed() {
-	if (!level.vote_state.command) {
-		gi.LocBroadcast_Print(PRINT_HIGH, "Vote passed but command was lost.\n");
-		TransitionVoteState(VoteState::FAILED);
-		return;
-	}
-
-	MuffModeLog("DEBUG", "Vote_Passed: executing command '%s'", level.vote_state.command->name);
-	level.vote_state.command->func();
-	MuffModeLog("DEBUG", "Vote_Passed: command executed, transitioning to COMPLETE");
-	TransitionVoteState(VoteState::COMPLETE);
-	MuffModeLog("DEBUG", "Vote_Passed: done");
+	MM_VotePassed();
 }
 
 /*
