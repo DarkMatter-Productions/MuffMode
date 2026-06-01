@@ -36,7 +36,7 @@ void MM_ShuffleMapList()
 	std::shuffle(values.begin(), values.end(), mt_rand);
 
 	// If the current map ended up at the front, push it to the end.
-	if (values[0] == level.mapname)
+	if (Q_strcasecmp(values[0].c_str(), level.mapname) == 0)
 		std::swap(values[0], values[values.size() - 1]);
 
 	gi.cvar_forceset("g_map_list", fmt::format("{}", join_strings(values, " ")).data());

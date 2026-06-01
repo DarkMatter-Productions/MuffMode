@@ -4,6 +4,8 @@
 #include "g_local.h"
 #include "g_debug_log.h"
 #include "muffmode/mm_vote.h"
+#include <cerrno>
+#include <climits>
 
 namespace {
 bool s_vote_validation_context_active = false;
@@ -54,6 +56,21 @@ const char *MM_VoteArgv(int index)
 	if (index == 2)
 		return s_vote_validation_arg.c_str();
 	return "";
+}
+
+bool MM_ParseVoteNonNegativeInt(const char *text, int &out)
+{
+	if (!text || text[0] < '0' || text[0] > '9')
+		return false;
+
+	errno = 0;
+	char *end = nullptr;
+	unsigned long value = strtoul(text, &end, 10);
+	if (errno == ERANGE || !end || *end != '\0' || value > INT_MAX)
+		return false;
+
+	out = (int)value;
+	return true;
 }
 
 bool MM_VoteValNone(gentity_t *ent)
@@ -571,10 +588,13 @@ void MM_VotePassNextMap()
 
 bool MM_VoteValRandom(gentity_t *ent)
 {
-	int arg = strtoul(MM_VoteArgv(2), nullptr, 10);
+	int arg = 0;
 
-	if (arg > 100 || arg < 2)
+	if (!MM_ParseVoteNonNegativeInt(MM_VoteArgv(2), arg) || arg > 100 || arg < 2)
+	{
+		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid random value. Use a number from 2 to 100.\n");
 		return false;
+	}
 
 	return true;
 }
@@ -600,7 +620,13 @@ void MM_VotePassUnlagged()
 
 bool MM_VoteValUnlagged(gentity_t *ent)
 {
-	int arg = strtoul(MM_VoteArgv(2), nullptr, 10);
+	int arg = 0;
+
+	if (!MM_ParseVoteNonNegativeInt(MM_VoteArgv(2), arg) || (arg != 0 && arg != 1))
+	{
+		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid argument. Use 0 to disable or 1 to enable lag compensation.\n");
+		return false;
+	}
 
 	if ((g_lag_compensation->integer && arg)
 		|| (!g_lag_compensation->integer && !arg))
@@ -627,9 +653,9 @@ void MM_VotePassTimelimit()
 
 bool MM_VoteValTimelimit(gentity_t *ent)
 {
-	int argi = strtoul(MM_VoteArgv(2), nullptr, 10);
+	int argi = 0;
 
-	if (argi < 0 || argi > 1440)
+	if (!MM_ParseVoteNonNegativeInt(MM_VoteArgv(2), argi) || argi > 1440)
 	{
 		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid time limit value.\n");
 		return false;
@@ -657,9 +683,9 @@ void MM_VotePassScorelimit()
 
 bool MM_VoteValScorelimit(gentity_t *ent)
 {
-	int argi = strtoul(MM_VoteArgv(2), nullptr, 10);
+	int argi = 0;
 
-	if (argi < 0)
+	if (!MM_ParseVoteNonNegativeInt(MM_VoteArgv(2), argi))
 	{
 		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid score limit value.\n");
 		return false;
@@ -688,9 +714,9 @@ void MM_VotePassPowerups()
 
 bool MM_VoteValPowerups(gentity_t *ent)
 {
-	int arg = strtoul(MM_VoteArgv(2), nullptr, 10);
+	int arg = 0;
 
-	if (arg != 0 && arg != 1)
+	if (!MM_ParseVoteNonNegativeInt(MM_VoteArgv(2), arg) || (arg != 0 && arg != 1))
 	{
 		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid argument. Use 0 to disable or 1 to enable powerups.\n");
 		return false;
@@ -725,9 +751,9 @@ bool MM_VoteValFriendlyFire(gentity_t *ent)
 		return false;
 	}
 
-	int arg = strtoul(MM_VoteArgv(2), nullptr, 10);
+	int arg = 0;
 
-	if (arg != 0 && arg != 1)
+	if (!MM_ParseVoteNonNegativeInt(MM_VoteArgv(2), arg) || (arg != 0 && arg != 1))
 	{
 		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid argument. Use 0 to disable or 1 to enable friendly fire.\n");
 		return false;
@@ -1336,10 +1362,10 @@ vcmds_t vote_cmds[] = {
 	{"timelimit",			MM_VoteValTimelimit,		MM_VotePassTimelimit,		16,		2,	"<0..$>",							"alters the match time limit, 0 for no time limit"},
 	{"scorelimit",			MM_VoteValScorelimit,		MM_VotePassScorelimit,		32,		2,	"<0..$>",							"alters the match score limit, 0 for no score limit"},
 	{"fraglimit",			MM_VoteValScorelimit,		MM_VotePassScorelimit,		32,		2,	"<0..$>",							"alters the match score limit, 0 for no score limit (alias for scorelimit)"},
-	{"shuffle",				MM_VoteValShuffleTeams,		MM_VotePassShuffleTeams,	64,		2,	"",									"shuffles teams"},
+	{"shuffle",				MM_VoteValShuffleTeams,		MM_VotePassShuffleTeams,	64,		1,	"",									"shuffles teams"},
 	{"unlagged",			MM_VoteValUnlagged,			MM_VotePassUnlagged,		128,	2,	"<0/1>",							"enables or disables lag compensation"},
 	{"cointoss",			MM_VoteValNone,				MM_VotePassCointoss,		256,	1,	"",									"invokes a HEADS or TAILS cointoss"},
-	{"random",				MM_VoteValRandom,			MM_VotePassRandom,			512,	1,	"<2-100>",							"randomly selects a number from 2 to specified value"},
+	{"random",				MM_VoteValRandom,			MM_VotePassRandom,			512,	2,	"<2-100>",							"randomly selects a number from 2 to specified value"},
 	{"balance",				MM_VoteValBalanceTeams,		MM_VotePassBalanceTeams,	1024,	1,	"",									"balance teams without shuffling"},
 	{"ruleset",				MM_VoteValRuleset,			MM_VotePassRuleset,			2048,	2,	"<q2re|mm|q3a|q2reb|qc>",			"changes the current ruleset"},
 	{"powerups",			MM_VoteValPowerups,			MM_VotePassPowerups,		4096,	2,	"<0/1>",							"enables or disables powerups"},

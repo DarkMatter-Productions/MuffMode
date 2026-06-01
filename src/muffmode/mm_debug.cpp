@@ -38,13 +38,19 @@ bool ShouldTruncateLog()
 	// Get file modification time.
 	time_t fileTime = fileInfo.st_mtime;
 	struct tm *fileTm = localtime(&fileTime);
+	if (!fileTm)
+		return true;
+	struct tm fileDate = *fileTm;
 
 	// Get current time.
 	time_t now = time(nullptr);
 	struct tm *nowTm = localtime(&now);
+	if (!nowTm)
+		return false;
+	struct tm nowDate = *nowTm;
 
 	// If file date is different from today, truncate.
-	if (fileTm->tm_year != nowTm->tm_year || fileTm->tm_mon != nowTm->tm_mon || fileTm->tm_mday != nowTm->tm_mday)
+	if (fileDate.tm_year != nowDate.tm_year || fileDate.tm_mon != nowDate.tm_mon || fileDate.tm_mday != nowDate.tm_mday)
 		return true;
 
 	return false;
