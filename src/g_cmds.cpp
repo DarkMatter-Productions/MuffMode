@@ -3307,51 +3307,7 @@ ValidVoteCommand
 =================
 */
 static bool ValidVoteCommand(gentity_t *ent) {
-	if (!ent->client)
-		return false;
-
-	MuffModeLog("DEBUG", "ValidVoteCommand: enter, argv(1)=%s, argc=%d", gi.argv(1), gi.argc());
-
-	level.vote_state.command = nullptr;
-
-	vcmds_t *cc = FindVoteCmdByName(gi.argv(1));
-	if (!cc) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid vote command: {}\n", gi.argv(1));
-		return false;
-	}
-	
-	if (cc->args && gi.argc() < (1 + cc->min_args)) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "{}: {}\nUsage: {} {}\n", cc->name, cc->help, cc->name, cc->args);
-		return false;
-	}
-
-	if (!cc->val_func(ent))
-		return false;
-
-	level.vote_state.command = cc;
-	
-	// Build the vote argument string
-	std::string raw_arg;
-	if (!Q_strcasecmp(cc->name, "handicap") && gi.argc() >= 5) {
-		std::string player_name = gi.argv(2);
-		if (player_name.find(' ') != std::string::npos)
-			raw_arg = "\"" + player_name + "\" " + std::string(gi.argv(3)) + " " + std::string(gi.argv(4));
-		else
-			raw_arg = player_name + " " + std::string(gi.argv(3)) + " " + std::string(gi.argv(4));
-	} else {
-		raw_arg = gi.argc() > 2 ? gi.argv(2) : "";
-	}
-	
-	constexpr size_t MAX_VOTE_ARG_LENGTH = 128;
-	if (raw_arg.length() > MAX_VOTE_ARG_LENGTH) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "Vote argument too long (max {} characters).\n", MAX_VOTE_ARG_LENGTH);
-		return false;
-	}
-	level.vote_state.arg = raw_arg;
-	MuffModeLog("DEBUG", "ValidVoteCommand: success, cmd=%s, arg='%s' (len=%d, ptr=%p)",
-	           cc->name, level.vote_state.arg.c_str(), (int)level.vote_state.arg.length(),
-	           (void*)level.vote_state.arg.c_str());
-	return true;
+	return MM_ValidVoteCommand(ent);
 }
 
 /*

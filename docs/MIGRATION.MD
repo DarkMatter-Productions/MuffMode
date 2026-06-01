@@ -78,6 +78,10 @@ This document tracks migration progress from a monolithic fork style toward thin
      - `MM_GetVotableGametypesList()`
      - `MM_GetVotableRulesetsList()`
 
+4. **Vote command validation extracted**
+   - `ValidVoteCommand()` in `g_cmds.cpp` is now a thin hook to `MM_ValidVoteCommand()`.
+   - Existing argument behavior is preserved, including the quoted-name `handicap` path.
+
 #### Validation completed so far
 
 - Build passes after each extraction step.
@@ -89,6 +93,7 @@ This document tracks migration progress from a monolithic fork style toward thin
   - `gt_changemap_first` flow
   - vote lifecycle (active/passed/failed/complete)
   - gametype/ruleset vote pass/reject behavior
+  - handicap vote parser path (`callvote handicap "Player Name" <weapon|all> <on|off>`)
 
 ## Current Thin-Hook Pattern
 
@@ -100,7 +105,6 @@ This document tracks migration progress from a monolithic fork style toward thin
 ## Next Recommended Targets
 
 - Vote flow extraction boundaries from `g_cmds.cpp` into `src/muffmode/`:
-  - command validation and argument-building (`ValidVoteCommand`)
   - vote startup/storage path (`VoteCommandStore`)
   - final callvote entry orchestration cleanup
 - Menu integration boundary cleanup (`g_menu.cpp`/`p_menu.cpp`) as a separate slice.
