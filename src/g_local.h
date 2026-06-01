@@ -2610,16 +2610,6 @@ vcmds_t *FindVoteCmdByName(const char *name);
 bool ValidateMenuVoteCommand(gentity_t *ent, vcmds_t *cc, const char *arg);
 bool IsGametypeVotable(gametype_t gt);
 bool IsRulesetVotable(ruleset_t rs);
-void Vote_Pass_Map();
-void Vote_Pass_RestartMatch();
-void Vote_Pass_Gametype();
-void Vote_Pass_NextMap();
-void Vote_Pass_ShuffleTeams();
-void Vote_Pass_ReadyAll();
-void Vote_Pass_Cointoss();
-void Vote_Pass_Random();
-void Vote_Pass_Timelimit();
-void Vote_Pass_Scorelimit();
 bool TeamShuffle();
 void TimeoutEnd();
 

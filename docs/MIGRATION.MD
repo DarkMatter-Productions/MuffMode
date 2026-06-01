@@ -125,6 +125,11 @@ This document tracks migration progress from a monolithic fork style toward thin
    - Menu vote validation context is now bridged through `mm_vote` (`MM_BeginVoteValidationContext` / `MM_EndVoteValidationContext`) so menu and console vote validation share the same parser path.
    - `g_cmds.cpp` keeps thin wrapper entrypoints and `vote_cmds[]` wiring.
 
+15. **Vote registry boundary cleanup**
+   - `vote_cmds[]`, `FindVoteCmdByName()`, and `ValidateMenuVoteCommand()` now live in `mm_vote.cpp`.
+   - `g_cmds.cpp` no longer owns vote registry internals; it now remains focused on orchestration/admin paths.
+   - Vote command table entries now point directly to `MM_*` handlers.
+
 #### Validation completed so far
 
 - Build passes after each extraction step.

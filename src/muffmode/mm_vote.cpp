@@ -56,6 +56,11 @@ const char *MM_VoteArgv(int index)
 	return "";
 }
 
+bool MM_VoteValNone(gentity_t *ent)
+{
+	return true;
+}
+
 bool MM_IsMapValidImpl(const char *mapname)
 {
 	if (!mapname || !mapname[0])
@@ -1301,5 +1306,57 @@ void MM_RevertVote(gclient_t *client)
 
 	if (client->pers.voted != 0)
 		client->pers.voted = 0;
+}
+
+bool ValidateMenuVoteCommand(gentity_t *ent, vcmds_t *cc, const char *arg)
+{
+	if (!ent || !ent->client || !cc)
+		return false;
+
+	const char *menu_arg = arg ? arg : "";
+	const int provided_argc = menu_arg[0] ? 3 : 2;
+
+	if (cc->args && provided_argc < (1 + cc->min_args))
+	{
+		gi.LocClient_Print(ent, PRINT_HIGH, "{}: {}\nUsage: {} {}\n", cc->name, cc->help, cc->name, cc->args);
+		return false;
+	}
+
+	MM_BeginVoteValidationContext(cc, menu_arg);
+	const bool ok = cc->val_func(ent);
+	MM_EndVoteValidationContext();
+	return ok;
+}
+
+vcmds_t vote_cmds[] = {
+	{"map",					MM_VoteValMap,				MM_VotePassMap,				1,		2,	"[mapname]",						"changes to the specified map"},
+	{"nextmap",				MM_VoteValNone,				MM_VotePassNextMap,			2,		1,	"",									"move to the next map in the rotation"},
+	{"restart",				MM_VoteValNone,				MM_VotePassRestartMatch,	4,		1,	"",									"restarts the current match"},
+	{"gametype",			MM_VoteValGametype,			MM_VotePassGametype,		8,		2,	"<gametype>",						"changes the current gametype"},
+	{"timelimit",			MM_VoteValTimelimit,		MM_VotePassTimelimit,		16,		2,	"<0..$>",							"alters the match time limit, 0 for no time limit"},
+	{"scorelimit",			MM_VoteValScorelimit,		MM_VotePassScorelimit,		32,		2,	"<0..$>",							"alters the match score limit, 0 for no score limit"},
+	{"fraglimit",			MM_VoteValScorelimit,		MM_VotePassScorelimit,		32,		2,	"<0..$>",							"alters the match score limit, 0 for no score limit (alias for scorelimit)"},
+	{"shuffle",				MM_VoteValShuffleTeams,		MM_VotePassShuffleTeams,	64,		2,	"",									"shuffles teams"},
+	{"unlagged",			MM_VoteValUnlagged,			MM_VotePassUnlagged,		128,	2,	"<0/1>",							"enables or disables lag compensation"},
+	{"cointoss",			MM_VoteValNone,				MM_VotePassCointoss,		256,	1,	"",									"invokes a HEADS or TAILS cointoss"},
+	{"random",				MM_VoteValRandom,			MM_VotePassRandom,			512,	1,	"<2-100>",							"randomly selects a number from 2 to specified value"},
+	{"balance",				MM_VoteValBalanceTeams,		MM_VotePassBalanceTeams,	1024,	1,	"",									"balance teams without shuffling"},
+	{"ruleset",				MM_VoteValRuleset,			MM_VotePassRuleset,			2048,	2,	"<q2re|mm|q3a|q2reb|qc>",			"changes the current ruleset"},
+	{"powerups",			MM_VoteValPowerups,			MM_VotePassPowerups,		4096,	2,	"<0/1>",							"enables or disables powerups"},
+	{"friendlyfire",		MM_VoteValFriendlyFire,		MM_VotePassFriendlyFire,	8192,	2,	"<0/1>",							"enables or disables friendly fire (team modes only)"},
+	{"handicap",			MM_VoteValHandicap,			MM_VotePassHandicap,		16384,	4,	"<player> <weapon> <on|off>",		"restricts weapons for a player in duel mode"},
+	{"readyall",			MM_VoteValReadyAll,			MM_VotePassReadyAll,		32768,	1,	"",									"ready all players (during ready-up warmup)"},
+	{nullptr,				nullptr,					nullptr,					0,		0,	nullptr,								nullptr},
+};
+
+vcmds_t *FindVoteCmdByName(const char *name)
+{
+	for (vcmds_t *cc = vote_cmds; cc->name; ++cc)
+	{
+		if (!Q_strcasecmp(cc->name, name))
+			return cc;
+	}
+
+	return nullptr;
 }
 
