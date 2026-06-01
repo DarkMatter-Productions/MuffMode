@@ -23,4 +23,5 @@ std::string MM_GetVotableRulesetsList();
 bool MM_ValidVoteCommand(gentity_t *ent);
 void MM_VoteCommandStore(gentity_t *ent);
 void MM_CmdCallVote(gentity_t *ent);
+void MM_CmdVote(gentity_t *ent);
 

@@ -518,3 +518,45 @@ void MM_CmdCallVote(gentity_t *ent)
 	MM_VoteCommandStore(ent);
 }
 
+void MM_CmdVote(gentity_t *ent)
+{
+	if (!deathmatch->integer)
+		return;
+
+	if (!ClientCanVote(ent->client))
+	{
+		gi.LocClient_Print(ent, PRINT_HIGH, "Not allowed to vote as spectator.\n");
+		return;
+	}
+
+	if (gi.argc() < 2)
+	{
+		gi.LocClient_Print(ent, PRINT_HIGH, "Usage: {} [yes/no]\nCasts your vote in current voting session.\n", gi.argv(0));
+		return;
+	}
+
+	if (level.vote_state.state != VoteState::ACTIVE)
+	{
+		gi.LocClient_Print(ent, PRINT_HIGH, "No vote in progress.\n");
+		return;
+	}
+
+	if (ent->client->pers.voted != 0)
+	{
+		gi.LocClient_Print(ent, PRINT_HIGH, "Vote already cast.\n");
+		return;
+	}
+
+	const char *arg = gi.argv(1);
+
+	if (arg[0] == 'y' || arg[0] == 'Y' || arg[0] == '1')
+		ent->client->pers.voted = 1;
+	else
+		ent->client->pers.voted = -1;
+
+	gi.LocClient_Print(ent, PRINT_HIGH, "Vote cast.\n");
+
+	// A majority will be determined in CheckVote, which will also account
+	// for players entering or leaving.
+}
+
