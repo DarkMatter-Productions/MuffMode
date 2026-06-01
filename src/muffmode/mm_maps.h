@@ -7,4 +7,5 @@
 void MM_ShuffleMapList();
 void MM_GametypeChangeMapFirst();
 bool MM_TryBeginIntermissionFromMapList();
+void MM_HandleMapShuffleCvarChange();
 

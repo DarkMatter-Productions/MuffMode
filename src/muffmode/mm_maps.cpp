@@ -19,6 +19,8 @@ std::vector<std::string> MM_StrSplit(const std::string_view &str, char by)
 
 	return out;
 }
+
+int s_map_list_shuffle_modified = -1;
 } // namespace
 
 void MM_ShuffleMapList()
@@ -168,5 +170,21 @@ bool MM_TryBeginIntermissionFromMapList()
 	}
 
 	return false;
+}
+
+void MM_HandleMapShuffleCvarChange()
+{
+	if (s_map_list_shuffle_modified == g_map_list_shuffle->modified_count)
+		return;
+
+	s_map_list_shuffle_modified = g_map_list_shuffle->modified_count;
+
+	// Shuffle immediately in lazy mode when toggled/changed from console.
+	if (g_map_list_shuffle->integer == 2)
+	{
+		extern bool g_map_list_shuffled;
+		G_ShuffleMapList();
+		g_map_list_shuffled = true;
+	}
 }
 

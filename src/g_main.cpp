@@ -774,16 +774,8 @@ void GT_Changes() {
 	if (!level.init)
 		return;
 
-	// If g_map_list_shuffle was changed via console, shuffle immediately
-	extern bool g_map_list_shuffled;
-	static int s_map_list_shuffle_modified = -1;
-	if (s_map_list_shuffle_modified != g_map_list_shuffle->modified_count) {
-		s_map_list_shuffle_modified = g_map_list_shuffle->modified_count;
-		if (g_map_list_shuffle->integer == 2) {
-			G_ShuffleMapList();
-			g_map_list_shuffled = true;
-		}
-	}
+	// [MuffMode] Thin vanilla hook for map-shuffle cvar handling.
+	MM_HandleMapShuffleCvarChange();
 
 	bool changed = false, team_reset = false;
 	gametype_t gt = gametype_t::GT_NONE;
