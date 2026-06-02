@@ -157,6 +157,22 @@ This document tracks migration progress from a monolithic fork style toward thin
    - Duel handicap admin commands and their private helper logic now execute in `mm_admin.cpp`.
    - `g_cmds.cpp` retains command-table wrappers and permission flag flow.
 
+#### Extracted gametype/ruleset subsystem (partial)
+
+- Added gametype module API:
+  - `src/muffmode/mm_gametype.h`
+- Added gametype module implementation:
+  - `src/muffmode/mm_gametype.cpp`
+
+#### Migrations completed in this subsystem
+
+1. **Gametype/ruleset orchestration extracted**
+   - Ruleset cvar reconciliation now executes in `MM_CheckRuleset()`.
+   - `ChangeGametype()` in `g_main.cpp` is now a thin hook to `MM_ChangeGametype()`.
+   - `GT_Changes()` in `g_main.cpp` is now a thin hook to `MM_GTChanges()`.
+   - Gametype tracking counters are owned by `mm_gametype.cpp` and initialized through `MM_SyncGametypeTracking()`.
+   - Existing gametype cvar synchronization, team reset, config execution, map reload, and map-list reshuffle behavior are preserved.
+
 #### Validation completed so far
 
 - Build passes after each extraction step.
@@ -178,6 +194,9 @@ This document tracks migration progress from a monolithic fork style toward thin
 - Build validation passed for admin command extraction:
   - `build.bat Debug x64 v145`
   - `0 Warning(s), 0 Error(s)`
+- Build validation passed for gametype/ruleset orchestration extraction:
+  - `build.bat Debug x64 v145`
+  - `0 Warning(s), 0 Error(s)`
 
 ## Current Thin-Hook Pattern
 
@@ -188,10 +207,10 @@ This document tracks migration progress from a monolithic fork style toward thin
 
 ## Next Recommended Targets
 
-- Gametype/ruleset orchestration from `g_main.cpp` as a later, higher-risk slice.
 - Further command cleanup from `g_cmds.cpp` where command bodies are clearly MuffMode-owned:
   - map queue display helpers
   - remaining admin-adjacent utilities.
+- Header boundary cleanup for MuffMode declarations in `g_local.h`.
 
 ## Notes
 

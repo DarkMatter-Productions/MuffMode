@@ -3,6 +3,7 @@
 
 #include "g_local.h"
 #include "g_debug_log.h"
+#include "muffmode/mm_gametype.h"
 #include "muffmode/mm_maps.h"
 #include "muffmode/mm_vote.h"
 #include "bots/bot_includes.h"
@@ -611,19 +612,8 @@ void G_LoadMOTD() {
 	}
 }
 
-int check_ruleset = -1;
 static void CheckRuleset() {
-	if (game.ruleset && check_ruleset == g_ruleset->modified_count)
-		return;
-
-	game.ruleset = (ruleset_t)clamp(g_ruleset->integer, (int)RS_NONE + 1, (int)RS_NUM_RULESETS - 1);
-
-	if ((int)game.ruleset != g_ruleset->integer)
-		gi.cvar_forceset("g_ruleset", G_Fmt("{}", (int)game.ruleset).data());
-
-	check_ruleset = g_ruleset->modified_count;
-
-	gi.LocBroadcast_Print(PRINT_HIGH, "Ruleset: {}\n", rs_long_name[(int)game.ruleset]);
+	MM_CheckRuleset();
 }
 
 static void InitGametype() {
@@ -663,246 +653,12 @@ static void InitGametype() {
 	}
 }
 
-// Gametype tracking variables (used by both ChangeGametype and GT_Changes)
-static int gt_teamplay = 0;
-static int gt_ctf = 0;
-static int gt_g_gametype = 0;
-static bool gt_teams_on = false;
-static gametype_t gt_check = GT_NONE;
-
 void ChangeGametype(gametype_t gt) {
-	switch (gt) {
-	case gametype_t::GT_CTF:
-		if (!ctf->integer)
-			gi.cvar_forceset("ctf", "1");
-		break;
-	case gametype_t::GT_TDM:
-		if (!teamplay->integer)
-			gi.cvar_forceset("teamplay", "1");
-		break;
-	default:
-		if (ctf->integer)
-			gi.cvar_forceset("ctf", "0");
-		if (teamplay->integer)
-			gi.cvar_forceset("teamplay", "0");
-		break;
-	}
-
-	if (!deathmatch->integer) {
-		gi.Com_Print("Forcing deathmatch.\n");
-		gi.cvar_forceset("deathmatch", "1");
-	}
-
-	if ((int)gt != g_gametype->integer) {
-		MuffModeLog("GAMETYPE", "Changing gametype from %s (%d) to %s (%d)", 
-		           gt_short_name[g_gametype->integer], g_gametype->integer,
-		           gt_short_name[(int)gt], (int)gt);
-		gi.cvar_forceset("g_gametype", G_Fmt("{}", (int)gt).data());
-
-		// Force all human clients through explicit join flow after gametype change.
-		// Without this, existing session state (team + initialised) can carry across
-		// map reloads and spawn players directly in-game even when auto-join is off.
-		for (auto ec : active_clients()) {
-			if (!ec->client)
-				continue;
-			if (ec->client->sess.is_a_bot || (ec->svflags & SVF_BOT))
-				continue;
-			ec->client->sess.team = TEAM_NONE;
-			ec->client->sess.duel_queued = false;
-			ec->client->sess.initialised = false;
-			ec->client->initial_menu_shown = false;
-			ec->client->initial_menu_delay = level.time + 10_hz;
-		}
-		
-		// Sync g_instagib cvar when switching to/from instagib gametype
-		if (gt == gametype_t::GT_INSTAGIB) {
-			if (!g_instagib->integer)
-				gi.cvar_forceset("g_instagib", "1");
-		} else if (g_gametype->integer == (int)gametype_t::GT_INSTAGIB) {
-			// Switching away from instagib - clear the cvar
-			if (g_instagib->integer)
-				gi.cvar_forceset("g_instagib", "0");
-		}
-		
-		// Sync g_nadefest cvar when switching to/from nadefest gametype
-		if (gt == gametype_t::GT_NADEFEST) {
-			if (!g_nadefest->integer)
-				gi.cvar_forceset("g_nadefest", "1");
-		} else if (g_gametype->integer == (int)gametype_t::GT_NADEFEST) {
-			// Switching away from nadefest - clear the cvar
-			if (g_nadefest->integer)
-				gi.cvar_forceset("g_nadefest", "0");
-		}
-		
-		// Clear duel handicap data when switching away from duel mode
-		if (g_gametype->integer == (int)gametype_t::GT_DUEL && gt != gametype_t::GT_DUEL) {
-			// Clear all handicap data for all clients
-			for (auto ec : active_clients()) {
-				if (!ec->client)
-					continue;
-				
-				ec->client->handicap.restricted_weapons = 0;
-				ec->client->handicap.damage_dealt_multiplier = 1.0f;
-				ec->client->handicap.damage_received_multiplier = 1.0f;
-				ec->client->handicap.health_multiplier = 1.0f;
-			}
-		}
-		
-		// Execute gametype-specific cfg when gametype actually changes
-		// This ensures cfg runs on gametype change, not on every map load
-		if (g_gametype_cfg->integer && deathmatch->integer) {
-			gi.AddCommandString(G_Fmt("exec gt-{}.cfg\n", gt_short_name_upper[(int)gt]).data());
-		}
-
-		// Reset shuffle flag so the map list gets reshuffled for the new gametype
-		extern bool g_map_list_shuffled;
-		g_map_list_shuffled = false;
-		
-		// Update tracking vars to prevent GT_Changes() from triggering a redundant reload
-		// when Vote_Pass_Gametype() has already handled the map change properly
-		gt_g_gametype = g_gametype->modified_count;
-		gt_check = (gametype_t)g_gametype->integer;
-		gt_teamplay = teamplay->modified_count;
-		gt_ctf = ctf->modified_count;
-	}
+	MM_ChangeGametype(gt);
 }
 
 void GT_Changes() {
-	if (!deathmatch->integer)
-		return;
-
-	// do these checks only once level has initialised
-	if (!level.init)
-		return;
-
-	// [MuffMode] Thin vanilla hook for map-shuffle cvar handling.
-	MM_HandleMapShuffleCvarChange();
-
-	bool changed = false, team_reset = false;
-	gametype_t gt = gametype_t::GT_NONE;
-
-	if (gt_g_gametype != g_gametype->modified_count) {
-		gt = (gametype_t)clamp(g_gametype->integer, (int)GT_FIRST, (int)GT_LAST);
-
-		if (gt != gt_check) {
-			switch (gt) {
-			case gametype_t::GT_TDM:
-				if (!teamplay->integer)
-					gi.cvar_forceset("teamplay", "1");
-				break;
-			case gametype_t::GT_CTF:
-				if (!ctf->integer)
-					gi.cvar_forceset("ctf", "1");
-				break;
-			default:
-				if (teamplay->integer)
-					gi.cvar_forceset("teamplay", "0");
-				if (ctf->integer)
-					gi.cvar_forceset("ctf", "0");
-				break;
-			}
-			gt_teamplay = teamplay->modified_count;
-			gt_ctf = ctf->modified_count;
-			changed = true;
-		}
-	}
-
-	if (!changed) {
-		if (gt_teamplay != teamplay->modified_count) {
-			if (teamplay->integer) {
-				gt = gametype_t::GT_TDM;
-				if (!teamplay->integer)
-					gi.cvar_forceset("teamplay", "1");
-				if (ctf->integer)
-					gi.cvar_forceset("ctf", "0");
-			} else {
-				gt = gametype_t::GT_FFA;
-				if (teamplay->integer)
-					gi.cvar_forceset("teamplay", "0");
-				if (ctf->integer)
-					gi.cvar_forceset("ctf", "0");
-			}
-			changed = true;
-			gt_teamplay = teamplay->modified_count;
-			gt_ctf = ctf->modified_count;
-		}
-		if (gt_ctf != ctf->modified_count) {
-			if (ctf->integer) {
-				gt = gametype_t::GT_CTF;
-				if (teamplay->integer)
-					gi.cvar_forceset("teamplay", "0");
-				if (!ctf->integer)
-					gi.cvar_forceset("ctf", "1");
-			} else {
-				gt = gametype_t::GT_TDM;
-				if (!teamplay->integer)
-					gi.cvar_forceset("teamplay", "1");
-				if (ctf->integer)
-					gi.cvar_forceset("ctf", "0");
-			}
-			changed = true;
-			gt_teamplay = teamplay->modified_count;
-			gt_ctf = ctf->modified_count;
-		}
-	}
-
-	if (!changed || gt == gametype_t::GT_NONE)
-		return;
-
-	//gi.Com_PrintFmt("GAMETYPE = {}\n", (int)gt);
-	
-	if (gt_teams_on != Teams()) {
-		team_reset = true;
-		gt_teams_on = Teams();
-	}
-
-	if (team_reset) {
-		// move all to spectator first
-		for (auto ec : active_clients()) {
-			SetIntermissionPoint();
-
-			ec->s.origin = level.intermission_origin;
-			ec->client->ps.pmove.origin = level.intermission_origin;
-			ec->client->ps.viewangles = level.intermission_angle;
-
-			ec->client->awaiting_respawn = true;
-			ec->client->ps.pmove.pm_type = PM_FREEZE;
-			ec->client->ps.rdflags = RDF_NONE;
-			ec->deadflag = false;
-			ec->solid = SOLID_NOT;
-			ec->movetype = MOVETYPE_FREECAM;
-			ec->s.modelindex = 0;
-			ec->svflags |= SVF_NOCLIENT;
-			gi.linkentity(ec);
-		}
-
-		// set to team and reset match
-		for (auto ec : active_clients()) {
-			if (!ClientIsPlaying(ec->client))
-				continue;
-			SetTeam(ec, PickTeam(-1), false, false, true);
-		}
-	}
-
-	if ((int)gt != gt_check) {
-		gi.cvar_forceset("g_gametype", G_Fmt("{}", (int)gt).data());
-		gt_g_gametype = g_gametype->modified_count;
-		gt_check = (gametype_t)g_gametype->integer;
-	} else return;
-
-	//TODO: save ent string so we can simply reload it and Match_Reset
-	//gi.AddCommandString("map_restart");
-
-	MuffModeLog("DEBUG", "GT_Changes: issuing gamemap '%s' (gt=%d gt_check=%d gt_g_gametype=%d g_gametype->modified_count=%d teamplay=%d ctf=%d in_frame=%d)",
-		level.mapname, (int)gt, (int)gt_check, gt_g_gametype, g_gametype->modified_count,
-		teamplay->integer, ctf->integer, level.in_frame);
-	gi.AddCommandString(G_Fmt("gamemap {}\n", level.mapname).data());
-
-	// Return immediately after queuing map change to avoid rendering state corruption.
-	// GT_PrecacheAssets() and GT_SetLongName() will be called during normal map initialization
-	// in SpawnEntities() -> PrecacheStartItems() -> PrecacheAssets() -> GT_PrecacheAssets()
-	// and SpawnEntities() -> GT_SetLongName().
-	return;
+	MM_GTChanges();
 }
 
 /*
@@ -1249,10 +1005,7 @@ static void InitGame() {
 
 	level.total_player_deaths = 0;
 
-	gt_teamplay = teamplay->modified_count;
-	gt_ctf = ctf->modified_count;
-	gt_g_gametype = g_gametype->modified_count;
-	gt_teams_on = Teams();
+	MM_SyncGametypeTracking();
 
 	Horde_Init();
 
