@@ -2,6 +2,7 @@
 // Licensed under the GNU General Public License 2.0.
 #include "g_local.h"
 #include "g_statusbar.h"
+#include "muffmode/mm_vote_menu.h"
 
 /*
 ======================================================================

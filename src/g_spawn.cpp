@@ -514,15 +514,6 @@ void ED_CallSpawn(gentity_t *ent) {
 
 	ent->sv.init = false;
 
-#if 0
-	if (GT(GT_HORDE)) {
-		// remove monsters from map, we will spawn them in during wave starts
-		if (!strnicmp(ent->classname, "monster_", 8)) {
-			G_FreeEntity(ent);
-			return;
-		}
-	}
-#endif
 	MM_RemapSpawnClassname(ent);
 
 	SpawnEnt_MapFixes(ent);

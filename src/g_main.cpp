@@ -2054,7 +2054,6 @@ void CalculateRanks() {
 	level.num_living_blue = 0;
 	level.num_playing_red = 0;
 	level.num_playing_blue = 0;
-	level.num_voting_clients = 0;
 
 	//memset(level.sorted_clients, -1, sizeof(level.sorted_clients));
 	for (size_t i = 0; i < MAX_CLIENTS; i++)
@@ -2067,8 +2066,6 @@ void CalculateRanks() {
 		level.num_connected_clients++;
 
 		if (!ClientIsPlaying(cl)) {
-			if (ClientCanVote(cl))
-				level.num_voting_clients++;
 			continue;
 		}
 
@@ -2078,7 +2075,6 @@ void CalculateRanks() {
 		level.num_playing_clients++;
 		if (!cl->sess.is_a_bot) {
 			level.num_playing_human_clients++;
-			level.num_voting_clients++;
 		}
 		if (level.follow1 == -1)
 			level.follow1 = ec->client - game.clients;

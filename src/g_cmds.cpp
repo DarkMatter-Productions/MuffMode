@@ -6,6 +6,7 @@
 #include "muffmode/mm_maps.h"
 #include "muffmode/mm_motd.h"
 #include "muffmode/mm_vote.h"
+#include "muffmode/mm_vote_menu.h"
 #include "monsters/m_player.h"
 /*freeze*/
 #if 0

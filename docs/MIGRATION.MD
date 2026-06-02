@@ -378,14 +378,101 @@ This document tracks migration progress from a monolithic fork style toward thin
 - Keep behavior unchanged for each extraction slice.
 - Validate each slice with build + in-game smoke tests before moving on.
 
-## Next Recommended Targets
+## Refactor Complete
 
-- Thin-vanilla Tier 1 and Tier 2 sweeps complete.
-- Phase 6G–6H and match-machine extraction explicitly deferred (one-liners / orchestration hubs).
-- Intentionally left in `g_local.h` for Phase 5 scope control:
-  - `gametype_t`, `ruleset_t`, and name/index tables (widely referenced across gameplay)
-  - embedded session state (`game.mapqueue`, `game.motd`, `level.vote_state`)
-  - thin vanilla orchestration hooks (`ChangeGametype()`, `GT_Changes()`, `TransitionVoteState()`, `ClearVote()`)
+**Status:** Thin-vanilla refactor declared complete (Phases 1–6, Tier 1–2, Phase 5 header boundaries).
+
+Cohesive MuffMode feature bodies live in `src/muffmode/`. Remaining vanilla code is intentionally thin: match orchestration hubs, 1–3 line `GT()`/`RS()`/`GTF()` gates, shared types/state in `g_local.h`, and cvar registration in `InitGame`. Removing every gametype/ruleset conditional from vanilla files is explicitly **out of scope** (see [`THIN_VANILLA_PRINCIPLES.md`](THIN_VANILLA_PRINCIPLES.md)).
+
+### Vanilla adapter table
+
+| Vanilla hook (call site) | Canonical API | Module |
+|-------------------------|---------------|--------|
+| `ChangeGametype()` | `MM_ChangeGametype()` | `mm_gametype` |
+| `GT_Changes()` | `MM_GTChanges()` | `mm_gametype` |
+| `CheckRuleset()` | `MM_CheckRuleset()` | `mm_gametype` |
+| `GT_SetLongName()` | `MM_GTSetLongName()` | `mm_gametype` |
+| `TransitionVoteState()` | `MM_TransitionVoteState()` | `mm_vote` |
+| `ClearVote()` | `MM_ClearVote()` | `mm_vote` |
+| `G_RunFrame_` vote tick | `MM_CheckVote()` | `mm_vote` |
+| `Cmd_CallVote_f` / `Cmd_Vote_f` | `MM_CmdCallVote()` / `MM_CmdVote()` | `mm_vote` |
+| `MM_RevertVote()` (direct) | `MM_RevertVote()` | `mm_vote` |
+| `G_Menu_Vote_Open()` / `Vote_Menu_Active()` | same (implemented in module) | `mm_vote_menu` |
+| `Cmd_Doctor_f` / `Cmd_Gametype_f` / `Cmd_Ruleset_f` / `Cmd_SetMap_f` | `MM_CmdDoctor()` etc. | `mm_admin` |
+| `Cmd_MapList_f` / `Cmd_MyMap_f` | `MM_CmdMapList()` / `MM_CmdMyMap()` | `mm_maps` |
+| `Cmd_Motd_f` / `Cmd_LoadMotd_f` | `MM_CmdMotd()` / `MM_CmdLoadMotd()` | `mm_motd` |
+| `G_ShuffleMapList` / map-list intermission | `MM_ShuffleMapList()` / `MM_TryBeginIntermissionFromMapList()` | `mm_maps` |
+| `SVCmd_GametypeChangeMapFirst_f` | `MM_GametypeChangeMapFirst()` | `mm_maps` |
+| `MM_RemapSpawnClassname()` / spawn inhibit | `mm_spawn_filter` | `mm_spawn_filter` |
+| `SP_worldspawn` statusbar | `MM_InitStatusbar()` | `mm_statusbar` |
+| Duel warmup/match hooks | `MM_Duel_*()` | `mm_duel` |
+| Horde spawn/wave hooks | `MM_Horde_*()` | `mm_horde` |
+| Item pickup/respawn/inhibit | `MM_*` item helpers | `mm_items_rules` |
+| Spawn health/armor/loadout | `MM_ApplyStartingHealthArmor()` / `MM_ApplySpawnLoadout()` | `mm_spawn_loadout` |
+| Weapon ruleset tuning | `MM_Ruleset_*()` | `mm_ruleset_weapons` |
+| Health/armor caps + Q3A decay | `MM_Clamp*()` / `MM_RulesetQ3AHealthArmorDecay()` | `mm_ruleset` |
+
+### Include policy
+
+- **`g_local.h`** — shared game types, macros (`GT`, `RS`, `GTF`), embedded `game`/`level`/`client` state, vanilla-named adapter declarations.
+- **Feature translation units** — include the specific `mm_*.h` for APIs they call (e.g. `g_spawn.cpp` → `mm_statusbar.h`, `mm_spawn_filter.h`).
+- **`muffmode/muffmode.h`** — optional umbrella include listing all module headers; not required project-wide.
+- **`[MuffMode]` markers** — used at vanilla hook boundaries and in module public headers; not required on every one-line `GT()` gate.
+
+### Permanent vanilla surface (intentional)
+
+- **`g_main.cpp`** — match warmup/round/exit state machines, `CalculateRanks`, `Match_End`, `InitGame` cvar registration (~25 MuffMode cvars).
+- **`g_cmds.cpp`** — command dispatch table; remaining admin/captain/ready/duel SetTeam bodies; thin wrappers for extracted commands.
+- **`g_local.h`** — `gametype_t`, `ruleset_t`, name/index tables, `VoteStateData`, map queue/MOTD/horde/duel embedded fields, adapter function names.
+- **`p_hud.cpp`** — gametype scoreboard layout (Phase 6H deferred).
+- **`g_combat.cpp`** — scattered gametype/ruleset damage gates (Phase 6G deferred).
+- **1–5 line `GT()`/`RS()`/`GTF()` gates** across gameplay files where extraction would obscure control flow.
+
+### Post-completion backlog (optional future slices)
+
+**Priority A — extend existing modules**
+
+| Target | ~Lines | Module |
+|--------|--------|--------|
+| Duel scoreboard + vote gate (`p_hud.cpp`) | ~210 | `mm_duel` |
+| AutoDoc RS_MM regen + health pickup glue (`g_items.cpp`) | ~110 | `mm_items_rules` |
+| Fall damage Q3A thresholds (`p_client.cpp`) | ~30 | `mm_ruleset` |
+| Horde round-win/exit snippets (`g_main.cpp`) | ~20 | `mm_horde` |
+| Remaining admin commands (`g_cmds.cpp`) | ~210 | `mm_admin` |
+| Duel SetTeam/forfeit/screenshot (`g_cmds.cpp`, `g_main.cpp`) | ~220 | `mm_duel` |
+
+**Priority B — new modules (defer unless actively developing those modes)**
+
+| Target | ~Lines | Module |
+|--------|--------|--------|
+| Match warmup/round/exit state machines | ~600+ | `mm_match` |
+| Captain/lock/ready-team commands | ~470 | `mm_captain` / `mm_match` |
+| Team scoreboard layout | ~250 | `mm_hud` |
+| Combat gametype/ruleset blocks | ~55 | `mm_combat_rules` |
+| Strike CTF round logic | ~20 | `mm_gametype` |
+
+**Priority C — optional structural tidy**
+
+- `mm_types.h` to break `mm_vote.h` ↔ `g_local.h` circular include
+- `MM_RegisterCvars()` to consolidate MuffMode cvar registration from `InitGame`
+
+### Final smoke-test matrix
+
+Run once after closure housekeeping; note results in commit message or below.
+
+| Area | Cases |
+|------|-------|
+| Gametypes | FFA, TDM, CTF, CA, duel, freeze, horde, instagib, strike, RR |
+| Rulesets | Q2RE, MM, Q3A, Q1, QC, VANILLA_PLUS (where applicable) |
+| Vote | Menu open, start map/gametype/ruleset vote, pass, fail, timeout |
+| Admin | setmap, gametype, ruleset, doctor |
+| Maps | map list, shuffle, MyMap queue, `sv nextmap` rotation |
+| Duel | queue join, loser rotation, spectator bot queue |
+| Horde | warmup spawn cap, wave scaling, round clear |
+| Ruleset | Q3A over-max health/armor decay |
+| UI | Statusbar on map load |
+
+_Smoke results: pending in-game validation._
 
 ## Notes
 
