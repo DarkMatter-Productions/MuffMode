@@ -3,6 +3,7 @@
 #include "g_local.h"
 #include "monsters/m_player.h"
 #include "bots/bot_includes.h"
+#include "muffmode/mm_vote.h"
 
 void SP_misc_teleporter_dest(gentity_t *ent);
 
@@ -3894,7 +3895,7 @@ void ClientDisconnect(gentity_t *ent) {
 	if ((dc_team == TEAM_RED || dc_team == TEAM_BLUE) && level.captain[dc_team] == ent)
 		VacateCaptain(dc_team, ent);
 
-	G_RevertVote(ent->client);
+	MM_RevertVote(ent->client);
 
 	// If the disconnected client called the vote, cancel it
 	if (level.vote_state.caller == ent->client) {

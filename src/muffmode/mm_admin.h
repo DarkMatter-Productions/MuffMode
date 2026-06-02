@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "g_local.h"
+struct gentity_t;
 
 // [MuffMode] Admin command bodies. g_cmds.cpp keeps command-table wrappers.
 void MM_CmdDoctor(gentity_t *ent);

@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "g_local.h"
+enum gametype_t;
 
 // [MuffMode] Gametype/ruleset orchestration hooks.
 void MM_CheckRuleset();

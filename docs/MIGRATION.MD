@@ -198,6 +198,95 @@ This document tracks migration progress from a monolithic fork style toward thin
   - `build.bat Debug x64 v145`
   - `0 Warning(s), 0 Error(s)`
 
+### Phase 5 (Completed)
+
+#### Header boundary cleanup — vote types slice
+
+- Added vote-only type header:
+  - `src/muffmode/mm_vote_types.h`
+- Moved out of `g_local.h`:
+  - `vcmds_t`, `vote_cmds[]`, `VoteState`
+- Moved vote registry declarations into `mm_vote.h`:
+  - `FindVoteCmdByName()`
+  - `ValidateMenuVoteCommand()`
+- Removed redundant vanilla declarations from `g_local.h`:
+  - `IsGametypeVotable()`, `IsRulesetVotable()`
+  - `VoteCommandStore()`, `Vote_Passed()`
+  - vote registry helpers now owned by the vote module
+- Kept in `g_local.h` (save/session and wide vanilla use):
+  - `VoteStateData` embedded in `level_locals_t`
+  - thin vanilla hooks `TransitionVoteState()`, `ClearVote()`
+- Updated MuffMode consumers:
+  - `mm_vote_menu.cpp` calls `MM_*` vote APIs directly
+  - removed dead thin wrappers from `g_cmds.cpp`
+- Updated project wiring:
+  - `src/game.vcxproj`
+  - `src/game.vcxproj.filters`
+  - `src/muffmode/muffmode.h`
+
+#### Validation
+
+- Build validation passed for vote header boundary slice:
+  - `build.bat Debug x64 v145`
+  - `0 Warning(s), 0 Error(s)`
+
+#### Map queue boundary cleanup
+
+- Extended `mm_maps.h` / `mm_maps.cpp` with MyMap queue ownership:
+  - `MM_MQ_Count()`, `MM_MQ_Add()`, `MM_MQ_Go_Next()`
+  - `MM_CmdMapList()`, `MM_CmdMyMap()`
+- Removed from `g_local.h`:
+  - `MQ_Count()`, `MQ_Add()` declarations
+- Removed from `g_main.cpp`:
+  - entire map-queue implementation block (~130 lines)
+  - `Match_End()` now calls `MM_MQ_*` directly
+- Removed from `g_cmds.cpp`:
+  - `MQ_PrintList()` and MyMap command bodies
+  - dead `MyMap_FlagString()` stub
+  - `maplist` / `mymap` commands remain as thin wrappers
+- Kept in `g_local.h`:
+  - `game.mapqueue` vector in `game_locals_t` (session state)
+
+#### Validation
+
+- Build validation passed for map queue boundary slice:
+  - `build.bat Debug x64 v145`
+  - `0 Warning(s), 0 Error(s)`
+
+#### MOTD boundary cleanup
+
+- Added MOTD module:
+  - `src/muffmode/mm_motd.h`
+  - `src/muffmode/mm_motd.cpp`
+- Moved from vanilla files:
+  - `G_LoadMOTD()` body from `g_main.cpp` → `MM_LoadMOTD()`
+  - `motd` / `loadmotd` command bodies from `g_cmds.cpp` → `MM_CmdMotd()` / `MM_CmdLoadMotd()`
+- Removed from `g_local.h`:
+  - `G_LoadMOTD()` declaration
+- Kept in `g_local.h`:
+  - `game.motd`, `game.motd_mod_count`, and per-client MOTD display state
+
+#### Vote and map-list wrapper cleanup
+
+- Removed dead or redundant vanilla wrappers:
+  - `G_RevertVote()` — callers now use `MM_RevertVote()` (`g_cmds.cpp`, `p_client.cpp`)
+  - `G_ShuffleMapList()` — removed; `mm_maps.cpp` calls `MM_ShuffleMapList()` internally
+  - unused `IsMapValid()` and `ValidVoteCommand()` stubs in `g_cmds.cpp`
+- Removed from `g_local.h`:
+  - `G_RevertVote()`, `G_ShuffleMapList()`
+
+#### MuffMode header include tightening
+
+- `mm_admin.h`, `mm_gametype.h`, `mm_vote_menu.h` no longer include `g_local.h`
+- Public module headers use forward declarations where sufficient
+- `muffmode/muffmode.h` includes `mm_motd.h`
+
+#### Validation
+
+- Build validation passed for final Phase 5 slice:
+  - `build.bat Debug x64 v145`
+  - `0 Warning(s), 0 Error(s)`
+
 ## Current Thin-Hook Pattern
 
 - Keep vanilla files (`g_main.cpp`, `g_svcmds.cpp`) as orchestration points.
@@ -207,10 +296,11 @@ This document tracks migration progress from a monolithic fork style toward thin
 
 ## Next Recommended Targets
 
-- Further command cleanup from `g_cmds.cpp` where command bodies are clearly MuffMode-owned:
-  - map queue display helpers
-  - remaining admin-adjacent utilities.
-- Header boundary cleanup for MuffMode declarations in `g_local.h`.
+- Phase 6 gameplay ruleset slices only as needed (spawn/loadout, handicap helpers, HUD presentation).
+- Intentionally left in `g_local.h` for Phase 5 scope control:
+  - `gametype_t`, `ruleset_t`, and name/index tables (widely referenced across gameplay)
+  - embedded session state (`game.mapqueue`, `game.motd`, `level.vote_state`, `client->handicap`)
+  - thin vanilla orchestration hooks (`ChangeGametype()`, `GT_Changes()`, `TransitionVoteState()`, `ClearVote()`)
 
 ## Notes
 

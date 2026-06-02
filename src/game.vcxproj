@@ -156,8 +156,10 @@
     <ClInclude Include="muffmode\mm_debug.h" />
     <ClInclude Include="muffmode\mm_gametype.h" />
     <ClInclude Include="muffmode\mm_maps.h" />
+    <ClInclude Include="muffmode\mm_motd.h" />
     <ClInclude Include="muffmode\mm_vote.h" />
     <ClInclude Include="muffmode\mm_vote_menu.h" />
+    <ClInclude Include="muffmode\mm_vote_types.h" />
     <ClInclude Include="muffmode\muffmode.h" />
     <ClInclude Include="p_menu.h" />
     <ClInclude Include="q_std.h" />
@@ -230,6 +232,7 @@
     <ClCompile Include="muffmode\mm_debug.cpp" />
     <ClCompile Include="muffmode\mm_gametype.cpp" />
     <ClCompile Include="muffmode\mm_maps.cpp" />
+    <ClCompile Include="muffmode\mm_motd.cpp" />
     <ClCompile Include="muffmode\mm_vote.cpp" />
     <ClCompile Include="muffmode\mm_vote_menu.cpp" />
     <ClCompile Include="p_client.cpp" />

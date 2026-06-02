@@ -5,6 +5,8 @@
 #include "g_debug_log.h"
 #include "muffmode/mm_maps.h"
 
+#include <algorithm>
+
 namespace {
 std::vector<std::string> MM_StrSplit(const std::string_view &str, char by)
 {
@@ -52,7 +54,7 @@ void MM_GametypeChangeMapFirst()
 	// Shuffle the list if shuffle is enabled (mode 1 or 2).
 	if (g_map_list_shuffle->integer >= 1)
 	{
-		G_ShuffleMapList();
+		MM_ShuffleMapList();
 		if (g_map_list_shuffle->integer == 2)
 		{
 			extern bool g_map_list_shuffled;
@@ -132,14 +134,14 @@ bool MM_TryBeginIntermissionFromMapList()
 				// g_map_list_shuffle 2 = shuffle once per gametype (lazy)
 				if (g_map_list_shuffle->integer == 1)
 				{
-					G_ShuffleMapList();
+					MM_ShuffleMapList();
 				}
 				else if (g_map_list_shuffle->integer == 2)
 				{
 					extern bool g_map_list_shuffled;
 					if (!g_map_list_shuffled)
 					{
-						G_ShuffleMapList();
+						MM_ShuffleMapList();
 						g_map_list_shuffled = true;
 					}
 				}
@@ -183,8 +185,235 @@ void MM_HandleMapShuffleCvarChange()
 	if (g_map_list_shuffle->integer == 2)
 	{
 		extern bool g_map_list_shuffled;
-		G_ShuffleMapList();
+		MM_ShuffleMapList();
 		g_map_list_shuffled = true;
 	}
+}
+
+namespace {
+
+void MM_MQ_Clear()
+{
+	if (!deathmatch)
+		return;
+
+	game.mapqueue.clear();
+}
+
+bool MM_MQ_Update()
+{
+	if (!deathmatch)
+		return false;
+
+	if (!g_allow_mymap->integer)
+		return false;
+
+	if (!g_map_list->string[0] && game.mapqueue.size()) {
+		MM_MQ_Clear();
+		gi.Broadcast_Print(PRINT_HIGH, "Map queue has been cleared.\n");
+		return false;
+	}
+
+	auto it = std::remove_if(game.mapqueue.begin(), game.mapqueue.end(),
+		[](const std::string &s) { return s.empty(); });
+	game.mapqueue.erase(it, game.mapqueue.end());
+
+	return true;
+}
+
+void MM_MQ_PrintList(gentity_t *ent)
+{
+	std::string text;
+
+	for (size_t i = 0; i < game.mapqueue.size(); i++) {
+		if (!game.mapqueue[i].empty())
+			text += game.mapqueue[i] + " ";
+	}
+
+	gi.LocClient_Print(ent, PRINT_HIGH, G_Fmt("{}\n", text).data());
+}
+
+constexpr size_t MAX_MAP_LIST_DISPLAY = 512;
+
+void MM_PrintTruncatedMapList(gentity_t *ent)
+{
+	std::string map_list_display = g_map_list->string;
+	if (map_list_display.length() > MAX_MAP_LIST_DISPLAY)
+		map_list_display = map_list_display.substr(0, MAX_MAP_LIST_DISPLAY) + "...";
+	gi.LocClient_Print(ent, PRINT_HIGH, "{}\n", map_list_display.c_str());
+}
+
+} // namespace
+
+int MM_MQ_Count()
+{
+	if (!deathmatch)
+		return 0;
+
+	if (!g_allow_mymap->integer)
+		return 0;
+
+	if (!MM_MQ_Update())
+		return 0;
+
+	return (int)game.mapqueue.size();
+}
+
+bool MM_MQ_Add(gentity_t *ent, const char *mapname)
+{
+	if (!deathmatch)
+		return false;
+
+	if (!g_allow_mymap->integer)
+		return false;
+
+	if (!mapname[0]) {
+		gi.Client_Print(ent, PRINT_HIGH, "Invalid map name.\n");
+		return false;
+	}
+
+	if (!g_map_pool->string[0] && !g_map_list->string[0])
+		return false;
+
+	char *token;
+	bool found = false;
+
+	if (g_map_pool->string[0]) {
+		const char *pool = g_map_pool->string;
+
+		while ((token = COM_Parse(&pool)) && *token) {
+			if (!Q_strcasecmp(token, mapname)) {
+				found = true;
+				break;
+			}
+		}
+	}
+
+	if (!found && g_map_list->string[0]) {
+		const char *mlist = g_map_list->string;
+
+		while ((token = COM_Parse(&mlist)) && *token) {
+			if (!Q_strcasecmp(token, mapname)) {
+				found = true;
+				break;
+			}
+		}
+	}
+
+	if (!found) {
+		gi.Client_Print(ent, PRINT_HIGH, "Selected map is either invalid or not in pool/list.\n");
+		return false;
+	}
+
+	if (!MM_MQ_Update())
+		return false;
+
+	if (std::find(game.mapqueue.begin(), game.mapqueue.end(), mapname) != game.mapqueue.end()) {
+		gi.Client_Print(ent, PRINT_HIGH, "Selected map is already in queue.\n");
+		return false;
+	}
+
+	game.mapqueue.push_back(mapname);
+	return true;
+}
+
+const char *MM_MQ_Go_Next()
+{
+	if (!deathmatch)
+		return nullptr;
+
+	if (!MM_MQ_Update())
+		return nullptr;
+
+	for (size_t i = 0; i < game.mapqueue.size(); i++) {
+		if (game.mapqueue[i].empty())
+			continue;
+		const char *s = G_Fmt("{}", game.mapqueue[i]).data();
+		game.mapqueue.erase(game.mapqueue.begin() + i);
+		return s;
+	}
+
+	return nullptr;
+}
+
+void MM_CmdMapList(gentity_t *ent)
+{
+	if (g_map_list->string[0]) {
+		gi.LocClient_Print(ent, PRINT_HIGH, "Current map list:\n");
+		MM_PrintTruncatedMapList(ent);
+		if (MM_MQ_Count()) {
+			gi.LocClient_Print(ent, PRINT_HIGH, "\nCurrent MyMap Queue:\n");
+			MM_MQ_PrintList(ent);
+		}
+	} else {
+		gi.LocClient_Print(ent, PRINT_HIGH, "No Map List set.\n");
+	}
+}
+
+void MM_CmdMyMap(gentity_t *ent)
+{
+	if (!g_allow_mymap->integer) {
+		gi.LocClient_Print(ent, PRINT_HIGH, "MyMap is disabled.\n");
+		return;
+	}
+
+	if (!g_map_list->string[0]) {
+		gi.LocClient_Print(ent, PRINT_HIGH, "No maps are queued as no map list is present.\n");
+		return;
+	}
+
+	if (gi.argc() < 2) {
+		gi.LocClient_Print(ent, PRINT_HIGH, "Add a map to the MyMap Queue.\nRecognized maps are:\n");
+		MM_PrintTruncatedMapList(ent);
+
+		if (MM_MQ_Count()) {
+			gi.LocClient_Print(ent, PRINT_HIGH, "MyMap Queue => ");
+			MM_MQ_PrintList(ent);
+		}
+		return;
+	}
+
+	if (!strcmp(gi.argv(1), level.mapname)) {
+		gi.LocClient_Print(ent, PRINT_HIGH, "Cannot add current map to MyMap Queue.\n");
+		return;
+	}
+
+	if (!MM_MQ_Add(ent, gi.argv(1)))
+		return;
+
+	std::string text;
+
+	for (size_t i = 0; i < game.mapqueue.size(); i++) {
+		if (!game.mapqueue[i].empty()) {
+			text += game.mapqueue[i];
+			text += " ";
+		}
+	}
+
+	game.item_inhibit_pu = 0;
+	game.item_inhibit_pa = 0;
+	game.item_inhibit_ht = 0;
+	game.item_inhibit_ar = 0;
+	game.item_inhibit_am = 0;
+	game.item_inhibit_wp = 0;
+
+	for (int i = 2; i < gi.argc(); i++) {
+		const char *s = gi.argv(i);
+		if (!s || !s[0])
+			continue;
+		int num = 0;
+		if (s[0] == '+') { num = 1; s++; }
+		else if (s[0] == '-') { num = -1; s++; }
+		else continue;
+		if (!Q_strcasecmp(s, "pu"))      game.item_inhibit_pu = num;
+		else if (!Q_strcasecmp(s, "pa")) game.item_inhibit_pa = num;
+		else if (!Q_strcasecmp(s, "ht")) game.item_inhibit_ht = num;
+		else if (!Q_strcasecmp(s, "ar")) game.item_inhibit_ar = num;
+		else if (!Q_strcasecmp(s, "am")) game.item_inhibit_am = num;
+		else if (!Q_strcasecmp(s, "wp")) game.item_inhibit_wp = num;
+	}
+
+	if (text.size())
+		gi.LocBroadcast_Print(PRINT_HIGH, "MyMap Queue => {}\n", text.data());
 }
 

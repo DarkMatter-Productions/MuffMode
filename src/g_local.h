@@ -5,6 +5,7 @@
 #pragma once
 
 #include "bg_local.h"
+#include "muffmode/mm_vote_types.h"
 
 // the "gameversion" client command will print this plus compile date
 constexpr const char *GAMEVERSION = "baseq2";
@@ -371,26 +372,6 @@ enum grapple_state_t {
 	GRAPPLE_STATE_FLY,
 	GRAPPLE_STATE_PULL,
 	GRAPPLE_STATE_HANG
-};
-
-struct vcmds_t {
-	const		char *name;
-	bool		(*val_func)(gentity_t *ent);
-	void		(*func)();
-	int32_t		flag;
-	int8_t		min_args;
-	const		char *args;
-	const		char *help;
-};
-extern vcmds_t vote_cmds[];
-
-enum class VoteState {
-	IDLE,			// No vote in progress
-	ACTIVE,			// Vote is being voted on
-	PASSED,			// Vote passed, waiting to execute
-	EXECUTING,		// Currently executing the vote command
-	FAILED,			// Vote failed or timed out
-	COMPLETE		// Vote executed successfully
 };
 
 extern int ii_highlight;
@@ -2603,13 +2584,8 @@ bool AllowClientTeamSwitch(gentity_t *ent);
 int TeamBalance(bool force);
 void Cmd_ReadyUp_f(gentity_t *ent);
 
-void VoteCommandStore(gentity_t *ent);
 void TransitionVoteState(VoteState new_state);
 void ClearVote();
-vcmds_t *FindVoteCmdByName(const char *name);
-bool ValidateMenuVoteCommand(gentity_t *ent, vcmds_t *cc, const char *arg);
-bool IsGametypeVotable(gametype_t gt);
-bool IsRulesetVotable(ruleset_t rs);
 bool TeamShuffle();
 void TimeoutEnd();
 
@@ -3206,23 +3182,16 @@ void CalculateRanks();
 void CheckDMExitRules();
 int GT_ScoreLimit();
 const char *GT_ScoreLimitString();
-void G_RevertVote(gclient_t *client);
-void Vote_Passed();
 void ExitLevel();
 void Teams_CalcRankings(std::array<uint32_t, MAX_CLIENTS> &player_ranks); // [Paril-KEX]
 void ReadyAll();
 void UnReadyAll();
 void QueueIntermission(const char *msg, bool boo, bool reset);
-void Match_Reset();
-int MQ_Count();
-bool MQ_Add(gentity_t *ent, const char *mapname);
 gentity_t *CreateTargetChangeLevel(const char *map);
 bool InAMatch();
 void ChangeGametype(gametype_t gt);
 void GT_Changes();
-void G_ShuffleMapList();
 void SpawnEntities(const char *mapname, const char *entities, const char *spawnpoint);
-void G_LoadMOTD();
 
 //
 // g_chase.cpp

@@ -3,7 +3,8 @@
 
 #pragma once
 
-#include "g_local.h"
+struct gentity_t;
+struct menu_hnd_t;
 
 // [MuffMode] Vote menu entry points. Implemented in muffmode/mm_vote_menu.cpp.
 bool Vote_Menu_Active(gentity_t *ent);

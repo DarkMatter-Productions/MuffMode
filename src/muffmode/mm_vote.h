@@ -3,8 +3,13 @@
 
 #pragma once
 
+#include "mm_vote_types.h"
 #include "g_local.h"
 #include <string>
+
+// [MuffMode] Vote registry helpers owned by mm_vote.cpp.
+vcmds_t *FindVoteCmdByName(const char *name);
+bool ValidateMenuVoteCommand(gentity_t *ent, vcmds_t *cc, const char *arg);
 
 // [MuffMode] Vote state machine implementation hooks.
 void MM_TransitionVoteState(VoteState new_state);

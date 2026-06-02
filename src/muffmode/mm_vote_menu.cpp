@@ -3,6 +3,7 @@
 
 #include "g_local.h"
 #include "g_debug_log.h"
+#include "muffmode/mm_vote.h"
 #include "muffmode/mm_vote_menu.h"
 
 #include <cstdlib>
@@ -266,7 +267,7 @@ static void MenuVote_Initiate(gentity_t *ent, const char *cmd_name, const char *
 		return;
 	level.vote_state.command = cc;
 	level.vote_state.arg = arg ? arg : "";
-	VoteCommandStore(ent);
+	MM_VoteCommandStore(ent);
 }
 
 struct map_menu_page_t {
@@ -443,7 +444,7 @@ void G_Menu_CallVote_GameType_Update(gentity_t *ent)
 		gametype_t gt = (gametype_t)i;
 		if (gt == GT_NONE || gt == GT_STRIKE || gt == GT_RR || gt == GT_LMS || gt == GT_BALL)
 			continue;
-		if (!IsGametypeVotable(gt))
+		if (!MM_IsGametypeVotable(gt))
 			continue;
 
 		Q_strlcpy(entries[menu_index].text_arg1, gt_short_name[i], sizeof(entries[menu_index].text_arg1));
@@ -465,7 +466,7 @@ void G_Menu_CallVote_GameType_Selection(gentity_t *ent, menu_hnd_t *p)
 		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid gametype selected.\n");
 		return;
 	}
-	if (!IsGametypeVotable(gt))
+	if (!MM_IsGametypeVotable(gt))
 	{
 		gi.LocClient_Print(ent, PRINT_HIGH, "This gametype is not available for voting.\n");
 		return;
@@ -498,7 +499,7 @@ void G_Menu_CallVote_Ruleset_Update(gentity_t *ent)
 		ruleset_t rs = (ruleset_t)i;
 		if (rs == RS_NONE)
 			continue;
-		if (!IsRulesetVotable(rs))
+		if (!MM_IsRulesetVotable(rs))
 			continue;
 
 		Q_strlcpy(entries[menu_index].text_arg1, rs_short_name[i], sizeof(entries[menu_index].text_arg1));

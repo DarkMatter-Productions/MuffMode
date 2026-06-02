@@ -138,10 +138,16 @@
     <ClInclude Include="muffmode\mm_maps.h">
       <Filter>muffmode</Filter>
     </ClInclude>
+    <ClInclude Include="muffmode\mm_motd.h">
+      <Filter>muffmode</Filter>
+    </ClInclude>
     <ClInclude Include="muffmode\mm_vote.h">
       <Filter>muffmode</Filter>
     </ClInclude>
     <ClInclude Include="muffmode\mm_vote_menu.h">
+      <Filter>muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="muffmode\mm_vote_types.h">
       <Filter>muffmode</Filter>
     </ClInclude>
     <ClInclude Include="muffmode\muffmode.h">
@@ -299,6 +305,9 @@
       <Filter>muffmode</Filter>
     </ClCompile>
     <ClCompile Include="muffmode\mm_maps.cpp">
+      <Filter>muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="muffmode\mm_motd.cpp">
       <Filter>muffmode</Filter>
     </ClCompile>
     <ClCompile Include="muffmode\mm_vote.cpp">

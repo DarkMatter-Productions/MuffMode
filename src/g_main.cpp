@@ -5,6 +5,7 @@
 #include "g_debug_log.h"
 #include "muffmode/mm_gametype.h"
 #include "muffmode/mm_maps.h"
+#include "muffmode/mm_motd.h"
 #include "muffmode/mm_vote.h"
 #include "bots/bot_includes.h"
 #include "monsters/m_player.h"	// match starts
@@ -569,49 +570,6 @@ static bool Horde_AllMonstersDead() {
 
 // =================================================
 
-
-void G_LoadMOTD() {
-	// load up ent override
-	const char *name = G_Fmt("baseq2/{}", g_motd_filename->string[0] ? g_motd_filename->string : "motd.txt").data();
-	FILE *f = fopen(name, "rb");
-	bool valid = true;
-	if (f != NULL) {
-		char *buffer = nullptr;
-		size_t length;
-		size_t read_length;
-
-		fseek(f, 0, SEEK_END);
-		length = ftell(f);
-		fseek(f, 0, SEEK_SET);
-
-		if (length > 0x40000) {
-			gi.Com_PrintFmt("{}: MoTD file length exceeds maximum: \"{}\"\n", __FUNCTION__, name);
-			valid = false;
-		}
-		if (valid) {
-			buffer = (char *)gi.TagMalloc(length + 1, '\0');
-			if (length) {
-				read_length = fread(buffer, 1, length, f);
-
-				if (length != read_length) {
-					gi.Com_PrintFmt("{}: MoTD file read error: \"{}\"\n", __FUNCTION__, name);
-					valid = false;
-				}
-			}
-		}
-		fclose(f);
-		
-		if (valid) {
-			game.motd = (const char *)buffer;
-			game.motd_mod_count++;
-			if (g_verbose->integer)
-				gi.Com_PrintFmt("{}: MotD file verified and loaded: \"{}\"\n", __FUNCTION__, name);
-		} else {
-			gi.Com_PrintFmt("{}: MotD file load error for \"{}\", discarding.\n", __FUNCTION__, name);
-		}
-	}
-}
-
 static void CheckRuleset() {
 	MM_CheckRuleset();
 }
@@ -1009,7 +967,7 @@ static void InitGame() {
 
 	Horde_Init();
 
-	G_LoadMOTD();
+	MM_LoadMOTD();
 
 	if (g_dm_exec_level_cfg->integer)
 		gi.AddCommandString(G_Fmt("exec {}\n", level.mapname).data());
@@ -2686,146 +2644,6 @@ void CalculateRanks() {
 
 }
 
-//===================================================================
-// MAP QUEUE SYSTEM
-//===================================================================
-
-static void MQ_Clear() {
-	if (!deathmatch)
-		return;
-
-	game.mapqueue.clear();
-}
-
-static bool MQ_Update() {
-	if (!deathmatch)
-		return false;
-
-	if (!g_allow_mymap->integer)
-		return false;
-
-	if (!g_map_list->string[0] && game.mapqueue.size()) {
-		MQ_Clear();
-		gi.Broadcast_Print(PRINT_HIGH, "Map queue has been cleared.\n");
-		return false;
-	}
-
-	// Remove empty elements from the queue
-	auto it = std::remove_if(game.mapqueue.begin(), game.mapqueue.end(), 
-		[](const std::string& s) { return s.empty(); });
-	game.mapqueue.erase(it, game.mapqueue.end());
-
-	return true;
-}
-
-bool MQ_Add(gentity_t *ent, const char *mapname) {
-	if (!deathmatch)
-		return false;
-
-	if (!g_allow_mymap->integer)
-		return false;
-
-	if (!mapname[0]) {
-		gi.Client_Print(ent, PRINT_HIGH, "Invalid map name.\n");
-		return false;
-	}
-
-	// Check if either pool or list exists
-	if (!g_map_pool->string[0] && !g_map_list->string[0])
-		return false;
-
-	// Validate map against pool first, then list
-	char *token;
-	bool found = false;
-
-	// First check g_map_pool if it exists and is non-empty
-	if (g_map_pool->string[0]) {
-		const char *pool = g_map_pool->string;
-
-		while ((token = COM_Parse(&pool)) && *token) {
-			if (!Q_strcasecmp(token, mapname)) {
-				found = true;
-				break;
-			}
-		}
-	}
-
-	// Fall back to g_map_list if pool didn't have it (or pool was empty)
-	if (!found && g_map_list->string[0]) {
-		const char *mlist = g_map_list->string;
-
-		while ((token = COM_Parse(&mlist)) && *token) {
-			if (!Q_strcasecmp(token, mapname)) {
-				found = true;
-				break;
-			}
-		}
-	}
-
-	if (!found) {
-		gi.Client_Print(ent, PRINT_HIGH, "Selected map is either invalid or not in pool/list.\n");
-		return false;
-	}
-
-	if (!MQ_Update())
-		return false;
-
-	// ensure map isn't already in the queue
-	if (std::find(game.mapqueue.begin(), game.mapqueue.end(), mapname) != game.mapqueue.end()) {
-		gi.Client_Print(ent, PRINT_HIGH, "Selected map is already in queue.\n");
-		return false;
-	}
-
-	// add it!
-	game.mapqueue.push_back(mapname);
-
-	return true;
-}
-
-static void MQ_Remove_Index(gentity_t *ent, int num) {
-	if (!deathmatch)
-		return;
-
-	if (!MQ_Update())
-		return;
-
-	if (num >= 0 && num < game.mapqueue.size()) {
-		game.mapqueue.erase(game.mapqueue.begin() + num);
-	}
-}
-
-static const char *MQ_Go_Next() {
-	if (!deathmatch)
-		return nullptr;
-
-	if (!MQ_Update())
-		return nullptr;
-
-	for (size_t i = 0; i < game.mapqueue.size(); i++) {
-		if (game.mapqueue[i].empty())
-			continue;
-		const char *s = G_Fmt("{}", game.mapqueue[i]).data();
-		game.mapqueue.erase(game.mapqueue.begin() + i);
-		return s;
-	}
-	return nullptr;
-}
-
-int MQ_Count() {
-	if (!deathmatch)
-		return 0;
-
-	if (!g_allow_mymap->integer)
-		return 0;
-
-	if (!MQ_Update())
-		return 0;
-	//gi.Com_PrintFmt("AAAAAAAAAAAAAAA size={}\n", game.mapqueue.size());
-	return game.mapqueue.size();
-}
-
-//===================================================================
-
 static void ShutdownGame() {
 	gi.Com_Print("==== ShutdownGame ====\n");
 
@@ -2931,18 +2749,6 @@ gentity_t *CreateTargetChangeLevel(const char *map) {
 
 /*
 =================
-G_ShuffleMapList
-
-Shuffle the map list in place, avoiding the current map at the front.
-=================
-*/
-void G_ShuffleMapList() {
-	// [MuffMode] Thin vanilla hook; implementation lives in muffmode/mm_maps.cpp.
-	MM_ShuffleMapList();
-}
-
-/*
-=================
 Match_End
 
 An end of match condition has been reached
@@ -2955,8 +2761,8 @@ void Match_End() {
 	level.match_state_timer = 0_sec;
 
 	// see if there is a queued map to go to
-	if (MQ_Count()) {
-		BeginIntermission(CreateTargetChangeLevel(MQ_Go_Next()));
+	if (MM_MQ_Count()) {
+		BeginIntermission(CreateTargetChangeLevel(MM_MQ_Go_Next()));
 		return;
 	}
 	

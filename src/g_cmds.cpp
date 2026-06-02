@@ -3,6 +3,8 @@
 #include "g_local.h"
 #include "g_debug_log.h"
 #include "muffmode/mm_admin.h"
+#include "muffmode/mm_maps.h"
+#include "muffmode/mm_motd.h"
 #include "muffmode/mm_vote.h"
 #include "monsters/m_player.h"
 /*freeze*/
@@ -2192,7 +2194,7 @@ bool SetTeam(gentity_t *ent, team_t desired_team, bool inactive, bool force, boo
 		if (Teams())
 			G_AssignPlayerSkin(ent, ent->client->pers.skin);
 
-		G_RevertVote(ent->client);
+		MM_RevertVote(ent->client);
 
 		// assign a ghost code
 		Match_Ghost_DoAssign(ent);
@@ -2470,20 +2472,6 @@ static void Cmd_Doctor_f(gentity_t *ent) {
 
 // NEW VOTING CODE
 
-static bool IsMapValid(const char *mapname) {
-	return MM_IsMapValid(mapname);
-}
-
-// Helper function to check if a gametype is votable
-bool IsGametypeVotable(gametype_t gt) {
-	return MM_IsGametypeVotable(gt);
-}
-
-// Helper function to check if a ruleset is votable
-bool IsRulesetVotable(ruleset_t rs) {
-	return MM_IsRulesetVotable(rs);
-}
-
 /*
 ===============
 TransitionVoteState
@@ -2508,33 +2496,6 @@ void ClearVote() {
 
 /*
 ==================
-Vote_Passed
-==================
-*/
-void Vote_Passed() {
-	MM_VotePassed();
-}
-
-/*
-=================
-ValidVoteCommand
-=================
-*/
-static bool ValidVoteCommand(gentity_t *ent) {
-	return MM_ValidVoteCommand(ent);
-}
-
-/*
-=================
-VoteCommandStore
-=================
-*/
-void VoteCommandStore(gentity_t *ent) {
-	MM_VoteCommandStore(ent);
-}
-
-/*
-==================
 Cmd_CallVote_f
 ==================
 */
@@ -2549,10 +2510,6 @@ Cmd_Vote_f
 */
 static void Cmd_Vote_f(gentity_t *ent) {
 	MM_CmdVote(ent);
-}
-
-void G_RevertVote(gclient_t *client) {
-	MM_RevertVote(client);
 }
 
 /*
@@ -3264,33 +3221,12 @@ static void Cmd_HandicapClear_f(gentity_t *ent) {
 // MAP QUEUE
 // ======================================================
 
-static void MQ_PrintList(gentity_t *ent) {
-	std::string text = "";
-	for (size_t i = 0; i < game.mapqueue.size(); i++) {
-		if (!game.mapqueue[i].empty())
-			text += game.mapqueue[i] + " ";	// G_Fmt("{} \n", game.mapqueue[i].data()).data();
-	}
-	
-	gi.LocClient_Print(ent, PRINT_HIGH, G_Fmt("{}\n", text).data());
+static void Cmd_MapList_f(gentity_t *ent) {
+	MM_CmdMapList(ent);
 }
 
-static void Cmd_MapList_f(gentity_t *ent) {
-	if (g_map_list->string[0]) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "Current map list:\n");
-		// Truncate map list if too long to prevent message overflow
-		constexpr size_t MAX_MAP_LIST_DISPLAY = 512;
-		std::string map_list_display = g_map_list->string;
-		if (map_list_display.length() > MAX_MAP_LIST_DISPLAY) {
-			map_list_display = map_list_display.substr(0, MAX_MAP_LIST_DISPLAY) + "...";
-		}
-		gi.LocClient_Print(ent, PRINT_HIGH, "{}\n", map_list_display.c_str());
-		if (MQ_Count()) {
-			gi.LocClient_Print(ent, PRINT_HIGH, "\nCurrent MyMap Queue:\n");
-			MQ_PrintList(ent);
-		}
-	} else {
-		gi.LocClient_Print(ent, PRINT_HIGH, "No Map List set.\n");
-	}
+static void Cmd_MyMap_f(gentity_t *ent) {
+	MM_CmdMyMap(ent);
 }
 
 static void Cmd_MapInfo_f(gentity_t *ent) {
@@ -3303,96 +3239,12 @@ static void Cmd_MapInfo_f(gentity_t *ent) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "author{}: {}{}{}\n", level.author2[0] ? "s" : "", level.author, level.author2[0] ? ", " : "", level.author2[0] ? level.author2 : "");
 }
 
-static const char *MyMap_FlagString() {
-
-}
-
-static void Cmd_MyMap_f(gentity_t *ent) {
-	if (!g_allow_mymap->integer) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "MyMap is disabled.\n");
-		return;
-	}
-
-	if (!g_map_list->string[0]) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "No maps are queued as no map list is present.\n");
-		return;
-	}
-
-	if (gi.argc() < 2) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "Add a map to the MyMap Queue.\nRecognized maps are:\n");
-		// Truncate map list if too long to prevent message overflow
-		constexpr size_t MAX_MAP_LIST_DISPLAY = 512;
-		std::string map_list_display = g_map_list->string;
-		if (map_list_display.length() > MAX_MAP_LIST_DISPLAY) {
-			map_list_display = map_list_display.substr(0, MAX_MAP_LIST_DISPLAY) + "...";
-		}
-		gi.LocClient_Print(ent, PRINT_HIGH, "{}\n", map_list_display.c_str());
-
-		if (MQ_Count()) {
-			gi.LocClient_Print(ent, PRINT_HIGH, "MyMap Queue => ");
-			MQ_PrintList(ent);
-		}
-		return;
-	}
-
-	if (!strcmp(gi.argv(1), level.mapname)) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "Cannot add current map to MyMap Queue.\n");
-		return;
-	}
-	
-	MQ_Add(ent, gi.argv(1));
-	
-	std::string text = "";
-
-	for (size_t i = 0; i < game.mapqueue.size(); i++) {
-		if (!game.mapqueue[i].empty()) {
-			text += game.mapqueue[i];
-			
-			text += " ";
-		}
-	}
-
-	game.item_inhibit_pu = 0;
-	game.item_inhibit_pa = 0;
-	game.item_inhibit_ht = 0;
-	game.item_inhibit_ar = 0;
-	game.item_inhibit_am = 0;
-	game.item_inhibit_wp = 0;
-
-	// flags: "+pu", "-pa", "+ht", "+ar", "+am", "+wp"
-	// argv indices: 0=cmd, 1=mapname, 2..argc-1=flags
-	for (int i = 2; i < gi.argc(); i++) {
-		const char *s = gi.argv(i);
-		if (!s || !s[0])
-			continue;
-		int num = 0;
-		if (s[0] == '+') { num = 1; s++; }
-		else if (s[0] == '-') { num = -1; s++; }
-		else continue;
-		if (!Q_strcasecmp(s, "pu"))      game.item_inhibit_pu = num;
-		else if (!Q_strcasecmp(s, "pa")) game.item_inhibit_pa = num;
-		else if (!Q_strcasecmp(s, "ht")) game.item_inhibit_ht = num;
-		else if (!Q_strcasecmp(s, "ar")) game.item_inhibit_ar = num;
-		else if (!Q_strcasecmp(s, "am")) game.item_inhibit_am = num;
-		else if (!Q_strcasecmp(s, "wp")) game.item_inhibit_wp = num;
-	}
-	
-	if (text.size())
-		gi.LocBroadcast_Print(PRINT_HIGH, "MyMap Queue => {}\n", text.data());
-}
-
 static void Cmd_LoadMotd_f(gentity_t *ent) {
-	G_LoadMOTD();
+	MM_CmdLoadMotd(ent);
 }
 
 static void Cmd_Motd_f(gentity_t *ent) {
-	const char *s = nullptr;
-
-	if (game.motd.size())
-		s = G_Fmt("Message of the Day:\n{}\n", game.motd.c_str()).data();
-	else
-		s = "No Message of the Day set.\n";
-	gi.LocClient_Print(ent, PRINT_HIGH, "{}", s);
+	MM_CmdMotd(ent);
 }
 
 // =========================================
