@@ -1269,6 +1269,13 @@ DIE(player_die) (gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 	if (ClientArenaEliminationCorpse(self->client))
 		self->takedamage = false;
 
+	// holster view weapon (Think_Weapon skips eliminated players before it can)
+	self->client->newweapon = nullptr;
+	self->client->pers.weapon = nullptr;
+	self->client->ps.gunindex = 0;
+	self->client->ps.gunskin = 0;
+	self->client->ps.gunframe = 0;
+
 	self->deadflag = true;
 
 	gi.linkentity(self);
