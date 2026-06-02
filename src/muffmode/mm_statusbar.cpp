@@ -33,7 +33,7 @@ void MM_InitStatusbar()
 	}
 
 	if (InCoopStyle()) {
-		int32_t y;
+		int32_t y = 2;
 		const int32_t text_adj = 26;
 
 		sb.ifstat(STAT_COOP_RESPAWN).xv(0).yt(0).loc_stat_cstring2(STAT_COOP_RESPAWN).endifstat();

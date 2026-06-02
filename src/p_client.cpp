@@ -1628,20 +1628,22 @@ select_spawn_result_t SelectDeathmatchSpawnPoint(gentity_t *ent, vec3_t avoid_po
 					}
 				}
 
-				if (ent->client->sess.is_a_bot)
-					if (spot->flags & FL_NO_BOTS)
-						continue;
-				if (!ent->client->sess.is_a_bot)
-					if (spot->flags & FL_NO_HUMANS)
-						continue;
+				if (ent && ent->client) {
+					if (ent->client->sess.is_a_bot)
+						if (spawn_points[i].point->flags & FL_NO_BOTS)
+							continue;
+					if (!ent->client->sess.is_a_bot)
+						if (spawn_points[i].point->flags & FL_NO_HUMANS)
+							continue;
+				}
 
 				if (SpawnPointClear(spawn_points[i].point))
 					return { spawn_points[i].point, true };
 			}
 			// none clear, so we have to pick one of the other two
-			if (SpawnPointClear(spawn_points[1].point))
+			if (spawn_points.size() > 1 && SpawnPointClear(spawn_points[1].point))
 				return { spawn_points[1].point, true };
-			else if (SpawnPointClear(spawn_points[0].point))
+			else if (spawn_points.size() > 0 && SpawnPointClear(spawn_points[0].point))
 				return { spawn_points[0].point, true };
 
 			break;
@@ -1664,12 +1666,14 @@ select_spawn_result_t SelectDeathmatchSpawnPoint(gentity_t *ent, vec3_t avoid_po
 					}
 				}
 
-				if (ent->client->sess.is_a_bot)
-					if (spot->flags & FL_NO_BOTS)
-						continue;
-				if (!ent->client->sess.is_a_bot)
-					if (spot->flags & FL_NO_HUMANS)
-						continue;
+				if (ent && ent->client) {
+					if (ent->client->sess.is_a_bot)
+						if (spawn_points[i].point->flags & FL_NO_BOTS)
+							continue;
+					if (!ent->client->sess.is_a_bot)
+						if (spawn_points[i].point->flags & FL_NO_HUMANS)
+							continue;
+				}
 
 				if (SpawnPointClear(spawn_points[i].point))
 					return { spawn_points[i].point, true };

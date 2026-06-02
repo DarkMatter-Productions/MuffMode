@@ -203,11 +203,15 @@ void MM_Horde_RunSpawning()
 		return;
 
 	if (level.horde_monster_spawn_time <= level.time) {
+		const char *monster_class = Horde_PickMonster();
+		if (!monster_class)
+			return;
+
 		gentity_t *e = G_Spawn();
-		e->classname = Horde_PickMonster();
+		e->classname = monster_class;
 		select_spawn_result_t result = SelectDeathmatchSpawnPoint(nullptr, vec3_origin, SPAWN_FARTHEST, false, true, false, false);
 
-		if (result.any_valid) {
+		if (result.any_valid && result.spot) {
 			e->s.origin = result.spot->s.origin;
 			e->s.angles = result.spot->s.angles;
 
