@@ -310,6 +310,13 @@ This document tracks migration progress from a monolithic fork style toward thin
    - Moved `k_ruleset_pickup_tuning` slug quantity table out of `p_weapon.cpp`.
    - `p_weapon.cpp` weapon fire and ammo pickup/drop paths now call `MM_Ruleset_*`; weapon fire functions remain in vanilla.
 
+### Phase 6D — Spawn loadout (complete)
+
+1. **Spawn loadout helpers extracted**
+   - Added `mm_spawn_loadout.h` / `mm_spawn_loadout.cpp` with `MM_ApplyStartingHealthArmor()` and `MM_ApplySpawnLoadout()`.
+   - Covers arena/Q3A/Q1/QC/default weapon branches, instagib/nadefest/BALL, and pre-match warmup weapon grants.
+   - `InitClientPersistant()` keeps coop loadout steal, `Player_GiveStartItems`, compass/grapple grants, and ruleset health/armor clamp in vanilla.
+
 ## Current Thin-Hook Pattern
 
 - Keep vanilla files (`g_main.cpp`, `g_svcmds.cpp`) as orchestration points.
@@ -319,7 +326,7 @@ This document tracks migration progress from a monolithic fork style toward thin
 
 ## Next Recommended Targets
 
-- Phase 6D–6F gameplay slices as needed (spawn loadout, items rules, spawn filter).
+- Phase 6E–6F gameplay slices as needed (items rules, spawn filter).
 - Intentionally left in `g_local.h` for Phase 5 scope control:
   - `gametype_t`, `ruleset_t`, and name/index tables (widely referenced across gameplay)
   - embedded session state (`game.mapqueue`, `game.motd`, `level.vote_state`)
