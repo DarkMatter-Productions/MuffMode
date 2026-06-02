@@ -483,7 +483,7 @@ void T_Damage(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, const 
 	const vec3_t &normal, int damage, int knockback, damageflags_t dflags, mod_t mod) {
 	gclient_t *client;
 	int			take, save;
-	int			asave, psave;
+	int			asave = 0, psave = 0;
 	int			te_sparks;
 	bool		sphere_notified;
 

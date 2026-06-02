@@ -2301,9 +2301,15 @@ void G_PostRespawn(gentity_t *self) {
 		BroadcastReadyReminderMessage();
 }
 
+static bool ClientArenaEliminationRound(const gclient_t *client) {
+	return client && client->eliminated &&
+		GTF(GTF_ARENA) && GTF(GTF_ELIMINATION) && GTF(GTF_ROUNDS) &&
+		level.match_state == matchst_t::MATCH_IN_PROGRESS &&
+		level.round_state == roundst_t::ROUND_IN_PROGRESS;
+}
+
 void ClientSetEliminated(gentity_t *self) {
 	self->client->eliminated = true;
-	//MoveClientToFreeCam(self);
 }
 
 void ClientRespawn(gentity_t *ent) {
@@ -2843,6 +2849,8 @@ void ClientSpawn(gentity_t *ent) {
 		if (!ent->client->initial_menu_shown)
 			ent->client->initial_menu_delay = level.time + 10_hz;
 		ent->client->eliminated = eliminated;
+		if (eliminated && GTF(GTF_ARENA) && GTF(GTF_ELIMINATION))
+			GetFollowTarget(ent);
 		gi.linkentity(ent);
 		return;
 	}
@@ -4719,6 +4727,12 @@ void ClientBeginServerFrame(gentity_t *ent) {
 		client->weapon_thunk = false;
 
 	if (ent->deadflag) {
+		if (deathmatch->integer && ClientArenaEliminationRound(client) &&
+				level.time > client->respawn_time && !level.coop_level_restart_time) {
+			ClientRespawn(ent);
+			return;
+		}
+
 		//muff mode: add minimum delay in dm
 		if (deathmatch->integer && client->respawn_min_time && level.time > client->respawn_min_time && level.time <= client->respawn_time) {
 			if ((client->latched_buttons & BUTTON_ATTACK)) {
