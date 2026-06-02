@@ -83,8 +83,6 @@ void MM_ApplySpawnLoadout(gentity_t *ent, gclient_t *client, bool taken_loadout)
 			client->pers.inventory[IT_WEAPON_GLAUNCHER] = 1;
 			client->pers.inventory[IT_WEAPON_RLAUNCHER] = 1;
 			client->pers.inventory[IT_WEAPON_HYPERBLASTER] = 1;
-			if (notGT(GT_CA))
-				client->pers.inventory[IT_WEAPON_PLASMABEAM] = 1;
 			if (!(RS(RS_Q1)))
 				client->pers.inventory[IT_WEAPON_RAILGUN] = 1;
 		} else {
