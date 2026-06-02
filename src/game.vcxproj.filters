@@ -126,6 +126,9 @@
       <Filter>monsters</Filter>
     </ClInclude>
     <ClInclude Include="p_menu.h" />
+    <ClInclude Include="muffmode\mm_admin.h">
+      <Filter>muffmode</Filter>
+    </ClInclude>
     <ClInclude Include="muffmode\mm_debug.h">
       <Filter>muffmode</Filter>
     </ClInclude>
@@ -299,6 +302,9 @@
       <Filter>muffmode</Filter>
     </ClCompile>
     <ClCompile Include="muffmode\mm_vote_menu.cpp">
+      <Filter>muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="muffmode\mm_admin.cpp">
       <Filter>muffmode</Filter>
     </ClCompile>
   </ItemGroup>

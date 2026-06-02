@@ -152,6 +152,7 @@
     <ClInclude Include="monsters\m_turret.h" />
     <ClInclude Include="monsters\m_widow.h" />
     <ClInclude Include="monsters\m_widow2.h" />
+    <ClInclude Include="muffmode\mm_admin.h" />
     <ClInclude Include="muffmode\mm_debug.h" />
     <ClInclude Include="muffmode\mm_maps.h" />
     <ClInclude Include="muffmode\mm_vote.h" />
@@ -224,6 +225,7 @@
     <ClCompile Include="monsters\m_turret.cpp" />
     <ClCompile Include="monsters\m_widow.cpp" />
     <ClCompile Include="monsters\m_widow2.cpp" />
+    <ClCompile Include="muffmode\mm_admin.cpp" />
     <ClCompile Include="muffmode\mm_debug.cpp" />
     <ClCompile Include="muffmode\mm_maps.cpp" />
     <ClCompile Include="muffmode\mm_vote.cpp" />

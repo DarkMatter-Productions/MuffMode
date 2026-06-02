@@ -142,6 +142,21 @@ This document tracks migration progress from a monolithic fork style toward thin
    - `g_main.cpp` now calls `MM_CheckVote()` from `G_RunFrame_()` as a thin vanilla hook.
    - Existing vote state-machine transitions and vote execution behavior are preserved.
 
+#### Extracted admin subsystem (partial)
+
+- Added admin module API:
+  - `src/muffmode/mm_admin.h`
+- Added admin module implementation:
+  - `src/muffmode/mm_admin.cpp`
+
+#### Migrations completed in this subsystem
+
+1. **Admin command bodies extracted**
+   - MuffMode Doctor diagnostics now execute in `MM_CmdDoctor()`.
+   - Admin `gametype`, `ruleset`, and `setmap` command bodies now execute in `mm_admin.cpp`.
+   - Duel handicap admin commands and their private helper logic now execute in `mm_admin.cpp`.
+   - `g_cmds.cpp` retains command-table wrappers and permission flag flow.
+
 #### Validation completed so far
 
 - Build passes after each extraction step.
@@ -160,6 +175,9 @@ This document tracks migration progress from a monolithic fork style toward thin
 - Build validation passed for vote lifecycle ticking extraction:
   - `build.bat Debug x64 v145`
   - `0 Warning(s), 0 Error(s)`
+- Build validation passed for admin command extraction:
+  - `build.bat Debug x64 v145`
+  - `0 Warning(s), 0 Error(s)`
 
 ## Current Thin-Hook Pattern
 
@@ -170,11 +188,10 @@ This document tracks migration progress from a monolithic fork style toward thin
 
 ## Next Recommended Targets
 
-- Admin command extraction from `g_cmds.cpp` into MuffMode modules:
-  - gametype/ruleset/setmap admin commands
-  - handicap admin commands
-  - MuffMode Doctor diagnostics.
 - Gametype/ruleset orchestration from `g_main.cpp` as a later, higher-risk slice.
+- Further command cleanup from `g_cmds.cpp` where command bodies are clearly MuffMode-owned:
+  - map queue display helpers
+  - remaining admin-adjacent utilities.
 
 ## Notes
 
