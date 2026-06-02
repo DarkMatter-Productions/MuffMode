@@ -251,3 +251,27 @@ int MM_AmmoSlugPickupCount(int quantity)
 
 	return quantity * 2;
 }
+
+int MM_PickRespawnItemTeamIndex(int current_index, int count)
+{
+	if (RS(RS_MM))
+		return (current_index + 1) % count;
+
+	return irandom(count);
+}
+
+void MM_OnPowerupItemRespawned(gentity_t *ent)
+{
+	if (!deathmatch->integer || !(RS(RS_MM) || RS(RS_Q3A)))
+		return;
+
+	if (!ent->item || !(ent->item->flags & IF_POWERUP))
+		return;
+
+	QLSound(ent, "items/poweruprespawn", "misc/alarm.wav", true);
+}
+
+bool MM_ShouldAnnouncePowerupUse()
+{
+	return RS(RS_MM) || RS(RS_Q3A) || RS(RS_VANILLA_PLUS);
+}

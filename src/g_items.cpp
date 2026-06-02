@@ -1408,16 +1408,9 @@ THINK(RespawnItem) (gentity_t *ent) -> void {
 					current_index = count;
 			}
 			
-			if (RS(RS_MM)) {
-				choice = (current_index + 1) % count;
-				//gi.Com_PrintFmt("ci={} co={} ch={}\n", current_index, count, choice);
-				for (count = 0, ent = master; count < choice; ent = ent->chain, count++)
-					;
-			} else {
-				choice = irandom(count);
-				for (count = 0, ent = master; count < choice; ent = ent->chain, count++)
-					;
-			}
+			choice = MM_PickRespawnItemTeamIndex(current_index, count);
+			for (count = 0, ent = master; count < choice; ent = ent->chain, count++)
+				;
 		}
 	}
 
@@ -1444,15 +1437,7 @@ THINK(RespawnItem) (gentity_t *ent) -> void {
 		}
 	}
 
-	if ((RS(RS_MM) || RS(RS_Q3A)) && deathmatch->integer) {
-		if (ent->item->flags & IF_POWERUP) {
-			//if (RS(RS_MM))
-			//	gi.LocBroadcast_Print(PRINT_HIGH, "{} has spawned!\n", ent->item->pickup_name);
-
-			//gi.sound(ent, CHAN_RELIABLE | CHAN_NO_PHS_ADD | CHAN_AUX, gi.soundindex("misc/alarm.wav"), 1, ATTN_NONE, 0);	//poweruprespawn
-			QLSound(ent, "items/poweruprespawn", "misc/alarm.wav", true);
-		}
-	}
+	MM_OnPowerupItemRespawned(ent);
 }
 
 void SetRespawn(gentity_t *ent, gtime_t delay, bool hide_self) {
@@ -2050,7 +2035,7 @@ static void Use_Powerup_BroadcastMsg(gentity_t *ent, gitem_t *item, const char *
 		//} else {
 		//	gi.LocBroadcast_Print(PRINT_HIGH, "{} got the {}!\n", ent->client->resp.netname, item->pickup_name);
 		}
-		if (RS(RS_MM) || RS(RS_Q3A) || RS(RS_VANILLA_PLUS)) {
+		if (MM_ShouldAnnouncePowerupUse()) {
 			gi.sound(ent, CHAN_RELIABLE | CHAN_NO_PHS_ADD | CHAN_AUX, gi.soundindex(sound_name), 1, ATTN_NONE, 0);
 			AnnouncerSound(world, announcer_name, nullptr, false);
 		}

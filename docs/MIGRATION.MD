@@ -330,6 +330,37 @@ This document tracks migration progress from a monolithic fork style toward thin
    - Moved `GT_SetLongName()` variant-mode matrix to `MM_GTSetLongName()` in `mm_gametype.cpp`; vanilla `GT_SetLongName()` is a one-line hook.
    - `G_InhibitEntity()` and `ED_CallSpawn()` call the new helpers; vanilla cvar/skill spawn gating remains in `g_spawn.cpp`.
 
+### Tier 1 thin-vanilla sweep (complete)
+
+1. **Items rules gap (6E follow-up)**
+   - Extended `mm_items_rules` with teamed-item respawn index, powerup respawn broadcast, and powerup use announcer gate.
+
+2. **Statusbar layout extracted**
+   - Added `mm_statusbar.h` / `mm_statusbar.cpp` with `MM_InitStatusbar()`; `SP_worldspawn` calls it from `g_spawn.cpp`.
+
+3. **Duel queue extracted**
+   - Added `mm_duel.h` / `mm_duel.cpp` with `MM_Duel_AddPlayer()`, `MM_Duel_RemoveLoser()`, `MM_Duel_MatchEnd_AdjustScores()`, and `MM_Duel_QueueSpectatorBots()`.
+
+## MuffMode module map
+
+| Module | Responsibility |
+|--------|----------------|
+| `mm_admin` | Admin commands (gametype, ruleset, setmap, doctor) |
+| `mm_debug` | Debug logging |
+| `mm_duel` | GT_DUEL queue and match-end score adjustment |
+| `mm_gametype` | Gametype/ruleset orchestration and display names |
+| `mm_items_rules` | Item pickup, respawn, inhibit, autoswitch rules |
+| `mm_maps` | Map list, queue, shuffle, MyMap |
+| `mm_motd` | Message-of-the-day load and commands |
+| `mm_ruleset` | Health/armor caps and clamp helpers |
+| `mm_ruleset_weapons` | Per-ruleset weapon tuning |
+| `mm_spawn_filter` | Entity classname remap and spawn-key filtering |
+| `mm_spawn_loadout` | Deathmatch spawn health/armor and weapon loadout |
+| `mm_statusbar` | Statusbar layout string builder |
+| `mm_vote` | Vote registry, validation, lifecycle |
+| `mm_vote_menu` | Callvote menu UI |
+| `mm_vote_types` | Vote type definitions and tables |
+
 ## Current Thin-Hook Pattern
 
 - Keep vanilla files (`g_main.cpp`, `g_svcmds.cpp`) as orchestration points.
@@ -339,7 +370,8 @@ This document tracks migration progress from a monolithic fork style toward thin
 
 ## Next Recommended Targets
 
-- Phase 6G–6H optional slices (combat rules, HUD presentation) only if merge pain warrants.
+- Thin-vanilla Tier 1 sweep complete. Optional Tier 2 only if actively developing horde or Q3A decay: `mm_horde`, extend `mm_ruleset`.
+- Phase 6G–6H and match-machine extraction explicitly deferred (one-liners / orchestration hubs).
 - Intentionally left in `g_local.h` for Phase 5 scope control:
   - `gametype_t`, `ruleset_t`, and name/index tables (widely referenced across gameplay)
   - embedded session state (`game.mapqueue`, `game.motd`, `level.vote_state`)

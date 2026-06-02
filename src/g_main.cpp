@@ -3,6 +3,7 @@
 
 #include "g_local.h"
 #include "g_debug_log.h"
+#include "muffmode/mm_duel.h"
 #include "muffmode/mm_gametype.h"
 #include "muffmode/mm_maps.h"
 #include "muffmode/mm_motd.h"
@@ -1454,104 +1455,6 @@ void Match_Reset() {
 
 /*
 =============
-Duel_AddPlayer
-
-If there are less than two players in the arena, place the
-next queued player in the game and restart
-=============
-*/
-static bool Duel_AddPlayer(void) {
-	if (notGT(GT_DUEL))
-		return false;
-
-	if (level.num_playing_clients >= 2)
-		return false;
-
-	// never change during intermission or outside of warmup (allow during readyup to refill if player disconnects)
-	if (level.match_state > matchst_t::MATCH_WARMUP_READYUP || level.intermission_time || level.intermission_queued)
-		return false;
-
-	gclient_t *next_in_line = nullptr;
-	
-	for (auto ec : active_clients()) {
-		if (ClientIsPlaying(ec->client))
-			continue;
-
-		//gi.Com_PrintFmt("Duel: {}, join time={}\n", ec->client->resp.netname, ec->client->sess.team_join_time.milliseconds());
-
-		if (!ec->client->sess.duel_queued)
-			continue;
-
-		if (!next_in_line || ec->client->sess.team_join_time < next_in_line->sess.team_join_time) {
-			//gi.Com_PrintFmt("Duel: A next-in-line considered: {}, join time={}\n", ec->client->resp.netname, ec->client->sess.team_join_time.milliseconds());
-			next_in_line = ec->client;
-		}
-	}
-
-	if (!next_in_line)
-		return false;
-	/*
-	level.match_state_timer = 0_sec;
-	level.match_state = matchst_t::MATCH_WARMUP_DEFAULT;
-	level.warmup_requisite = warmupreq_t::WARMUP_REQ_NONE;
-	level.warmup_notice_time = 0_sec;
-	*/
-	// set them to free-for-all team
-	SetTeam(&g_entities[next_in_line - game.clients + 1], TEAM_FREE, false, true, false);
-
-	return true;
-}
-
-/*
-=======================
-Duel_RemoveLoser
-
-Make the loser a queued player at the back of the line
-=======================
-*/
-static void Duel_RemoveLoser(void) {
-	if (level.num_playing_clients != 2)
-		return;
-	
-	gentity_t *ent = &g_entities[level.sorted_clients[1] + 1];
-
-	if (!ent || !ent->client || !ent->client->pers.connected)
-		return;
-
-	if (g_verbose->integer)
-		gi.Com_PrintFmt( "Duel: Moving the loser, {}, to end of queue.\n", ent->client->resp.netname);
-
-	// make them a queued player
-	SetTeam(ent, TEAM_NONE, false, true, false);
-}
-
-/*
-=======================
-Duel_MatchEnd_AdjustScores
-=======================
-*/
-static void Duel_MatchEnd_AdjustScores(void) {
-	if (notGT(GT_DUEL))
-		return;
-
-	int client_num;
-
-	client_num = level.sorted_clients[0];
-	if (game.clients[client_num].pers.connected) {
-		game.clients[client_num].sess.wins++;
-		//ClientUserinfoChanged(&g_entities[client_num], g_entities[client_num].client->pers.userinfo);
-	}
-
-	client_num = level.sorted_clients[1];
-	if (game.clients[client_num].pers.connected) {
-		// handled in SetTeam
-		//game.clients[client_num].sess.losses++;
-		//ClientUserinfoChanged(&g_entities[client_num], g_entities[client_num].client->pers.userinfo);
-	}
-}
-
-/*
-=============
 ReadyAll
 =============
 */
@@ -1943,23 +1846,10 @@ static void CheckDMWarmupState(void) {
 	}
 
 	// duel: pull in a queued spectator if needed
-	if (Duel_AddPlayer())
+	if (MM_Duel_AddPlayer())
 		return;
 
-	// duel: automatically queue spectating bots (they'll be pulled in when needed)
-	// Queue bots regardless of match state - Duel_AddPlayer will only pull them during warmup
-	if (GT(GT_DUEL) && !level.intermission_time && !level.intermission_queued) {
-		for (auto ec : active_clients()) {
-			if (ClientIsPlaying(ec->client))
-				continue;
-			if (!(ec->client->sess.is_a_bot || ec->svflags & SVF_BOT))
-				continue;
-			if (ec->client->sess.duel_queued)
-				continue; // already queued
-			// queue this bot so it's ready for future matches
-			SetTeam(ec, TEAM_SPECTATOR, false, true, false);
-		}
-	}
+	MM_Duel_QueueSpectatorBots();
 
 	min_players = GT(GT_DUEL) ? 2 : minplayers->integer;
 	if (level.match_state < matchst_t::MATCH_COUNTDOWN && !g_dm_do_warmup->integer && level.num_playing_clients >= min_players) {
@@ -3099,7 +2989,7 @@ void BeginIntermission(gentity_t *targ) {
 		return; // already activated
 
 	// if in a duel, change the wins / losses
-	Duel_MatchEnd_AdjustScores();
+	MM_Duel_MatchEnd_AdjustScores();
 
 	game.autosaved = false;
 
@@ -3320,7 +3210,7 @@ void ExitLevel() {
 	// if we are running a duel, kick the loser to queue,
 	// which will automatically grab the next queued player and restart
 	if (deathmatch->integer && GT(GT_DUEL))
-		Duel_RemoveLoser();
+		MM_Duel_RemoveLoser();
 
 	level.intermission_time = 0_ms;
 

@@ -154,6 +154,7 @@
     <ClInclude Include="monsters\m_widow2.h" />
     <ClInclude Include="muffmode\mm_admin.h" />
     <ClInclude Include="muffmode\mm_debug.h" />
+    <ClInclude Include="muffmode\mm_duel.h" />
     <ClInclude Include="muffmode\mm_gametype.h" />
     <ClInclude Include="muffmode\mm_items_rules.h" />
     <ClInclude Include="muffmode\mm_maps.h" />
@@ -162,6 +163,7 @@
     <ClInclude Include="muffmode\mm_ruleset_weapons.h" />
     <ClInclude Include="muffmode\mm_spawn_filter.h" />
     <ClInclude Include="muffmode\mm_spawn_loadout.h" />
+    <ClInclude Include="muffmode\mm_statusbar.h" />
     <ClInclude Include="muffmode\mm_vote.h" />
     <ClInclude Include="muffmode\mm_vote_menu.h" />
     <ClInclude Include="muffmode\mm_vote_types.h" />
@@ -235,6 +237,7 @@
     <ClCompile Include="monsters\m_widow2.cpp" />
     <ClCompile Include="muffmode\mm_admin.cpp" />
     <ClCompile Include="muffmode\mm_debug.cpp" />
+    <ClCompile Include="muffmode\mm_duel.cpp" />
     <ClCompile Include="muffmode\mm_gametype.cpp" />
     <ClCompile Include="muffmode\mm_items_rules.cpp" />
     <ClCompile Include="muffmode\mm_maps.cpp" />
@@ -243,6 +246,7 @@
     <ClCompile Include="muffmode\mm_ruleset_weapons.cpp" />
     <ClCompile Include="muffmode\mm_spawn_filter.cpp" />
     <ClCompile Include="muffmode\mm_spawn_loadout.cpp" />
+    <ClCompile Include="muffmode\mm_statusbar.cpp" />
     <ClCompile Include="muffmode\mm_vote.cpp" />
     <ClCompile Include="muffmode\mm_vote_menu.cpp" />
     <ClCompile Include="p_client.cpp" />

@@ -13,8 +13,10 @@
 #include "mm_motd.h"
 #include "mm_ruleset.h"
 #include "mm_ruleset_weapons.h"
+#include "mm_duel.h"
 #include "mm_spawn_filter.h"
 #include "mm_spawn_loadout.h"
+#include "mm_statusbar.h"
 #include "mm_vote.h"
 #include "mm_vote_menu.h"
 
