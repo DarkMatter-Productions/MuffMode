@@ -646,6 +646,48 @@ static void CG_DrawField(int x, int y, int color, int width, int value, int scal
 	}
 }
 
+/*
+==============
+CG_DrawFieldHudCentered
+==============
+*/
+// [MuffMode] Draw digits centered on hud_vrect horizontal axis (countdown timer)
+static void CG_DrawFieldHudCentered(vrect_t hud_vrect, int y, int color, int width, int value, int scale) {
+	char    num[16], *ptr;
+	int     l;
+	int     frame;
+
+	if (width < 1)
+		return;
+
+	if (width > 5)
+		width = 5;
+
+	auto result = std::to_chars(num, num + sizeof(num) - 1, value);
+	*(result.ptr) = '\0';
+
+	l = (result.ptr - num);
+
+	if (l > width)
+		l = width;
+
+	int32_t x = ((hud_vrect.x + hud_vrect.width / 2) * scale) - ((l * CHAR_WIDTH) / 2) * scale;
+
+	ptr = num;
+	while (*ptr && l) {
+		if (*ptr == '-')
+			frame = STAT_MINUS;
+		else
+			frame = *ptr - '0';
+		int w, h;
+		cgi.Draw_GetPicSize(&w, &h, sb_nums[color][frame]);
+		cgi.SCR_DrawPic(x, y, w * scale, h * scale, sb_nums[color][frame]);
+		x += CHAR_WIDTH * scale;
+		ptr++;
+		l--;
+	}
+}
+
 // [Paril-KEX]
 static void CG_DrawTable(int x, int y, uint32_t width, uint32_t height, int32_t scale) {
 	// half left
@@ -958,10 +1000,16 @@ static void CG_ExecuteLayoutString(const char *s, vrect_t hud_vrect, vrect_t hud
 				width = atoi(token);
 			token = COM_Parse(&s);
 			if (!skip_depth) {
-				value = ps->stats[atoi(token)];
+				int32_t stat = atoi(token);
+				value = ps->stats[stat];
 				//muff: little hacky hack to conditionally hide text for muffmode connoisseurs
-				if (value != -999)
-					CG_DrawField(x, y, 0, width, value, scale);
+				if (value != -999) {
+					// [MuffMode] match countdown centered on HUD width (any aspect ratio)
+					if (stat == STAT_COUNTDOWN)
+						CG_DrawFieldHudCentered(hud_vrect, y, 0, width, value, scale);
+					else
+						CG_DrawField(x, y, 0, width, value, scale);
+				}
 			}
 			continue;
 		}

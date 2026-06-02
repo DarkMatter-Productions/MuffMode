@@ -76,7 +76,7 @@ void MM_InitStatusbar()
 			sb.ifstat(STAT_TEAMPLAY_INFO).xl(0).yb(-88).stat_string(STAT_TEAMPLAY_INFO).endifstat();
 		}
 
-		sb.ifstat(STAT_COUNTDOWN).xv(136).yb(-256).num(3, STAT_COUNTDOWN).endifstat();
+		sb.ifstat(STAT_COUNTDOWN).yb(-256).num(3, STAT_COUNTDOWN).endifstat();
 		sb.ifstat(STAT_MATCH_STATE).xv(0).yb(-78).stat_string(STAT_MATCH_STATE).endifstat();
 		sb.ifstat(STAT_CHASE).xv(0).yb(-68).string("FOLLOWING").xv(80).stat_string(STAT_CHASE).endifstat();
 		sb.ifstat(STAT_SPECTATOR).xv(0).yb(-58).string2("SPECTATOR MODE").endifstat();
