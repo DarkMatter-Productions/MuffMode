@@ -1355,7 +1355,7 @@ void InitClientPersistant(gentity_t *ent, gclient_t *client) {
 
 		MM_ApplySpawnLoadout(ent, client, taken_loadout);
 
-		if (!GT(GT_BALL) && !taken_loadout) {
+		if (notGT(GT_BALL) && !taken_loadout) {
 			if (*g_start_items->string)
 				Player_GiveStartItems(ent, g_start_items->string);
 			if (level.start_items && *level.start_items)
