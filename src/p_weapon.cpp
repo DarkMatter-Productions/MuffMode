@@ -4,269 +4,12 @@
 
 #include "g_local.h"
 #include "monsters/m_player.h"
+#include "muffmode/mm_ruleset_weapons.h"
 
 bool is_quad;
 bool is_haste;
 player_muzzle_t is_silenced;
 byte damage_multiplier;
-
-struct ruleset_pickup_tuning_t {
-	int slug_pickup_quantity;
-};
-
-static constexpr ruleset_pickup_tuning_t k_ruleset_pickup_tuning[RS_NUM_RULESETS] = {
-	/* RS_NONE */		{ 10 },
-	/* RS_Q2RE */		{ 10 },
-	/* RS_MM */			{ 5 },
-	/* RS_Q3A */		{ 10 },
-	/* RS_VANILLA_PLUS */	{ 10 },
-	/* RS_Q1 */			{ 10 },
-	/* RS_QC */			{ 10 },
-};
-
-static inline int Ruleset_SlugPickupQuantity() {
-	int ruleset = clamp((int)game.ruleset, 0, (int)RS_NUM_RULESETS - 1);
-	return k_ruleset_pickup_tuning[ruleset].slug_pickup_quantity;
-}
-
-static inline int Ruleset_MachinegunDamage() {
-	if (RS(RS_Q3A))
-		return GT(GT_TDM) ? 5 : 7;
-	if (RS(RS_QC))
-		return 6;
-	if (RS(RS_VANILLA_PLUS) && deathmatch->integer)
-		return 7;
-	return 8;
-}
-
-static inline void Ruleset_MachinegunSpread(int &hspread, int &vspread) {
-	if (RS(RS_Q3A)) {
-		hspread = 200;
-		vspread = 200;
-	} else {
-		hspread = DEFAULT_BULLET_HSPREAD;
-		vspread = DEFAULT_BULLET_VSPREAD;
-	}
-}
-
-static inline int Ruleset_ChaingunDamage(gentity_t *ent) {
-	if (RS(RS_QC) && deathmatch->integer)
-		return 4 + (ent->client->chaingun_shots++ & 1);
-	if (RS(RS_VANILLA_PLUS) && deathmatch->integer)
-		return 4 + (ent->client->chaingun_shots++ & 1);
-	if (RS(RS_QC))
-		return 6;
-	return deathmatch->integer ? 6 : 8;
-}
-
-static inline void Ruleset_RocketLauncherDefaults(int &damage, int &splash_damage, float &splash_radius, int &speed) {
-	switch (game.ruleset) {
-	case RS_MM:
-		damage = 100;
-		splash_radius = 120;
-		splash_damage = damage;
-		speed = 650;
-		break;
-	case RS_QC:
-		damage = 100;
-		splash_radius = 120;
-		splash_damage = damage;
-		speed = 750;
-		break;
-	case RS_VANILLA_PLUS:
-		damage = 100;
-		splash_radius = 120;
-		splash_damage = damage;
-		speed = (deathmatch->integer ? 750 : 650);
-		break;
-	case RS_Q3A:
-		damage = 100;
-		splash_radius = 120;
-		splash_damage = 120;
-		speed = 900;
-		break;
-	case RS_Q1:
-		damage = irandom(100, 120);
-		splash_radius = 120;
-		splash_damage = 120;
-		speed = 1000;
-		break;
-	default:
-		damage = irandom(100, 120);
-		splash_radius = 120;
-		splash_damage = 120;
-		speed = 650;
-		break;
-	}
-}
-
-static inline void Ruleset_RocketLauncherDefaultsForCustomDamage(int damage, int &splash_damage, float &splash_radius, int &speed) {
-	switch (game.ruleset) {
-	case RS_MM:
-		splash_radius = 120;
-		splash_damage = damage;
-		speed = 650;
-		break;
-	case RS_QC:
-		splash_radius = 120;
-		splash_damage = damage;
-		speed = 750;
-		break;
-	case RS_VANILLA_PLUS:
-		splash_radius = 120;
-		splash_damage = damage;
-		speed = (deathmatch->integer ? 750 : 650);
-		break;
-	case RS_Q3A:
-		splash_radius = 120;
-		splash_damage = 120;
-		speed = 900;
-		break;
-	case RS_Q1:
-		splash_radius = 120;
-		splash_damage = 120;
-		speed = 1000;
-		break;
-	default:
-		splash_radius = 120;
-		splash_damage = 120;
-		speed = 650;
-		break;
-	}
-}
-
-static inline int Ruleset_HyperBlasterSpeed(bool hyper) {
-	if (RS(RS_Q3A))
-		return hyper ? 2000 : 2500;
-	if (RS(RS_VANILLA_PLUS))
-		return hyper ? (deathmatch->integer ? 1100 : 1000) : (deathmatch->integer ? 1700 : 1500);
-	return hyper ? 1000 : 1500;
-}
-
-static inline int Ruleset_HyperBlasterDamage() {
-	if (RS(RS_Q3A))
-		return deathmatch->integer ? 20 : 25;
-	if (RS(RS_QC))
-		return 12;
-	return deathmatch->integer ? 15 : 20;
-}
-
-static inline int Ruleset_RailgunDamage() {
-	if (RS(RS_QC) || RS(RS_VANILLA_PLUS))
-		return 90;
-	return deathmatch->integer ? 100 : 150;
-}
-
-static inline int Ruleset_RailgunKick(int damage) {
-	if (RS(RS_MM))
-		return damage * 2;
-	return deathmatch->integer ? 200 : 225;
-}
-
-static inline void Ruleset_BFGDefaults(int &damage, float &splash_radius, int &speed) {
-	if (RS(RS_Q3A)) {
-		damage = 100;
-		splash_radius = 120;
-		speed = 1000;
-	} else {
-		damage = deathmatch->integer ? 200 : 500;
-		splash_radius = 1000;
-		speed = 400;
-	}
-}
-
-static inline void Ruleset_PlasmaBeamDefaults(int &damage, int &kick) {
-	switch (game.ruleset) {
-	case RS_MM:
-	case RS_VANILLA_PLUS:
-	case RS_QC:
-		damage = deathmatch->integer ? 10 : 15;
-		kick = damage;
-		break;
-	case RS_Q3A:
-		damage = deathmatch->integer ? 8 : 15;
-		kick = damage;
-		break;
-	default:
-		damage = 15;
-		kick = deathmatch->integer ? 75 : 30;
-		break;
-	}
-}
-
-static inline int Ruleset_IonRipperDamage() {
-	if (deathmatch->integer)
-		return RS(RS_MM) ? 20 : 30;
-	return 50;
-}
-
-static inline int Ruleset_IonRipperSpeed() {
-	return RS(RS_MM) ? 800 : 500;
-}
-
-static inline void Ruleset_GrenadeLauncherDefaults(int &damage, float &splash_radius, int &speed) {
-	if (RS(RS_Q3A)) {
-		damage = 100;
-		splash_radius = 150;
-		speed = 700;
-	} else {
-		damage = 120;
-		splash_radius = (float)(damage + 40);
-		speed = 600;
-	}
-}
-
-static inline void Ruleset_ChaingunSpreadDefaults(int &hspread, int &vspread, float &spread_offset) {
-	hspread = DEFAULT_BULLET_HSPREAD;
-	vspread = DEFAULT_BULLET_VSPREAD;
-	spread_offset = 4.0f;
-}
-
-static inline int Ruleset_ShotgunDamage() {
-	return RS(RS_Q3A) ? 10 : 4;
-}
-
-static inline int Ruleset_ShotgunPelletCount() {
-	return RS(RS_Q3A) ? 11 : 12;
-}
-
-static inline bool Ruleset_BFGUsesQ3Style() {
-	return RS(RS_Q3A);
-}
-
-static inline int Ruleset_BFGAmmoPerShot() {
-	return Ruleset_BFGUsesQ3Style() ? 10 : 50;
-}
-
-static inline bool Ruleset_Q3AHeavyAmmo(item_id_t ammo_id) {
-	return ammo_id == IT_AMMO_GRENADES || ammo_id == IT_AMMO_ROCKETS || ammo_id == IT_AMMO_SLUGS;
-}
-
-static inline int Ruleset_WeaponPickupAmmoQuantity(const gentity_t *ent, const gentity_t *other, const gitem_t *ammo) {
-	if (ent->count)
-		return ent->count;
-
-	if (RS(RS_Q3A)) {
-		int quantity = Ruleset_Q3AHeavyAmmo(ammo->id) ? 10 : ammo->quantity;
-
-		if (other->client->pers.inventory[ammo->id] < quantity)
-			return quantity - other->client->pers.inventory[ammo->id];
-
-		return 1;
-	}
-
-	if (ammo->id == IT_AMMO_SLUGS)
-		return Ruleset_SlugPickupQuantity();
-
-	return ammo->quantity;
-}
-
-static inline int Ruleset_WeaponDropAmmoQuantity(const gitem_t *item, const gitem_t *ammo) {
-	if (item->id == IT_WEAPON_RAILGUN)
-		return Ruleset_SlugPickupQuantity();
-
-	return ammo->quantity;
-}
 
 /*
 ================
@@ -526,7 +269,7 @@ bool Pickup_Weapon(gentity_t *ent, gentity_t *other) {
 			if (InfiniteAmmoOn(ammo))
 				Add_Ammo(other, ammo, AMMO_INFINITE);
 			else {
-				int quantity = Ruleset_WeaponPickupAmmoQuantity(ent, other, ammo);
+				int quantity = MM_Ruleset_WeaponPickupAmmoQuantity(ent, other, ammo);
 				Add_Ammo(other, ammo, quantity);
 			}
 		}
@@ -904,7 +647,7 @@ void Drop_Weapon(gentity_t *ent, gitem_t *item) {
 	if (ent->client->pers.inventory[ammo->id] <= 0)
 		return;
 	
-	drop->count = Ruleset_WeaponDropAmmoQuantity(item, ammo);
+	drop->count = MM_Ruleset_WeaponDropAmmoQuantity(item, ammo);
 
 	drop->count = clamp(drop->count, drop->count, ent->client->pers.inventory[ammo->id]);
 
@@ -1491,7 +1234,7 @@ static void Weapon_GrenadeLauncher_Fire(gentity_t *ent) {
 	float	splash_radius;
 	int		speed;
 
-	Ruleset_GrenadeLauncherDefaults(damage, splash_radius, speed);
+	MM_Ruleset_GrenadeLauncherDefaults(damage, splash_radius, speed);
 
 	if (is_quad)
 		damage *= damage_multiplier;
@@ -1540,12 +1283,12 @@ static void Weapon_RocketLauncher_Fire(gentity_t *ent) {
 #ifdef _DEBUG
 	if (g_weapon_balance_dev && g_weapon_balance_dev->integer && g_rocketlauncher_damage && g_rocketlauncher_damage->integer > 0) {
 		damage = g_rocketlauncher_damage->integer;
-		Ruleset_RocketLauncherDefaultsForCustomDamage(damage, splash_damage, splash_radius, speed);
+		MM_Ruleset_RocketLauncherDefaultsForCustomDamage(damage, splash_damage, splash_radius, speed);
 	} else {
 #else
 	{
 #endif
-		Ruleset_RocketLauncherDefaults(damage, splash_damage, splash_radius, speed);
+		MM_Ruleset_RocketLauncherDefaults(damage, splash_damage, splash_radius, speed);
 	}
 	// Use dev cvar for rocket launcher speed if enabled, otherwise use ruleset-based defaults
 #ifdef _DEBUG
@@ -1909,7 +1652,7 @@ static void Weapon_Blaster_Fire(gentity_t *ent, const vec3_t &g_offset, int dama
 #else
 	{
 #endif
-		speed = Ruleset_HyperBlasterSpeed(hyper);
+		speed = MM_Ruleset_HyperBlasterSpeed(hyper);
 	}
 
 	fire_blaster(ent, start, dir, damage, speed, effect, hyper ? MOD_HYPERBLASTER : MOD_BLASTER);
@@ -1987,7 +1730,7 @@ static void Weapon_HyperBlaster_Fire(gentity_t *ent) {
 
 			// Use dev cvar if enabled, otherwise use ruleset-based defaults
 			// Note: hyperblaster damage cvar would go here if we add it, but currently only speed is configurable
-			damage = Ruleset_HyperBlasterDamage();
+			damage = MM_Ruleset_HyperBlasterDamage();
 
 			Weapon_Blaster_Fire(ent, offset, damage, true, (ent->client->ps.gunframe % 4) ? EF_NONE : EF_HYPERBLASTER);
 			Weapon_PowerupSound(ent);
@@ -2032,18 +1775,18 @@ static void Weapon_Machinegun_Fire(gentity_t *ent) {
 		if (g_machinegun_damage && g_machinegun_damage->integer > 0) {
 			damage = g_machinegun_damage->integer;
 		} else {
-			damage = Ruleset_MachinegunDamage();
+			damage = MM_Ruleset_MachinegunDamage();
 		}
 		int default_hs, default_vs;
-		Ruleset_MachinegunSpread(default_hs, default_vs);
+		MM_Ruleset_MachinegunSpread(default_hs, default_vs);
 		hs = (g_machinegun_hspread && g_machinegun_hspread->integer > 0) ? g_machinegun_hspread->integer : default_hs;
 		vs = (g_machinegun_vspread && g_machinegun_vspread->integer > 0) ? g_machinegun_vspread->integer : default_vs;
 	} else {
 #else
 	{
 #endif
-		damage = Ruleset_MachinegunDamage();
-		Ruleset_MachinegunSpread(hs, vs);
+		damage = MM_Ruleset_MachinegunDamage();
+		MM_Ruleset_MachinegunSpread(hs, vs);
 	}
 
 	if (!(ent->client->buttons & BUTTON_ATTACK)) {
@@ -2125,7 +1868,7 @@ static void Weapon_Chaingun_Fire(gentity_t *ent) {
 #else
 	{
 #endif
-		damage = Ruleset_ChaingunDamage(ent);
+		damage = MM_Ruleset_ChaingunDamage(ent);
 	}
 	int	  kick = 2;
 
@@ -2216,10 +1959,10 @@ static void Weapon_Chaingun_Fire(gentity_t *ent) {
 		vspread = (g_chaingun_vspread && g_chaingun_vspread->integer > 0) ? g_chaingun_vspread->integer : DEFAULT_BULLET_VSPREAD;
 		spread_offset = (g_chaingun_spread_offset && g_chaingun_spread_offset->value > 0.0f) ? g_chaingun_spread_offset->value : 4.0f;
 	} else {
-		Ruleset_ChaingunSpreadDefaults(hspread, vspread, spread_offset);
+		MM_Ruleset_ChaingunSpreadDefaults(hspread, vspread, spread_offset);
 	}
 #else
-	Ruleset_ChaingunSpreadDefaults(hspread, vspread, spread_offset);
+	MM_Ruleset_ChaingunSpreadDefaults(hspread, vspread, spread_offset);
 #endif
 	
 	for (i = 0; i < shots; i++) {
@@ -2262,7 +2005,7 @@ SHOTGUN / SUPERSHOTGUN
 */
 
 static void Weapon_Shotgun_Fire(gentity_t *ent) {
-	int damage = Ruleset_ShotgunDamage();
+	int damage = MM_Ruleset_ShotgunDamage();
 	int kick = 8;
 
 	vec3_t start, dir;
@@ -2277,7 +2020,7 @@ static void Weapon_Shotgun_Fire(gentity_t *ent) {
 	}
 
 	G_LagCompensate(ent, start, dir);
-	int pellets = Ruleset_ShotgunPelletCount();
+	int pellets = MM_Ruleset_ShotgunPelletCount();
 	fire_shotgun(ent, start, dir, damage, kick, 500, 500, pellets, MOD_SHOTGUN);
 	G_UnLagCompensate();
 
@@ -2364,9 +2107,9 @@ static void Weapon_Railgun_Fire(gentity_t *ent) {
 #else
 	{
 #endif
-		damage = Ruleset_RailgunDamage();
+		damage = MM_Ruleset_RailgunDamage();
 	}
-	int kick = Ruleset_RailgunKick(damage);
+	int kick = MM_Ruleset_RailgunKick(damage);
 
 	if (is_quad) {
 		damage *= damage_multiplier;
@@ -2408,11 +2151,11 @@ BFG10K
 ======================================================================
 */
 static void Weapon_BFG_Fire(gentity_t *ent) {
-	bool	q3 = Ruleset_BFGUsesQ3Style();
+	bool	q3 = MM_Ruleset_BFGUsesQ3Style();
 	int		damage, speed;
 	float	splash_radius;
 
-	Ruleset_BFGDefaults(damage, splash_radius, speed);
+	MM_Ruleset_BFGDefaults(damage, splash_radius, speed);
 
 	if (ent->client->ps.gunframe == 9) {
 		// send muzzle flash
@@ -2454,7 +2197,7 @@ static void Weapon_BFG_Fire(gentity_t *ent) {
 	PlayerNoise(ent, start, PNOISE_WEAPON);
 
 	Stats_AddShot(ent);
-	RemoveAmmo(ent, Ruleset_BFGAmmoPerShot());
+	RemoveAmmo(ent, MM_Ruleset_BFGAmmoPerShot());
 }
 
 void Weapon_BFG(gentity_t *ent) {
@@ -2462,7 +2205,7 @@ void Weapon_BFG(gentity_t *ent) {
 	const int fire_frames[] = { 9, 17, 0 };
 	const int fire_frames_q3a[] = { 15, 17, 0 };
 
-	Weapon_Generic(ent, 8, 32, 54, 58, pause_frames, Ruleset_BFGUsesQ3Style() ? fire_frames_q3a : fire_frames, Weapon_BFG_Fire);
+	Weapon_Generic(ent, 8, 32, 54, 58, pause_frames, MM_Ruleset_BFGUsesQ3Style() ? fire_frames_q3a : fire_frames, Weapon_BFG_Fire);
 }
 
 /*
@@ -2842,7 +2585,7 @@ static void Weapon_PlasmaBeam_Fire(gentity_t *ent) {
 	// for comparison, the hyperblaster is 15/20
 	// jim requested more damage, so try 15/15 --- PGM 07/23/98
 	// muffmode: jim you are a silly boy, 15 is way OP for DM
-	Ruleset_PlasmaBeamDefaults(damage, kick);
+	MM_Ruleset_PlasmaBeamDefaults(damage, kick);
 
 	if (is_quad) {
 		damage *= damage_multiplier;
@@ -2899,7 +2642,7 @@ ION RIPPER
 */
 static void Weapon_IonRipper_Fire(gentity_t *ent) {
 	vec3_t tempang;
-	int	   damage = Ruleset_IonRipperDamage();
+	int	   damage = MM_Ruleset_IonRipperDamage();
 
 	if (is_quad)
 		damage *= damage_multiplier;
@@ -2912,7 +2655,7 @@ static void Weapon_IonRipper_Fire(gentity_t *ent) {
 
 	P_AddWeaponKick(ent, ent->client->v_forward * -3, { -3.f, 0.f, 0.f });
 
-	fire_ionripper(ent, start, dir, damage, Ruleset_IonRipperSpeed(), EF_IONRIPPER);
+	fire_ionripper(ent, start, dir, damage, MM_Ruleset_IonRipperSpeed(), EF_IONRIPPER);
 
 	// send muzzle flash
 	gi.WriteByte(svc_muzzleflash);

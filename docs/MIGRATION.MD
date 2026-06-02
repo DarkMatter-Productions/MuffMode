@@ -303,6 +303,13 @@ This document tracks migration progress from a monolithic fork style toward thin
    - Removed `G_RULESET_*` constants and `G_RulesetHealthArmorCap()` from `g_local.h`.
    - `p_client.cpp` spawn and periodic clamp paths call the new helpers; `g_items.cpp` pickup/respawn logic uses `MM_*` symbols.
 
+### Phase 6C — Ruleset weapon tuning (complete)
+
+1. **Ruleset weapon helpers extracted**
+   - Added `mm_ruleset_weapons.h` / `mm_ruleset_weapons.cpp` with per-ruleset damage, spread, pickup, and projectile defaults (`MM_Ruleset_*`).
+   - Moved `k_ruleset_pickup_tuning` slug quantity table out of `p_weapon.cpp`.
+   - `p_weapon.cpp` weapon fire and ammo pickup/drop paths now call `MM_Ruleset_*`; weapon fire functions remain in vanilla.
+
 ## Current Thin-Hook Pattern
 
 - Keep vanilla files (`g_main.cpp`, `g_svcmds.cpp`) as orchestration points.
@@ -312,7 +319,6 @@ This document tracks migration progress from a monolithic fork style toward thin
 
 ## Next Recommended Targets
 
-- Phase 6C ruleset weapons (`Ruleset_*` in `p_weapon.cpp`) — highest ROI next slice.
 - Phase 6D–6F gameplay slices as needed (spawn loadout, items rules, spawn filter).
 - Intentionally left in `g_local.h` for Phase 5 scope control:
   - `gametype_t`, `ruleset_t`, and name/index tables (widely referenced across gameplay)
