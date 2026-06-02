@@ -614,20 +614,6 @@ void Change_Weapon(gentity_t *ent) {
 		return;
 	}
 
-	// Safety check: if somehow a restricted weapon got through, force switch away
-	if (GT(GT_DUEL) && ent->client->handicap.restricted_weapons && 
-	    (ent->client->pers.weapon->flags & IF_WEAPON)) {
-		if (ent->client->pers.weapon->id >= FIRST_WEAPON && 
-		    ent->client->pers.weapon->id <= LAST_WEAPON) {
-			uint32_t weapon_bit = 1U << (ent->client->pers.weapon->id - FIRST_WEAPON);
-			if (ent->client->handicap.restricted_weapons & weapon_bit) {
-				// Force switch to a non-restricted weapon
-				NoAmmoWeaponChange(ent, false);
-				return;
-			}
-		}
-	}
-
 	ent->client->weaponstate = WEAPON_ACTIVATING;
 	ent->client->ps.gunframe = 0;
 	ent->client->ps.gunindex = gi.modelindex(ent->client->pers.weapon->view_model);
@@ -695,15 +681,6 @@ void NoAmmoWeaponChange(gentity_t *ent, bool sound) {
 
 		if (item->ammo && ent->client->pers.inventory[item->ammo] < item->quantity)
 			continue;
-
-		// Skip restricted weapons in duel mode
-		if (GT(GT_DUEL) && ent->client->handicap.restricted_weapons && (item->flags & IF_WEAPON)) {
-			if (item->id >= FIRST_WEAPON && item->id <= LAST_WEAPON) {
-				uint32_t weapon_bit = 1U << (item->id - FIRST_WEAPON);
-				if (ent->client->handicap.restricted_weapons & weapon_bit)
-					continue; // Skip this restricted weapon
-			}
-		}
 
 		ent->client->newweapon = item;
 		return;
@@ -831,18 +808,6 @@ static weap_switch_t Weapon_AttemptSwitch(gentity_t *ent, gitem_t *item, bool si
 		return WEAP_SWITCH_ALREADY_USING;
 	else if (!ent->client->pers.inventory[item->id])
 		return WEAP_SWITCH_NO_WEAPON;
-
-	// Check duel handicap weapon restrictions
-	if (GT(GT_DUEL) && ent->client->handicap.restricted_weapons && (item->flags & IF_WEAPON)) {
-		if (item->id >= FIRST_WEAPON && item->id <= LAST_WEAPON) {
-			uint32_t weapon_bit = 1U << (item->id - FIRST_WEAPON);
-			if (ent->client->handicap.restricted_weapons & weapon_bit) {
-				if (!silent)
-					gi.LocClient_Print(ent, PRINT_HIGH, "Weapon restricted: {}\n", item->pickup_name);
-				return WEAP_SWITCH_NO_WEAPON; // Treat as if weapon doesn't exist
-			}
-		}
-	}
 
 	if (item->ammo && !g_select_empty->integer && !(item->flags & IF_AMMO)) {
 		gitem_t *ammo_item = GetItemByIndex(item->ammo);

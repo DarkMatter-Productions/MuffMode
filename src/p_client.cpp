@@ -1588,12 +1588,6 @@ static void InitClientResp(gclient_t *cl) {
 	cl->resp.motd_mod_count = motd_mod_count;
 
 	cl->sess.team = team;
-	
-	// Initialize duel handicap system
-	cl->handicap.restricted_weapons = 0;
-	cl->handicap.damage_dealt_multiplier = 1.0f;
-	cl->handicap.damage_received_multiplier = 1.0f;
-	cl->handicap.health_multiplier = 1.0f;
 }
 
 /*

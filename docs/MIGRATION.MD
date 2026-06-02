@@ -287,6 +287,15 @@ This document tracks migration progress from a monolithic fork style toward thin
   - `build.bat Debug x64 v145`
   - `0 Warning(s), 0 Error(s)`
 
+### Duel handicap removal
+
+- Removed the unused duel weapon-restriction feature end-to-end:
+  - admin commands (`handicap`, `handicap_clear`)
+  - vote type (`callvote handicap`)
+  - `client->handicap` state in `gclient_t`
+  - gameplay enforcement in `p_weapon.cpp` and `g_items.cpp`
+  - reset/init paths in `p_client.cpp` and `mm_gametype.cpp`
+
 ## Current Thin-Hook Pattern
 
 - Keep vanilla files (`g_main.cpp`, `g_svcmds.cpp`) as orchestration points.
@@ -296,10 +305,10 @@ This document tracks migration progress from a monolithic fork style toward thin
 
 ## Next Recommended Targets
 
-- Phase 6 gameplay ruleset slices only as needed (spawn/loadout, handicap helpers, HUD presentation).
+- Phase 6 gameplay ruleset slices only as needed (spawn/loadout, ruleset weapons, HUD presentation).
 - Intentionally left in `g_local.h` for Phase 5 scope control:
   - `gametype_t`, `ruleset_t`, and name/index tables (widely referenced across gameplay)
-  - embedded session state (`game.mapqueue`, `game.motd`, `level.vote_state`, `client->handicap`)
+  - embedded session state (`game.mapqueue`, `game.motd`, `level.vote_state`)
   - thin vanilla orchestration hooks (`ChangeGametype()`, `GT_Changes()`, `TransitionVoteState()`, `ClearVote()`)
 
 ## Notes

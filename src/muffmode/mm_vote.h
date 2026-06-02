@@ -40,8 +40,6 @@ void MM_VotePassPowerups();
 bool MM_VoteValPowerups(gentity_t *ent);
 void MM_VotePassFriendlyFire();
 bool MM_VoteValFriendlyFire(gentity_t *ent);
-void MM_VotePassHandicap();
-bool MM_VoteValHandicap(gentity_t *ent);
 void MM_VotePassShuffleTeams();
 bool MM_VoteValShuffleTeams(gentity_t *ent);
 void MM_VotePassBalanceTeams();

@@ -3770,16 +3770,6 @@ struct gclient_t {
 
 	gtime_t		time_residual;
 
-	// Duel handicap system (only active in GT_DUEL mode)
-	struct {
-		// Weapon restrictions (bitmask of IT_WEAPON_* IDs)
-		uint32_t	restricted_weapons;
-		
-		// Numerical modifiers (1.0 = normal, <1.0 = debuff, >1.0 = buff)
-		float		damage_dealt_multiplier;     // Multiplier for damage dealt (default: 1.0)
-		float		damage_received_multiplier;   // Multiplier for damage received (default: 1.0)
-		float		health_multiplier;           // Multiplier for max health (default: 1.0)
-	} handicap;
 };
 
 // ==========================================

@@ -2354,15 +2354,6 @@ void G_CheckAutoSwitch(gentity_t *ent, gitem_t *item, bool is_new) {
 			return;
 	}
 
-	// Skip restricted weapons in duel mode
-	if (GT(GT_DUEL) && ent->client->handicap.restricted_weapons && (item->flags & IF_WEAPON)) {
-		if (item->id >= FIRST_WEAPON && item->id <= LAST_WEAPON) {
-			uint32_t weapon_bit = 1U << (item->id - FIRST_WEAPON);
-			if (ent->client->handicap.restricted_weapons & weapon_bit)
-				return; // Don't auto-switch to restricted weapon
-		}
-	}
-
 	// switch!
 	ent->client->newweapon = item;
 }

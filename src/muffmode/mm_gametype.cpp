@@ -103,20 +103,6 @@ void MM_ChangeGametype(gametype_t gt)
 				gi.cvar_forceset("g_nadefest", "0");
 		}
 
-		if (g_gametype->integer == (int)gametype_t::GT_DUEL && gt != gametype_t::GT_DUEL)
-		{
-			for (auto ec : active_clients())
-			{
-				if (!ec->client)
-					continue;
-
-				ec->client->handicap.restricted_weapons = 0;
-				ec->client->handicap.damage_dealt_multiplier = 1.0f;
-				ec->client->handicap.damage_received_multiplier = 1.0f;
-				ec->client->handicap.health_multiplier = 1.0f;
-			}
-		}
-
 		if (g_gametype_cfg->integer && deathmatch->integer)
 			gi.AddCommandString(G_Fmt("exec gt-{}.cfg\n", gt_short_name_upper[(int)gt]).data());
 

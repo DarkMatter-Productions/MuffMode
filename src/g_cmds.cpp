@@ -3209,14 +3209,6 @@ static void Cmd_UnHook_f(gentity_t *ent) {
 	Weapon_Grapple_DoReset(ent->client);
 }
 
-static void Cmd_Handicap_f(gentity_t *ent) {
-	MM_CmdHandicap(ent);
-}
-
-static void Cmd_HandicapClear_f(gentity_t *ent) {
-	MM_CmdHandicapClear(ent);
-}
-
 // ======================================================
 // MAP QUEUE
 // ======================================================
@@ -3342,8 +3334,6 @@ cmds_t client_cmds[] = {
 	{"weapnext",		Cmd_WeapNext_f,			CF_NONE},
 	{"weapprev",		Cmd_WeapPrev_f,			CF_NONE},
 	{"where",			Cmd_Where_f,			CF_ALLOW_SPEC},
-	{"handicap",			Cmd_Handicap_f,			CF_ADMIN_ONLY | CF_ALLOW_INT | CF_ALLOW_SPEC},
-	{"handicap_clear",	Cmd_HandicapClear_f,	CF_ADMIN_ONLY | CF_ALLOW_INT | CF_ALLOW_SPEC},
 };
 
 /*
