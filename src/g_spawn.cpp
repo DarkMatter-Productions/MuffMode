@@ -3,6 +3,8 @@
 
 #include "g_local.h"
 #include "g_debug_log.h"
+#include "muffmode/mm_gametype.h"
+#include "muffmode/mm_spawn_filter.h"
 
 struct spawn_t {
 	const char *name;
@@ -520,41 +522,7 @@ void ED_CallSpawn(gentity_t *ent) {
 		}
 	}
 #endif
-	// FIXME - PMM classnames hack
-	if (!strcmp(ent->classname, "weapon_nailgun"))
-		ent->classname = GetItemByIndex(IT_WEAPON_ETF_RIFLE)->classname;
-	else if (!strcmp(ent->classname, "ammo_nails"))
-		ent->classname = GetItemByIndex(IT_AMMO_FLECHETTES)->classname;
-	else if (!strcmp(ent->classname, "weapon_heatbeam"))
-		ent->classname = GetItemByIndex(IT_WEAPON_PLASMABEAM)->classname;
-	else if (!strcmp(ent->classname, "item_haste"))
-		ent->classname = GetItemByIndex(IT_POWERUP_HASTE)->classname;
-	else if (RS(RS_Q3A) && !strcmp(ent->classname, "weapon_supershotgun"))
-		ent->classname = GetItemByIndex(IT_WEAPON_SHOTGUN)->classname;
-	else if (!strcmp(ent->classname, "info_player_team1"))
-		ent->classname = "info_player_team_red";
-	else if (!strcmp(ent->classname, "info_player_team2"))
-		ent->classname = "info_player_team_blue";
-	else if (!strcmp(ent->classname, "item_flag_team1"))
-		ent->classname = ITEM_CTF_FLAG_RED;
-	else if (!strcmp(ent->classname, "item_flag_team2"))
-		ent->classname = ITEM_CTF_FLAG_BLUE;
-
-	if (RS(RS_Q1)) {
-		if (!strcmp(ent->classname, "weapon_machinegun"))
-			ent->classname = GetItemByIndex(IT_WEAPON_ETF_RIFLE)->classname;
-		else if (!strcmp(ent->classname, "weapon_chaingun"))
-			ent->classname = GetItemByIndex(IT_WEAPON_PLASMABEAM)->classname;
-		else if (!strcmp(ent->classname, "weapon_railgun"))
-			ent->classname = GetItemByIndex(IT_WEAPON_HYPERBLASTER)->classname;
-		else if (!strcmp(ent->classname, "ammo_slugs"))
-			ent->classname = GetItemByIndex(IT_AMMO_CELLS)->classname;
-		else if (!strcmp(ent->classname, "ammo_bullets"))
-			ent->classname = GetItemByIndex(IT_AMMO_FLECHETTES)->classname;
-		else if (!strcmp(ent->classname, "ammo_grenades"))
-			ent->classname = GetItemByIndex(IT_AMMO_ROCKETS_SMALL)->classname;
-	}
-	// pmm
+	MM_RemapSpawnClassname(ent);
 
 	SpawnEnt_MapFixes(ent);
 
@@ -952,21 +920,6 @@ static const std::initializer_list<temp_field_t> temp_fields = {
 };
 // clang-format on
 
-static constexpr const char *gt_spawn_string[GT_NUM_GAMETYPES] = {
-	"campaign",
-	"ffa",
-	"tournament",
-	"team",
-	"ctf",
-	"ca",
-	"freeze",
-	"strike",
-	"rr",
-	"lms",
-	"horde",
-	"ball"
-};
-
 /*
 ===============
 ED_ParseField
@@ -1178,27 +1131,12 @@ static void G_FindTeams() {
 
 // inhibit entities from game based on cvars & spawnflags
 static inline bool G_InhibitEntity(gentity_t *ent) {
-	if (ent->gametype) {
-		const char *s = strstr(ent->gametype, gt_spawn_string[g_gametype->integer]);
-		if (!s)
-			return true;
-	}
-	if (ent->not_gametype) {
-		const char *s = strstr(ent->not_gametype, gt_spawn_string[g_gametype->integer]);
-		if (s)
-			return true;
-	}
+	if (MM_ShouldInhibitSpawnEntity(ent))
+		return true;
 
 	if (ent->notteam && Teams())
 		return true;
 	if (ent->notfree && !Teams())
-		return true;
-
-	if (ent->notq2 && (RS(RS_Q2RE) || RS(RS_MM)))
-		return true;
-	if (ent->notq3a && RS(RS_Q3A))
-		return true;
-	if (ent->notarena && (GTF(GTF_ARENA)))
 		return true;
 
 	if (ent->powerups_on && g_no_powerups->integer)
@@ -1216,17 +1154,6 @@ static inline bool G_InhibitEntity(gentity_t *ent) {
 	if (ent->plasmabeam_off && !g_mapspawn_no_plasmabeam->integer)
 		return true;
 
-	if (ent->ruleset) {
-		const char *s = strstr(ent->ruleset, rs_short_name[game.ruleset]);
-		if (!s)
-			return true;
-	}
-	if (ent->not_ruleset) {
-		const char *s = strstr(ent->not_ruleset, rs_short_name[game.ruleset]);
-		if (s)
-			return true;
-	}
-
 	// dm-only
 	if (deathmatch->integer)
 		return ent->spawnflags.has(SPAWNFLAG_NOT_DEATHMATCH);
@@ -1235,9 +1162,6 @@ static inline bool G_InhibitEntity(gentity_t *ent) {
 	if (coop->integer && ent->spawnflags.has(SPAWNFLAG_NOT_COOP))
 		return true;
 	else if (!coop->integer && ent->spawnflags.has(SPAWNFLAG_COOP_ONLY))
-		return true;
-
-	if (g_quadhog->integer && !strcmp(ent->classname, "item_quad"))
 		return true;
 
 	// skill
@@ -2090,164 +2014,7 @@ static void G_InitStatusbar() {
 }
 
 void GT_SetLongName(void) {
-	const char *s;
-	if (deathmatch->integer) {
-		if (GT(GT_INSTAGIB)) {
-			s = gt_long_name[GT_INSTAGIB];
-		} else if (GT(GT_NADEFEST)) {
-			s = gt_long_name[GT_NADEFEST];
-		} else if (GT(GT_CTF)) {
-			if (g_instagib->integer) {
-				s = "Insta-CTF";
-			} else if (g_vampiric_damage->integer) {
-				s = "Vampiric CTF";
-			} else if (g_frenzy->integer) {
-				s = "Frenzy CTF";
-			} else if (g_nadefest->integer) {
-				s = "NadeFest CTF";
-			} else if (g_quadhog->integer) {
-				s = "Quad Hog CTF";
-			} else {
-				s = gt_long_name[GT_CTF];
-			}
-		} else if (GT(GT_FREEZE)) {
-			if (g_instagib->integer) {
-				s = "Insta-Freeze";
-			} else if (g_vampiric_damage->integer) {
-				s = "Vampiric Freeze";
-			} else if (g_frenzy->integer) {
-				s = "Frenzy Freeze";
-			} else if (g_nadefest->integer) {
-				s = "NadeFest Freeze";
-			} else if (g_quadhog->integer) {
-				s = "Quad Hog Freeze";
-			} else {
-				s = gt_long_name[GT_FREEZE];
-			}
-		} else if (GT(GT_CA)) {
-			if (g_instagib->integer) {
-				s = "Insta-CA";
-			} else if (g_vampiric_damage->integer) {
-				s = "Vampiric CA";
-			} else if (g_frenzy->integer) {
-				s = "Frenzy CA";
-			} else if (g_nadefest->integer) {
-				s = "NadeFest CA";
-			} else if (g_quadhog->integer) {
-				s = "Quad Hog CA";
-			} else {
-				s = gt_long_name[GT_CA];
-			}
-		} else if (GT(GT_RR)) {
-			if (g_instagib->integer) {
-				s = "Insta-RR";
-			} else if (g_vampiric_damage->integer) {
-				s = "Vampiric RR";
-			} else if (g_frenzy->integer) {
-				s = "Frenzy RR";
-			} else if (g_nadefest->integer) {
-				s = "NadeFest RR";
-			} else if (g_quadhog->integer) {
-				s = "Quad Hog RR";
-			} else {
-				s = gt_long_name[GT_RR];
-			}
-		} else if (GT(GT_STRIKE)) {
-			if (g_instagib->integer) {
-				s = "Insta-Strike";
-			} else if (g_vampiric_damage->integer) {
-				s = "Vampiric Strike";
-			} else if (g_frenzy->integer) {
-				s = "Frenzy Strike";
-			} else if (g_nadefest->integer) {
-				s = "NadeFest Strike";
-			} else if (g_quadhog->integer) {
-				s = "Quad Hog Strike";
-			} else {
-				s = gt_long_name[GT_STRIKE];
-			}
-		} else if (GT(GT_TDM)) {
-			if (g_instagib->integer) {
-				s = "Insta-TDM";
-			} else if (g_vampiric_damage->integer) {
-				s = "Vampiric TDM";
-			} else if (g_frenzy->integer) {
-				s = "Frenzy TDM";
-			} else if (g_nadefest->integer) {
-				s = "NadeFest TDM";
-			} else if (g_quadhog->integer) {
-				s = "Quad Hog TDM";
-			} else {
-				s = gt_long_name[GT_TDM];
-			}
-		} else if (GT(GT_DUEL)) {
-			if (g_instagib->integer) {
-				s = "Insta-Duel";
-			} else if (g_vampiric_damage->integer) {
-				s = "Vampiric Duel";
-			} else if (g_frenzy->integer) {
-				s = "Frenzy Duel";
-			} else if (g_nadefest->integer) {
-				s = "NadeFest Duel";
-			} else if (g_quadhog->integer) {
-				s = "Quad Hog Duel";
-			} else {
-				s = gt_long_name[GT_DUEL];
-			}
-		} else if (GT(GT_HORDE)) {
-			if (g_instagib->integer) {
-				s = "Insta-Horde";
-			} else if (g_vampiric_damage->integer) {
-				s = "Vampiric Horde";
-			} else if (g_frenzy->integer) {
-				s = "Frenzy Horde";
-			} else if (g_nadefest->integer) {
-				s = "NadeFest Horde";
-			} else if (g_quadhog->integer) {
-				s = "Quad Hog Horde";
-			} else {
-				s = gt_long_name[GT_HORDE];
-			}
-		} else if (GT(GT_BALL)) {
-			if (g_instagib->integer) {
-				s = "Insta-ProBall";
-			} else if (g_vampiric_damage->integer) {
-				s = "Vampiric ProBall";
-			} else if (g_frenzy->integer) {
-				s = "Frenzy ProBall";
-			} else if (g_nadefest->integer) {
-				s = "NadeFest ProBall";
-			} else if (g_quadhog->integer) {
-				s = "Quad Hog ProBall";
-			} else {
-				s = gt_long_name[GT_BALL];
-			}
-		} else if (deathmatch->integer) {
-			if (g_instagib->integer) {
-				s = "InstaGib";
-			} else if (g_vampiric_damage->integer) {
-				s = "Vampiric FFA";
-			} else if (g_frenzy->integer) {
-				s = "Frenzy FFA";
-			} else if (g_nadefest->integer) {
-				s = "NadeFest";
-			} else if (g_quadhog->integer) {
-				s = "Quad Hog";
-			} else {
-				s = gt_long_name[GT_FFA];
-			}
-		} else {
-			s = "Unknown Gametype";
-		}
-	} else {
-		if (coop->integer) {
-			s = "Co-op";
-		} else {
-			s = "Single Player";
-		}
-	}
-	if (s)
-		Q_strlcpy(level.gametype_name, s, sizeof(level.gametype_name));
+	MM_GTSetLongName();
 }
 
 /*QUAKED worldspawn (0 0 0) ?

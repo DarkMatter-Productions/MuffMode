@@ -271,3 +271,165 @@ void MM_SyncGametypeTracking()
 	s_gt_g_gametype = g_gametype->modified_count;
 	s_gt_teams_on = Teams();
 }
+
+void MM_GTSetLongName()
+{
+	const char *s;
+	if (deathmatch->integer) {
+		if (GT(GT_INSTAGIB)) {
+			s = gt_long_name[GT_INSTAGIB];
+		} else if (GT(GT_NADEFEST)) {
+			s = gt_long_name[GT_NADEFEST];
+		} else if (GT(GT_CTF)) {
+			if (g_instagib->integer) {
+				s = "Insta-CTF";
+			} else if (g_vampiric_damage->integer) {
+				s = "Vampiric CTF";
+			} else if (g_frenzy->integer) {
+				s = "Frenzy CTF";
+			} else if (g_nadefest->integer) {
+				s = "NadeFest CTF";
+			} else if (g_quadhog->integer) {
+				s = "Quad Hog CTF";
+			} else {
+				s = gt_long_name[GT_CTF];
+			}
+		} else if (GT(GT_FREEZE)) {
+			if (g_instagib->integer) {
+				s = "Insta-Freeze";
+			} else if (g_vampiric_damage->integer) {
+				s = "Vampiric Freeze";
+			} else if (g_frenzy->integer) {
+				s = "Frenzy Freeze";
+			} else if (g_nadefest->integer) {
+				s = "NadeFest Freeze";
+			} else if (g_quadhog->integer) {
+				s = "Quad Hog Freeze";
+			} else {
+				s = gt_long_name[GT_FREEZE];
+			}
+		} else if (GT(GT_CA)) {
+			if (g_instagib->integer) {
+				s = "Insta-CA";
+			} else if (g_vampiric_damage->integer) {
+				s = "Vampiric CA";
+			} else if (g_frenzy->integer) {
+				s = "Frenzy CA";
+			} else if (g_nadefest->integer) {
+				s = "NadeFest CA";
+			} else if (g_quadhog->integer) {
+				s = "Quad Hog CA";
+			} else {
+				s = gt_long_name[GT_CA];
+			}
+		} else if (GT(GT_RR)) {
+			if (g_instagib->integer) {
+				s = "Insta-RR";
+			} else if (g_vampiric_damage->integer) {
+				s = "Vampiric RR";
+			} else if (g_frenzy->integer) {
+				s = "Frenzy RR";
+			} else if (g_nadefest->integer) {
+				s = "NadeFest RR";
+			} else if (g_quadhog->integer) {
+				s = "Quad Hog RR";
+			} else {
+				s = gt_long_name[GT_RR];
+			}
+		} else if (GT(GT_STRIKE)) {
+			if (g_instagib->integer) {
+				s = "Insta-Strike";
+			} else if (g_vampiric_damage->integer) {
+				s = "Vampiric Strike";
+			} else if (g_frenzy->integer) {
+				s = "Frenzy Strike";
+			} else if (g_nadefest->integer) {
+				s = "NadeFest Strike";
+			} else if (g_quadhog->integer) {
+				s = "Quad Hog Strike";
+			} else {
+				s = gt_long_name[GT_STRIKE];
+			}
+		} else if (GT(GT_TDM)) {
+			if (g_instagib->integer) {
+				s = "Insta-TDM";
+			} else if (g_vampiric_damage->integer) {
+				s = "Vampiric TDM";
+			} else if (g_frenzy->integer) {
+				s = "Frenzy TDM";
+			} else if (g_nadefest->integer) {
+				s = "NadeFest TDM";
+			} else if (g_quadhog->integer) {
+				s = "Quad Hog TDM";
+			} else {
+				s = gt_long_name[GT_TDM];
+			}
+		} else if (GT(GT_DUEL)) {
+			if (g_instagib->integer) {
+				s = "Insta-Duel";
+			} else if (g_vampiric_damage->integer) {
+				s = "Vampiric Duel";
+			} else if (g_frenzy->integer) {
+				s = "Frenzy Duel";
+			} else if (g_nadefest->integer) {
+				s = "NadeFest Duel";
+			} else if (g_quadhog->integer) {
+				s = "Quad Hog Duel";
+			} else {
+				s = gt_long_name[GT_DUEL];
+			}
+		} else if (GT(GT_HORDE)) {
+			if (g_instagib->integer) {
+				s = "Insta-Horde";
+			} else if (g_vampiric_damage->integer) {
+				s = "Vampiric Horde";
+			} else if (g_frenzy->integer) {
+				s = "Frenzy Horde";
+			} else if (g_nadefest->integer) {
+				s = "NadeFest Horde";
+			} else if (g_quadhog->integer) {
+				s = "Quad Hog Horde";
+			} else {
+				s = gt_long_name[GT_HORDE];
+			}
+		} else if (GT(GT_BALL)) {
+			if (g_instagib->integer) {
+				s = "Insta-ProBall";
+			} else if (g_vampiric_damage->integer) {
+				s = "Vampiric ProBall";
+			} else if (g_frenzy->integer) {
+				s = "Frenzy ProBall";
+			} else if (g_nadefest->integer) {
+				s = "NadeFest ProBall";
+			} else if (g_quadhog->integer) {
+				s = "Quad Hog ProBall";
+			} else {
+				s = gt_long_name[GT_BALL];
+			}
+		} else if (deathmatch->integer) {
+			if (g_instagib->integer) {
+				s = "InstaGib";
+			} else if (g_vampiric_damage->integer) {
+				s = "Vampiric FFA";
+			} else if (g_frenzy->integer) {
+				s = "Frenzy FFA";
+			} else if (g_nadefest->integer) {
+				s = "NadeFest";
+			} else if (g_quadhog->integer) {
+				s = "Quad Hog";
+			} else {
+				s = gt_long_name[GT_FFA];
+			}
+		} else {
+			s = "Unknown Gametype";
+		}
+	} else {
+		if (coop->integer) {
+			s = "Co-op";
+		} else {
+			s = "Single Player";
+		}
+	}
+	if (s)
+		Q_strlcpy(level.gametype_name, s, sizeof(level.gametype_name));
+}

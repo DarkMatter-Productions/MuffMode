@@ -160,6 +160,7 @@
     <ClInclude Include="muffmode\mm_motd.h" />
     <ClInclude Include="muffmode\mm_ruleset.h" />
     <ClInclude Include="muffmode\mm_ruleset_weapons.h" />
+    <ClInclude Include="muffmode\mm_spawn_filter.h" />
     <ClInclude Include="muffmode\mm_spawn_loadout.h" />
     <ClInclude Include="muffmode\mm_vote.h" />
     <ClInclude Include="muffmode\mm_vote_menu.h" />
@@ -240,6 +241,7 @@
     <ClCompile Include="muffmode\mm_motd.cpp" />
     <ClCompile Include="muffmode\mm_ruleset.cpp" />
     <ClCompile Include="muffmode\mm_ruleset_weapons.cpp" />
+    <ClCompile Include="muffmode\mm_spawn_filter.cpp" />
     <ClCompile Include="muffmode\mm_spawn_loadout.cpp" />
     <ClCompile Include="muffmode\mm_vote.cpp" />
     <ClCompile Include="muffmode\mm_vote_menu.cpp" />

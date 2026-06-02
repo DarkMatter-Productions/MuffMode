@@ -323,6 +323,13 @@ This document tracks migration progress from a monolithic fork style toward thin
    - Added `mm_items_rules.h` / `mm_items_rules.cpp` for armor pickup (Q3A/Q1), health pickup caps, powerup respawn timing, smart autoswitch, slug ammo multiplier, MyMap item inhibit flags, and initial powerup spawn delay.
    - `g_items.cpp` keeps thin wrappers for `Pickup_Armor`, `ArmorIndex`, `G_CheckAutoSwitch`, `CheckItemEnabled`, and vanilla `CheckItemEnabled` cvar logic.
 
+### Phase 6F — Spawn filter and gametype names (complete)
+
+1. **Spawn filter and display names extracted**
+   - Added `mm_spawn_filter.h` / `mm_spawn_filter.cpp` with `MM_RemapSpawnClassname()` (Q1/Q3A weapon aliases, team spawn keys) and `MM_ShouldInhibitSpawnEntity()` (gametype/ruleset spawn keys, `notq2`/`notq3a`/`notarena`, quad hog).
+   - Moved `GT_SetLongName()` variant-mode matrix to `MM_GTSetLongName()` in `mm_gametype.cpp`; vanilla `GT_SetLongName()` is a one-line hook.
+   - `G_InhibitEntity()` and `ED_CallSpawn()` call the new helpers; vanilla cvar/skill spawn gating remains in `g_spawn.cpp`.
+
 ## Current Thin-Hook Pattern
 
 - Keep vanilla files (`g_main.cpp`, `g_svcmds.cpp`) as orchestration points.
@@ -332,7 +339,7 @@ This document tracks migration progress from a monolithic fork style toward thin
 
 ## Next Recommended Targets
 
-- Phase 6F spawn filter (`g_spawn.cpp`) as next slice.
+- Phase 6G–6H optional slices (combat rules, HUD presentation) only if merge pain warrants.
 - Intentionally left in `g_local.h` for Phase 5 scope control:
   - `gametype_t`, `ruleset_t`, and name/index tables (widely referenced across gameplay)
   - embedded session state (`game.mapqueue`, `game.motd`, `level.vote_state`)
