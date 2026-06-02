@@ -4,6 +4,7 @@
 #include "g_local.h"
 #include "g_debug_log.h"
 #include "muffmode/mm_maps.h"
+#include "muffmode/mm_vote.h"
 #include "bots/bot_includes.h"
 #include "monsters/m_player.h"	// match starts
 
@@ -2430,97 +2431,6 @@ start:
 	}
 }
 
-/*
-==================
-CheckVote
-==================
-*/
-static void UpdateActiveVote() {
-	if (level.time - level.vote_state.start_time < 1_sec)
-		return;
-
-	MuffModeLog("DEBUG", "UpdateActiveVote: checking vote (state=%d, caller=%p, command=%p, arg_ptr=%p)",
-	           (int)level.vote_state.state, (void*)level.vote_state.caller,
-	           (void*)level.vote_state.command, (void*)level.vote_state.arg.c_str());
-
-	if (level.time - level.vote_state.start_time >= 30_sec) {
-		gi.LocBroadcast_Print(PRINT_HIGH, "Vote timed out.\n");
-		AnnouncerSound(world, "vote_failed", nullptr, false);
-		TransitionVoteState(VoteState::FAILED);
-		return;
-	}
-
-	// Recount votes from client state each frame
-	level.vote_state.yes_votes = 0;
-	level.vote_state.no_votes = 0;
-	level.vote_state.num_eligible = 0;
-	for (auto ec : active_clients()) {
-		if (ec->client->sess.is_a_bot)
-			continue;
-		if (!ClientCanVote(ec->client))
-			continue;
-		level.vote_state.num_eligible++;
-		if (ec->client->pers.voted == 1)
-			level.vote_state.yes_votes++;
-		else if (ec->client->pers.voted == -1)
-			level.vote_state.no_votes++;
-	}
-
-	int halfpoint = level.vote_state.num_eligible / 2;
-
-	// Guard: if no eligible voters found, don't instantly pass/fail - wait for timeout
-	// This prevents 0 >= 0 from triggering an instant fail
-	if (level.vote_state.num_eligible == 0)
-		return;
-
-	if (level.vote_state.yes_votes > halfpoint) {
-		gi.LocBroadcast_Print(PRINT_HIGH, "Vote passed.\n");
-		AnnouncerSound(world, "vote_passed", nullptr, false);
-		TransitionVoteState(VoteState::PASSED);
-	} else if (level.vote_state.no_votes >= halfpoint) {
-		gi.LocBroadcast_Print(PRINT_HIGH, "Vote failed.\n");
-		AnnouncerSound(world, "vote_failed", nullptr, false);
-		TransitionVoteState(VoteState::FAILED);
-	}
-}
-
-static void CheckVote(void) {
-	if (!deathmatch->integer)
-		return;
-
-	if (level.vote_state.state != VoteState::IDLE)
-		MuffModeLog("DEBUG", "CheckVote: state=%d, caller=%p, command=%p",
-		           (int)level.vote_state.state, (void*)level.vote_state.caller, (void*)level.vote_state.command);
-
-	switch (level.vote_state.state) {
-		case VoteState::IDLE:
-			return;
-
-		case VoteState::ACTIVE:
-			if (!level.vote_state.command || !level.vote_state.caller) {
-				gi.LocBroadcast_Print(PRINT_HIGH, "Vote cancelled: invalid state.\n");
-				TransitionVoteState(VoteState::FAILED);
-				return;
-			}
-			UpdateActiveVote();
-			break;
-
-		case VoteState::PASSED:
-			if (level.time >= level.vote_state.execute_time)
-				TransitionVoteState(VoteState::EXECUTING);
-			break;
-
-		case VoteState::EXECUTING:
-			Vote_Passed();
-			break;
-
-		case VoteState::FAILED:
-		case VoteState::COMPLETE:
-			TransitionVoteState(VoteState::IDLE);
-			break;
-	}
-}
-
 // ----------------
 
 /*
@@ -4077,8 +3987,8 @@ static inline void G_RunFrame_(bool main_loop) {
 		// track gametype changes and update accordingly
 		GT_Changes();
 
-		// cancel vote if timed out
-		CheckVote();
+		// [MuffMode] Thin vanilla hook for vote lifecycle ticking.
+		MM_CheckVote();
 
 		// for tracking changes
 		CheckCvars();

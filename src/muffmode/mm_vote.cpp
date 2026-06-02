@@ -78,6 +78,60 @@ bool MM_VoteValNone(gentity_t *ent)
 	return true;
 }
 
+void MM_UpdateActiveVote()
+{
+	if (level.time - level.vote_state.start_time < 1_sec)
+		return;
+
+	MuffModeLog("DEBUG", "UpdateActiveVote: checking vote (state=%d, caller=%p, command=%p, arg_ptr=%p)",
+		(int)level.vote_state.state, (void *)level.vote_state.caller,
+		(void *)level.vote_state.command, (void *)level.vote_state.arg.c_str());
+
+	if (level.time - level.vote_state.start_time >= 30_sec)
+	{
+		gi.LocBroadcast_Print(PRINT_HIGH, "Vote timed out.\n");
+		AnnouncerSound(world, "vote_failed", nullptr, false);
+		MM_TransitionVoteState(VoteState::FAILED);
+		return;
+	}
+
+	// Recount votes from client state each frame.
+	level.vote_state.yes_votes = 0;
+	level.vote_state.no_votes = 0;
+	level.vote_state.num_eligible = 0;
+	for (auto ec : active_clients())
+	{
+		if (ec->client->sess.is_a_bot)
+			continue;
+		if (!ClientCanVote(ec->client))
+			continue;
+		level.vote_state.num_eligible++;
+		if (ec->client->pers.voted == 1)
+			level.vote_state.yes_votes++;
+		else if (ec->client->pers.voted == -1)
+			level.vote_state.no_votes++;
+	}
+
+	int halfpoint = level.vote_state.num_eligible / 2;
+
+	// Avoid 0 >= 0 turning an empty eligible-voter set into an instant failure.
+	if (level.vote_state.num_eligible == 0)
+		return;
+
+	if (level.vote_state.yes_votes > halfpoint)
+	{
+		gi.LocBroadcast_Print(PRINT_HIGH, "Vote passed.\n");
+		AnnouncerSound(world, "vote_passed", nullptr, false);
+		MM_TransitionVoteState(VoteState::PASSED);
+	}
+	else if (level.vote_state.no_votes >= halfpoint)
+	{
+		gi.LocBroadcast_Print(PRINT_HIGH, "Vote failed.\n");
+		AnnouncerSound(world, "vote_failed", nullptr, false);
+		MM_TransitionVoteState(VoteState::FAILED);
+	}
+}
+
 bool MM_IsMapValidImpl(const char *mapname)
 {
 	if (!mapname || !mapname[0])
@@ -277,6 +331,46 @@ void MM_TransitionVoteState(VoteState new_state)
 void MM_ClearVote()
 {
 	MM_TransitionVoteState(VoteState::IDLE);
+}
+
+void MM_CheckVote()
+{
+	if (!deathmatch->integer)
+		return;
+
+	if (level.vote_state.state != VoteState::IDLE)
+		MuffModeLog("DEBUG", "CheckVote: state=%d, caller=%p, command=%p",
+			(int)level.vote_state.state, (void *)level.vote_state.caller, (void *)level.vote_state.command);
+
+	switch (level.vote_state.state)
+	{
+	case VoteState::IDLE:
+		return;
+
+	case VoteState::ACTIVE:
+		if (!level.vote_state.command || !level.vote_state.caller)
+		{
+			gi.LocBroadcast_Print(PRINT_HIGH, "Vote cancelled: invalid state.\n");
+			MM_TransitionVoteState(VoteState::FAILED);
+			return;
+		}
+		MM_UpdateActiveVote();
+		break;
+
+	case VoteState::PASSED:
+		if (level.time >= level.vote_state.execute_time)
+			MM_TransitionVoteState(VoteState::EXECUTING);
+		break;
+
+	case VoteState::EXECUTING:
+		MM_VotePassed();
+		break;
+
+	case VoteState::FAILED:
+	case VoteState::COMPLETE:
+		MM_TransitionVoteState(VoteState::IDLE);
+		break;
+	}
 }
 
 void MM_BeginVoteValidationContext(vcmds_t *cc, const char *arg)

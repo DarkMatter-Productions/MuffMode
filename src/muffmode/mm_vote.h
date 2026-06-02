@@ -9,6 +9,7 @@
 // [MuffMode] Vote state machine implementation hooks.
 void MM_TransitionVoteState(VoteState new_state);
 void MM_ClearVote();
+void MM_CheckVote();
 void MM_BeginVoteValidationContext(vcmds_t *cc, const char *arg);
 void MM_EndVoteValidationContext();
 void MM_VotePassed();

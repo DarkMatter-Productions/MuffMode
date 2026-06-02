@@ -137,6 +137,11 @@ This document tracks migration progress from a monolithic fork style toward thin
    - `g_menu.cpp` now includes `muffmode/mm_vote_menu.h` and retains only the join-menu callvote entry hook.
    - `muffmode/muffmode.h`, `game.vcxproj`, and `game.vcxproj.filters` include the new vote-menu module.
 
+17. **Vote lifecycle ticking extraction**
+   - Active-vote recounting, timeout handling, pass/fail transition checks, and delayed execution are now handled by `MM_CheckVote()` in `mm_vote.cpp`.
+   - `g_main.cpp` now calls `MM_CheckVote()` from `G_RunFrame_()` as a thin vanilla hook.
+   - Existing vote state-machine transitions and vote execution behavior are preserved.
+
 #### Validation completed so far
 
 - Build passes after each extraction step.
@@ -152,6 +157,9 @@ This document tracks migration progress from a monolithic fork style toward thin
 - Build validation passed for vote-menu extraction:
   - `build.bat Debug x64 v145`
   - `0 Warning(s), 0 Error(s)`
+- Build validation passed for vote lifecycle ticking extraction:
+  - `build.bat Debug x64 v145`
+  - `0 Warning(s), 0 Error(s)`
 
 ## Current Thin-Hook Pattern
 
@@ -162,10 +170,6 @@ This document tracks migration progress from a monolithic fork style toward thin
 
 ## Next Recommended Targets
 
-- Vote lifecycle ticking from `g_main.cpp` into the MuffMode vote module:
-  - `UpdateActiveVote()`
-  - `CheckVote()`
-  - keep `G_RunFrame_()` as a thin hook.
 - Admin command extraction from `g_cmds.cpp` into MuffMode modules:
   - gametype/ruleset/setmap admin commands
   - handicap admin commands
