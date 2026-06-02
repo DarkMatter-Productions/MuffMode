@@ -992,6 +992,10 @@ static bool ShouldShowRampageMessages() {
 	return true;
 }
 
+static bool ClientArenaEliminationCorpse(const gclient_t *client) {
+	return client && client->eliminated && GTF(GTF_ARENA) && GTF(GTF_ELIMINATION);
+}
+
 /*
 ==================
 player_die
@@ -1261,6 +1265,9 @@ DIE(player_die) (gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 	}
 
 	level.total_player_deaths++;
+
+	if (ClientArenaEliminationCorpse(self->client))
+		self->takedamage = false;
 
 	self->deadflag = true;
 
@@ -2279,6 +2286,13 @@ void CopyToBodyQue(gentity_t *ent) {
 
 	body->die = body_die;
 	body->takedamage = true;
+
+	if (ClientArenaEliminationCorpse(ent->client)) {
+		body->takedamage = false;
+		body->solid = SOLID_NOT;
+		body->movetype = MOVETYPE_NONE;
+		body->mins = body->maxs = {};
+	}
 
 	gi.linkentity(body);
 }
