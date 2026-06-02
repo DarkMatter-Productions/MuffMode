@@ -3,6 +3,7 @@
 #include "g_local.h"
 #include "bots/bot_includes.h"
 #include "monsters/m_player.h"	//doppelganger
+#include "muffmode/mm_items_rules.h"
 #include "muffmode/mm_ruleset.h"
 
 bool Pickup_Weapon(gentity_t *ent, gentity_t *other);
@@ -1328,25 +1329,7 @@ static inline item_id_t FindSubstituteItem(gentity_t *ent) {
 		item_flags_t itflags = it->flags;
 		bool add = false, subtract = false;
 
-		if (game.item_inhibit_pu && itflags & (IF_POWERUP | IF_SPHERE)) {
-			add = game.item_inhibit_pu > 0 ? true : false;
-			subtract = game.item_inhibit_pu < 0 ? true : false;
-		} else if (game.item_inhibit_pa && itflags & IF_POWER_ARMOR) {
-			add = game.item_inhibit_pa > 0 ? true : false;
-			subtract = game.item_inhibit_pa < 0 ? true : false;
-		} else if (game.item_inhibit_ht && itflags & IF_HEALTH) {
-			add = game.item_inhibit_ht > 0 ? true : false;
-			subtract = game.item_inhibit_ht < 0 ? true : false;
-		} else if (game.item_inhibit_ar && itflags & IF_ARMOR) {
-			add = game.item_inhibit_ar > 0 ? true : false;
-			subtract = game.item_inhibit_ar < 0 ? true : false;
-		} else if (game.item_inhibit_am && itflags & IF_AMMO) {
-			add = game.item_inhibit_am > 0 ? true : false;
-			subtract = game.item_inhibit_am < 0 ? true : false;
-		} else if (game.item_inhibit_wp && itflags & IF_WEAPON) {
-			add = game.item_inhibit_wp > 0 ? true : false;
-			subtract = game.item_inhibit_wp < 0 ? true : false;
-		}
+		MM_GetItemInhibitMode(itflags, add, subtract);
 
 		if (subtract)
 			continue;
@@ -1375,12 +1358,7 @@ static inline item_id_t FindSubstituteItem(gentity_t *ent) {
 			possible_items[possible_item_count++] = i;
 	}
 
-	game.item_inhibit_pu = 0;
-	game.item_inhibit_pa = 0;
-	game.item_inhibit_ht = 0;
-	game.item_inhibit_ar = 0;
-	game.item_inhibit_am = 0;
-	game.item_inhibit_wp = 0;
+	MM_ClearItemInhibitFlags();
 
 	if (!possible_item_count)
 		return IT_NULL;
@@ -1604,7 +1582,7 @@ static bool Pickup_Powerup(gentity_t *ent, gentity_t *other) {
 
 	if (IsInstantItemsEnabled() || is_dropped_from_death) {
 		bool use = false;
-		gtime_t t = (((RS(RS_MM) || RS(RS_Q3A)) && deathmatch->integer) || !is_dropped_from_death) ? gtime_t::from_sec(ent->count) : (ent->nextthink - level.time);
+		gtime_t t = MM_PowerupInstantPickupTimeout(ent, is_dropped_from_death);
 		switch (ent->item->id) {
 		case IT_POWERUP_QUAD:
 			quad_drop_timeout_hack = t;
@@ -1649,16 +1627,7 @@ static bool Pickup_Powerup(gentity_t *ent, gentity_t *other) {
 		return true;
 	}
 	*/
-	int count = 0;
-
-	if (deathmatch->integer && (RS(RS_MM) || RS(RS_Q3A)) && !ent->spawnflags.has(SPAWNFLAG_ITEM_DROPPED | SPAWNFLAG_ITEM_DROPPED_PLAYER))
-		count = 120;
-
-	if (RS(RS_Q2RE) && (ent->item->id == IT_POWERUP_PROTECTION || ent->item->id == IT_POWERUP_INVISIBILITY))
-		count = 300;
-
-	if (ent->item->quantity)
-		count = ent->item->quantity;
+	int count = MM_PowerupRespawnSeconds(ent);
 
 	if (!is_dropped_from_death)
 		SetRespawn(ent, gtime_t::from_sec(count));
@@ -2318,37 +2287,8 @@ void G_CheckAutoSwitch(gentity_t *ent, gitem_t *item, bool is_new) {
 		// smartness algorithm: in DM, we will always switch if we have the blaster out
 		// otherwise leave our active weapon alone
 		if (deathmatch->integer) {
-			// muff mode: make it smarter!
-			// switch to better weapons
-			if (ent->client->pers.weapon) {
-				switch (ent->client->pers.weapon->id) {
-				case IT_WEAPON_CHAINFIST:
-					// always switch from chainfist
-					break;
-				case IT_WEAPON_BLASTER:
-					// should never auto switch to chainfist
-					if (item->id == IT_WEAPON_CHAINFIST)
-						return;
-					break;
-				case IT_WEAPON_SHOTGUN:
-					// switch only to SSG
-					if (item->id != IT_WEAPON_SSHOTGUN) 
-						return;
-					break;
-				case IT_WEAPON_MACHINEGUN:
-					if (RS(RS_Q3A)) {
-						// always switch from mg in Q3A
-					} else {
-						// switch only to CG
-						if (item->id != IT_WEAPON_CHAINGUN)
-							return;
-					}
-					break;
-				default:
-					// otherwise don't switch!
-					return;
-				}
-			}
+			if (ent->client->pers.weapon && !MM_AllowSmartAutoSwitch(ent, item))
+				return;
 		}
 		// in SP, only switch if it's a new weapon, or we have the blaster out
 		else if (!deathmatch->integer && !(ent->client->pers.weapon && ent->client->pers.weapon->id == IT_WEAPON_BLASTER) && !is_new)
@@ -2371,8 +2311,7 @@ static bool Pickup_Ammo(gentity_t *ent, gentity_t *other) {
 		count = ent->item->quantity;
 
 		if (ent->item->id == IT_AMMO_SLUGS)
-			if (!(RS(RS_MM)))
-				count *= 2;
+			count = MM_AmmoSlugPickupCount(count);
 	}
 
 	oldcount = other->client->pers.inventory[AmmoConvertId(ent->item->id)];
@@ -2450,25 +2389,11 @@ static bool Pickup_Health(gentity_t *ent, gentity_t *other) {
 		if (other->health >= other->max_health)
 			return false;
 
-	int count = ent->count ? ent->count : ent->item->quantity;
-	int max = RS(RS_Q3A) ? other->max_health * 2 : (MM_RulesetHealthArmorCap() ? MM_RULESET_HEALTH_CAP : 250);
+	int count = MM_HealthPickupAmount(ent, ent->count ? ent->count : ent->item->quantity);
+	int max = MM_HealthPickupCap(other);
 
 	if (deathmatch->integer && other->health >= max && count > 25)
 		return false;
-
-	if (RS(RS_Q3A) && !ent->count) {
-		switch (ent->item->id) {
-		case IT_HEALTH_SMALL:
-			count = 5;
-			break;
-		case IT_HEALTH_MEDIUM:
-			count = 25;
-			break;
-		case IT_HEALTH_LARGE:
-			count = 50;
-			break;
-		}
-	}
 
 	other->health += count;
 
@@ -2487,7 +2412,7 @@ static bool Pickup_Health(gentity_t *ent, gentity_t *other) {
 	if (MM_RulesetHealthArmorCap() && other->health > MM_RULESET_HEALTH_CAP)
 		other->health = MM_RULESET_HEALTH_CAP;
 
-	if (!(RS(RS_Q3A)) && (ent->item->tag & HEALTH_TIMED) && !Tech_HasRegeneration(other)) {
+	if (MM_HealthPickupUsesMegaThink(ent, other)) {
 		if (!deathmatch->integer) {
 			// mega health doesn't need to be special in SP
 			// since it never respawns.
@@ -2506,7 +2431,7 @@ static bool Pickup_Health(gentity_t *ent, gentity_t *other) {
 
 		}
 	} else {
-		SetRespawn(ent, RS(RS_Q3A) ? 60_sec : 30_sec);
+		SetRespawn(ent, MM_HealthPickupRespawnDelay());
 	}
 
 	return true;
@@ -2518,128 +2443,14 @@ item_id_t ArmorIndex(gentity_t *ent) {
 	if (ent->svflags & SVF_MONSTER)
 		return ent->monsterinfo.armor_type;
 
-	if (ent->client) {
-		if (RS(RS_Q3A)) {
-			if (ent->client->pers.inventory[IT_ARMOR_JACKET] > 0 ||
-				ent->client->pers.inventory[IT_ARMOR_COMBAT] > 0 ||
-				ent->client->pers.inventory[IT_ARMOR_BODY] > 0)
-			return IT_ARMOR_COMBAT;
-		} else {
-			if (ent->client->pers.inventory[IT_ARMOR_JACKET] > 0)
-				return IT_ARMOR_JACKET;
-			else if (ent->client->pers.inventory[IT_ARMOR_COMBAT] > 0)
-				return IT_ARMOR_COMBAT;
-			else if (ent->client->pers.inventory[IT_ARMOR_BODY] > 0)
-				return IT_ARMOR_BODY;
-		}
-	}
+	if (ent->client)
+		return MM_ClientArmorIndex(ent);
 
 	return IT_NULL;
 }
 
-static bool Pickup_Armor_Q3(gentity_t *ent, gentity_t *other, int32_t base_count) {
-	if (other->client->pers.inventory[IT_ARMOR_COMBAT] >= other->client->pers.max_health * 2)
-		return false;
-
-	if (ent->item->id == IT_ARMOR_SHARD && !ent->count)
-		base_count = 5;
-
-	other->client->pers.inventory[IT_ARMOR_COMBAT] += base_count;
-	if (other->client->pers.inventory[IT_ARMOR_COMBAT] > other->client->pers.max_health * 2)
-		other->client->pers.inventory[IT_ARMOR_COMBAT] = other->client->pers.max_health * 2;
-
-	other->client->pers.inventory[IT_ARMOR_SHARD] = 0;
-	other->client->pers.inventory[IT_ARMOR_JACKET] = 0;
-	other->client->pers.inventory[IT_ARMOR_BODY] = 0;
-
-	SetRespawn(ent, 25_sec);
-
-	return true;
-}
-
 static bool Pickup_Armor(gentity_t *ent, gentity_t *other) {
-	item_id_t			 old_armor_index;
-	const gitem_armor_t *oldinfo;
-	const gitem_armor_t *newinfo;
-	int					 newcount;
-	float				 salvage;
-	int					 salvagecount;
-
-	// get info on new armor
-	newinfo = ent->item->armor_info;
-
-	// [Paril-KEX] for g_start_items
-	int32_t base_count = ent->count ? ent->count : newinfo ? (RS(RS_Q1) ? newinfo->max_count : newinfo->base_count) : 0;
-
-	if (RS(RS_Q3A))
-		return Pickup_Armor_Q3(ent, other, base_count);
-
-	old_armor_index = ArmorIndex(other);
-
-	// handle armor shards specially
-	if (ent->item->id == IT_ARMOR_SHARD) {
-		if (!old_armor_index)
-			other->client->pers.inventory[IT_ARMOR_JACKET] = 2;
-		else
-			other->client->pers.inventory[old_armor_index] += 2;
-	}
-	// if player has no armor, just use it
-	else if (!old_armor_index) {
-		other->client->pers.inventory[ent->item->id] = base_count;
-	}
-
-	// use the better armor
-	else {
-		// get info on old armor
-		if (old_armor_index == IT_ARMOR_JACKET)
-			oldinfo = &jacketarmor_info;
-		else if (old_armor_index == IT_ARMOR_COMBAT)
-			oldinfo = &combatarmor_info;
-		else
-			oldinfo = &bodyarmor_info;
-
-		if (newinfo->normal_protection > oldinfo->normal_protection) {
-			// calc new armor values
-			salvage = oldinfo->normal_protection / newinfo->normal_protection;
-			salvagecount = (int)(salvage * other->client->pers.inventory[old_armor_index]);
-			newcount = base_count + salvagecount;
-			if (newcount > newinfo->max_count)
-				newcount = newinfo->max_count;
-
-			// zero count of old armor so it goes away
-			other->client->pers.inventory[old_armor_index] = 0;
-
-			// change armor to new item with computed value
-			other->client->pers.inventory[ent->item->id] = newcount;
-		} else {
-			// calc new armor values
-			salvage = newinfo->normal_protection / oldinfo->normal_protection;
-			salvagecount = (int)(salvage * base_count);
-			newcount = other->client->pers.inventory[old_armor_index] + salvagecount;
-			if (newcount > oldinfo->max_count)
-				newcount = oldinfo->max_count;
-
-			if (RS(RS_Q1) && other->client->pers.inventory[old_armor_index] * oldinfo->normal_protection >= newcount * newinfo->normal_protection)
-				return false;
-
-			// if we're already maxed out then we don't need the new armor
-			if (other->client->pers.inventory[old_armor_index] >= newcount)
-				return false;
-
-			// update current armor value
-			other->client->pers.inventory[old_armor_index] = newcount;
-		}
-	}
-
-	if (MM_RulesetHealthArmorCap()) {
-		item_id_t cap_idx = ArmorIndex(other);
-		if (cap_idx != IT_NULL && other->client->pers.inventory[cap_idx] > MM_RULESET_ARMOR_CAP)
-			other->client->pers.inventory[cap_idx] = MM_RULESET_ARMOR_CAP;
-	}
-
-	SetRespawn(ent, 20_sec);
-
-	return true;
+	return MM_PickupArmor(ent, other);
 }
 
 //======================================================================
@@ -3025,17 +2836,8 @@ static THINK(FinishSpawningItem) (gentity_t *ent) -> void {
 		ent->use = Use_Item;
 	}
 
-	// powerups don't spawn in for a while
-	if ((RS(RS_MM) || RS(RS_Q3A)) && deathmatch->integer && ent->item->flags & IF_POWERUP) {
-		int32_t r = RS(RS_MM) ? 30 : irandom(30, 60);
-
-		ent->svflags |= SVF_NOCLIENT;
-		ent->solid = SOLID_NOT;
-
-		ent->nextthink = level.time + gtime_t::from_sec(r);
-		ent->think = RespawnItem;
+	if (MM_DeferInitialPowerupSpawn(ent))
 		return;
-	}
 
 	ent->watertype = gi.pointcontents(ent->s.origin);
 	gi.linkentity(ent);
@@ -3141,25 +2943,7 @@ bool CheckItemEnabled(gitem_t *item) {
 
 	bool add = false, subtract = false;
 
-	if (game.item_inhibit_pu && item->flags & (IF_POWERUP | IF_SPHERE)) {
-		add = game.item_inhibit_pu > 0 ? true : false;
-		subtract = game.item_inhibit_pu < 0 ? true : false;
-	} else if (game.item_inhibit_pa && item->flags & IF_POWER_ARMOR) {
-		add = game.item_inhibit_pa > 0 ? true : false;
-		subtract = game.item_inhibit_pa < 0 ? true : false;
-	} else if (game.item_inhibit_ht && item->flags & IF_HEALTH) {
-		add = game.item_inhibit_ht > 0 ? true : false;
-		subtract = game.item_inhibit_ht < 0 ? true : false;
-	} else if (game.item_inhibit_ar && item->flags & IF_ARMOR) {
-		add = game.item_inhibit_ar > 0 ? true : false;
-		subtract = game.item_inhibit_ar < 0 ? true : false;
-	} else if (game.item_inhibit_am && item->flags & IF_AMMO) {
-		add = game.item_inhibit_am > 0 ? true : false;
-		subtract = game.item_inhibit_am < 0 ? true : false;
-	} else if (game.item_inhibit_wp && item->flags & IF_WEAPON) {
-		add = game.item_inhibit_wp > 0 ? true : false;
-		subtract = game.item_inhibit_wp < 0 ? true : false;
-	}
+	MM_GetItemInhibitMode(item->flags, add, subtract);
 
 	if (subtract)
 		return false;

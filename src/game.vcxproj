@@ -155,6 +155,7 @@
     <ClInclude Include="muffmode\mm_admin.h" />
     <ClInclude Include="muffmode\mm_debug.h" />
     <ClInclude Include="muffmode\mm_gametype.h" />
+    <ClInclude Include="muffmode\mm_items_rules.h" />
     <ClInclude Include="muffmode\mm_maps.h" />
     <ClInclude Include="muffmode\mm_motd.h" />
     <ClInclude Include="muffmode\mm_ruleset.h" />
@@ -234,6 +235,7 @@
     <ClCompile Include="muffmode\mm_admin.cpp" />
     <ClCompile Include="muffmode\mm_debug.cpp" />
     <ClCompile Include="muffmode\mm_gametype.cpp" />
+    <ClCompile Include="muffmode\mm_items_rules.cpp" />
     <ClCompile Include="muffmode\mm_maps.cpp" />
     <ClCompile Include="muffmode\mm_motd.cpp" />
     <ClCompile Include="muffmode\mm_ruleset.cpp" />
