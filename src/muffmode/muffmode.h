@@ -8,6 +8,7 @@
 #include "mm_admin.h"
 #include "mm_debug.h"
 #include "mm_gametype.h"
+#include "mm_horde.h"
 #include "mm_items_rules.h"
 #include "mm_maps.h"
 #include "mm_motd.h"

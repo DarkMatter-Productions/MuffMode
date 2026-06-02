@@ -4036,15 +4036,7 @@ static void ClientTimerActions(gentity_t *ent) {
 	if (ent->client->ping > MS_Value(ent->client, MSTAT_PING_PEAK))
 		MS_Set(ent->client, MSTAT_HEALTH_PEAK, ent->client->ping);
 
-	if (RS(RS_Q3A)) {
-		// count down health when over max
-		if (ent->health > ent->client->pers.max_health)
-			ent->health--;
-
-		// count down armor when over max
-		if (ent->client->pers.inventory[IT_ARMOR_COMBAT] > ent->client->pers.max_health)
-			ent->client->pers.inventory[IT_ARMOR_COMBAT]--;
-	}
+	MM_RulesetQ3AHealthArmorDecay(ent);
 
 	MM_ClampEntityHealthArmor(ent);
 

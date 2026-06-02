@@ -341,6 +341,15 @@ This document tracks migration progress from a monolithic fork style toward thin
 3. **Duel queue extracted**
    - Added `mm_duel.h` / `mm_duel.cpp` with `MM_Duel_AddPlayer()`, `MM_Duel_RemoveLoser()`, `MM_Duel_MatchEnd_AdjustScores()`, and `MM_Duel_QueueSpectatorBots()`.
 
+### Tier 2 thin-vanilla sweep (complete)
+
+1. **Horde mode extracted**
+   - Added `mm_horde.h` / `mm_horde.cpp` with weighted monster/item tables, `MM_Horde_Init()`, `MM_Horde_RunSpawning()`, `MM_Horde_BeginWave()`, and `MM_Horde_AdjustPlayerScore()`.
+   - `g_main.cpp` retains round/match orchestration hooks; `g_monster.cpp` calls `MM_Horde_AdjustPlayerScore()`.
+
+2. **Q3A health/armor decay**
+   - Added `MM_RulesetQ3AHealthArmorDecay()` to `mm_ruleset`; `ClientTimerActions` in `p_client.cpp` calls it before clamp.
+
 ## MuffMode module map
 
 | Module | Responsibility |
@@ -349,10 +358,11 @@ This document tracks migration progress from a monolithic fork style toward thin
 | `mm_debug` | Debug logging |
 | `mm_duel` | GT_DUEL queue and match-end score adjustment |
 | `mm_gametype` | Gametype/ruleset orchestration and display names |
+| `mm_horde` | GT_HORDE wave spawning, tables, and kill scoring |
 | `mm_items_rules` | Item pickup, respawn, inhibit, autoswitch rules |
 | `mm_maps` | Map list, queue, shuffle, MyMap |
 | `mm_motd` | Message-of-the-day load and commands |
-| `mm_ruleset` | Health/armor caps and clamp helpers |
+| `mm_ruleset` | Health/armor caps, Q3A over-max decay, and clamp helpers |
 | `mm_ruleset_weapons` | Per-ruleset weapon tuning |
 | `mm_spawn_filter` | Entity classname remap and spawn-key filtering |
 | `mm_spawn_loadout` | Deathmatch spawn health/armor and weapon loadout |
@@ -370,7 +380,7 @@ This document tracks migration progress from a monolithic fork style toward thin
 
 ## Next Recommended Targets
 
-- Thin-vanilla Tier 1 sweep complete. Optional Tier 2 only if actively developing horde or Q3A decay: `mm_horde`, extend `mm_ruleset`.
+- Thin-vanilla Tier 1 and Tier 2 sweeps complete.
 - Phase 6G–6H and match-machine extraction explicitly deferred (one-liners / orchestration hubs).
 - Intentionally left in `g_local.h` for Phase 5 scope control:
   - `gametype_t`, `ruleset_t`, and name/index tables (widely referenced across gameplay)

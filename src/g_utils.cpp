@@ -671,21 +671,6 @@ void G_AdjustPlayerScore(gclient_t *cl, int32_t offset, bool adjust_team, int32_
 
 /*
 ===================
-Horde_AdjustPlayerScore
-===================
-*/
-void Horde_AdjustPlayerScore(gclient_t *cl, int32_t offset) {
-	if (notGT(GT_HORDE)) return;
-	if (!cl || !cl->pers.connected) return;
-
-	if (IsScoringDisabled())
-		return;
-
-	G_AdjustPlayerScore(cl, offset, false, 0);
-}
-
-/*
-===================
 G_SetPlayerScore
 ===================
 */

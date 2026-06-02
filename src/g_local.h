@@ -2674,7 +2674,6 @@ const char *Teams_OtherTeamName(team_t team);
 team_t Teams_OtherTeam(team_t team);
 bool Teams();
 void G_AdjustPlayerScore(gclient_t *cl, int32_t offset, bool adjust_team, int32_t team_offset);
-void Horde_AdjustPlayerScore(gclient_t *cl, int32_t offset);
 void G_SetPlayerScore(gclient_t *cl, int32_t value);
 void G_AdjustTeamScore(team_t team, int32_t offset);
 void G_SetTeamScore(team_t team, int32_t value);

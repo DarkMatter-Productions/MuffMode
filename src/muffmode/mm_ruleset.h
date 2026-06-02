@@ -15,3 +15,4 @@ constexpr int32_t MM_RULESET_ARMOR_CAP = 150;
 bool MM_RulesetHealthArmorCap();
 void MM_ClampClientPersistHealthArmor(gclient_t *client);
 void MM_ClampEntityHealthArmor(gentity_t *ent);
+void MM_RulesetQ3AHealthArmorDecay(gentity_t *ent);

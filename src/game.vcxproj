@@ -156,6 +156,7 @@
     <ClInclude Include="muffmode\mm_debug.h" />
     <ClInclude Include="muffmode\mm_duel.h" />
     <ClInclude Include="muffmode\mm_gametype.h" />
+    <ClInclude Include="muffmode\mm_horde.h" />
     <ClInclude Include="muffmode\mm_items_rules.h" />
     <ClInclude Include="muffmode\mm_maps.h" />
     <ClInclude Include="muffmode\mm_motd.h" />
@@ -239,6 +240,7 @@
     <ClCompile Include="muffmode\mm_debug.cpp" />
     <ClCompile Include="muffmode\mm_duel.cpp" />
     <ClCompile Include="muffmode\mm_gametype.cpp" />
+    <ClCompile Include="muffmode\mm_horde.cpp" />
     <ClCompile Include="muffmode\mm_items_rules.cpp" />
     <ClCompile Include="muffmode\mm_maps.cpp" />
     <ClCompile Include="muffmode\mm_motd.cpp" />

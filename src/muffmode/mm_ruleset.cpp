@@ -23,6 +23,18 @@ void MM_ClampClientPersistHealthArmor(gclient_t *client)
 	}
 }
 
+void MM_RulesetQ3AHealthArmorDecay(gentity_t *ent)
+{
+	if (!ent || !ent->client || game.ruleset != RS_Q3A)
+		return;
+
+	if (ent->health > ent->client->pers.max_health)
+		ent->health--;
+
+	if (ent->client->pers.inventory[IT_ARMOR_COMBAT] > ent->client->pers.max_health)
+		ent->client->pers.inventory[IT_ARMOR_COMBAT]--;
+}
+
 void MM_ClampEntityHealthArmor(gentity_t *ent)
 {
 	if (!ent || !ent->client || !MM_RulesetHealthArmorCap())
@@ -40,3 +52,4 @@ void MM_ClampEntityHealthArmor(gentity_t *ent)
 			ent->client->pers.inventory[aid] = MM_RULESET_ARMOR_CAP;
 	}
 }
+
