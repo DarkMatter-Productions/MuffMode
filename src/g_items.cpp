@@ -3,6 +3,7 @@
 #include "g_local.h"
 #include "bots/bot_includes.h"
 #include "monsters/m_player.h"	//doppelganger
+#include "muffmode/mm_ruleset.h"
 
 bool Pickup_Weapon(gentity_t *ent, gentity_t *other);
 void Use_Weapon(gentity_t *ent, gitem_t *inv);
@@ -1916,14 +1917,14 @@ static void Drop_General(gentity_t *ent, gitem_t *item) {
 static void Use_Adrenaline(gentity_t *ent, gitem_t *item) {
 	ent->max_health += deathmatch->integer ? ((RS(RS_MM)) ? 5 : 0) : 1;
 
-	if (G_RulesetHealthArmorCap() && ent->max_health > G_RULESET_HEALTH_CAP)
-		ent->max_health = G_RULESET_HEALTH_CAP;
+	if (MM_RulesetHealthArmorCap() && ent->max_health > MM_RULESET_HEALTH_CAP)
+		ent->max_health = MM_RULESET_HEALTH_CAP;
 
 	if (ent->health < ent->max_health)
 		ent->health = ent->max_health;
 
-	if (G_RulesetHealthArmorCap() && ent->health > G_RULESET_HEALTH_CAP)
-		ent->health = G_RULESET_HEALTH_CAP;
+	if (MM_RulesetHealthArmorCap() && ent->health > MM_RULESET_HEALTH_CAP)
+		ent->health = MM_RULESET_HEALTH_CAP;
 
 	gi.sound(ent, CHAN_ITEM, gi.soundindex("items/m_health.wav"), 1, ATTN_NORM, 0);
 
@@ -1936,11 +1937,11 @@ static void Use_Adrenaline(gentity_t *ent, gitem_t *item) {
 static bool Pickup_LegacyHead(gentity_t *ent, gentity_t *other) {
 	other->max_health += 5;
 	other->health += 5;
-	if (G_RulesetHealthArmorCap()) {
-		if (other->max_health > G_RULESET_HEALTH_CAP)
-			other->max_health = G_RULESET_HEALTH_CAP;
-		if (other->health > G_RULESET_HEALTH_CAP)
-			other->health = G_RULESET_HEALTH_CAP;
+	if (MM_RulesetHealthArmorCap()) {
+		if (other->max_health > MM_RULESET_HEALTH_CAP)
+			other->max_health = MM_RULESET_HEALTH_CAP;
+		if (other->health > MM_RULESET_HEALTH_CAP)
+			other->health = MM_RULESET_HEALTH_CAP;
 	}
 
 	SetRespawn(ent, gtime_t::from_sec(ent->item->quantity));
@@ -2207,8 +2208,8 @@ void Powerup_ApplyRegeneration(gentity_t *ent) {
 	if (cl->pu_regen_time_regen < level.time) {
 		gtime_t delay = 1_sec;
 		int		max = mod ? cl->pers.max_health : cl->pers.max_health * 2;
-		if (G_RulesetHealthArmorCap())
-			max = min(max, (int)G_RULESET_HEALTH_CAP);
+		if (MM_RulesetHealthArmorCap())
+			max = min(max, (int)MM_RULESET_HEALTH_CAP);
 
 		cl->pu_regen_time_regen = level.time;
 		if (ent->health < max) {
@@ -2450,7 +2451,7 @@ static bool Pickup_Health(gentity_t *ent, gentity_t *other) {
 			return false;
 
 	int count = ent->count ? ent->count : ent->item->quantity;
-	int max = RS(RS_Q3A) ? other->max_health * 2 : (G_RulesetHealthArmorCap() ? G_RULESET_HEALTH_CAP : 250);
+	int max = RS(RS_Q3A) ? other->max_health * 2 : (MM_RulesetHealthArmorCap() ? MM_RULESET_HEALTH_CAP : 250);
 
 	if (deathmatch->integer && other->health >= max && count > 25)
 		return false;
@@ -2483,8 +2484,8 @@ static bool Pickup_Health(gentity_t *ent, gentity_t *other) {
 			other->health = other->max_health * 2;
 	}
 
-	if (G_RulesetHealthArmorCap() && other->health > G_RULESET_HEALTH_CAP)
-		other->health = G_RULESET_HEALTH_CAP;
+	if (MM_RulesetHealthArmorCap() && other->health > MM_RULESET_HEALTH_CAP)
+		other->health = MM_RULESET_HEALTH_CAP;
 
 	if (!(RS(RS_Q3A)) && (ent->item->tag & HEALTH_TIMED) && !Tech_HasRegeneration(other)) {
 		if (!deathmatch->integer) {
@@ -2630,10 +2631,10 @@ static bool Pickup_Armor(gentity_t *ent, gentity_t *other) {
 		}
 	}
 
-	if (G_RulesetHealthArmorCap()) {
+	if (MM_RulesetHealthArmorCap()) {
 		item_id_t cap_idx = ArmorIndex(other);
-		if (cap_idx != IT_NULL && other->client->pers.inventory[cap_idx] > G_RULESET_ARMOR_CAP)
-			other->client->pers.inventory[cap_idx] = G_RULESET_ARMOR_CAP;
+		if (cap_idx != IT_NULL && other->client->pers.inventory[cap_idx] > MM_RULESET_ARMOR_CAP)
+			other->client->pers.inventory[cap_idx] = MM_RULESET_ARMOR_CAP;
 	}
 
 	SetRespawn(ent, 20_sec);

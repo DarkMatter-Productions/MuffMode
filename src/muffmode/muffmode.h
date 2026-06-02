@@ -10,6 +10,7 @@
 #include "mm_gametype.h"
 #include "mm_maps.h"
 #include "mm_motd.h"
+#include "mm_ruleset.h"
 #include "mm_vote.h"
 #include "mm_vote_menu.h"
 

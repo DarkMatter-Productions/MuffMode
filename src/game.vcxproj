@@ -157,6 +157,7 @@
     <ClInclude Include="muffmode\mm_gametype.h" />
     <ClInclude Include="muffmode\mm_maps.h" />
     <ClInclude Include="muffmode\mm_motd.h" />
+    <ClInclude Include="muffmode\mm_ruleset.h" />
     <ClInclude Include="muffmode\mm_vote.h" />
     <ClInclude Include="muffmode\mm_vote_menu.h" />
     <ClInclude Include="muffmode\mm_vote_types.h" />
@@ -233,6 +234,7 @@
     <ClCompile Include="muffmode\mm_gametype.cpp" />
     <ClCompile Include="muffmode\mm_maps.cpp" />
     <ClCompile Include="muffmode\mm_motd.cpp" />
+    <ClCompile Include="muffmode\mm_ruleset.cpp" />
     <ClCompile Include="muffmode\mm_vote.cpp" />
     <ClCompile Include="muffmode\mm_vote_menu.cpp" />
     <ClCompile Include="p_client.cpp" />

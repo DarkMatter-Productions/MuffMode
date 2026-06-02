@@ -3,6 +3,7 @@
 #include "g_local.h"
 #include "monsters/m_player.h"
 #include "bots/bot_includes.h"
+#include "muffmode/mm_ruleset.h"
 #include "muffmode/mm_vote.h"
 
 void SP_misc_teleporter_dest(gentity_t *ent);
@@ -1540,14 +1541,7 @@ void InitClientPersistant(gentity_t *ent, gclient_t *client) {
 				client->pers.inventory[IT_WEAPON_GRAPPLE] = 1;
 		}
 
-		if (G_RulesetHealthArmorCap()) {
-		client->pers.max_health = min(client->pers.max_health, (int)G_RULESET_HEALTH_CAP);
-		client->pers.health = min(client->pers.health, (int)G_RULESET_HEALTH_CAP);
-			for (item_id_t aid : { IT_ARMOR_JACKET, IT_ARMOR_COMBAT, IT_ARMOR_BODY }) {
-			if (client->pers.inventory[aid] > G_RULESET_ARMOR_CAP)
-				client->pers.inventory[aid] = G_RULESET_ARMOR_CAP;
-			}
-		}
+		MM_ClampClientPersistHealthArmor(client);
 
 		NoAmmoWeaponChange(ent, false);
 
@@ -4219,18 +4213,7 @@ static void ClientTimerActions(gentity_t *ent) {
 			ent->client->pers.inventory[IT_ARMOR_COMBAT]--;
 	}
 
-	if (G_RulesetHealthArmorCap()) {
-		if (ent->max_health > G_RULESET_HEALTH_CAP)
-			ent->max_health = G_RULESET_HEALTH_CAP;
-		if (ent->client->pers.max_health > G_RULESET_HEALTH_CAP)
-			ent->client->pers.max_health = G_RULESET_HEALTH_CAP;
-		if (ent->health > G_RULESET_HEALTH_CAP)
-			ent->health = G_RULESET_HEALTH_CAP;
-		for (item_id_t aid : { IT_ARMOR_JACKET, IT_ARMOR_COMBAT, IT_ARMOR_BODY }) {
-			if (ent->client->pers.inventory[aid] > G_RULESET_ARMOR_CAP)
-				ent->client->pers.inventory[aid] = G_RULESET_ARMOR_CAP;
-		}
-	}
+	MM_ClampEntityHealthArmor(ent);
 
 	ent->client->time_residual = level.time + 1_sec;
 }

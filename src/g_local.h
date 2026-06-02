@@ -2250,12 +2250,6 @@ constexpr gtime_t DUCK_INTERVAL = 5000_ms;
 
 extern game_locals_t  game;
 
-constexpr int32_t G_RULESET_HEALTH_CAP = 200;
-constexpr int32_t G_RULESET_ARMOR_CAP = 150;
-[[nodiscard]] inline bool G_RulesetHealthArmorCap() {
-	return game.ruleset == RS_VANILLA_PLUS || game.ruleset == RS_QC;
-}
-
 extern level_locals_t level;
 extern game_export_t  globals;
 extern spawn_temp_t	  st;

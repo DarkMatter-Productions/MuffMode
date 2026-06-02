@@ -296,6 +296,13 @@ This document tracks migration progress from a monolithic fork style toward thin
   - gameplay enforcement in `p_weapon.cpp` and `g_items.cpp`
   - reset/init paths in `p_client.cpp` and `mm_gametype.cpp`
 
+### Phase 6B — Ruleset health/armor caps (complete)
+
+1. **Ruleset cap helpers extracted**
+   - Added `mm_ruleset.h` / `mm_ruleset.cpp` with `MM_RULESET_HEALTH_CAP`, `MM_RULESET_ARMOR_CAP`, `MM_RulesetHealthArmorCap()`, `MM_ClampClientPersistHealthArmor()`, and `MM_ClampEntityHealthArmor()`.
+   - Removed `G_RULESET_*` constants and `G_RulesetHealthArmorCap()` from `g_local.h`.
+   - `p_client.cpp` spawn and periodic clamp paths call the new helpers; `g_items.cpp` pickup/respawn logic uses `MM_*` symbols.
+
 ## Current Thin-Hook Pattern
 
 - Keep vanilla files (`g_main.cpp`, `g_svcmds.cpp`) as orchestration points.
@@ -305,7 +312,8 @@ This document tracks migration progress from a monolithic fork style toward thin
 
 ## Next Recommended Targets
 
-- Phase 6 gameplay ruleset slices only as needed (spawn/loadout, ruleset weapons, HUD presentation).
+- Phase 6C ruleset weapons (`Ruleset_*` in `p_weapon.cpp`) — highest ROI next slice.
+- Phase 6D–6F gameplay slices as needed (spawn loadout, items rules, spawn filter).
 - Intentionally left in `g_local.h` for Phase 5 scope control:
   - `gametype_t`, `ruleset_t`, and name/index tables (widely referenced across gameplay)
   - embedded session state (`game.mapqueue`, `game.motd`, `level.vote_state`)
