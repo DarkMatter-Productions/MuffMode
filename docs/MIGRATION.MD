@@ -468,11 +468,26 @@ Run once after closure housekeeping; note results in commit message or below.
 | Admin | setmap, gametype, ruleset, doctor |
 | Maps | map list, shuffle, MyMap queue, `sv nextmap` rotation |
 | Duel | queue join, loser rotation, spectator bot queue |
-| Horde | warmup spawn cap, wave scaling, round clear |
+| Horde | See [Horde smoke checklist](#horde-smoke-checklist) below |
 | Ruleset | Q3A over-max health/armor decay |
 | UI | Statusbar on map load |
 
 _Smoke results: pending in-game validation._
+
+### Horde smoke checklist
+
+Manual sign-off for `GT_HORDE` after spawn/orchestration changes:
+
+| Step | What to verify |
+|------|----------------|
+| Map load | Horde map loads without crash; statusbar wave/monster HUD visible |
+| Warmup | At most ~30 living monsters during warmup; spawns continue if points are blocked |
+| Wave 1+ | Wave begins, monsters spawn to quota, wave clears when quota spawned and all dead |
+| Multi-wave | Corpses do not pile up between waves; counters/HUD stay sane |
+| Overrun | With cheats or tuning, 100+ living monsters triggers defeat intermission |
+| Held grenade | Detonate while engaging monsters (no AV / soft-lock) |
+| Modifiers | Insta-Horde (or other horde vote presets) still spawn and score |
+| Admin/vote | `callvote` map/gametype to Horde on a horde-capable map |
 
 ## Notes
 

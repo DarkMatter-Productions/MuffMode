@@ -8,6 +8,7 @@
 - **Horde orchestration (`mm_horde`):** Consolidated round/match logic from `g_main.cpp` into `mm_horde` — wave countdown numbering (`g_horde_starting_wave`), wave begin/end hooks, in-wave spawn/clear check, 100-monster overrun defeat, `roundlimit` match win, and Horde exceptions for frag/mercy limits. `g_main.cpp` now calls thin `MM_Horde_*()` hooks only.
 - **Horde inter-wave cleanup:** `MM_Horde_CleanWaveTransition()` frees dead monster edicts and resets `total_monsters` / `killed_monsters` when a wave ends and before the next wave spawns, so corpses do not accumulate across waves (Horde does not use `Entities_Reset` between waves).
 - **Horde monster interaction (q2horde):** In Horde, monsters ignore `CONTENTS_MONSTER` for step/clip traces, are on the same team for damage (no monster friendly fire), step traces defer `G_TouchTriggers` to monster physics, matching Paril's q2horde behavior.
+- **Horde spawn hardening:** Failed spawn attempts free the reserved edict and only backoff the spawn timer (wave quota unchanged). Weighted pick fallback uses the highest-tier valid monster row when the table has no positive weights; invalid `ED_CallSpawn` results are discarded without counting toward the wave.
 
 ### Fix
 

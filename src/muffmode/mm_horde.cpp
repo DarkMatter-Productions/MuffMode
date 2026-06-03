@@ -4,6 +4,8 @@
 #include "g_local.h"
 #include "muffmode/mm_horde.h"
 
+#include <climits>
+
 namespace {
 struct weighted_item_t;
 
@@ -169,6 +171,59 @@ const char *Horde_PickMonster()
 			return picked_monsters[i].item->classname;
 
 	return nullptr;
+}
+
+// When weighted pick finds nothing (e.g. all weights zero), use the highest-tier table row still valid for this wave.
+const char *Horde_PickMonsterFallback()
+{
+	const weighted_item_t *choice = nullptr;
+	int32_t                    best_cap = -1;
+
+	for (auto &monster : monsters) {
+		if (monster.min_level != -1 && level.round_number < monster.min_level)
+			continue;
+
+		const int32_t cap = monster.max_level == -1 ? INT32_MAX : monster.max_level;
+		if (level.round_number > cap)
+			continue;
+
+		if (cap > best_cap) {
+			best_cap = cap;
+			choice = &monster;
+		}
+	}
+
+	if (!choice) {
+		best_cap = -1;
+		for (auto &monster : monsters) {
+			if (monster.min_level != -1 && level.round_number < monster.min_level)
+				continue;
+
+			const int32_t cap = monster.max_level == -1 ? INT32_MAX : monster.max_level;
+			if (cap > best_cap) {
+				best_cap = cap;
+				choice = &monster;
+			}
+		}
+	}
+
+	return choice ? choice->classname : nullptr;
+}
+
+const char *Horde_PickMonsterForWave()
+{
+	if (const char *pick = Horde_PickMonster())
+		return pick;
+
+	static int32_t fallback_warn_wave = -1;
+	const char    *fallback = Horde_PickMonsterFallback();
+
+	if (fallback && fallback_warn_wave != level.round_number) {
+		fallback_warn_wave = level.round_number;
+		gi.Com_PrintFmt("MM_Horde: no weighted monster for wave {}; using fallback {}\n", level.round_number, fallback);
+	}
+
+	return fallback;
 }
 } // namespace
 
@@ -340,9 +395,11 @@ void MM_Horde_RunSpawning()
 		return;
 
 	if (level.horde_monster_spawn_time <= level.time) {
-		const char *monster_class = Horde_PickMonster();
-		if (!monster_class)
+		const char *monster_class = Horde_PickMonsterForWave();
+		if (!monster_class) {
+			level.horde_monster_spawn_time = warmup ? level.time + 5_sec : level.time + 1_sec;
 			return;
+		}
 
 		gentity_t *e = G_Spawn();
 		e->classname = monster_class;
@@ -354,6 +411,14 @@ void MM_Horde_RunSpawning()
 
 			e->item = Horde_PickItem();
 			ED_CallSpawn(e);
+
+			if (!e->inuse || !(e->svflags & SVF_MONSTER)) {
+				if (e->inuse)
+					G_FreeEntity(e);
+				level.horde_monster_spawn_time = warmup ? level.time + 5_sec : level.time + 1_sec;
+				return;
+			}
+
 			level.horde_monster_spawn_time = warmup ? level.time + 5_sec : level.time + random_time(0.3_sec, 0.5_sec);
 
 			e->enemy = FindClosestPlayerToPoint(e->s.origin);
@@ -366,8 +431,10 @@ void MM_Horde_RunSpawning()
 				if (!level.horde_num_monsters_to_spawn)
 					level.horde_all_spawned = true;
 			}
-		} else
+		} else {
+			G_FreeEntity(e);
 			level.horde_monster_spawn_time = warmup ? level.time + 5_sec : level.time + 1_sec;
+		}
 	}
 }
 
