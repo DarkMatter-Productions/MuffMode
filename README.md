@@ -7,7 +7,7 @@ Muff Mode is a server-side mod for [QUAKE II Remastered](https://github.com/id-S
 With a focus on multiplayer, it provides refined match handling and an extensive set of new capabilities for server owners to configure the game in a host of new ways.
 
 ### It is for Level Designers
-New creative possibilities are unlocked for level designers, with an array of new map entities and keys and a range of added gametypes to design for.
+New creative possibilities are unlocked for level designers, with an array of new map entities and keys and gametype filters on entities (map keys still recognize all mode names; see Gametype availability below).
 
 ### It is for the Players(tm)
 Enhanced HUD info and a number of changable settings.
@@ -36,6 +36,7 @@ Muff Mode includes the game logic, a server config, bot files and some map entit
 - Team captain system for team modes: auto-assigned captains, captain transfer, and captain-managed team controls.
 - A whole host of controls for admins, voting and more.
 - Refined match handling with conditional progression, including: warmups, readying, countdowns, post-match delays, sudden death, overtime and more.
+- Curated gametype list for public servers: enabled modes only in vote/menu/admin; disabled and removed modes documented with stable `g_gametype` indices.
 - Enhanced teamplay with team auto-balancing, forced balancing rules, improved team handling, communicating joined team to players, major item pickup and weapon drop POI's, and friendly fire warnings.
 - Extensive controls over specific map item spawns and entity string overrides.
 - EyeCam spectating, smooth and with aim prediction (mostly!)
@@ -58,14 +59,42 @@ Muff Mode includes the game logic, a server config, bot files and some map entit
 - Vertical Vengeance [Alpha v2] (mm-vengeance-a2)
   A small Duel map from Quake III: Arena.
 
-### New Gametypes (enabled in this release)
-- Horde: Battle waves of monsters, stay on top of the scoreboard while defeating up to 16 waves to be victorious! Note: currently does not handle limited lives.
-- Duel: Go head-to-head with an opponent. The victor goes on to face their next opponent in the queue.
-- Clan Arena: Rocket Arena's famous round-based team elimination mode - no item spawns, no self-damage and a full arsenal of weapons.
+### Gametype availability
 
-**Disabled for now** (code present; not selectable via vote, menu, or `gametype` until re-enabled): CaptureStrike, Red Rover.
+Muff Mode uses a single availability list for which modes can be started. **Vote menus**, **`callvote gametype`**, and the admin **`gametype`** command only offer **enabled** modes. Setting **`g_gametype`** to a disabled or removed index on map load or cvar change falls back to **Free for All (1)** with a console message.
 
-**Removed** (not available; enum slots reserved): Freeze Tag, ProBall, Last Man Standing.
+| Status | Modes | Short names | Notes |
+|--------|-------|-------------|-------|
+| **Enabled** | Free for All, Duel, Team Deathmatch, Capture the Flag, Clan Arena, Horde, Instagib, Nade Fest | `ffa`, `duel`, `tdm`, `ctf`, `ca`, `horde`, `instagib`, `nadefest` | Fully selectable and supported |
+| **Disabled** | CaptureStrike, Red Rover | `strike`, `rr` | Implementation retained; hidden until re-enabled in a future release |
+| **Removed** | Freeze Tag, ProBall, Last Man Standing | `ft`, `ball`, `lms` | Gameplay stripped; `g_gametype` indices 6, 9, 11 reserved |
+
+`g_gametype` index numbers are **stable** (see table under New Cvars). Map entity keys `gametype` / `not_gametype` still accept all short names above for filtering spawns; that is independent of whether a mode can be selected for play.
+
+Restrict voting further with **`g_votable_gametypes`** (subset of enabled modes only).
+
+### Selectable gametypes (this release)
+
+**Core deathmatch**
+- **Free for All** (`ffa`): Standard deathmatch.
+- **Duel** (`duel`): Head-to-head; winner faces the next opponent in the queue.
+- **Team Deathmatch** (`tdm`): Team-based frag scoring.
+- **Capture the Flag** (`ctf`): Classic CTF.
+
+**Muff Mode additions**
+- **Clan Arena** (`ca`): Round-based team elimination — arena loadout, no item spawns, no self-damage, full weapon set.
+- **Horde** (`horde`): Wave-based PvE; top scoreboard while clearing up to 16 waves. Note: limited lives are not handled in coop-style lives.
+- **Instagib** (`instagib`): Railgun-only one-hit kills.
+- **Nade Fest** (`nadefest`): Grenades only.
+
+### Not selectable in this release
+
+**Disabled** (code present; will return when round/match flow is production-ready):
+- **CaptureStrike** (`strike`): Clan Arena plus attack/defense CTF rounds (Threewave-style).
+- **Red Rover** (`rr`): Arena loadout; players swap teams on death until one side is empty.
+
+**Removed** (not available; do not use in server configs):
+- **Freeze Tag** (`ft`), **ProBall** (`ball`), **Last Man Standing** (`lms`).
 
 ### New Game Modifications
 - Vampiric Damage: Gain health by inflicting damage on your foes! No health pickups and a draining health value means the pressure is on!
@@ -99,7 +128,7 @@ Muff Mode includes the game logic, a server config, bot files and some map entit
 ## Debug Logging
 Muff Mode includes a centralized debug logging system that outputs detailed information to `muffmode_debug.log` in the game directory. This is controlled by the `g_muffmode_debug` cvar:
 
-- **g_muffmode_debug**: enables debug logging to muffmode_debug.log file (default 1)
+- **g_muffmode_debug**: enables debug logging to muffmode_debug.log file (default 0)
 
 When enabled, this log captures detailed information about:
 - Match state changes and transitions
@@ -195,7 +224,7 @@ Use **[command] [arg]** for the below listed admin commands:
  - **map**: changes the level to the specified map, map needs to be a part of the map list.
  - **nextmap**: forces level change to the next map.
  - **map_restart**: restarts current level and session, applies latches cvar changes
- - **gametype [gametype_name]**: changes gametype to selected option, then resets the level
+ - **gametype [gametype_name]**: changes gametype to an enabled mode (`ffa|duel|tdm|ctf|ca|horde|instagib|nadefest`), then resets the level. Disabled or removed modes are rejected.
  - **ruleset <q2re|mm|q3a|q2reb|qc>**: changes gameplay style
  - **doctor**: read-only diagnostics command that runs all checks and reports cvar misconfigurations and risky combinations with suggested fixes
  - **readyall**: force all players to ready status (during readying warmup status)
@@ -253,7 +282,7 @@ Use **callvote [command] [arg]** for the below listed vote commands:
 
 Voting control cvars:
 - **g_allow_vote_midgame**: allows/prohibits starting votes during an active match state (default 0)
-- **g_allow_voting**: global voting enable/disable switch; when 0, voting is fully disabled (default 0)
+- **g_allow_voting**: global voting enable/disable switch; when 0, voting is fully disabled (default 1)
 
 ### Cvar Changes
  - g_dm_spawn_farthest: added an option, valid values are as follows:
@@ -274,7 +303,7 @@ Voting control cvars:
  - **g_allow_mymap**: allow mymap (map queuing function) (default 1)
  - **g_allow_spec_vote**: Allows/prohibits voting from spectators. (default 1)
  - **g_allow_vote_midgame**: Allows/prohibits voting during a match. (default 0)
- - **g_allow_voting**: General control over voting, 0 prohibits any voting. (default 0)
+ - **g_allow_voting**: General control over voting, 0 prohibits any voting. (default 1)
  - **g_arena_start_armor**: sets starting armor value in arena modes, range from 1-999, value affects armor tier (default 200)
  - **g_arena_start_health**: sets starting health value in arena modes, range from 1-999 (default 200)
  - **g_arena_dmg_armor**: when set to 1, allows armor damage in arena modes (default 0)
@@ -357,7 +386,7 @@ For a complete set of ready-to-use server configs with per-gametype settings, se
  - **g_mapspawn_no_plasmabeam**: when set to 1, prevents Plasma Beam from spawning in maps (default 0)
  - **g_owner_auto_join**: when set to 0, avoids auto-joining a match as lobby owner (default 1)
  - **g_owner_push_scores**: when set to 1, automatically shows scores to lobby owner on join (default 0)
- - **g_muffmode_debug**: enables debug logging to muffmode_debug.log file (default 1)
+ - **g_muffmode_debug**: enables debug logging to muffmode_debug.log file (default 0)
  - **g_round_countdown**: sets round countdown time (in seconds) in round-based gametypes (default 10)
  - **g_ruleset**: gameplay rules (default 2):
 	1. Quake II Rerelease
@@ -379,7 +408,7 @@ For a complete set of ready-to-use server configs with per-gametype settings, se
  - **g_vampiric_percentile**: set health percentile bonus for vampiric damage (default 0.67f)
  - **g_vote_flags**: Bitmask to disable specific vote options. (default 0)
  - **g_vote_limit**: Sets maximum number of votes per match per client, 0 for no limit. (default 3)
- - **g_votable_gametypes**: Space-separated list of gametype short names that can be voted on. If empty, all implemented gametypes are available for voting. Example: "ffa duel tdm ctf" (default: "")
+ - **g_votable_gametypes**: Space-separated list of gametype short names that can be voted on. If empty, all **enabled** gametypes are available (`ffa|duel|tdm|ctf|ca|horde|instagib|nadefest`). Example: "ffa duel tdm ctf ca" (default: "")
  - **g_votable_rulesets**: Space-separated list of ruleset short names that can be voted on. If empty, all implemented rulesets are available for voting. Example: "q2re mm q3a q2reb qc" (default: "")
  - **g_warmup_ready_percentage**: in match mode, sets percentile of ready players out of total players required to start the match. Set to 0 to disable readying up. (default: 0.51f)
  - **g_weapon_projection**: changes weapon projection offset. 0 = normal, 1 = always force central handedness, 2 = force central view projection. looks strange with view weapons. (default: 0)
@@ -425,20 +454,24 @@ Some entity overrides are included which add some subtle ambient sounds, mover s
 	 - **g_entity_override_dir**: overrides entity override file subdir within baseq2 (default: maps)
 	 - **g_entity_override_save**: when set to 1, will save entity override file upon map load (should one not already be loaded) (default: 0)
 	 - **g_entity_override_load**: when set to 1, will load entity override file upon map load (default: 1)
- * New entity keys**: "gametype" and "not_gametype": set conditional list of gametypes to respectively spawn or not spawn the entity in. The list can be comma or space separated. The following values correspond to a particular gametype:
-	campaign: Campaigns
-	ffa: Deathmatch
-	tournament: Duel
-	team: Team Deathmatch
-	ctf: Capture the Flag
-	ca: Clan Arena
-	ft: Freeze Tag
-	rr: Red Rover
-	lms: Last Man Standing
-	horde: Horde Mode
-		Example: "gametype" "ffa tournament" - this will spawn the entity only in deathmatches and duels.
+ * New entity keys**: "gametype" and "not_gametype": set conditional list of gametypes to respectively spawn or not spawn the entity in. The list can be comma or space separated. Short names (including disabled/removed modes) still work for **map filtering**:
+	campaign — Campaigns
+	ffa — Free for All
+	tournament — Duel
+	team — Team Deathmatch
+	ctf — Capture the Flag
+	ca — Clan Arena
+	horde — Horde
+	instagib — Instagib
+	nadefest — Nade Fest
+	strike — CaptureStrike (disabled for play)
+	rr — Red Rover (disabled for play)
+	ft — Freeze Tag (removed)
+	ball — ProBall (removed)
+	lms — Last Man Standing (removed)
+	Example: "gametype" "ffa tournament" — spawns the entity only in FFA and Duel.
  * New entity keys**: "**notteam**" and "**notfree**": removes an entity from team gametypes or non-team gametypes respectively.
-	Example: "**notteam**" "1" - the entity will not spawn in team gametypes such as TDM, CTF, FreezeTag and Clan Arena.
+	Example: "**notteam**" "1" — the entity will not spawn in team gametypes such as TDM, CTF, and Clan Arena.
  * misc_teleporter: **"mins"/"maxs" "x y z"** entity keys to override teleport trigger size, removes teleporter pad if either keys are set
  * new item spawnflag & 8: item spawns in suspended state (does not drop to floor)
  * Hacky Map Fixes:
