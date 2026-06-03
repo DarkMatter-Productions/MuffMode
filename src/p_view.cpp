@@ -1266,7 +1266,6 @@ Called for each player at the end of the server frame
 and right after spawning
 =================
 */
-static int scorelimit = -1;
 void ClientEndServerFrame(gentity_t *ent) {
 	// no player exists yet (load game)
 	if (!ent->client->pers.spawned)
@@ -1280,8 +1279,8 @@ void ClientEndServerFrame(gentity_t *ent) {
 
 	if (deathmatch->integer) {
 		int limit = GT_ScoreLimit();
-		if (!ent->client->ps.stats[STAT_SCORELIMIT] || limit != strtoul(gi.get_configstring(CONFIG_STORY_SCORELIMIT), nullptr, 10)) {
-			ent->client->ps.stats[STAT_SCORELIMIT] = CONFIG_STORY_SCORELIMIT;
+		ent->client->ps.stats[STAT_SCORELIMIT] = limit;
+		if (limit != (int)strtoul(gi.get_configstring(CONFIG_STORY_SCORELIMIT), nullptr, 10)) {
 			gi.configstring(CONFIG_STORY_SCORELIMIT, limit ? G_Fmt("{}", limit).data() : "");
 		}
 	}
