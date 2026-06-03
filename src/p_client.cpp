@@ -680,16 +680,8 @@ static void ClientObituary(gentity_t *self, gentity_t *inflictor, gentity_t *att
 			} else {
 				if (GTF(GTF_ROUNDS) && GTF(GTF_ELIMINATION) && level.round_state == roundst_t::ROUND_IN_PROGRESS) {
 					gi.LocClient_Print(self, PRINT_CENTER, "You were fragged by {}\nYou will respawn next round.", attacker->client->resp.netname);
-				} else if (GT(GT_FREEZE) && level.round_state == roundst_t::ROUND_IN_PROGRESS) {
-					bool last_standing = true;
-					if (self->client->sess.team == TEAM_RED && level.num_living_red > 1 ||
-						self->client->sess.team == TEAM_BLUE && level.num_living_blue > 1)
-						last_standing = false;
-					gi.LocClient_Print(self, PRINT_CENTER, "You were frozen by {}{}",
-						attacker->client->resp.netname,
-						last_standing ? "" : "\nYou will respawn once thawed.");
 				} else {
-					gi.LocClient_Print(self, PRINT_CENTER, "You were {} by {}", GT(GT_FREEZE) ? "frozen" : "fragged", attacker->client->resp.netname);
+					gi.LocClient_Print(self, PRINT_CENTER, "You were fragged by {}", attacker->client->resp.netname);
 				}
 			}
 		}
@@ -713,10 +705,10 @@ static void ClientObituary(gentity_t *self, gentity_t *inflictor, gentity_t *att
 					}
 				} else if (Teams() || level.match_state != matchst_t::MATCH_IN_PROGRESS) {
 					if (attacker->client->sess.pc.show_fragmessages)
-						gi.LocClient_Print(attacker, PRINT_CENTER, "You {} {}", GT(GT_FREEZE) ? "froze" : "fragged", self->client->resp.netname);
+						gi.LocClient_Print(attacker, PRINT_CENTER, "You fragged {}", self->client->resp.netname);
 				} else {
 					if (attacker->client->sess.pc.show_fragmessages)
-						gi.LocClient_Print(attacker, PRINT_CENTER, "You {} {}\n{} place with {}", GT(GT_FREEZE) ? "froze" : "fragged",
+						gi.LocClient_Print(attacker, PRINT_CENTER, "You fragged {}\n{} place with {}",
 							self->client->resp.netname, G_PlaceString(attacker->client->resp.rank + 1), attacker->client->resp.score);
 				}
 			}
@@ -1153,13 +1145,8 @@ DIE(player_die) (gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 		damage = 400;
 	}
 
-	if (GT(GT_FREEZE) && !level.intermission_time && self->client->eliminated && !self->client->resp.thawer) {
-		self->s.effects |= EF_COLOR_SHELL;
-		self->s.renderfx |= (RF_SHELL_RED | RF_SHELL_GREEN | RF_SHELL_BLUE);
-	} else {
-		self->s.effects = EF_NONE;
-		self->s.renderfx = RF_NONE;
-	}
+	self->s.effects = EF_NONE;
+	self->s.renderfx = RF_NONE;
 
 	// make sure no trackers are still hurting us.
 	if (self->client->tracker_pain_time) {
@@ -1197,14 +1184,10 @@ DIE(player_die) (gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 		self->takedamage = false;
 	} else { // normal death
 		if (!self->deadflag) {
-			if (GT(GT_FREEZE)) {
-				self->s.frame = FRAME_crstnd01 - 1;
-				self->client->anim_end = self->s.frame;
-			} else {
-				// start a death animation
-				self->client->anim_priority = ANIM_DEATH;
-				if (self->client->ps.pmove.pm_flags & PMF_DUCKED) {
-					self->s.frame = FRAME_crdeath1 - 1;
+			// start a death animation
+			self->client->anim_priority = ANIM_DEATH;
+			if (self->client->ps.pmove.pm_flags & PMF_DUCKED) {
+				self->s.frame = FRAME_crdeath1 - 1;
 					self->client->anim_end = FRAME_crdeath5;
 				} else {
 					switch (irandom(3)) {
@@ -1222,7 +1205,6 @@ DIE(player_die) (gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 						break;
 					}
 				}
-			}
 			static constexpr const char *death_sounds[] = {
 				"*death1.wav",
 				"*death2.wav",
@@ -1369,7 +1351,7 @@ void InitClientPersistant(gentity_t *ent, gclient_t *client) {
 
 		MM_ApplySpawnLoadout(ent, client, taken_loadout);
 
-		if (notGT(GT_BALL) && !taken_loadout) {
+		if (!taken_loadout) {
 			if (*g_start_items->string)
 				Player_GiveStartItems(ent, g_start_items->string);
 			if (level.start_items && *level.start_items)
@@ -2240,7 +2222,6 @@ void CopyToBodyQue(gentity_t *ent) {
 		return;
 
 	gentity_t *body;
-	bool frozen = !!(GT(GT_FREEZE) && !level.intermission_time && ent->client->eliminated && !ent->client->resp.thawer);
 
 	// grab a body que and cycle to the next one
 	body = &g_entities[game.maxclients + level.body_que + 1];
@@ -2255,13 +2236,8 @@ void CopyToBodyQue(gentity_t *ent) {
 	body->s.number = body - g_entities;
 	body->s.skinnum = ent->s.skinnum & 0xFF; // only copy the client #
 
-	if (frozen) {
-		body->s.effects |= EF_COLOR_SHELL;
-		body->s.renderfx |= (RF_SHELL_RED | RF_SHELL_GREEN | RF_SHELL_BLUE);
-	} else {
-		body->s.effects = EF_NONE;
-		body->s.renderfx = RF_NONE;
-	}
+	body->s.effects = EF_NONE;
+	body->s.renderfx = RF_NONE;
 
 	body->svflags = ent->svflags;
 	body->absmin = ent->absmin;
@@ -2285,7 +2261,7 @@ void CopyToBodyQue(gentity_t *ent) {
 	} else
 		body->mins = body->maxs = {};
 
-	if (g_corpse_sink_time->value > 0 && notGT(GT_FREEZE)) {
+	if (g_corpse_sink_time->value > 0) {
 		body->timestamp = level.time + gtime_t::from_sec(g_corpse_sink_time->value + 1.5);
 		body->nextthink = level.time + gtime_t::from_sec(g_corpse_sink_time->value);
 		body->think = BodySink;

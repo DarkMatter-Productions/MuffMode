@@ -554,12 +554,7 @@ void ED_CallSpawn(gentity_t *ent) {
 	}
 
 	if (!strcmp(ent->classname, "item_ball")) {
-		if (GT(GT_BALL)) {
-			ent->s.effects |= EF_COLOR_SHELL;
-			ent->s.renderfx |= RF_SHELL_RED | RF_SHELL_GREEN;
-		} else {
-			G_FreeEntity(ent);
-		}
+		G_FreeEntity(ent);
 		return;
 	}
 
@@ -2035,11 +2030,8 @@ void SP_worldspawn(gentity_t *ent) {
 
 	PrecacheItem(GetItemByIndex(IT_COMPASS));
 
-	if (!(g_instagib->integer || GT(GT_INSTAGIB)) && !(g_nadefest->integer || GT(GT_NADEFEST)) && notGT(GT_BALL))
+	if (!(g_instagib->integer || GT(GT_INSTAGIB)) && !(g_nadefest->integer || GT(GT_NADEFEST)))
 		PrecacheItem(GetItemByIndex(IT_WEAPON_BLASTER));
-
-	if (GT(GT_BALL))
-		PrecacheItem(GetItemByIndex(IT_BALL));
 
 	if ((!strcmp(g_allow_grapple->string, "auto")) ?
 		(GTF(GTF_CTF) ? !level.no_grapple : 0) :

@@ -58,14 +58,14 @@ Muff Mode includes the game logic, a server config, bot files and some map entit
 - Vertical Vengeance [Alpha v2] (mm-vengeance-a2)
   A small Duel map from Quake III: Arena.
 
-### New Gametypes
+### New Gametypes (enabled in this release)
 - Horde: Battle waves of monsters, stay on top of the scoreboard while defeating up to 16 waves to be victorious! Note: currently does not handle limited lives.
 - Duel: Go head-to-head with an opponent. The victor goes on to face their next opponent in the queue.
 - Clan Arena: Rocket Arena's famous round-based team elimination mode - no item spawns, no self-damage and a full arsenal of weapons.
-- CaptureStrike: A Threewave classic, combines Clan Arena, CTF and Counter Strike. Teams take turns attacking or defending and battle until one team is dead, or the attacking team captures the flag.
-- Red Rover: Clan Arena style where teams are changed on death. When a team has been eliminated, the round ends.
-- Freeze Tag: Team elimination mode where frozen players can be thawed by teammates. The round ends when one team is completely frozen. (WIP)
-- ProBall: A sports-style gametype where players compete to carry a ball into the enemy goal. (WIP)
+
+**Disabled for now** (code present; not selectable via vote, menu, or `gametype` until re-enabled): CaptureStrike, Red Rover.
+
+**Removed** (not available; enum slots reserved): Freeze Tag, ProBall, Last Man Standing.
 
 ### New Game Modifications
 - Vampiric Damage: Gain health by inflicting damage on your foes! No health pickups and a draining health value means the pressure is on!
@@ -241,7 +241,7 @@ Use **callvote [command] [arg]** for the below listed vote commands:
  - **map**: changes the level to the specified map, map needs to be a part of the map list.
  - **nextmap**: forces level change to the next map.
  - **restart**: force the match to reset to warmup, requires a match in progress.
- - **gametype**: changes gametype to the specified type (ffa|duel|tdm|ctf|ca|ft|strike|rr|lms|horde|ball|instagib|nadefest)
+ - **gametype**: changes gametype to the specified type (ffa|duel|tdm|ctf|ca|horde|instagib|nadefest)
  - **timelimit**: changes timelimit to the minutes specified.
  - **scorelimit**: changes scorelimit to the value specified.
  - **shuffle**: shuffles and balances the teams, resets the match. Requires a team gametype.
@@ -308,37 +308,34 @@ When `g_gametype_cfg` is enabled (default), the game automatically executes conf
 
 The config files follow the naming convention: `gt-[GAMETYPE].cfg`
 
-Available config files:
+Available config files (for enabled gametypes):
 - `gt-FFA.cfg` - Free for All settings
 - `gt-DUEL.cfg` - Duel settings  
 - `gt-TDM.cfg` - Team Deathmatch settings
 - `gt-CTF.cfg` - Capture the Flag settings
 - `gt-CA.cfg` - Clan Arena settings
-- `gt-FT.cfg` - Freeze Tag settings
-- `gt-STRIKE.cfg` - CaptureStrike settings
-- `gt-REDROVER.cfg` - Red Rover settings
-- `gt-LMS.cfg` - Last Man Standing settings
 - `gt-HORDE.cfg` - Horde mode settings
-- `gt-BALL.cfg` - ProBall settings
 - `gt-INSTAGIB.cfg` - Instagib settings
 - `gt-NADEFEST.cfg` - Nade Fest settings
+
+Configs for disabled/removed gametypes (`gt-STRIKE`, `gt-REDROVER`, `gt-FT`, `gt-BALL`, `gt-LMS`) are not executed while those modes are unavailable.
 
 These config files should be placed in the main game directory and can contain any server commands, cvar settings, map lists, or other configurations specific to that gametype. The system ensures configs are only executed when the gametype actually changes, not on every map load.
 
 For a complete set of ready-to-use server configs with per-gametype settings, see the [MuffMode Server Configs repository](https://github.com/ozy24/muffmode-server-configs).
- - **g_gametype**: cvar sets gametype by index number, this is the current list:
+ - **g_gametype**: cvar sets gametype by index number. Indices are stable; unavailable values fall back to FFA (1).
 	0: Campaign (not used at present, use deathmatch 0 as usual)
-	1. Free for All
+	1. Free for All (default if invalid/disabled index)
 	2. Duel
 	3. Team Deathmatch
 	4. Capture the Flag
 	5. Clan Arena
-	6. Freeze Tag (WIP)
-	7. CaptureStrike
-	8. Red Rover
-	9. Last Man Standing
+	6. Freeze Tag (removed)
+	7. CaptureStrike (disabled)
+	8. Red Rover (disabled)
+	9. Last Man Standing (removed)
 	10. Horde
-	11. ProBall (WIP)
+	11. ProBall (removed)
 	12. Instagib
 	13. Nade Fest
  - **g_horde_starting_wave**: sets the starting wave number for Horde mode (default 1)
@@ -569,7 +566,7 @@ Some entity overrides are included which add some subtle ambient sounds, mover s
 	
 ## Roadmap:
 - tastyspleen.net's mymap system: add support for dm flags
-- Freeze Tag gametype (WIP)
+- Re-enable CaptureStrike and Red Rover when match/round scoring is production-ready
 - Server-side player configs, stats, Elo, ranked matches, Elo team balancing (WIP)
 - Gladiator bots
 - Menu overhaul, adding voting, full admin controls, mymap, player config

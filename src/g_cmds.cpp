@@ -8,12 +8,6 @@
 #include "muffmode/mm_vote.h"
 #include "muffmode/mm_vote_menu.h"
 #include "monsters/m_player.h"
-/*freeze*/
-#if 0
-#include "freeze.h"
-#endif
-/*freeze*/
-
 enum cmd_flags_t : uint32_t {
 	CF_NONE				= 0,
 	CF_ALLOW_DEAD		= bit_v<0>,

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Change
+
+- **Gametype availability:** Central registry in `mm_gametype` controls which modes can be selected. Removed stub gametypes (Freeze Tag, ProBall, LMS) and their gameplay code; disabled CaptureStrike and Red Rover from vote/admin/menu selection (implementation retained for a future release). Invalid `g_gametype` values fall back to FFA. Enum indices unchanged for configs and map entity keys.
+
 ### Fix
 
 - **Miniscore match limit HUD:** Show frag/round/capture limit with statusbar `num` and a numeric `STAT_SCORELIMIT` so the value centers under miniscore faces on vanilla and Muff Mode clients (replaces left-aligned `stat_string`).

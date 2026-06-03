@@ -3,6 +3,7 @@
 
 #include "g_local.h"
 #include "g_debug_log.h"
+#include "muffmode/mm_gametype.h"
 #include "muffmode/mm_vote.h"
 #include "muffmode/mm_vote_menu.h"
 #include <cerrno>
@@ -407,7 +408,10 @@ bool MM_VoteValGametype(gentity_t *ent)
 
 bool MM_IsGametypeVotable(gametype_t gt)
 {
-	// If no votable list is set, allow all gametypes (backward compatible).
+	if (!MM_IsGametypeEnabled(gt))
+		return false;
+
+	// If no votable list is set, allow all enabled gametypes.
 	if (!g_votable_gametypes->string[0])
 		return true;
 
@@ -430,16 +434,7 @@ std::string MM_GetVotableGametypesList()
 
 	if (!g_votable_gametypes->string[0])
 	{
-		// If no restriction, show all implemented gametypes.
-		for (int i = (int)GT_FIRST; i <= (int)GT_LAST; i++)
-		{
-			// Skip GT_NONE, GT_STRIKE, GT_RR, GT_LMS, GT_BALL (not fully implemented).
-			if (i == GT_NONE || i == GT_STRIKE || i == GT_RR || i == GT_LMS || i == GT_BALL)
-				continue;
-			if (!result.empty())
-				result += "|";
-			result += gt_short_name[i];
-		}
+		return MM_GetEnabledGametypesList();
 	}
 	else
 	{

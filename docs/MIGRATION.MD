@@ -478,4 +478,5 @@ _Smoke results: pending in-game validation._
 
 - This is a staged refactor, not a rewrite.
 - Focus remains on reducing merge/debug risk while preserving gameplay behavior.
+- **Gametype availability** (`mm_gametype.cpp`): enabled modes are selectable; disabled modes (Strike, RR) keep code but reject selection; removed modes (Freeze, Ball, LMS) have gameplay stripped. `g_gametype` enum indices are unchanged.
 

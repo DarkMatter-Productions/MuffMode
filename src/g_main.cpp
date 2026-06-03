@@ -153,7 +153,6 @@ cvar_t *g_fast_doors;
 cvar_t *g_frag_messages;
 cvar_t *g_frenzy;
 cvar_t *g_friendly_fire;
-cvar_t *g_frozen_time;
 cvar_t *g_grapple_damage;
 cvar_t *g_grapple_fly_speed;
 cvar_t *g_grapple_offhand;
@@ -284,12 +283,12 @@ int _gt[] = {
 	/* GT_TDM */ GTF_TEAMS | GTF_FRAGS,
 	/* GT_CTF */ GTF_TEAMS | GTF_CTF,
 	/* GT_CA */ GTF_TEAMS | GTF_ARENA | GTF_ROUNDS | GTF_ELIMINATION,
-	/* GT_FREEZE */ GTF_TEAMS | GTF_ELIMINATION,
+	/* GT_FREEZE */ 0, // removed
 	/* GT_STRIKE */ GTF_TEAMS | GTF_ARENA | GTF_ROUNDS | GTF_CTF | GTF_ELIMINATION,
 	/* GT_RR */ GTF_TEAMS | GTF_ROUNDS | GTF_ARENA,
-	/* GT_LMS */ GTF_ELIMINATION,
+	/* GT_LMS */ 0, // removed
 	/* GT_HORDE */ GTF_ROUNDS,
-	/* GT_BALL */ 0,
+	/* GT_BALL */ 0, // removed
 	/* GT_INSTAGIB */ GTF_FRAGS,
 	/* GT_NADEFEST */ GTF_FRAGS
 };
@@ -306,7 +305,9 @@ static void InitGametype() {
 
 	if (g_gametype->integer < 0 || g_gametype->integer >= GT_NUM_GAMETYPES)
 		gi.cvar_forceset("g_gametype", G_Fmt("{}", clamp(g_gametype->integer, (int)GT_FIRST, (int)GT_LAST)).data());
-	
+
+	MM_SanitizeCurrentGametype();
+
 	if (ctf->integer) {
 		force_dm = true;
 		// force coop off
@@ -420,9 +421,6 @@ static void InitGame() {
 	g_vampiric_exp_min = gi.cvar("g_vampiric_exp_min", "0", CVAR_NOFLAGS);
 	g_vampiric_health_max = gi.cvar("g_vampiric_health_max", "9999", CVAR_NOFLAGS);
 	g_vampiric_percentile = gi.cvar("g_vampiric_percentile", "0.67f", CVAR_NOFLAGS);
-
-	// freeze tag
-	g_frozen_time = gi.cvar("g_frozen_time", "180", CVAR_NOFLAGS);
 
 	// [Paril-KEX]
 	g_coop_player_collision = gi.cvar("g_coop_player_collision", "0", CVAR_LATCH);
@@ -690,6 +688,7 @@ static void InitGame() {
 	level.total_player_deaths = 0;
 
 	MM_SyncGametypeTracking();
+	MM_SanitizeCurrentGametype();
 
 	MM_Horde_Init();
 
@@ -2741,9 +2740,6 @@ void BeginIntermission(gentity_t *targ) {
 		// Clear follow_target if entity is not in use OR if client pointer is invalid
 		if (ec->client->follow_target && (!ec->client->follow_target->inuse || !ec->client->follow_target->client)) {
 			ec->client->follow_target = nullptr;
-		}
-		if (ec->client->viewed && !ec->client->viewed->inuse) {
-			ec->client->viewed = nullptr;
 		}
 		// Clear any bot-specific entity references
 		if (ec->svflags & SVF_BOT) {

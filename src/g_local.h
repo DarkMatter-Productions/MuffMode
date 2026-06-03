@@ -1372,7 +1372,6 @@ enum mod_id_t : uint8_t {
 	MOD_HUNTER_SPHERE,
 	MOD_DEFENDER_SPHERE,
 	MOD_TRACKER,
-	MOD_THAW,
 	MOD_DOPPEL_EXPLODE,
 	MOD_DOPPEL_VENGEANCE,
 	MOD_DOPPEL_HUNTER,
@@ -2428,7 +2427,6 @@ extern cvar_t *g_fast_doors;
 extern cvar_t *g_frag_messages;
 extern cvar_t *g_frenzy;
 extern cvar_t *g_friendly_fire;
-extern cvar_t *g_frozen_time;
 extern cvar_t *g_grapple_damage;
 extern cvar_t *g_grapple_fly_speed;
 extern cvar_t *g_grapple_offhand;
@@ -3471,12 +3469,6 @@ struct client_respawn_t {
 	bool				ready;
 	ghost_t				*ghost; // for ghost codes
 
-/*freeze*/
-	gentity_t			*thawer;
-	int					help;
-	int					thawed;
-/*freeze*/
-
 	int32_t				kill_count;	// for rampage award, reset on respawn
 
 	bool				showed_motd;
@@ -3710,12 +3702,6 @@ struct gclient_t {
 	gtime_t	 last_firing_time;
 
 	bool		eliminated;
-/*freeze*/
-	gentity_t		*viewed;
-	float		thaw_time;
-	float		frozen_time;
-	float		moan_time;
-/*freeze*/
 
 	bool		ready_to_exit;
 

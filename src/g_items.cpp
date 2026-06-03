@@ -996,7 +996,7 @@ static void Tech_Spawn(gitem_t *item, gentity_t *spot) {
 
 static bool AllowTechs() {
 	if (!strcmp(g_allow_techs->string, "auto"))
-		return !!(GT(GT_CTF) && !(g_instagib->integer || GT(GT_INSTAGIB)) && !(g_nadefest->integer || GT(GT_NADEFEST)) && notGT(GT_BALL));
+		return !!(GT(GT_CTF) && !(g_instagib->integer || GT(GT_INSTAGIB)) && !(g_nadefest->integer || GT(GT_NADEFEST)));
 	else
 		return !!(g_allow_techs->integer && ItemSpawnsEnabled());
 }
@@ -2931,9 +2931,6 @@ bool CheckItemEnabled(gitem_t *item) {
 	MM_GetItemInhibitMode(item->flags, add, subtract);
 
 	if (subtract)
-		return false;
-
-	if (GT(GT_BALL) && item->id != IT_BALL)
 		return false;
 
 	if (!add) {

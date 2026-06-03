@@ -17,7 +17,74 @@ int s_gt_g_gametype = 0;
 bool s_gt_teams_on = false;
 gametype_t s_gt_check = GT_NONE;
 
+constexpr gametype_avail_t k_gametype_availability[GT_NUM_GAMETYPES] = {
+	/* GT_NONE */ gametype_avail_t::Removed,
+	/* GT_FFA */ gametype_avail_t::Enabled,
+	/* GT_DUEL */ gametype_avail_t::Enabled,
+	/* GT_TDM */ gametype_avail_t::Enabled,
+	/* GT_CTF */ gametype_avail_t::Enabled,
+	/* GT_CA */ gametype_avail_t::Enabled,
+	/* GT_FREEZE */ gametype_avail_t::Removed,
+	/* GT_STRIKE */ gametype_avail_t::Disabled,
+	/* GT_RR */ gametype_avail_t::Disabled,
+	/* GT_LMS */ gametype_avail_t::Removed,
+	/* GT_HORDE */ gametype_avail_t::Enabled,
+	/* GT_BALL */ gametype_avail_t::Removed,
+	/* GT_INSTAGIB */ gametype_avail_t::Enabled,
+	/* GT_NADEFEST */ gametype_avail_t::Enabled,
+};
+
 } // namespace
+
+gametype_avail_t MM_GetGametypeAvailability(gametype_t gt)
+{
+	const int i = (int)gt;
+	if (i < 0 || i >= GT_NUM_GAMETYPES)
+		return gametype_avail_t::Removed;
+	return k_gametype_availability[i];
+}
+
+bool MM_IsGametypeEnabled(gametype_t gt)
+{
+	return MM_GetGametypeAvailability(gt) == gametype_avail_t::Enabled;
+}
+
+gametype_t MM_SanitizeGametype(gametype_t gt)
+{
+	if (MM_IsGametypeEnabled(gt))
+		return gt;
+	return GT_FFA;
+}
+
+void MM_SanitizeCurrentGametype()
+{
+	const gametype_t raw = (gametype_t)clamp(g_gametype->integer, (int)GT_FIRST, (int)GT_LAST);
+	const gametype_t sane = MM_SanitizeGametype(raw);
+
+	if (sane == raw)
+		return;
+
+	const char *reason = MM_GetGametypeAvailability(raw) == gametype_avail_t::Disabled ? "disabled" : "removed";
+	gi.Com_PrintFmt("g_gametype {} ({}) is {}; using {} ({}).\n",
+		(int)raw, gt_long_name[(int)raw], reason, (int)sane, gt_long_name[(int)sane]);
+	gi.cvar_forceset("g_gametype", G_Fmt("{}", (int)sane).data());
+}
+
+std::string MM_GetEnabledGametypesList()
+{
+	std::string result;
+
+	for (int i = (int)GT_FIRST; i <= (int)GT_LAST; i++) {
+		const gametype_t gt = (gametype_t)i;
+		if (!MM_IsGametypeEnabled(gt))
+			continue;
+		if (!result.empty())
+			result += "|";
+		result += gt_short_name[i];
+	}
+
+	return result;
+}
 
 void MM_CheckRuleset()
 {
@@ -36,6 +103,14 @@ void MM_CheckRuleset()
 
 void MM_ChangeGametype(gametype_t gt)
 {
+	if (!MM_IsGametypeEnabled(gt)) {
+		const gametype_avail_t avail = MM_GetGametypeAvailability(gt);
+		const char *reason = avail == gametype_avail_t::Disabled ? "disabled" : "removed";
+		gi.Com_PrintFmt("Gametype {} ({}) is {} and cannot be selected.\n",
+			gt_short_name[(int)gt], gt_long_name[(int)gt], reason);
+		return;
+	}
+
 	switch (gt)
 	{
 	case gametype_t::GT_CTF:
@@ -133,7 +208,11 @@ void MM_GTChanges()
 
 	if (s_gt_g_gametype != g_gametype->modified_count)
 	{
-		gt = (gametype_t)clamp(g_gametype->integer, (int)GT_FIRST, (int)GT_LAST);
+		const gametype_t raw = (gametype_t)clamp(g_gametype->integer, (int)GT_FIRST, (int)GT_LAST);
+		gt = MM_SanitizeGametype(raw);
+
+		if (gt != raw)
+			gi.cvar_forceset("g_gametype", G_Fmt("{}", (int)gt).data());
 
 		if (gt != s_gt_check)
 		{
@@ -294,20 +373,6 @@ void MM_GTSetLongName()
 			} else {
 				s = gt_long_name[GT_CTF];
 			}
-		} else if (GT(GT_FREEZE)) {
-			if (g_instagib->integer) {
-				s = "Insta-Freeze";
-			} else if (g_vampiric_damage->integer) {
-				s = "Vampiric Freeze";
-			} else if (g_frenzy->integer) {
-				s = "Frenzy Freeze";
-			} else if (g_nadefest->integer) {
-				s = "NadeFest Freeze";
-			} else if (g_quadhog->integer) {
-				s = "Quad Hog Freeze";
-			} else {
-				s = gt_long_name[GT_FREEZE];
-			}
 		} else if (GT(GT_CA)) {
 			if (g_instagib->integer) {
 				s = "Insta-CA";
@@ -391,20 +456,6 @@ void MM_GTSetLongName()
 				s = "Quad Hog Horde";
 			} else {
 				s = gt_long_name[GT_HORDE];
-			}
-		} else if (GT(GT_BALL)) {
-			if (g_instagib->integer) {
-				s = "Insta-ProBall";
-			} else if (g_vampiric_damage->integer) {
-				s = "Vampiric ProBall";
-			} else if (g_frenzy->integer) {
-				s = "Frenzy ProBall";
-			} else if (g_nadefest->integer) {
-				s = "NadeFest ProBall";
-			} else if (g_quadhog->integer) {
-				s = "Quad Hog ProBall";
-			} else {
-				s = gt_long_name[GT_BALL];
 			}
 		} else if (deathmatch->integer) {
 			if (g_instagib->integer) {

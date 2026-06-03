@@ -3,6 +3,7 @@
 
 #include "g_local.h"
 #include "muffmode/mm_admin.h"
+#include "muffmode/mm_gametype.h"
 #include "muffmode/mm_vote.h"
 
 void MM_CmdDoctor(gentity_t *ent)
@@ -164,9 +165,9 @@ void MM_CmdGametype(gentity_t *ent)
 
 	if (gi.argc() < 2)
 	{
-		std::string votable_list = MM_GetVotableGametypesList();
-		if (!votable_list.empty())
-			gi.LocClient_Print(ent, PRINT_HIGH, "Usage: {} <{}>\nChanges current gametype. Current gametype is {} ({}).\n", gi.argv(0), votable_list.c_str(), gt_long_name[g_gametype->integer], g_gametype->integer);
+		const std::string enabled_list = MM_GetEnabledGametypesList();
+		if (!enabled_list.empty())
+			gi.LocClient_Print(ent, PRINT_HIGH, "Usage: {} <{}>\nChanges current gametype. Current gametype is {} ({}).\n", gi.argv(0), enabled_list.c_str(), gt_long_name[g_gametype->integer], g_gametype->integer);
 		else
 			gi.LocClient_Print(ent, PRINT_HIGH, "Usage: {} <gametype>\nChanges current gametype. Current gametype is {} ({}).\n", gi.argv(0), gt_long_name[g_gametype->integer], g_gametype->integer);
 		return;
@@ -176,9 +177,17 @@ void MM_CmdGametype(gentity_t *ent)
 	if (gt == GT_NONE)
 	{
 		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid gametype.\n");
-		std::string votable_list = MM_GetVotableGametypesList();
-		if (!votable_list.empty())
-			gi.LocClient_Print(ent, PRINT_HIGH, "Valid gametypes are: {}\n", votable_list.c_str());
+		const std::string enabled_list = MM_GetEnabledGametypesList();
+		if (!enabled_list.empty())
+			gi.LocClient_Print(ent, PRINT_HIGH, "Valid gametypes are: {}\n", enabled_list.c_str());
+		return;
+	}
+
+	if (!MM_IsGametypeEnabled(gt)) {
+		const gametype_avail_t avail = MM_GetGametypeAvailability(gt);
+		const char *reason = avail == gametype_avail_t::Disabled ? "disabled" : "removed";
+		gi.LocClient_Print(ent, PRINT_HIGH, "Gametype {} ({}) is {} and cannot be selected.\n",
+			gt_short_name[(int)gt], gt_long_name[(int)gt], reason);
 		return;
 	}
 

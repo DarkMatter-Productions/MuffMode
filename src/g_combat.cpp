@@ -554,12 +554,7 @@ void T_Damage(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, const 
 			knockback = 200;
 	}
 
-/*freeze*/
-	if (GT(GT_FREEZE) && client && client->eliminated)
-		knockback *= 2;
-	else
-/*freeze*/
-		if ((targ->flags & FL_NO_KNOCKBACK) ||
+	if ((targ->flags & FL_NO_KNOCKBACK) ||
 			((targ->flags & FL_ALIVE_KNOCKBACK_ONLY) && (!targ->deadflag || targ->dead_time != level.time)))
 			knockback = 0;
 
@@ -602,21 +597,10 @@ void T_Damage(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, const 
 	save = 0;
 
 	if (!(dflags & DAMAGE_NO_PROTECTION)) {
-		if (IsCombatDisabled() || GT(GT_BALL)) {
+		if (IsCombatDisabled()) {
 			take = 0;
 			save = damage;
 		}
-
-/*freeze*/
-#if 0
-		if (GT(GT_FREEZE) && playerDamage(targ, attacker, damage)) {
-			take = 0;
-			save = damage;
-			SpawnDamage(te_sparks, point, normal, save);
-			return;
-		}
-#endif
-/*freeze*/
 
 		// instagib railgun splash never inflicts damage
 		if (mod.id == MOD_RAILGUN_SPLASH) {
@@ -792,10 +776,6 @@ void T_Damage(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, const 
 				targ->flags |= FL_ALIVE_KNOCKBACK_ONLY;
 				targ->dead_time = level.time;
 
-				// don't gib in freeze tag unless thawing
-				if (GT(GT_FREEZE) && mod.id != MOD_THAW && targ->health <= targ->gib_health) {
-					targ->health = targ->gib_health + 1;
-				}
 			}
 			targ->monsterinfo.damage_blood += take;
 			targ->monsterinfo.damage_attacker = attacker;

@@ -3,6 +3,7 @@
 
 #include "g_local.h"
 #include "g_debug_log.h"
+#include "muffmode/mm_gametype.h"
 #include "muffmode/mm_vote.h"
 #include "muffmode/mm_vote_menu.h"
 
@@ -442,7 +443,7 @@ void G_Menu_CallVote_GameType_Update(gentity_t *ent)
 	for (int i = (int)GT_FIRST; i <= (int)GT_LAST && menu_index < 17; i++)
 	{
 		gametype_t gt = (gametype_t)i;
-		if (gt == GT_NONE || gt == GT_STRIKE || gt == GT_RR || gt == GT_LMS || gt == GT_BALL)
+		if (gt == GT_NONE)
 			continue;
 		if (!MM_IsGametypeVotable(gt))
 			continue;
