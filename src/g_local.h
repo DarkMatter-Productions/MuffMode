@@ -1692,7 +1692,9 @@ struct level_locals_t {
 	bool		strike_turn_blue;
 
 	gtime_t		horde_monster_spawn_time;
-	int8_t		horde_num_monsters_to_spawn;
+	int16_t		horde_num_monsters_to_spawn;
+	int16_t		horde_overrun_limit;
+	int8_t		horde_fighters_snapshotted;
 	bool		horde_all_spawned;
 
 	char		author[MAX_QPATH];

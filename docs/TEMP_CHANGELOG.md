@@ -9,6 +9,7 @@
 - **Horde inter-wave cleanup:** `MM_Horde_CleanWaveTransition()` frees dead monster edicts and resets `total_monsters` / `killed_monsters` when a wave ends and before the next wave spawns, so corpses do not accumulate across waves (Horde does not use `Entities_Reset` between waves).
 - **Horde monster interaction (q2horde):** In Horde, monsters ignore `CONTENTS_MONSTER` for step/clip traces, are on the same team for damage (no monster friendly fire), step traces defer `G_TouchTriggers` to monster physics, matching Paril's q2horde behavior.
 - **Horde spawn hardening:** Failed spawn attempts free the reserved edict and only backoff the spawn timer (wave quota unchanged). Weighted pick fallback uses the highest-tier valid monster row when the table has no positive weights; invalid `ED_CallSpawn` results are discarded without counting toward the wave.
+- **Horde tuning cvars (2.1):** `g_horde_monsters_base`, `g_horde_monsters_per_wave`, min/max, spawn interval, warmup cap, overrun limit, and wave spawn delay replace hardcoded spawn pacing. Sublinear multi-player scaling (`g_horde_player_scale`, `g_horde_player_scale_factor`, `g_horde_player_scale_max`) sets wave quota and overrun at wave start from living fighter count; defaults preserve solo behavior (`mult = 1 + (fighters - 1) * 0.4`).
 
 ### Fix
 

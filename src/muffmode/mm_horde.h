@@ -13,6 +13,9 @@ void MM_Horde_RunSpawning();
 void MM_Horde_BeginWave();
 void MM_Horde_AdjustPlayerScore(gclient_t *cl, int32_t offset);
 
+int  MM_Horde_CountFighters();
+int  MM_Horde_WaveQuota();
+
 bool MM_Horde_ShouldSkipEntitiesReset();
 int  MM_Horde_CountdownWaveNumber();
 void MM_Horde_AdvanceRoundNumber();

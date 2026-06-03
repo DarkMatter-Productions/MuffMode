@@ -228,12 +228,82 @@ const char *Horde_PickMonsterForWave()
 } // namespace
 
 extern cvar_t *g_horde_starting_wave;
-
-static constexpr int32_t HORDE_OVERRUN_LIMIT = 100;
+extern cvar_t *g_horde_monsters_base;
+extern cvar_t *g_horde_monsters_per_wave;
+extern cvar_t *g_horde_monsters_min;
+extern cvar_t *g_horde_monsters_max;
+extern cvar_t *g_horde_spawn_interval_min;
+extern cvar_t *g_horde_spawn_interval_max;
+extern cvar_t *g_horde_warmup_cap;
+extern cvar_t *g_horde_overrun_limit;
+extern cvar_t *g_horde_wave_spawn_delay_ms;
+extern cvar_t *g_horde_player_scale;
+extern cvar_t *g_horde_player_scale_factor;
+extern cvar_t *g_horde_player_scale_max;
 
 static bool HordeActive()
 {
 	return g_gametype->integer == static_cast<int>(GT_HORDE);
+}
+
+static float Horde_MultiplierFromFighters(int fighters)
+{
+	if (!g_horde_player_scale->integer)
+		return 1.f;
+
+	float factor = g_horde_player_scale_factor->value;
+	if (factor < 0.f)
+		factor = 0.f;
+
+	return 1.f + (fighters - 1) * factor;
+}
+
+int MM_Horde_CountFighters()
+{
+	int fighters = 0;
+
+	for (auto ec : active_clients()) {
+		if (ec->health <= 0 || ec->client->eliminated)
+			continue;
+		fighters++;
+	}
+
+	const int max_fighters = clamp(g_horde_player_scale_max->integer, 1, 32);
+	return clamp(max(fighters, 1), 1, max_fighters);
+}
+
+int MM_Horde_WaveQuota()
+{
+	const int fighters = MM_Horde_CountFighters();
+	const float mult = Horde_MultiplierFromFighters(fighters);
+	const int   base = g_horde_monsters_base->integer;
+	const int   per_wave = g_horde_monsters_per_wave->integer;
+	const int   min_m = g_horde_monsters_min->integer;
+	const int   max_m = g_horde_monsters_max->integer;
+	const int   raw = base + level.round_number * per_wave;
+	const int   scaled = static_cast<int>(raw * mult);
+
+	return clamp(scaled, min_m, max_m);
+}
+
+static int Horde_EffectiveOverrunLimitForFighters(int fighters)
+{
+	int limit = g_horde_overrun_limit->integer;
+	if (limit < 1)
+		limit = 100;
+
+	const float mult = Horde_MultiplierFromFighters(fighters);
+	return max(1, static_cast<int>(limit * mult));
+}
+
+static gtime_t Horde_SpawnInterval(bool warmup)
+{
+	if (warmup)
+		return 5_sec;
+
+	const float min_sec = max(0.05f, g_horde_spawn_interval_min->value);
+	const float max_sec = max(min_sec, g_horde_spawn_interval_max->value);
+	return random_time(gtime_t::from_sec(min_sec), gtime_t::from_sec(max_sec));
 }
 
 bool MM_Horde_ShouldSkipEntitiesReset()
@@ -330,7 +400,11 @@ bool MM_Horde_CheckOverrun()
 	if (notGT(GT_HORDE))
 		return false;
 
-	if ((level.total_monsters - level.killed_monsters) < HORDE_OVERRUN_LIMIT)
+	int overrun_limit = level.horde_overrun_limit;
+	if (overrun_limit < 1)
+		overrun_limit = Horde_EffectiveOverrunLimitForFighters(MM_Horde_CountFighters());
+
+	if ((level.total_monsters - level.killed_monsters) < overrun_limit)
 		return false;
 
 	gi.Broadcast_Print(PRINT_CENTER, "DEFEATED!");
@@ -374,8 +448,13 @@ void MM_Horde_BeginWave()
 
 	MM_Horde_CleanWaveTransition();
 
-	level.horde_num_monsters_to_spawn = clamp(15 + (level.round_number * 5), 20, 80);
-	level.horde_monster_spawn_time = level.time + 500_ms;
+	const int fighters = MM_Horde_CountFighters();
+	level.horde_fighters_snapshotted = static_cast<int8_t>(fighters);
+	level.horde_num_monsters_to_spawn = static_cast<int16_t>(MM_Horde_WaveQuota());
+	level.horde_overrun_limit = static_cast<int16_t>(Horde_EffectiveOverrunLimitForFighters(fighters));
+
+	const int delay_ms = max(0, g_horde_wave_spawn_delay_ms->integer);
+	level.horde_monster_spawn_time = level.time + gtime_t::from_ms(delay_ms);
 }
 
 void MM_Horde_RunSpawning()
@@ -388,7 +467,8 @@ void MM_Horde_RunSpawning()
 	if (!warmup && level.round_state != ROUND_IN_PROGRESS)
 		return;
 
-	if (warmup && (level.total_monsters - level.killed_monsters >= 30))
+	const int warmup_cap = max(1, g_horde_warmup_cap->integer);
+	if (warmup && (level.total_monsters - level.killed_monsters >= warmup_cap))
 		return;
 
 	if (level.horde_all_spawned)
@@ -419,7 +499,7 @@ void MM_Horde_RunSpawning()
 				return;
 			}
 
-			level.horde_monster_spawn_time = warmup ? level.time + 5_sec : level.time + random_time(0.3_sec, 0.5_sec);
+			level.horde_monster_spawn_time = level.time + Horde_SpawnInterval(warmup);
 
 			e->enemy = FindClosestPlayerToPoint(e->s.origin);
 			if (e->enemy)
