@@ -1877,7 +1877,8 @@ void G_SetStats(gentity_t *ent) {
 						s1 = "COUNTDOWN";
 					} else if (level.round_state == roundst_t::ROUND_IN_PROGRESS) {
 						int t2 = (level.round_state_timer - level.time).milliseconds();
-						s1 = G_Fmt("{} ({})", G_TimeString(t, false), G_TimeString(t2, false)).data();
+						std::string match_time_str = G_TimeString(t, false);
+						s1 = G_Fmt("{} ({})", match_time_str, G_TimeString(t2, false)).data();
 					} else {
 						s1 = "";
 					}
