@@ -566,11 +566,11 @@ static THINK(Grenade_Explode) (gentity_t *ent) -> void {
 	vec3_t origin;
 	mod_t  mod;
 
-	if (ent->owner->client)
+	if (ent->owner && ent->owner->client)
 		PlayerNoise(ent->owner, ent->s.origin, PNOISE_IMPACT);
 
 	// FIXME: if we are onground then raise our Z just a bit since we are a point?
-	if (ent->enemy) {
+	if (ent->enemy && ent->enemy->inuse) {
 		float  points;
 		vec3_t v;
 		vec3_t dir;
@@ -586,7 +586,8 @@ static THINK(Grenade_Explode) (gentity_t *ent) -> void {
 			mod = MOD_GRENADE;
 		T_Damage(ent->enemy, ent, ent->owner, dir, ent->s.origin, vec3_origin, (int)points, (int)points, DAMAGE_RADIUS | DAMAGE_STAT_ONCE, mod);
 
-		MS_Adjust(ent->owner->client, MSTAT_HITS, 1);
+		if (ent->owner && ent->owner->client)
+			MS_Adjust(ent->owner->client, MSTAT_HITS, 1);
 		//MS_Adjust(ent->owner->client, (mod.id == MOD_HANDGRENADE) ? MSTAT_WP_HG_HITS : MSTAT_WP_GL_HITS, 1);
 	}
 
@@ -596,7 +597,7 @@ static THINK(Grenade_Explode) (gentity_t *ent) -> void {
 		mod = MOD_HG_SPLASH;
 	else
 		mod = MOD_G_SPLASH;
-	T_RadiusDamage(ent, ent->owner, (float)ent->dmg, ent->enemy, ent->splash_radius, DAMAGE_NONE | DAMAGE_STAT_ONCE, mod);
+	T_RadiusDamage(ent, ent->owner ? ent->owner : ent, (float)ent->dmg, ent->enemy, ent->splash_radius, DAMAGE_NONE | DAMAGE_STAT_ONCE, mod);
 
 	origin = ent->s.origin + (ent->velocity * -0.02f);
 	gi.WriteByte(svc_temp_entity);

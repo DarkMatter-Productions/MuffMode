@@ -441,9 +441,15 @@ static void M_ReactToDamage(gentity_t *targ, gentity_t *attacker, gentity_t *inf
 
 // check if the two given entities are on the same team
 bool OnSameTeam(gentity_t *ent1, gentity_t *ent2) {
-	// monsters are never on our team atm
-	if (!ent1->client || !ent2->client)
+	if (!ent1 || !ent2)
 		return false;
+
+	// monsters are never on the same team (except Horde: no monster-vs-monster damage)
+	if (!ent1->client || !ent2->client) {
+		if (GT(GT_HORDE) && (ent1->svflags & SVF_MONSTER) && (ent2->svflags & SVF_MONSTER))
+			return true;
+		return false;
+	}
 
 	// we're never on our own team
 	else if (ent1 == ent2)
@@ -489,6 +495,9 @@ void T_Damage(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, const 
 
 	if (!targ->takedamage)
 		return;
+
+	if (!attacker)
+		attacker = world;
 
 	if ((g_instagib->integer || GT(GT_INSTAGIB)) && attacker->client && targ->client) {
 		// [Kex] always kill no matter what on instagib

@@ -50,6 +50,10 @@ contents_t G_GetClipMask(gentity_t *ent) {
 	if ((ent->svflags & (SVF_MONSTER | SVF_PLAYER)) && (ent->svflags & SVF_DEADMONSTER))
 		mask &= ~(CONTENTS_MONSTER | CONTENTS_PLAYER);
 
+	// Horde: monsters don't clip against each other (see q2horde)
+	if (GT(GT_HORDE) && (ent->svflags & SVF_MONSTER))
+		mask &= ~CONTENTS_MONSTER;
+
 	return mask;
 }
 
@@ -880,8 +884,10 @@ static void G_Physics_Step(gentity_t *ent) {
 
 		// [Paril-KEX] this is something N64 does to avoid doors opening
 		// at the start of a level, which triggers some monsters to spawn.
-		if (!level.is_n64 || level.time > FRAME_TIME_S)
-			G_TouchTriggers(ent);
+		if (notGT(GT_HORDE)) {
+			if (!level.is_n64 || level.time > FRAME_TIME_S)
+				G_TouchTriggers(ent);
+		}
 
 		if (!ent->inuse)
 			return;
@@ -891,6 +897,9 @@ static void G_Physics_Step(gentity_t *ent) {
 				if (hitsound && !(RS(RS_Q1)))
 					ent->s.event = EV_FOOTSTEP;
 	}
+
+	if (GT(GT_HORDE))
+		G_TouchTriggers(ent);
 
 	if (!ent->inuse) // PGM g_touchtrigger free problem
 		return;
