@@ -1012,14 +1012,12 @@ static bool Round_StartNew() {
 		return false;
 	}
 
-	bool horde = GT(GT_HORDE);
-
 	level.round_state = roundst_t::ROUND_COUNTDOWN;
 	level.round_state_timer = level.time + gtime_t::from_sec(g_round_countdown->integer);
 	level.countdown_check = 0_sec;
 
-	if (!horde)
-		Entities_Reset(!horde, false, false);
+	if (!MM_Horde_ShouldSkipEntitiesReset())
+		Entities_Reset(true, false, false);
 
 	if (GT(GT_STRIKE)) {
 		level.strike_red_attacks ^= true;
@@ -1035,17 +1033,13 @@ static bool Round_StartNew() {
 		BroadcastTeamMessage(TEAM_RED, PRINT_CENTER, G_Fmt("Your team is on {}!\nRound {} - Begins in...", level.strike_red_attacks ? "OFFENSE" : "DEFENSE", round_num).data());
 		BroadcastTeamMessage(TEAM_BLUE, PRINT_CENTER, G_Fmt("Your team is on {}!\nRound {} - Begins in...", !level.strike_red_attacks ? "OFFENSE" : "DEFENSE", round_num).data());
 	} else {
-		int round_num;
-
-		if (horde && !level.round_number && g_horde_starting_wave->integer > 0)
-			round_num = g_horde_starting_wave->integer;
-		else
-			round_num = level.round_number + 1;
+		const int round_num = GT(GT_HORDE) ? MM_Horde_CountdownWaveNumber() : (level.round_number + 1);
+		const char *round_label = GT(GT_HORDE) ? "Wave" : "Round";
 
 		if (GT(GT_RR) && roundlimit->integer) {
-			gi.LocBroadcast_Print(PRINT_CENTER, "{} {} of {}\nBegins in...", horde ? "Wave" : "Round", round_num, roundlimit->integer);
+			gi.LocBroadcast_Print(PRINT_CENTER, "{} {} of {}\nBegins in...", round_label, round_num, roundlimit->integer);
 		} else
-			gi.LocBroadcast_Print(PRINT_CENTER, "{} {}\nBegins in...", horde ? "Wave" : "Round", round_num);
+			gi.LocBroadcast_Print(PRINT_CENTER, "{} {}\nBegins in...", round_label, round_num);
 	}
 
 	AnnouncerSound(world, "round_begins_in", nullptr, false);
@@ -1072,7 +1066,7 @@ void Round_End() {
 
 	level.round_state = roundst_t::ROUND_ENDED;
 	level.round_state_timer = level.time + 3_sec;
-	level.horde_all_spawned = false;
+	MM_Horde_OnRoundEnd();
 }
 
 /*
@@ -1302,8 +1296,8 @@ static void CheckDMRoundState(void) {
 				}
 			}
 			if (!turn) {
-				if (GT(GT_HORDE) && !level.round_number && g_horde_starting_wave->integer > 0)
-					level.round_number = g_horde_starting_wave->integer;
+				if (GT(GT_HORDE))
+					MM_Horde_AdvanceRoundNumber();
 				else
 					level.round_number++;
 			}
@@ -1312,14 +1306,12 @@ static void CheckDMRoundState(void) {
 				const char *msg[2] = { "DEFEND", "CAPTURE" };
 				BroadcastTeamMessage(TEAM_RED, PRINT_CENTER, G_Fmt("Round {} has begun!\n{} THE FLAG!", level.round_number, msg[level.strike_red_attacks]).data());
 				BroadcastTeamMessage(TEAM_BLUE, PRINT_CENTER, G_Fmt("Round {} has begun!\n{} THE FLAG!", level.round_number, msg[!level.strike_red_attacks]).data());
+			} else if (GT(GT_HORDE)) {
+				MM_Horde_OnRoundStarted();
 			} else {
-				bool horde = GT(GT_HORDE);
-				gi.LocBroadcast_Print(PRINT_CHAT, "{} {} has begun!\n", horde ? "Wave" : "Round", level.round_number);
-				gi.LocBroadcast_Print(PRINT_CENTER, horde ? (brandom() ? "INCOMING!" : "LOCK AND LOAD!") : "FIGHT!");
+				gi.LocBroadcast_Print(PRINT_CHAT, "Round {} has begun!\n", level.round_number);
+				gi.LocBroadcast_Print(PRINT_CENTER, "FIGHT!");
 				AnnouncerSound(world, "fight", nullptr, false);
-
-				if (horde)
-					MM_Horde_BeginWave();
 			}
 		}
 		return;
@@ -1381,14 +1373,9 @@ static void CheckDMRoundState(void) {
 			break;
 		}
 		case GT_HORDE:
-			MM_Horde_RunSpawning();
-			if (level.horde_all_spawned && !(level.total_monsters - level.killed_monsters)) {
-				gi.LocBroadcast_Print(PRINT_CENTER, "Monsters eliminated!\n");
-				gi.positioned_sound(world->s.origin, world, CHAN_AUTO | CHAN_RELIABLE, gi.soundindex("ctf/flagcap.wav"), 1, ATTN_NONE, 0);
+			if (MM_Horde_UpdateRoundInProgress())
 				Round_End();
-				return;
-			}
-			break;
+			return;
 
 		case GT_RR:
 			if (!level.num_playing_red || !level.num_playing_blue) {
@@ -2508,23 +2495,14 @@ void CheckDMExitRules() {
 	if (level.time - level.match_time <= FRAME_TIME_MS)
 		return;
 
-	if (GT(GT_HORDE)) {
-		if ((level.total_monsters - level.killed_monsters) >= 100) {
-			gi.Broadcast_Print(PRINT_CENTER, "DEFEATED!");
-			QueueIntermission("OVERRUN BY MONSTERS!", true, false);
-			return;
-		}
-	}
+	if (MM_Horde_CheckOverrun())
+		return;
 
 	if (GTF(GTF_ROUNDS) && level.round_state != roundst_t::ROUND_ENDED)
 		return;
 
-	if (GT(GT_HORDE)) {
-		if (roundlimit->integer > 0 && level.round_number >= roundlimit->integer) {
-			QueueIntermission(G_Fmt("{} WINS with a final score of {}.", game.clients[level.sorted_clients[0]].resp.netname, game.clients[level.sorted_clients[0]].resp.score).data(), false, false);
-			return;
-		}
-	}
+	if (MM_Horde_CheckMatchEnd())
+		return;
 
 	if (!g_dm_allow_no_humans->integer && !level.num_playing_human_clients) {
 		QueueIntermission("No human players remaining.", true, false);
@@ -2609,17 +2587,15 @@ void CheckDMExitRules() {
 				QueueIntermission(G_Fmt("{} hit the mercylimit ({}).", Teams_TeamName(TEAM_BLUE), mercylimit->integer).data(), true, false);
 				return;
 			}
-		} else {
-			if (notGT(GT_HORDE)) {
-				gclient_t *cl1, *cl2;
+		} else if (!MM_Horde_SkipMercyLimit()) {
+			gclient_t *cl1, *cl2;
 
-				cl1 = &game.clients[level.sorted_clients[0]];
-				cl2 = &game.clients[level.sorted_clients[1]];
-				if (cl1 && cl2) {
-					if (cl1->resp.score >= cl2->resp.score + mercylimit->integer) {
-						QueueIntermission(G_Fmt("{} hit the mercylimit ({}).", cl1->resp.netname, mercylimit->integer).data(), true, false);
-						return;
-					}
+			cl1 = &game.clients[level.sorted_clients[0]];
+			cl2 = &game.clients[level.sorted_clients[1]];
+			if (cl1 && cl2) {
+				if (cl1->resp.score >= cl2->resp.score + mercylimit->integer) {
+					QueueIntermission(G_Fmt("{} hit the mercylimit ({}).", cl1->resp.netname, mercylimit->integer).data(), true, false);
+					return;
 				}
 			}
 		}
@@ -2629,8 +2605,7 @@ void CheckDMExitRules() {
 	if (ScoreIsTied())
 		return;
 
-	// no score limit in horde
-	if (GT(GT_HORDE))
+	if (MM_Horde_SkipFragScoreLimit())
 		return;
 
 	// no score limit in race

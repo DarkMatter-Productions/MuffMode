@@ -172,6 +172,114 @@ const char *Horde_PickMonster()
 }
 } // namespace
 
+extern cvar_t *g_horde_starting_wave;
+
+static constexpr int32_t HORDE_OVERRUN_LIMIT = 100;
+
+static bool HordeActive()
+{
+	return g_gametype->integer == static_cast<int>(GT_HORDE);
+}
+
+bool MM_Horde_ShouldSkipEntitiesReset()
+{
+	return HordeActive();
+}
+
+int MM_Horde_CountdownWaveNumber()
+{
+	if (notGT(GT_HORDE))
+		return level.round_number + 1;
+
+	if (!level.round_number && g_horde_starting_wave->integer > 0)
+		return g_horde_starting_wave->integer;
+
+	return level.round_number + 1;
+}
+
+void MM_Horde_AdvanceRoundNumber()
+{
+	if (notGT(GT_HORDE))
+		return;
+
+	if (!level.round_number && g_horde_starting_wave->integer > 0)
+		level.round_number = g_horde_starting_wave->integer;
+	else
+		level.round_number++;
+}
+
+void MM_Horde_OnRoundStarted()
+{
+	if (notGT(GT_HORDE))
+		return;
+
+	gi.LocBroadcast_Print(PRINT_CHAT, "Wave {} has begun!\n", level.round_number);
+	gi.LocBroadcast_Print(PRINT_CENTER, brandom() ? "INCOMING!" : "LOCK AND LOAD!");
+	AnnouncerSound(world, "fight", nullptr, false);
+	MM_Horde_BeginWave();
+}
+
+void MM_Horde_OnRoundEnd()
+{
+	if (notGT(GT_HORDE))
+		return;
+
+	level.horde_all_spawned = false;
+}
+
+bool MM_Horde_UpdateRoundInProgress()
+{
+	if (notGT(GT_HORDE))
+		return false;
+
+	MM_Horde_RunSpawning();
+
+	if (level.horde_all_spawned && !(level.total_monsters - level.killed_monsters)) {
+		gi.LocBroadcast_Print(PRINT_CENTER, "Monsters eliminated!\n");
+		gi.positioned_sound(world->s.origin, world, CHAN_AUTO | CHAN_RELIABLE, gi.soundindex("ctf/flagcap.wav"), 1, ATTN_NONE, 0);
+		return true;
+	}
+
+	return false;
+}
+
+bool MM_Horde_CheckOverrun()
+{
+	if (notGT(GT_HORDE))
+		return false;
+
+	if ((level.total_monsters - level.killed_monsters) < HORDE_OVERRUN_LIMIT)
+		return false;
+
+	gi.Broadcast_Print(PRINT_CENTER, "DEFEATED!");
+	QueueIntermission("OVERRUN BY MONSTERS!", true, false);
+	return true;
+}
+
+bool MM_Horde_CheckMatchEnd()
+{
+	if (notGT(GT_HORDE))
+		return false;
+
+	if (roundlimit->integer <= 0 || level.round_number < roundlimit->integer)
+		return false;
+
+	QueueIntermission(G_Fmt("{} WINS with a final score of {}.", game.clients[level.sorted_clients[0]].resp.netname,
+		game.clients[level.sorted_clients[0]].resp.score).data(),
+		false, false);
+	return true;
+}
+
+bool MM_Horde_SkipFragScoreLimit()
+{
+	return HordeActive();
+}
+
+bool MM_Horde_SkipMercyLimit()
+{
+	return HordeActive();
+}
+
 void MM_Horde_Init()
 {
 	// precache-all path disabled; see commented block in git history.
