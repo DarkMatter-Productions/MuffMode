@@ -219,12 +219,39 @@ void MM_Horde_OnRoundStarted()
 	MM_Horde_BeginWave();
 }
 
+void MM_Horde_CleanWaveTransition()
+{
+	if (!HordeActive())
+		return;
+
+	// Remove dead monster corpses between waves (Horde skips Entities_Reset).
+	for (size_t i = globals.num_entities; i > 1; i--) {
+		gentity_t *ent = &g_entities[i - 1];
+
+		if (!ent->inuse)
+			continue;
+		if (!(ent->svflags & SVF_MONSTER))
+			continue;
+		if (ent->health > 0 && !ent->deadflag && !(ent->svflags & SVF_DEADMONSTER))
+			continue;
+
+		G_FreeEntity(ent);
+	}
+
+	level.total_monsters = 0;
+	level.killed_monsters = 0;
+
+	if (g_debug_monster_kills->integer)
+		level.monsters_registered.fill(nullptr);
+}
+
 void MM_Horde_OnRoundEnd()
 {
 	if (notGT(GT_HORDE))
 		return;
 
 	level.horde_all_spawned = false;
+	MM_Horde_CleanWaveTransition();
 }
 
 bool MM_Horde_UpdateRoundInProgress()
@@ -289,6 +316,8 @@ void MM_Horde_BeginWave()
 {
 	if (notGT(GT_HORDE))
 		return;
+
+	MM_Horde_CleanWaveTransition();
 
 	level.horde_num_monsters_to_spawn = clamp(15 + (level.round_number * 5), 20, 80);
 	level.horde_monster_spawn_time = level.time + 500_ms;

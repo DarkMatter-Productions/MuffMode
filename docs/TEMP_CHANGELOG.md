@@ -6,6 +6,7 @@
 
 - **Gametype availability:** Central registry in `mm_gametype` controls which modes can be selected. Removed stub gametypes (Freeze Tag, ProBall, LMS) and their gameplay code; disabled CaptureStrike and Red Rover from vote/admin/menu selection (implementation retained for a future release). Invalid `g_gametype` values fall back to FFA. Enum indices unchanged for configs and map entity keys.
 - **Horde orchestration (`mm_horde`):** Consolidated round/match logic from `g_main.cpp` into `mm_horde` — wave countdown numbering (`g_horde_starting_wave`), wave begin/end hooks, in-wave spawn/clear check, 100-monster overrun defeat, `roundlimit` match win, and Horde exceptions for frag/mercy limits. `g_main.cpp` now calls thin `MM_Horde_*()` hooks only.
+- **Horde inter-wave cleanup:** `MM_Horde_CleanWaveTransition()` frees dead monster edicts and resets `total_monsters` / `killed_monsters` when a wave ends and before the next wave spawns, so corpses do not accumulate across waves (Horde does not use `Entities_Reset` between waves).
 
 ### Fix
 

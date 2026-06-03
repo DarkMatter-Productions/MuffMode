@@ -18,6 +18,7 @@ int  MM_Horde_CountdownWaveNumber();
 void MM_Horde_AdvanceRoundNumber();
 void MM_Horde_OnRoundStarted();
 void MM_Horde_OnRoundEnd();
+void MM_Horde_CleanWaveTransition();
 
 // Returns true when the wave is cleared (caller should invoke Round_End).
 bool MM_Horde_UpdateRoundInProgress();
