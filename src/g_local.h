@@ -282,15 +282,6 @@ constexpr const char *gt_long_name[GT_NUM_GAMETYPES] = {
 	"NadeFest"
 };
 
-enum monflags_t {
-	MF_NONE		= 0x00,
-	MF_GROUND	= 0x01,
-	MF_AIR		= 0x02,
-	MF_WATER	= 0x04,
-	MF_MEDIUM	= 0x08,
-	MF_BOSS		= 0x10
-};
-
 typedef enum {
 	MATCH_NONE,
 	MATCH_WARMUP_DELAYED,	// pre-warmup (delay is active)
