@@ -369,6 +369,8 @@ For a complete set of ready-to-use server configs with per-gametype settings, se
 	13. Nade Fest
  - **g_horde_starting_wave**: sets the starting wave number for Horde mode (default 1)
  - **g_horde_lives**: lives per wave for Horde fighters (default 1); last death in a wave moves you to spectator until the next wave
+ - **g_horde_points_base** / **g_horde_points_per_wave**: wave spawn point budget is `base + round_number × per_wave` (defaults 15 and 5; wave 1 ≈ 20 points). Each monster type has a fixed point cost in the spawn table; `weight` controls how often it is picked among affordable types.
+ - **g_horde_points_min** / **g_horde_points_max**: optional floor/ceiling on the budget (default 0 = disabled). Legacy clamps were `min 20` / `max 80` on the old count cvars.
  - **g_inactivity**: Values above 0 enables an inactivity timer for players, specifying number of seconds since last input to point of flagging the player as inactive. A warning is sent to the player 10 seconds before triggering and once triggered, the player is moved to spectators. Inactive clients are noted as such using the 'players' command. (default: 120)
  - **g_instagib_splash**: enables a non-damaging explosion from railgun shots in instagib, allows for rail jumping or knocking foes about (default 0)
  - **g_knockback_scale**: scales all knockback resulting from damage received (default 1.0)

@@ -14,6 +14,7 @@ struct weighted_item_t {
 	float                   weight = 1.0f;
 	float                   lvl_w_adjust = 0;
 	std::array<item_id_t, 4> drops = {};
+	int32_t                 spawn_points = 1;
 };
 
 constexpr weighted_item_t items[] = {
@@ -39,32 +40,32 @@ constexpr weighted_item_t items[] = {
 };
 
 constexpr weighted_item_t monsters[] = {
-	{ "monster_soldier_light", -1, 7, 1.50f, -0.45f, { IT_HEALTH_SMALL } },
-	{ "monster_soldier", -1, 7, 0.85f, -0.25f, { IT_AMMO_BULLETS_SMALL, IT_HEALTH_SMALL } },
-	{ "monster_soldier_ss", 2, 7, 1.01f, -0.125f, { IT_AMMO_SHELLS_SMALL, IT_HEALTH_SMALL } },
-	{ "monster_soldier_hypergun", 2, 9, 1.2f, 0.15f, { IT_AMMO_CELLS_SMALL, IT_HEALTH_SMALL } },
-	{ "monster_soldier_lasergun", 3, 9, 1.15f, 0.2f, { IT_AMMO_CELLS_SMALL, IT_HEALTH_SMALL } },
-	{ "monster_soldier_ripper", 3, 9, 1.25f, 0.25f, { IT_AMMO_CELLS_SMALL, IT_HEALTH_SMALL } },
-	{ "monster_infantry", 3, 16, 1.05f, 0.125f, { IT_AMMO_BULLETS_SMALL, IT_AMMO_BULLETS } },
-	{ "monster_gunner", 4, 16, 1.08f, 0.5f, { IT_AMMO_GRENADES, IT_AMMO_BULLETS_SMALL } },
-	{ "monster_berserk", 4, 16, 1.05f, 0.1f, { IT_ARMOR_SHARD } },
-	{ "monster_parasite", 5, 16, 1.04f, -0.08f, {} },
-	{ "monster_gladiator", 5, 16, 1.07f, 0.3f, { IT_AMMO_SLUGS } },
-	{ "monster_gekk", 6, 16, 0.99f, -0.15f, {} },
-	{ "monster_brain", 6, 16, 0.95f, 0, { IT_AMMO_CELLS_SMALL } },
-	{ "monster_flyer", 6, 16, 0.92f, 0.15f, { IT_AMMO_CELLS_SMALL } },
-	{ "monster_floater", 7, 16, 0.9f, 0, {} },
-	{ "monster_mutant", 7, 16, 0.85f, 0, {} },
-	{ "monster_hover", 8, 16, 0.8f, 0, {} },
-	{ "monster_guncmdr", 8, -1, 0, 0.125f, { IT_AMMO_GRENADES, IT_AMMO_BULLETS_SMALL, IT_AMMO_BULLETS, IT_AMMO_CELLS_SMALL } },
-	{ "monster_chick", 9, 20, 1.01f, -0.05f, { IT_AMMO_ROCKETS_SMALL, IT_AMMO_ROCKETS } },
-	{ "monster_daedalus", 9, -1, 0.99f, 0.05f, { IT_AMMO_CELLS_SMALL } },
-	{ "monster_medic", 10, 16, 0.95f, -0.05f, { IT_HEALTH_SMALL, IT_HEALTH_MEDIUM } },
-	{ "monster_tank", 11, -1, 0.85f, 0, { IT_AMMO_ROCKETS } },
-	{ "monster_chick_heat", 12, -1, 0.87f, 0.065f, { IT_AMMO_CELLS_SMALL, IT_AMMO_CELLS } },
-	{ "monster_tank_commander", 12, -1, 0.45f, 0.16f, { IT_AMMO_ROCKETS_SMALL, IT_AMMO_BULLETS_SMALL, IT_AMMO_ROCKETS, IT_AMMO_BULLETS } },
-	{ "monster_medic_commander", 13, -1, 0.4f, 0.15f, { IT_AMMO_CELLS_SMALL, IT_HEALTH_MEDIUM, IT_HEALTH_LARGE } },
-	{ "monster_kamikaze", 13, -1, 0.85f, 0.04f, {} },
+	{ "monster_soldier_light", -1, 7, 1.50f, -0.45f, { IT_HEALTH_SMALL }, 1 },
+	{ "monster_soldier", -1, 7, 0.85f, -0.25f, { IT_AMMO_BULLETS_SMALL, IT_HEALTH_SMALL }, 1 },
+	{ "monster_soldier_ss", 2, 7, 1.01f, -0.125f, { IT_AMMO_SHELLS_SMALL, IT_HEALTH_SMALL }, 2 },
+	{ "monster_soldier_hypergun", 2, 9, 1.2f, 0.15f, { IT_AMMO_CELLS_SMALL, IT_HEALTH_SMALL }, 2 },
+	{ "monster_soldier_lasergun", 3, 9, 1.15f, 0.2f, { IT_AMMO_CELLS_SMALL, IT_HEALTH_SMALL }, 2 },
+	{ "monster_soldier_ripper", 3, 9, 1.25f, 0.25f, { IT_AMMO_CELLS_SMALL, IT_HEALTH_SMALL }, 2 },
+	{ "monster_infantry", 3, 16, 1.05f, 0.125f, { IT_AMMO_BULLETS_SMALL, IT_AMMO_BULLETS }, 2 },
+	{ "monster_gunner", 4, 16, 1.08f, 0.5f, { IT_AMMO_GRENADES, IT_AMMO_BULLETS_SMALL }, 3 },
+	{ "monster_berserk", 4, 16, 1.05f, 0.1f, { IT_ARMOR_SHARD }, 2 },
+	{ "monster_parasite", 5, 16, 1.04f, -0.08f, {}, 3 },
+	{ "monster_gladiator", 5, 16, 1.07f, 0.3f, { IT_AMMO_SLUGS }, 3 },
+	{ "monster_gekk", 6, 16, 0.99f, -0.15f, {}, 2 },
+	{ "monster_brain", 6, 16, 0.95f, 0, { IT_AMMO_CELLS_SMALL }, 3 },
+	{ "monster_flyer", 6, 16, 0.92f, 0.15f, { IT_AMMO_CELLS_SMALL }, 3 },
+	{ "monster_floater", 7, 16, 0.9f, 0, {}, 4 },
+	{ "monster_mutant", 7, 16, 0.85f, 0, {}, 4 },
+	{ "monster_hover", 8, 16, 0.8f, 0, {}, 4 },
+	{ "monster_guncmdr", 8, -1, 0, 0.125f, { IT_AMMO_GRENADES, IT_AMMO_BULLETS_SMALL, IT_AMMO_BULLETS, IT_AMMO_CELLS_SMALL }, 5 },
+	{ "monster_chick", 9, 20, 1.01f, -0.05f, { IT_AMMO_ROCKETS_SMALL, IT_AMMO_ROCKETS }, 4 },
+	{ "monster_daedalus", 9, -1, 0.99f, 0.05f, { IT_AMMO_CELLS_SMALL }, 4 },
+	{ "monster_medic", 10, 16, 0.95f, -0.05f, { IT_HEALTH_SMALL, IT_HEALTH_MEDIUM }, 5 },
+	{ "monster_tank", 11, -1, 0.85f, 0, { IT_AMMO_ROCKETS }, 6 },
+	{ "monster_chick_heat", 12, -1, 0.87f, 0.065f, { IT_AMMO_CELLS_SMALL, IT_AMMO_CELLS }, 5 },
+	{ "monster_tank_commander", 12, -1, 0.45f, 0.16f, { IT_AMMO_ROCKETS_SMALL, IT_AMMO_BULLETS_SMALL, IT_AMMO_ROCKETS, IT_AMMO_BULLETS }, 8 },
+	{ "monster_medic_commander", 13, -1, 0.4f, 0.15f, { IT_AMMO_CELLS_SMALL, IT_HEALTH_MEDIUM, IT_HEALTH_LARGE }, 8 },
+	{ "monster_kamikaze", 13, -1, 0.85f, 0.04f, {}, 8 },
 };
 
 struct picked_item_t {
@@ -144,7 +145,7 @@ static gitem_t *Horde_PickDropItem(const weighted_item_t *monster_row)
 	return Horde_PickItem();
 }
 
-static const char *Horde_PickMonster(weighted_item_t const **out_row)
+static const char *Horde_PickMonster(weighted_item_t const **out_row, int remaining_points)
 {
 	static std::array<picked_item_t, q_countof(monsters)> picked_monsters;
 	size_t                                                num_picked_monsters = 0;
@@ -157,6 +158,8 @@ static const char *Horde_PickMonster(weighted_item_t const **out_row)
 		if (monster.min_level != -1 && level.round_number < monster.min_level)
 			continue;
 		if (monster.max_level != -1 && level.round_number > monster.max_level)
+			continue;
+		if (monster.spawn_points > remaining_points)
 			continue;
 
 		float weight = monster.weight + ((level.round_number - monster.min_level) * monster.lvl_w_adjust);
@@ -184,8 +187,8 @@ static const char *Horde_PickMonster(weighted_item_t const **out_row)
 	return nullptr;
 }
 
-// When weighted pick finds nothing (e.g. all weights zero), use the highest-tier table row still valid for this wave.
-static const char *Horde_PickMonsterFallback(weighted_item_t const **out_row)
+// When weighted pick finds nothing (e.g. all weights zero), use the highest-tier affordable row still valid for this wave.
+static const char *Horde_PickMonsterFallback(weighted_item_t const **out_row, int remaining_points)
 {
 	const weighted_item_t *choice = nullptr;
 
@@ -195,6 +198,8 @@ static const char *Horde_PickMonsterFallback(weighted_item_t const **out_row)
 
 	for (auto &monster : monsters) {
 		if (monster.min_level != -1 && level.round_number < monster.min_level)
+			continue;
+		if (monster.spawn_points > remaining_points)
 			continue;
 
 		const int32_t cap = monster.max_level == -1 ? INT32_MAX : monster.max_level;
@@ -212,6 +217,8 @@ static const char *Horde_PickMonsterFallback(weighted_item_t const **out_row)
 		for (auto &monster : monsters) {
 			if (monster.min_level != -1 && level.round_number < monster.min_level)
 				continue;
+			if (monster.spawn_points > remaining_points)
+				continue;
 
 			const int32_t cap = monster.max_level == -1 ? INT32_MAX : monster.max_level;
 			if (cap > best_cap) {
@@ -227,13 +234,13 @@ static const char *Horde_PickMonsterFallback(weighted_item_t const **out_row)
 	return choice ? choice->classname : nullptr;
 }
 
-static const char *Horde_PickMonsterForWave(weighted_item_t const **out_row)
+static const char *Horde_PickMonsterForWave(weighted_item_t const **out_row, int remaining_points)
 {
-	if (const char *pick = Horde_PickMonster(out_row))
+	if (const char *pick = Horde_PickMonster(out_row, remaining_points))
 		return pick;
 
 	static int32_t fallback_warn_wave = -1;
-	const char    *fallback = Horde_PickMonsterFallback(out_row);
+	const char    *fallback = Horde_PickMonsterFallback(out_row, remaining_points);
 
 	if (fallback && fallback_warn_wave != level.round_number) {
 		fallback_warn_wave = level.round_number;
@@ -245,10 +252,10 @@ static const char *Horde_PickMonsterForWave(weighted_item_t const **out_row)
 } // namespace
 
 extern cvar_t *g_horde_starting_wave;
-extern cvar_t *g_horde_monsters_base;
-extern cvar_t *g_horde_monsters_per_wave;
-extern cvar_t *g_horde_monsters_min;
-extern cvar_t *g_horde_monsters_max;
+extern cvar_t *g_horde_points_base;
+extern cvar_t *g_horde_points_per_wave;
+extern cvar_t *g_horde_points_min;
+extern cvar_t *g_horde_points_max;
 extern cvar_t *g_horde_spawn_interval_min;
 extern cvar_t *g_horde_spawn_interval_max;
 extern cvar_t *g_horde_warmup_cap;
@@ -333,18 +340,22 @@ int MM_Horde_CountFighters()
 	return clamp(max(fighters, 1), 1, max_fighters);
 }
 
-int MM_Horde_WaveQuota()
+int MM_Horde_WavePointBudget()
 {
-	const int fighters = MM_Horde_CountFighters();
+	const int   fighters = MM_Horde_CountFighters();
 	const float mult = Horde_MultiplierFromFighters(fighters);
-	const int   base = g_horde_monsters_base->integer;
-	const int   per_wave = g_horde_monsters_per_wave->integer;
-	const int   min_m = g_horde_monsters_min->integer;
-	const int   max_m = g_horde_monsters_max->integer;
-	const int   raw = base + level.round_number * per_wave;
-	const int   scaled = static_cast<int>(raw * mult);
+	const int   base = g_horde_points_base->integer;
+	const int   per_wave = g_horde_points_per_wave->integer;
+	const int   min_pts = g_horde_points_min->integer;
+	const int   max_pts = g_horde_points_max->integer;
+	int         budget = base + level.round_number * per_wave;
 
-	return clamp(scaled, min_m, max_m);
+	if (min_pts > 0)
+		budget = max(budget, min_pts);
+	if (max_pts > 0)
+		budget = min(budget, max_pts);
+
+	return max(1, static_cast<int>(budget * mult));
 }
 
 static int Horde_EffectiveOverrunLimitForFighters(int fighters)
@@ -563,7 +574,7 @@ void MM_Horde_BeginWave()
 
 	const int fighters = MM_Horde_CountFighters();
 	level.horde_fighters_snapshotted = static_cast<int8_t>(fighters);
-	level.horde_num_monsters_to_spawn = static_cast<int16_t>(MM_Horde_WaveQuota());
+	level.horde_spawn_points_remaining = MM_Horde_WavePointBudget();
 	level.horde_overrun_limit = static_cast<int16_t>(Horde_EffectiveOverrunLimitForFighters(fighters));
 
 	const int delay_ms = max(0, g_horde_wave_spawn_delay_ms->integer);
@@ -587,11 +598,20 @@ void MM_Horde_RunSpawning()
 	if (level.horde_all_spawned)
 		return;
 
+	if (!warmup && level.horde_spawn_points_remaining <= 0) {
+		level.horde_all_spawned = true;
+		return;
+	}
+
 	if (level.horde_monster_spawn_time <= level.time) {
+		const int              remaining = warmup ? INT_MAX : level.horde_spawn_points_remaining;
 		const weighted_item_t *monster_row = nullptr;
-		const char            *monster_class = Horde_PickMonsterForWave(&monster_row);
+		const char            *monster_class = Horde_PickMonsterForWave(&monster_row, remaining);
 		if (!monster_class) {
-			level.horde_monster_spawn_time = warmup ? level.time + 5_sec : level.time + 1_sec;
+			if (!warmup)
+				level.horde_all_spawned = true;
+			else
+				level.horde_monster_spawn_time = level.time + 5_sec;
 			return;
 		}
 
@@ -619,10 +639,10 @@ void MM_Horde_RunSpawning()
 			if (e->enemy)
 				FoundTarget(e);
 
-			if (!warmup) {
-				level.horde_num_monsters_to_spawn--;
+			if (!warmup && monster_row) {
+				level.horde_spawn_points_remaining -= monster_row->spawn_points;
 
-				if (!level.horde_num_monsters_to_spawn)
+				if (level.horde_spawn_points_remaining <= 0)
 					level.horde_all_spawned = true;
 			}
 		} else {

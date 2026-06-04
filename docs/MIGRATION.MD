@@ -481,8 +481,8 @@ Manual sign-off for `GT_HORDE` after spawn/orchestration changes:
 | Step | What to verify |
 |------|----------------|
 | Map load | Horde map loads without crash; statusbar wave/monster HUD visible |
-| Warmup | At most ~30 living monsters during warmup; spawns continue if points are blocked |
-| Wave 1+ | Wave begins, monsters spawn to quota, wave clears when quota spawned and all dead |
+| Warmup | At most ~30 living monsters during warmup; no point budget drain |
+| Wave 1+ | Wave begins, monsters spawn until point budget spent, wave clears when budget exhausted and all dead |
 | Multi-wave | Corpses do not pile up between waves; counters/HUD stay sane |
 | Overrun | With cheats or tuning, 100+ living monsters triggers defeat intermission |
 | Held grenade | Detonate while engaging monsters (no AV / soft-lock) |
@@ -492,6 +492,17 @@ Manual sign-off for `GT_HORDE` after spawn/orchestration changes:
 | All out | Last fighter loses last life → defeat intermission (not next wave) |
 | Coop cvar | `g_coop_enable_lives 1` in Horde must not double-decrement lives |
 | Warmup death | Warmup kill does not decrement horde lives |
+
+### Horde cvar rename (spawn points)
+
+| Old | New |
+|-----|-----|
+| `g_horde_monsters_base` | `g_horde_points_base` |
+| `g_horde_monsters_per_wave` | `g_horde_points_per_wave` |
+| `g_horde_monsters_min` | `g_horde_points_min` (default **0** = off; was 20) |
+| `g_horde_monsters_max` | `g_horde_points_max` (default **0** = off; was 80) |
+
+Configs that used the old min/max clamps can set `g_horde_points_min 20` and `g_horde_points_max 80`.
 
 ## Notes
 
