@@ -4,6 +4,7 @@
 #include "g_local.h"
 #include "g_debug_log.h"
 #include "muffmode/mm_gametype.h"
+#include "muffmode/mm_horde.h"
 #include "muffmode/mm_spawn_filter.h"
 #include "muffmode/mm_statusbar.h"
 
@@ -2071,6 +2072,8 @@ void SP_worldspawn(gentity_t *ent) {
 	}
 
 	PrecacheAssets();
+
+	MM_Horde_Init();
 
 	GT_SetLongName();
 

@@ -453,9 +453,23 @@ bool MM_Horde_SkipMercyLimit()
 	return HordeActive();
 }
 
+static void Horde_PrecacheTableMonsters()
+{
+	for (auto &monster : monsters) {
+		gentity_t *e = G_Spawn();
+		e->classname = monster.classname;
+		ED_CallSpawn(e);
+		if (e->inuse)
+			G_FreeEntity(e);
+	}
+}
+
 void MM_Horde_Init()
 {
-	// precache-all path disabled; see commented block in git history.
+	if (notGT(GT_HORDE))
+		return;
+
+	Horde_PrecacheTableMonsters();
 }
 
 void MM_Horde_BeginWave()

@@ -11,6 +11,7 @@
 - **Horde spawn hardening:** Failed spawn attempts free the reserved edict and only backoff the spawn timer (wave quota unchanged). Weighted pick fallback uses the highest-tier valid monster row when the table has no positive weights; invalid `ED_CallSpawn` results are discarded without counting toward the wave.
 - **Horde tuning cvars (2.1):** `g_horde_monsters_base`, `g_horde_monsters_per_wave`, min/max, spawn interval, warmup cap, overrun limit, and wave spawn delay replace hardcoded spawn pacing. Sublinear multi-player scaling (`g_horde_player_scale`, `g_horde_player_scale_factor`, `g_horde_player_scale_max`) sets wave quota and overrun at wave start from living fighter count; defaults preserve solo behavior (`mult = 1 + (fighters - 1) * 0.4`).
 - **Horde table cleanup (2.2):** Monster `drops[]` on the spawn table row is wired to `ent->item` (random non-empty entry, dropped on death); rows with no drops still use `Horde_PickItem()`. Removed unused `adjust_weight_*` stubs, `MF_*` spawn flags, and `monflags_t`.
+- **Horde monster precache (2.3):** `MM_Horde_Init()` precaches every `monsters[]` classname once per map (spawn/free via `ED_CallSpawn`) when `GT_HORDE` is active. Runs after `PrecacheAssets()` in `SP_worldspawn`, not on other gametypes or full `itemlist` (q2horde-style selective precache).
 
 ### Fix
 

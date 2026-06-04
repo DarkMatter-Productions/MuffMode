@@ -714,8 +714,6 @@ static void InitGame() {
 	MM_SyncGametypeTracking();
 	MM_SanitizeCurrentGametype();
 
-	MM_Horde_Init();
-
 	MM_LoadMOTD();
 
 	if (g_dm_exec_level_cfg->integer)
