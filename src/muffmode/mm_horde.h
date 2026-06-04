@@ -22,6 +22,10 @@ void MM_Horde_AdvanceRoundNumber();
 void MM_Horde_OnRoundStarted();
 void MM_Horde_OnRoundEnd();
 void MM_Horde_CleanWaveTransition();
+void MM_Horde_OnPlayerDeath(gentity_t *ent);
+
+// CheckDMExitRules / round tick; return true when defeat intermission was queued.
+bool MM_Horde_CheckAllFightersLost();
 
 // Returns true when the wave is cleared (caller should invoke Round_End).
 bool MM_Horde_UpdateRoundInProgress();

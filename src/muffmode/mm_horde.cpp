@@ -257,6 +257,50 @@ extern cvar_t *g_horde_wave_spawn_delay_ms;
 extern cvar_t *g_horde_player_scale;
 extern cvar_t *g_horde_player_scale_factor;
 extern cvar_t *g_horde_player_scale_max;
+extern cvar_t *g_horde_lives;
+
+static int Horde_LivesPerWave()
+{
+	return max(1, g_horde_lives->integer);
+}
+
+static bool Horde_ClientIsActiveFighter(gentity_t *ec)
+{
+	if (!ec->client || !ClientIsPlaying(ec->client))
+		return false;
+	if (ec->client->eliminated)
+		return false;
+	if (ec->health > 0)
+		return true;
+
+	return ec->client->pers.lives > 0;
+}
+
+static bool Horde_HasActiveFighter()
+{
+	for (auto ec : active_clients()) {
+		if (Horde_ClientIsActiveFighter(ec))
+			return true;
+	}
+
+	return false;
+}
+
+static void MM_Horde_GrantWaveLives()
+{
+	const int lives = Horde_LivesPerWave();
+
+	for (auto ec : active_clients()) {
+		if (!ClientIsPlaying(ec->client))
+			continue;
+
+		ec->client->pers.lives = lives;
+		ec->client->eliminated = false;
+
+		if (ec->deadflag || ec->health <= 0)
+			ClientRespawn(ec);
+	}
+}
 
 static bool HordeActive()
 {
@@ -358,7 +402,42 @@ void MM_Horde_OnRoundStarted()
 	gi.LocBroadcast_Print(PRINT_CHAT, "Wave {} has begun!\n", level.round_number);
 	gi.LocBroadcast_Print(PRINT_CENTER, brandom() ? "INCOMING!" : "LOCK AND LOAD!");
 	AnnouncerSound(world, "fight", nullptr, false);
+	MM_Horde_GrantWaveLives();
 	MM_Horde_BeginWave();
+}
+
+void MM_Horde_OnPlayerDeath(gentity_t *ent)
+{
+	if (!HordeActive())
+		return;
+	if (level.round_state != roundst_t::ROUND_IN_PROGRESS)
+		return;
+	if (!ent->client || !ClientIsPlaying(ent->client))
+		return;
+
+	if (ent->client->pers.lives > 0)
+		ent->client->pers.lives--;
+
+	if (ent->client->pers.lives <= 0) {
+		ClientSetEliminated(ent);
+		ent->client->respawn_time = level.time + 1_sec;
+	}
+}
+
+bool MM_Horde_CheckAllFightersLost()
+{
+	if (!HordeActive())
+		return false;
+	if (level.round_state != roundst_t::ROUND_IN_PROGRESS)
+		return false;
+	if (level.num_playing_clients < 1)
+		return false;
+	if (Horde_HasActiveFighter())
+		return false;
+
+	gi.Broadcast_Print(PRINT_CENTER, "DEFEATED!");
+	QueueIntermission("ALL FIGHTERS LOST!", true, false);
+	return true;
 }
 
 void MM_Horde_CleanWaveTransition()
@@ -399,6 +478,9 @@ void MM_Horde_OnRoundEnd()
 bool MM_Horde_UpdateRoundInProgress()
 {
 	if (notGT(GT_HORDE))
+		return false;
+
+	if (MM_Horde_CheckAllFightersLost())
 		return false;
 
 	MM_Horde_RunSpawning();

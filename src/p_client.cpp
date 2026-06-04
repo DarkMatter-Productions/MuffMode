@@ -3,6 +3,7 @@
 #include "g_local.h"
 #include "monsters/m_player.h"
 #include "bots/bot_includes.h"
+#include "muffmode/mm_horde.h"
 #include "muffmode/mm_ruleset.h"
 #include "muffmode/mm_spawn_loadout.h"
 #include "muffmode/mm_vote.h"
@@ -678,7 +679,16 @@ static void ClientObituary(gentity_t *self, gentity_t *inflictor, gentity_t *att
 			if (level.match_state == matchst_t::MATCH_WARMUP_READYUP) {
 				BroadcastReadyReminderMessage();
 			} else {
-				if (GTF(GTF_ROUNDS) && GTF(GTF_ELIMINATION) && level.round_state == roundst_t::ROUND_IN_PROGRESS) {
+				if (GT(GT_HORDE) && level.round_state == roundst_t::ROUND_IN_PROGRESS && ClientIsPlaying(self->client)) {
+					const int remaining = max(0, self->client->pers.lives - 1);
+					if (remaining > 0) {
+						gi.LocClient_Print(self, PRINT_CENTER, "You were killed by {}\n{} {} remaining.",
+							attacker->client->resp.netname, remaining, remaining == 1 ? "life" : "lives");
+					} else {
+						gi.LocClient_Print(self, PRINT_CENTER, "You were killed by {}\nYou are out until the next wave.",
+							attacker->client->resp.netname);
+					}
+				} else if (GTF(GTF_ROUNDS) && GTF(GTF_ELIMINATION) && level.round_state == roundst_t::ROUND_IN_PROGRESS) {
 					gi.LocClient_Print(self, PRINT_CENTER, "You were fragged by {}\nYou will respawn next round.", attacker->client->resp.netname);
 				} else {
 					gi.LocClient_Print(self, PRINT_CENTER, "You were fragged by {}", attacker->client->resp.netname);
@@ -1096,6 +1106,11 @@ DIE(player_die) (gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 		self->client->ps.pmove.pm_type = PM_DEAD;
 		ClientObituary(self, inflictor, attacker, mod);
 
+		if (GT(GT_HORDE))
+			MM_Horde_OnPlayerDeath(self);
+		if (GT(GT_HORDE) && self->client->eliminated)
+			self->client->respawn_time = level.time + 1_sec;
+
 		CTF_ScoreBonuses(self, inflictor, attacker);
 		TossClientItems(self);
 		Weapon_Grapple_DoReset(self->client);
@@ -1217,7 +1232,7 @@ DIE(player_die) (gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 	}
 
 	if (!self->deadflag) {
-		if (InCoopStyle() && (g_coop_squad_respawn->integer || g_coop_enable_lives->integer)) {
+		if (InCoopStyle() && notGT(GT_HORDE) && (g_coop_squad_respawn->integer || g_coop_enable_lives->integer)) {
 			if (g_coop_enable_lives->integer && self->client->pers.lives) {
 				self->client->pers.lives--;
 				self->client->resp.coop_respawn.lives--;
@@ -2305,6 +2320,13 @@ static bool ClientArenaEliminationRound(const gclient_t *client) {
 		level.round_state == roundst_t::ROUND_IN_PROGRESS;
 }
 
+static bool ClientHordeEliminatedRound(const gclient_t *client) {
+	return client && client->eliminated && GT(GT_HORDE) &&
+		level.match_state == matchst_t::MATCH_IN_PROGRESS &&
+		(level.round_state == roundst_t::ROUND_IN_PROGRESS || level.round_state == roundst_t::ROUND_ENDED) &&
+		client->sess.team != TEAM_SPECTATOR;
+}
+
 void ClientSetEliminated(gentity_t *self) {
 	self->client->eliminated = true;
 }
@@ -2627,8 +2649,10 @@ void ClientSpawn(gentity_t *ent) {
 			ClientSetEliminated(ent);
 	bool eliminated = ent->client->eliminated;
 	int lives = 0;
-	if (InCoopStyle() && g_coop_enable_lives->integer)
+	if (InCoopStyle() && notGT(GT_HORDE) && g_coop_enable_lives->integer)
 		lives = ent->client->pers.spawned ? ent->client->pers.lives : g_coop_enable_lives->integer + 1;
+	else if (GT(GT_HORDE) && ClientIsPlaying(ent->client))
+		lives = ent->client->pers.lives;
 	
 	// clear velocity now, since landmark may change it
 	ent->velocity = {};
@@ -2847,6 +2871,8 @@ void ClientSpawn(gentity_t *ent) {
 			ent->client->initial_menu_delay = level.time + 10_hz;
 		ent->client->eliminated = eliminated;
 		if (eliminated && GTF(GTF_ARENA) && GTF(GTF_ELIMINATION))
+			GetFollowTarget(ent);
+		else if (eliminated && GT(GT_HORDE))
 			GetFollowTarget(ent);
 		gi.linkentity(ent);
 		return;
@@ -4608,6 +4634,8 @@ static bool G_CoopRespawn(gentity_t *ent) {
 	// don't do this in non-coop
 	if (!InCoopStyle())
 		return false;
+	if (GT(GT_HORDE))
+		return false;
 	// if we don't have squad or lives, it doesn't matter
 	if (!g_coop_squad_respawn->integer && !g_coop_enable_lives->integer)
 		return false;
@@ -4727,6 +4755,17 @@ void ClientBeginServerFrame(gentity_t *ent) {
 		if (deathmatch->integer && ClientArenaEliminationRound(client) &&
 				level.time > client->respawn_time && !level.coop_level_restart_time) {
 			ClientRespawn(ent);
+			return;
+		}
+
+		if (deathmatch->integer && ClientHordeEliminatedRound(client) &&
+				level.time > client->respawn_time && !level.coop_level_restart_time) {
+			ClientRespawn(ent);
+			return;
+		}
+
+		if (deathmatch->integer && GT(GT_HORDE) && ClientIsPlaying(client) && client->eliminated &&
+				level.round_state == roundst_t::ROUND_IN_PROGRESS) {
 			return;
 		}
 

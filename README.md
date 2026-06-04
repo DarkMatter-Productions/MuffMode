@@ -83,7 +83,7 @@ Restrict voting further with **`g_votable_gametypes`** (subset of enabled modes 
 
 **Muff Mode additions**
 - **Clan Arena** (`ca`): Round-based team elimination — arena loadout, no item spawns, no self-damage, full weapon set.
-- **Horde** (`horde`): Wave-based PvE; top scoreboard while clearing up to 16 waves. Note: limited lives are not handled in coop-style lives.
+- **Horde** (`horde`): Wave-based PvE with per-wave lives; top scoreboard while clearing waves (`roundlimit`). Last life sends you to spectator until the next wave; all fighters out ends the match.
 - **Instagib** (`instagib`): Railgun-only one-hit kills.
 - **Nade Fest** (`nadefest`): Grenades only.
 
@@ -368,6 +368,7 @@ For a complete set of ready-to-use server configs with per-gametype settings, se
 	12. Instagib
 	13. Nade Fest
  - **g_horde_starting_wave**: sets the starting wave number for Horde mode (default 1)
+ - **g_horde_lives**: lives per wave for Horde fighters (default 1); last death in a wave moves you to spectator until the next wave
  - **g_inactivity**: Values above 0 enables an inactivity timer for players, specifying number of seconds since last input to point of flagging the player as inactive. A warning is sent to the player 10 seconds before triggering and once triggered, the player is moved to spectators. Inactive clients are noted as such using the 'players' command. (default: 120)
  - **g_instagib_splash**: enables a non-damaging explosion from railgun shots in instagib, allows for rail jumping or knocking foes about (default 0)
  - **g_knockback_scale**: scales all knockback resulting from damage received (default 1.0)

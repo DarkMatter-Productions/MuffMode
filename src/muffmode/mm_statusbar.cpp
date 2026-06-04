@@ -38,7 +38,10 @@ void MM_InitStatusbar()
 
 		sb.ifstat(STAT_COOP_RESPAWN).xv(0).yt(0).loc_stat_cstring2(STAT_COOP_RESPAWN).endifstat();
 
-		if (g_coop_enable_lives->integer && g_coop_num_lives->integer > 0)
+		if (g_coop_enable_lives->integer && g_coop_num_lives->integer > 0 && notGT(GT_HORDE))
+			sb.ifstat(STAT_LIVES).xr(-16).yt(y = 2).lives_num(STAT_LIVES).xr(0).yt(y += text_adj).loc_rstring("$g_lives").endifstat();
+
+		if (GT(GT_HORDE) && g_horde_lives->integer > 0)
 			sb.ifstat(STAT_LIVES).xr(-16).yt(y = 2).lives_num(STAT_LIVES).xr(0).yt(y += text_adj).loc_rstring("$g_lives").endifstat();
 
 		if (GT(GT_HORDE)) {

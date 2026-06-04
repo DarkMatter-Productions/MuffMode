@@ -488,6 +488,10 @@ Manual sign-off for `GT_HORDE` after spawn/orchestration changes:
 | Held grenade | Detonate while engaging monsters (no AV / soft-lock) |
 | Modifiers | Insta-Horde (or other horde vote presets) still spawn and score |
 | Admin/vote | `callvote` map/gametype to Horde on a horde-capable map |
+| Lives | Default `g_horde_lives 1` (one death per wave → spectator); set higher to allow respawns; lives restored each wave |
+| All out | Last fighter loses last life → defeat intermission (not next wave) |
+| Coop cvar | `g_coop_enable_lives 1` in Horde must not double-decrement lives |
+| Warmup death | Warmup kill does not decrement horde lives |
 
 ## Notes
 

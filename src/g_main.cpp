@@ -171,6 +171,7 @@ cvar_t *g_horde_wave_spawn_delay_ms;
 cvar_t *g_horde_player_scale;
 cvar_t *g_horde_player_scale_factor;
 cvar_t *g_horde_player_scale_max;
+cvar_t *g_horde_lives;
 cvar_t *g_huntercam;
 cvar_t *g_inactivity;
 cvar_t *g_infinite_ammo;
@@ -427,6 +428,7 @@ static void InitGame() {
 	g_horde_player_scale = gi.cvar("g_horde_player_scale", "1", CVAR_NOFLAGS);
 	g_horde_player_scale_factor = gi.cvar("g_horde_player_scale_factor", "0.4", CVAR_NOFLAGS);
 	g_horde_player_scale_max = gi.cvar("g_horde_player_scale_max", "4", CVAR_NOFLAGS);
+	g_horde_lives = gi.cvar("g_horde_lives", "1", CVAR_NOFLAGS);
 
 	g_huntercam = gi.cvar("g_huntercam", "1", CVAR_SERVERINFO | CVAR_LATCH);
 	g_dm_strong_mines = gi.cvar("g_dm_strong_mines", "0", CVAR_NOFLAGS);
@@ -2518,6 +2520,9 @@ void CheckDMExitRules() {
 		return;
 
 	if (MM_Horde_CheckOverrun())
+		return;
+
+	if (MM_Horde_CheckAllFightersLost())
 		return;
 
 	if (GTF(GTF_ROUNDS) && level.round_state != roundst_t::ROUND_ENDED)
