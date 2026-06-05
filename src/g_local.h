@@ -1687,6 +1687,8 @@ struct level_locals_t {
 	int16_t		horde_overrun_limit;
 	int8_t		horde_fighters_snapshotted;
 	bool		horde_all_spawned;
+	gtime_t		horde_mark_time;
+	int16_t		horde_mark_living;
 
 	char		author[MAX_QPATH];
 	char		author2[MAX_QPATH];
@@ -2599,6 +2601,16 @@ void		fire_doppelganger(gentity_t *ent, const vec3_t &start, const vec3_t &aimdi
 bool KillBox(gentity_t *ent, bool from_spawning, mod_id_t mod = MOD_TELEFRAG, bool bsp_clipping = true);
 gentity_t *G_Find(gentity_t *from, std::function<bool(gentity_t *e)> matcher);
 
+// Reject null-page and other non-canonical pointers before strlen/strcmp.
+constexpr bool G_IsValidStringPtr(const char *p) {
+	if (!p)
+		return false;
+	const auto addr = reinterpret_cast<uintptr_t>(p);
+	return addr >= 0x1000 && addr <= 0x7FFFFFFFFFFF;
+}
+
+void G_LogInvalidEntityString(gentity_t *e, const char *ptr, const char *context);
+
 // utility template for getting the type of a field
 template<typename>
 struct member_object_type {};
@@ -2612,7 +2624,13 @@ gentity_t *G_FindByString(gentity_t *from, const std::string_view &value) {
 	static_assert(std::is_same_v<member_object_type_t<decltype(M)>, const char *>, "can only use string member functions");
 
 	return G_Find(from, [&](gentity_t *e) {
-		return e->*M && strlen(e->*M) == value.length() && !Q_strncasecmp(e->*M, value.data(), value.length());
+		const char *field = e->*M;
+		if (!G_IsValidStringPtr(field)) {
+			if (field)
+				G_LogInvalidEntityString(e, field, value.data());
+			return false;
+		}
+		return strlen(field) == value.length() && !Q_strncasecmp(field, value.data(), value.length());
 		});
 }
 
@@ -3696,6 +3714,7 @@ struct gclient_t {
 	gtime_t	 last_firing_time;
 
 	bool		eliminated;
+	int16_t		horde_elim_msg_wave;
 
 	bool		ready_to_exit;
 
@@ -4219,9 +4238,10 @@ struct fmt::formatter<gentity_t> {
 
 	template<typename FormatContext>
 	auto format(const gentity_t &p, FormatContext &ctx) -> decltype(ctx.out()) {
+		const char *classname = G_IsValidStringPtr(p.classname) ? p.classname : "<invalid-classname>";
 		if (p.linked)
-			return fmt::format_to(ctx.out(), FMT_STRING("{} @ {}"), p.classname, (p.absmax + p.absmin) * 0.5f);
-		return fmt::format_to(ctx.out(), FMT_STRING("{} @ {}"), p.classname, p.s.origin);
+			return fmt::format_to(ctx.out(), FMT_STRING("{} @ {}"), classname, (p.absmax + p.absmin) * 0.5f);
+		return fmt::format_to(ctx.out(), FMT_STRING("{} @ {}"), classname, p.s.origin);
 	}
 };
 
@@ -4256,6 +4276,9 @@ enum pois_t : uint16_t {
 	POI_BLUE_FLAG, // blue flag/carrier
 	POI_PING,
 	POI_PING_END = POI_PING + MAX_CLIENTS - 1,
+
+	POI_HORDE_MONSTER_0,
+	POI_HORDE_MONSTER_END = POI_HORDE_MONSTER_0 + 7,
 };
 
 // implementation of pierce stuff

@@ -492,6 +492,9 @@ Manual sign-off for `GT_HORDE` after spawn/orchestration changes:
 | All out | Last fighter loses last life → defeat intermission (not next wave) |
 | Coop cvar | `g_coop_enable_lives 1` in Horde must not double-decrement lives |
 | Warmup death | Warmup kill does not decrement horde lives |
+| Elim spectator | Last life in a wave → center message to rejoin next wave; no duplicate spam on respawn to freecam |
+| Last monsters | At ≤3 living (default), `loc_ping` POIs (team ping style) for fighters and eliminated spectators; clear after wave |
+| Wave rejoin | Die out mid-wave → spectator until next wave; respawn with fresh lives and kept weapons when "Wave N Begins in..." countdown starts |
 
 ### Horde cvar rename (spawn points)
 

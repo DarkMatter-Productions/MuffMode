@@ -19,10 +19,12 @@ int  MM_Horde_WavePointBudget();
 bool MM_Horde_ShouldSkipEntitiesReset();
 int  MM_Horde_CountdownWaveNumber();
 void MM_Horde_AdvanceRoundNumber();
+void MM_Horde_OnRoundCountdown();
 void MM_Horde_OnRoundStarted();
 void MM_Horde_OnRoundEnd();
 void MM_Horde_CleanWaveTransition();
 void MM_Horde_OnPlayerDeath(gentity_t *ent);
+void MM_Horde_NotifyEliminatedSpectator(gentity_t *ent);
 
 // CheckDMExitRules / round tick; return true when defeat intermission was queued.
 bool MM_Horde_CheckAllFightersLost();

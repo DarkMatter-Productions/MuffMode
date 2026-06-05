@@ -265,6 +265,150 @@ extern cvar_t *g_horde_player_scale;
 extern cvar_t *g_horde_player_scale_factor;
 extern cvar_t *g_horde_player_scale_max;
 extern cvar_t *g_horde_lives;
+extern cvar_t *g_horde_mark_monsters_threshold;
+extern cvar_t *g_horde_mark_monsters_max;
+
+static bool HordeActive()
+{
+	return g_gametype->integer == static_cast<int>(GT_HORDE);
+}
+
+static int Horde_MarkMonsterSlots()
+{
+	return clamp(g_horde_mark_monsters_max->integer, 1, static_cast<int>(POI_HORDE_MONSTER_END - POI_HORDE_MONSTER_0 + 1));
+}
+
+static bool Horde_ClientWantsMonsterMarkers(gclient_t *cl)
+{
+	if (!cl || !cl->pers.connected)
+		return false;
+	if (ClientIsPlaying(cl))
+		return true;
+
+	return cl->eliminated && cl->sess.team != TEAM_SPECTATOR;
+}
+
+static bool Horde_IsLivingMonster(const gentity_t *ent)
+{
+	if (!ent->inuse || !(ent->svflags & SVF_MONSTER))
+		return false;
+	if (ent->health <= 0 || ent->deadflag || (ent->svflags & SVF_DEADMONSTER))
+		return false;
+	if (ent->monsterinfo.aiflags & AI_DO_NOT_COUNT)
+		return false;
+
+	return true;
+}
+
+static void Horde_SendMonsterPOI(gentity_t *player, int slot, const vec3_t &pos)
+{
+	gi.WriteByte(svc_poi);
+	gi.WriteShort(static_cast<uint16_t>(POI_HORDE_MONSTER_0 + slot));
+	gi.WriteShort(600);
+	gi.WritePosition(pos);
+	gi.WriteShort(level.pic_ping);
+	gi.WriteByte(208);
+	gi.WriteByte(POI_FLAG_NONE);
+	gi.unicast(player, false);
+}
+
+static void Horde_ClearMonsterPOI(gentity_t *player, int slot)
+{
+	gi.WriteByte(svc_poi);
+	gi.WriteShort(static_cast<uint16_t>(POI_HORDE_MONSTER_0 + slot));
+	gi.WriteShort(0xFFFF);
+	gi.WritePosition(vec3_origin);
+	gi.WriteShort(0);
+	gi.WriteByte(0);
+	gi.WriteByte(POI_FLAG_NONE);
+	gi.unicast(player, false);
+}
+
+static void Horde_ClearMonsterPOIsForClient(gentity_t *player)
+{
+	const int slots = Horde_MarkMonsterSlots();
+
+	for (int slot = 0; slot < slots; slot++)
+		Horde_ClearMonsterPOI(player, slot);
+}
+
+static void Horde_ClearMonsterPOIsForAll()
+{
+	for (auto ec : active_clients()) {
+		if (!ec->client || !Horde_ClientWantsMonsterMarkers(ec->client))
+			continue;
+
+		Horde_ClearMonsterPOIsForClient(ec);
+	}
+
+	level.horde_mark_living = -1;
+}
+
+static void MM_Horde_UpdateMonsterMarkers()
+{
+	if (!HordeActive())
+		return;
+	if (level.round_state != roundst_t::ROUND_IN_PROGRESS)
+		return;
+
+	const int threshold = g_horde_mark_monsters_threshold->integer;
+	const int living = level.total_monsters - level.killed_monsters;
+
+	if (threshold < 1 || living > threshold) {
+		if (level.horde_mark_living >= 0 && level.horde_mark_living <= threshold)
+			Horde_ClearMonsterPOIsForAll();
+
+		level.horde_mark_living = static_cast<int16_t>(living);
+		return;
+	}
+
+	const bool newly_marking = level.horde_mark_living > threshold || level.horde_mark_living < 0;
+	const bool count_changed = level.horde_mark_living != living;
+	const bool throttle = level.horde_mark_time > level.time && !count_changed;
+
+	if (throttle)
+		return;
+
+	level.horde_mark_time = level.time + 500_ms;
+	level.horde_mark_living = static_cast<int16_t>(living);
+
+	if (newly_marking) {
+		for (auto ec : active_clients()) {
+			if (!ec->client || !Horde_ClientWantsMonsterMarkers(ec->client))
+				continue;
+
+			gi.local_sound(ec, CHAN_AUTO, gi.soundindex("misc/help_marker.wav"), 1.f, ATTN_NORM, 0, GetUnicastKey());
+		}
+	}
+
+	const int max_slots = Horde_MarkMonsterSlots();
+	gentity_t *marked[8] = {};
+	int        num_marked = 0;
+
+	for (size_t i = 1; i < globals.num_entities && num_marked < max_slots; i++) {
+		gentity_t *ent = &g_entities[i];
+
+		if (!Horde_IsLivingMonster(ent))
+			continue;
+
+		marked[num_marked++] = ent;
+	}
+
+	for (auto ec : active_clients()) {
+		if (!ec->client || !Horde_ClientWantsMonsterMarkers(ec->client))
+			continue;
+
+		for (int slot = 0; slot < max_slots; slot++) {
+			if (slot < num_marked) {
+				vec3_t pos = marked[slot]->s.origin;
+				pos[2] += marked[slot]->maxs[2] * 0.5f;
+				Horde_SendMonsterPOI(ec, slot, pos);
+			} else {
+				Horde_ClearMonsterPOI(ec, slot);
+			}
+		}
+	}
+}
 
 static int Horde_LivesPerWave()
 {
@@ -301,17 +445,16 @@ static void MM_Horde_GrantWaveLives()
 		if (!ClientIsPlaying(ec->client))
 			continue;
 
+		const bool was_eliminated = ec->client->eliminated;
+
 		ec->client->pers.lives = lives;
 		ec->client->eliminated = false;
+		ec->client->horde_elim_msg_wave = 0;
 
-		if (ec->deadflag || ec->health <= 0)
+		// Eliminated fighters spectate in freecam with deadflag cleared and health restored.
+		if (was_eliminated || ec->deadflag || ec->health <= 0)
 			ClientRespawn(ec);
 	}
-}
-
-static bool HordeActive()
-{
-	return g_gametype->integer == static_cast<int>(GT_HORDE);
 }
 
 static float Horde_MultiplierFromFighters(int fighters)
@@ -405,6 +548,14 @@ void MM_Horde_AdvanceRoundNumber()
 		level.round_number++;
 }
 
+void MM_Horde_OnRoundCountdown()
+{
+	if (notGT(GT_HORDE))
+		return;
+
+	MM_Horde_GrantWaveLives();
+}
+
 void MM_Horde_OnRoundStarted()
 {
 	if (notGT(GT_HORDE))
@@ -413,8 +564,24 @@ void MM_Horde_OnRoundStarted()
 	gi.LocBroadcast_Print(PRINT_CHAT, "Wave {} has begun!\n", level.round_number);
 	gi.LocBroadcast_Print(PRINT_CENTER, brandom() ? "INCOMING!" : "LOCK AND LOAD!");
 	AnnouncerSound(world, "fight", nullptr, false);
-	MM_Horde_GrantWaveLives();
 	MM_Horde_BeginWave();
+}
+
+void MM_Horde_NotifyEliminatedSpectator(gentity_t *ent)
+{
+	if (!HordeActive())
+		return;
+	if (level.round_state != roundst_t::ROUND_IN_PROGRESS)
+		return;
+	if (!ent->client || !ent->client->eliminated)
+		return;
+	if (ent->client->sess.team == TEAM_SPECTATOR)
+		return;
+	if (ent->client->horde_elim_msg_wave == level.round_number)
+		return;
+
+	ent->client->horde_elim_msg_wave = static_cast<int16_t>(level.round_number);
+	gi.LocClient_Print(ent, PRINT_CENTER, "You will rejoin when the next wave countdown begins.");
 }
 
 void MM_Horde_OnPlayerDeath(gentity_t *ent)
@@ -432,6 +599,7 @@ void MM_Horde_OnPlayerDeath(gentity_t *ent)
 	if (ent->client->pers.lives <= 0) {
 		ClientSetEliminated(ent);
 		ent->client->respawn_time = level.time + 1_sec;
+		MM_Horde_NotifyEliminatedSpectator(ent);
 	}
 }
 
@@ -475,6 +643,9 @@ void MM_Horde_CleanWaveTransition()
 
 	if (g_debug_monster_kills->integer)
 		level.monsters_registered.fill(nullptr);
+
+	Horde_ClearMonsterPOIsForAll();
+	level.horde_mark_time = 0_ms;
 }
 
 void MM_Horde_OnRoundEnd()
@@ -495,6 +666,7 @@ bool MM_Horde_UpdateRoundInProgress()
 		return false;
 
 	MM_Horde_RunSpawning();
+	MM_Horde_UpdateMonsterMarkers();
 
 	if (level.horde_all_spawned && !(level.total_monsters - level.killed_monsters)) {
 		gi.LocBroadcast_Print(PRINT_CENTER, "Monsters eliminated!\n");

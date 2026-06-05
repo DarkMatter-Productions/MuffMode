@@ -685,7 +685,7 @@ static void ClientObituary(gentity_t *self, gentity_t *inflictor, gentity_t *att
 						gi.LocClient_Print(self, PRINT_CENTER, "You were killed by {}\n{} {} remaining.",
 							attacker->client->resp.netname, remaining, remaining == 1 ? "life" : "lives");
 					} else {
-						gi.LocClient_Print(self, PRINT_CENTER, "You were killed by {}\nYou are out until the next wave.",
+						gi.LocClient_Print(self, PRINT_CENTER, "You were killed by {}",
 							attacker->client->resp.netname);
 					}
 				} else if (GTF(GTF_ROUNDS) && GTF(GTF_ELIMINATION) && level.round_state == roundst_t::ROUND_IN_PROGRESS) {
@@ -1112,7 +1112,8 @@ DIE(player_die) (gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 			self->client->respawn_time = level.time + 1_sec;
 
 		CTF_ScoreBonuses(self, inflictor, attacker);
-		TossClientItems(self);
+		if (!(GT(GT_HORDE) && self->client->eliminated))
+			TossClientItems(self);
 		Weapon_Grapple_DoReset(self->client);
 
 		if (deathmatch->integer && !self->client->showscores)
@@ -2771,8 +2772,18 @@ void ClientSpawn(gentity_t *ent) {
 
 	// on a new, fresh spawn (always in DM, clear inventory
 	// or new spawns in SP/coop)
-	if (client->pers.health <= 0)
+	const bool horde_elim_spectator = GT(GT_HORDE) && eliminated && ClientIsPlaying(client);
+	const bool horde_wave_rejoin = GT(GT_HORDE) && ClientIsPlaying(client) && !eliminated &&
+		level.round_state == roundst_t::ROUND_COUNTDOWN;
+
+	if (client->pers.health <= 0 && !horde_elim_spectator && !horde_wave_rejoin)
 		InitClientPersistant(ent, client);
+	else if (horde_wave_rejoin) {
+		if (client->pers.max_health < 1)
+			MM_ApplyStartingHealthArmor(ent, client);
+		else
+			client->pers.health = client->pers.max_health;
+	}
 
 	// restore social ID
 	Q_strlcpy(ent->client->pers.social_id, social_id, sizeof(social_id));
@@ -2872,8 +2883,10 @@ void ClientSpawn(gentity_t *ent) {
 		ent->client->eliminated = eliminated;
 		if (eliminated && GTF(GTF_ARENA) && GTF(GTF_ELIMINATION))
 			GetFollowTarget(ent);
-		else if (eliminated && GT(GT_HORDE))
+		else if (eliminated && GT(GT_HORDE)) {
 			GetFollowTarget(ent);
+			MM_Horde_NotifyEliminatedSpectator(ent);
+		}
 		gi.linkentity(ent);
 		return;
 	}
