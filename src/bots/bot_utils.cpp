@@ -257,7 +257,24 @@ static void Item_UpdateState(gentity_t *item) {
 	// always need to update these for items, since random item spawning
 	// could change them at any time...
 	item->sv.classname = item->classname;
-	item->sv.item_id = item->item->id;
+
+	// Map MuffMode-specific item variants to the nearest engine-known base ID so
+	// the bot system doesn't emit "unknown item … skipping entity!" warnings.
+	static auto bot_item_id = [](item_id_t id) -> item_id_t {
+		switch (id) {
+		case IT_AMMO_SHELLS_LARGE:
+		case IT_AMMO_SHELLS_SMALL:  return IT_AMMO_SHELLS;
+		case IT_AMMO_BULLETS_LARGE:
+		case IT_AMMO_BULLETS_SMALL: return IT_AMMO_BULLETS;
+		case IT_AMMO_CELLS_LARGE:
+		case IT_AMMO_CELLS_SMALL:   return IT_AMMO_CELLS;
+		case IT_AMMO_ROCKETS_SMALL: return IT_AMMO_ROCKETS;
+		case IT_AMMO_SLUGS_LARGE:
+		case IT_AMMO_SLUGS_SMALL:   return IT_AMMO_SLUGS;
+		default:                    return id;
+		}
+	};
+	item->sv.item_id = bot_item_id(item->item->id);
 
 	if (!item->sv.init) {
 		item->sv.init = true;
