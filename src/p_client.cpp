@@ -3662,6 +3662,15 @@ bool ClientConnect(gentity_t *ent, char *userinfo, const char *social_id, bool i
 		ent->svflags |= SVF_BOT;
 		ent->client->sess.is_a_bot = true;
 
+		// On level change the engine reconnects bots with a default/placeholder name
+		// (typically "0" or empty). Restore the previously-stored name so it is not lost.
+		char engine_name[MAX_INFO_VALUE] = { 0 };
+		gi.Info_ValueForKey(userinfo, "name", engine_name, sizeof(engine_name));
+		if ((!engine_name[0] || !strcmp(engine_name, "0")) && ent->client->resp.netname[0]) {
+			gi.Info_SetValueForKey(userinfo, "name", ent->client->resp.netname);
+			ClientUserinfoChanged(ent, userinfo);
+		}
+
 		if (bot_name_prefix->string[0] && *bot_name_prefix->string) {
 			char oldname[MAX_INFO_VALUE];
 			char newname[MAX_NETNAME];
@@ -3670,6 +3679,7 @@ bool ClientConnect(gentity_t *ent, char *userinfo, const char *social_id, bool i
 			Q_strlcpy(newname, bot_name_prefix->string, sizeof(newname));
 			Q_strlcat(newname, oldname, sizeof(newname));
 			gi.Info_SetValueForKey(userinfo, "name", newname);
+			ClientUserinfoChanged(ent, userinfo);
 		}
 	} else {
 		// Clear bot flag for human clients - sess persists across map loads (TAG_GAME),
