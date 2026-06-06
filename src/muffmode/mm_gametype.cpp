@@ -269,8 +269,9 @@ void MM_ChangeGametype(gametype_t gt)
 
 	if ((int)gt != g_gametype->integer)
 	{
+		const gametype_t old_gt = (gametype_t)g_gametype->integer;
 		MuffModeLog("GAMETYPE", "Changing gametype from %s (%d) to %s (%d)",
-			gt_short_name[g_gametype->integer], g_gametype->integer,
+			gt_short_name[(int)old_gt], (int)old_gt,
 			gt_short_name[(int)gt], (int)gt);
 		gi.cvar_forceset("g_gametype", G_Fmt("{}", (int)gt).data());
 
@@ -293,7 +294,7 @@ void MM_ChangeGametype(gametype_t gt)
 			if (!g_instagib->integer)
 				gi.cvar_forceset("g_instagib", "1");
 		}
-		else if (g_gametype->integer == (int)gametype_t::GT_INSTAGIB)
+		else if (old_gt == gametype_t::GT_INSTAGIB)
 		{
 			if (g_instagib->integer)
 				gi.cvar_forceset("g_instagib", "0");
@@ -304,7 +305,7 @@ void MM_ChangeGametype(gametype_t gt)
 			if (!g_nadefest->integer)
 				gi.cvar_forceset("g_nadefest", "1");
 		}
-		else if (g_gametype->integer == (int)gametype_t::GT_NADEFEST)
+		else if (old_gt == gametype_t::GT_NADEFEST)
 		{
 			if (g_nadefest->integer)
 				gi.cvar_forceset("g_nadefest", "0");
@@ -378,16 +379,12 @@ void MM_GTChanges()
 			if (teamplay->integer)
 			{
 				gt = gametype_t::GT_TDM;
-				if (!teamplay->integer)
-					gi.cvar_forceset("teamplay", "1");
 				if (ctf->integer)
 					gi.cvar_forceset("ctf", "0");
 			}
 			else
 			{
 				gt = gametype_t::GT_FFA;
-				if (teamplay->integer)
-					gi.cvar_forceset("teamplay", "0");
 				if (ctf->integer)
 					gi.cvar_forceset("ctf", "0");
 			}
@@ -403,16 +400,12 @@ void MM_GTChanges()
 				gt = gametype_t::GT_CTF;
 				if (teamplay->integer)
 					gi.cvar_forceset("teamplay", "0");
-				if (!ctf->integer)
-					gi.cvar_forceset("ctf", "1");
 			}
 			else
 			{
 				gt = gametype_t::GT_TDM;
 				if (!teamplay->integer)
 					gi.cvar_forceset("teamplay", "1");
-				if (ctf->integer)
-					gi.cvar_forceset("ctf", "0");
 			}
 			changed = true;
 			s_gt_teamplay = teamplay->modified_count;
