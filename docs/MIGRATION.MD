@@ -484,7 +484,6 @@ Manual sign-off for `GT_HORDE` after spawn/orchestration changes:
 | Warmup | At most ~30 living monsters during warmup; no point budget drain |
 | Wave 1+ | Wave begins, monsters spawn until point budget spent, wave clears when budget exhausted and all dead |
 | Multi-wave | Corpses do not pile up between waves; counters/HUD stay sane |
-| Overrun | With cheats or tuning, 100+ living monsters triggers defeat intermission |
 | Held grenade | Detonate while engaging monsters (no AV / soft-lock) |
 | Modifiers | Insta-Horde (or other horde vote presets) still spawn and score |
 | Admin/vote | `callvote` map/gametype to Horde on a horde-capable map |

@@ -32,8 +32,7 @@ bool MM_Horde_CheckAllFightersLost();
 // Returns true when the wave is cleared (caller should invoke Round_End).
 bool MM_Horde_UpdateRoundInProgress();
 
-// CheckDMExitRules hooks; return true when intermission was queued.
-bool MM_Horde_CheckOverrun();
+// CheckDMExitRules hook; return true when intermission was queued.
 bool MM_Horde_CheckMatchEnd();
 
 bool MM_Horde_SkipFragScoreLimit();

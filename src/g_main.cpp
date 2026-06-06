@@ -166,7 +166,6 @@ cvar_t *g_horde_points_max;
 cvar_t *g_horde_spawn_interval_min;
 cvar_t *g_horde_spawn_interval_max;
 cvar_t *g_horde_warmup_cap;
-cvar_t *g_horde_overrun_limit;
 cvar_t *g_horde_wave_spawn_delay_ms;
 cvar_t *g_horde_player_scale;
 cvar_t *g_horde_player_scale_factor;
@@ -425,7 +424,6 @@ static void InitGame() {
 	g_horde_spawn_interval_min = gi.cvar("g_horde_spawn_interval_min", "0.3", CVAR_NOFLAGS);
 	g_horde_spawn_interval_max = gi.cvar("g_horde_spawn_interval_max", "0.5", CVAR_NOFLAGS);
 	g_horde_warmup_cap = gi.cvar("g_horde_warmup_cap", "30", CVAR_NOFLAGS);
-	g_horde_overrun_limit = gi.cvar("g_horde_overrun_limit", "100", CVAR_NOFLAGS);
 	g_horde_wave_spawn_delay_ms = gi.cvar("g_horde_wave_spawn_delay_ms", "500", CVAR_NOFLAGS);
 	g_horde_player_scale = gi.cvar("g_horde_player_scale", "1", CVAR_NOFLAGS);
 	g_horde_player_scale_factor = gi.cvar("g_horde_player_scale_factor", "0.4", CVAR_NOFLAGS);
@@ -2524,9 +2522,6 @@ void CheckDMExitRules() {
 		return;
 	
 	if (level.time - level.match_time <= FRAME_TIME_MS)
-		return;
-
-	if (MM_Horde_CheckOverrun())
 		return;
 
 	if (MM_Horde_CheckAllFightersLost())

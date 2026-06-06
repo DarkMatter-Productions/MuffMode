@@ -259,7 +259,6 @@ extern cvar_t *g_horde_points_max;
 extern cvar_t *g_horde_spawn_interval_min;
 extern cvar_t *g_horde_spawn_interval_max;
 extern cvar_t *g_horde_warmup_cap;
-extern cvar_t *g_horde_overrun_limit;
 extern cvar_t *g_horde_wave_spawn_delay_ms;
 extern cvar_t *g_horde_player_scale;
 extern cvar_t *g_horde_player_scale_factor;
@@ -501,16 +500,6 @@ int MM_Horde_WavePointBudget()
 	return max(1, static_cast<int>(budget * mult));
 }
 
-static int Horde_EffectiveOverrunLimitForFighters(int fighters)
-{
-	int limit = g_horde_overrun_limit->integer;
-	if (limit < 1)
-		limit = 100;
-
-	const float mult = Horde_MultiplierFromFighters(fighters);
-	return max(1, static_cast<int>(limit * mult));
-}
-
 static gtime_t Horde_SpawnInterval(bool warmup)
 {
 	if (warmup)
@@ -677,23 +666,6 @@ bool MM_Horde_UpdateRoundInProgress()
 	return false;
 }
 
-bool MM_Horde_CheckOverrun()
-{
-	if (notGT(GT_HORDE))
-		return false;
-
-	int overrun_limit = level.horde_overrun_limit;
-	if (overrun_limit < 1)
-		overrun_limit = Horde_EffectiveOverrunLimitForFighters(MM_Horde_CountFighters());
-
-	if ((level.total_monsters - level.killed_monsters) < overrun_limit)
-		return false;
-
-	gi.Broadcast_Print(PRINT_CENTER, "DEFEATED!");
-	QueueIntermission("OVERRUN BY MONSTERS!", true, false);
-	return true;
-}
-
 bool MM_Horde_CheckMatchEnd()
 {
 	if (notGT(GT_HORDE))
@@ -747,7 +719,6 @@ void MM_Horde_BeginWave()
 	const int fighters = MM_Horde_CountFighters();
 	level.horde_fighters_snapshotted = static_cast<int8_t>(fighters);
 	level.horde_spawn_points_remaining = MM_Horde_WavePointBudget();
-	level.horde_overrun_limit = static_cast<int16_t>(Horde_EffectiveOverrunLimitForFighters(fighters));
 
 	const int delay_ms = max(0, g_horde_wave_spawn_delay_ms->integer);
 	level.horde_monster_spawn_time = level.time + gtime_t::from_ms(delay_ms);
