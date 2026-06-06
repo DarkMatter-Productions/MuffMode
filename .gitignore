@@ -413,3 +413,6 @@ build_dev.bat
 # Local vcpkg artifacts
 src/vcpkg_installed/
 **/vcpkg_installed/
+
+# Runtime logs
+/logs/

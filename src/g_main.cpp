@@ -2139,7 +2139,7 @@ void CalculateRanks() {
 			}
 		}
 		else {
-			int score = 0, new_score, rank;
+			int score = 0, new_score, rank = 0;
 
 			for (size_t i = 0; i < level.num_playing_clients; i++) {
 				if (game.clients[i].pers.connected) {
