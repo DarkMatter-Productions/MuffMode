@@ -48,6 +48,8 @@ void UpdateChaseCam(gentity_t *ent) {
 	if (!targ || !targ->inuse || !targ->client || !ClientIsPlaying(targ->client) || targ->client->eliminated) {
 		//SetTeam(ent, TEAM_SPECTATOR, false, false, false);
 		FreeClientFollowers(targ);
+		if (!ClientIsPlaying(ent->client) || ent->client->eliminated)
+			GetFollowTarget(ent);
 		return;
 	}
 

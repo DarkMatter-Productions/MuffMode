@@ -3268,10 +3268,10 @@ cmds_t client_cmds[] = {
 	{"immortal",		Cmd_Immortal_f,			CF_ALLOW_SPEC | CF_CHEAT_PROTECT},
 	{"invdrop",			Cmd_InvDrop_f,			CF_NONE},
 	{"inven",			Cmd_Inven_f,			CF_ALLOW_DEAD | CF_ALLOW_SPEC},
-	{"invnext",			Cmd_InvNext_f,			CF_ALLOW_SPEC},	//spec for menu up/down
+	{"invnext",			Cmd_InvNext_f,			CF_ALLOW_SPEC | CF_ALLOW_DEAD},	//spec for menu up/down, dead for horde spectators
 	{"invnextp",		Cmd_InvNextP_f,			CF_NONE},
 	{"invnextw",		Cmd_InvNextW_f,			CF_NONE},
-	{"invprev",			Cmd_InvPrev_f,			CF_ALLOW_SPEC},	//spec for menu up/down
+	{"invprev",			Cmd_InvPrev_f,			CF_ALLOW_SPEC | CF_ALLOW_DEAD},	//spec for menu up/down, dead for horde spectators
 	{"invprevp",		Cmd_InvPrevP_f,			CF_NONE},
 	{"invprevw",		Cmd_InvPrevW_f,			CF_NONE},
 	{"invuse",			Cmd_InvUse_f,			CF_ALLOW_SPEC},	//spec for menu up/down
