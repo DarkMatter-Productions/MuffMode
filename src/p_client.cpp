@@ -2886,6 +2886,7 @@ void ClientSpawn(gentity_t *ent) {
 		else if (eliminated && GT(GT_HORDE)) {
 			GetFollowTarget(ent);
 			MM_Horde_NotifyEliminatedSpectator(ent);
+			ent->client->pers.health = 1; // prevent pers.health <= 0 from forcing scoreboard layout in freecam
 		}
 		gi.linkentity(ent);
 		return;
@@ -4789,6 +4790,13 @@ void ClientBeginServerFrame(gentity_t *ent) {
 
 		if (deathmatch->integer && GT(GT_HORDE) && ClientIsPlaying(client) && client->eliminated &&
 				level.round_state == roundst_t::ROUND_IN_PROGRESS) {
+			return;
+		}
+
+		if (deathmatch->integer && GT(GT_HORDE) && ClientIsPlaying(client) && !client->eliminated &&
+				level.round_state == roundst_t::ROUND_IN_PROGRESS &&
+				level.time > client->respawn_time && !level.coop_level_restart_time) {
+			ClientRespawn(ent);
 			return;
 		}
 
