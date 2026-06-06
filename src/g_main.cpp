@@ -3072,7 +3072,10 @@ static void CheckMinMaxPlayers() {
 		return;
 
 	// set min/maxplayer limits
-	if (minplayers->integer < 2) gi.cvar_set("minplayers", "2");
+	if (minplayers->integer < 1) {
+		gi.Com_PrintFmt("minplayers must be at least 1; clamped to 1.\n");
+		gi.cvar_set("minplayers", "1");
+	}
 	else if (minplayers->integer > maxclients->integer) gi.cvar_set("minplayers", maxclients->string);
 	if (maxplayers->integer < 0) gi.cvar_set("maxplayers", maxclients->string);
 	if (maxplayers->integer > maxclients->integer) gi.cvar_set("maxplayers", maxclients->string);
