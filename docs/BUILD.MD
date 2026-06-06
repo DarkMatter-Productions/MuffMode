@@ -36,14 +36,16 @@ build.bat
 Optional args:
 
 ```bat
-build.bat [Configuration] [Platform] [PlatformToolset]
+build.bat [Platform] [PlatformToolset]
 ```
+
+Configuration defaults to `Debug`. Set `MUFFMODE_BUILD_CONFIG=Release` for a release build.
 
 Examples:
 
 ```bat
-build.bat Debug x64 v145
-build.bat Release x64 v145
+build.bat x64 v143
+build.bat x64 v145
 ```
 
 ### Release build
@@ -69,5 +71,7 @@ After building, copy the DLL into your Quake 2 rerelease `muffmode` game folder 
   Open a Visual Studio Developer Command Prompt/PowerShell, then run the command again.
 - **Build fails with missing C++ tools**  
   Install Visual Studio C++ build components and Windows SDK.
+- **MSB8020: build tools for v145 cannot be found**  
+  You have VS 2022 (toolset `v143`). Run `build.bat` as-is, or pass `build.bat x64 v143`. Install VS 2026+ for `v145`.
 - **DLL copy/test issues**  
   Verify your Quake 2 install path and folder permissions.

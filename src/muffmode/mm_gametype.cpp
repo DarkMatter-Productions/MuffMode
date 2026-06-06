@@ -6,6 +6,8 @@
 #include "muffmode/mm_gametype.h"
 #include "muffmode/mm_maps.h"
 
+#include <cstdio>
+
 namespace {
 
 int s_check_ruleset = -1;
@@ -33,6 +35,136 @@ constexpr gametype_avail_t k_gametype_availability[GT_NUM_GAMETYPES] = {
 	/* GT_INSTAGIB */ gametype_avail_t::Enabled,
 	/* GT_NADEFEST */ gametype_avail_t::Enabled,
 };
+
+// Sessions running at or below the splitscreen player cap cannot safely
+// apply gt-cfg lines that raise maxclients above that cap mid-match.
+bool MM_IsSlotCappedSession()
+{
+	cvar_t *mc = gi.cvar("maxclients", nullptr, CVAR_NOFLAGS);
+	return mc && mc->integer <= (int)MAX_SPLIT_PLAYERS;
+}
+
+bool MM_IsCommentOrEmptyCfgLine(const char *line)
+{
+	while (*line == ' ' || *line == '\t')
+		line++;
+	return !*line || *line == '#' || (line[0] == '/' && line[1] == '/');
+}
+
+int MM_ParseCfgIntValue(const char *p)
+{
+	while (*p == ' ' || *p == '\t')
+		p++;
+
+	if (*p == '"')
+		return atoi(p + 1);
+
+	return atoi(p);
+}
+
+bool MM_TryParseMaxclientsTarget(const char *line, int *out_target)
+{
+	const char *p = line;
+	while (*p == ' ' || *p == '\t')
+		p++;
+
+	if (!Q_strncasecmp(p, "seta ", 5))
+		p += 5;
+	else if (!Q_strncasecmp(p, "set ", 4))
+		p += 4;
+	else if (!Q_strncasecmp(p, "sets ", 5))
+		p += 5;
+	else if (!Q_strncasecmp(p, "cvar_forceset ", 14))
+		p += 14;
+	else if (!Q_strncasecmp(p, "cvar_set ", 9))
+		p += 9;
+	else
+		return false;
+
+	while (*p == ' ' || *p == '\t')
+		p++;
+
+	if (Q_strncasecmp(p, "maxclients", 10))
+		return false;
+
+	const char c = p[10];
+	if (c && c != ' ' && c != '\t' && c != '"')
+		return false;
+
+	p += 10;
+	*out_target = MM_ParseCfgIntValue(p);
+	return true;
+}
+
+bool MM_ShouldSkipGtCfgLine(const char *line)
+{
+	if (!MM_IsSlotCappedSession())
+		return false;
+
+	const char *p = line;
+	while (*p == ' ' || *p == '\t')
+		p++;
+
+	// Lobby/setup command; never appropriate during gametype change.
+	if (!Q_strncasecmp(p, "kexmultiplayer", 14))
+		return true;
+
+	int target = 0;
+	if (MM_TryParseMaxclientsTarget(line, &target))
+		return target > (int)MAX_SPLIT_PLAYERS;
+
+	return false;
+}
+
+void MM_ExecGametypeCfg(gametype_t gt)
+{
+	const char *cfg_name = gt_short_name_upper[(int)gt];
+
+	if (!MM_IsSlotCappedSession())
+	{
+		gi.AddCommandString(G_Fmt("exec gt-{}.cfg\n", cfg_name).data());
+		return;
+	}
+
+	const char *path = G_Fmt("baseq2/gt-{}.cfg", cfg_name).data();
+	FILE *f = fopen(path, "rb");
+	if (!f)
+	{
+		gi.Com_PrintFmt("WARNING: Could not open {} for filtered load; skipping gametype cfg.\n", path);
+		return;
+	}
+
+	gi.Com_PrintFmt("Loading gametype cfg (filtered for {} maxclients: skipping kexmultiplayer and maxclients > {}).\n",
+		MAX_SPLIT_PLAYERS, MAX_SPLIT_PLAYERS);
+
+	int skipped = 0;
+	int executed = 0;
+	char line_buf[1024];
+
+	while (fgets(line_buf, sizeof(line_buf), f))
+	{
+		char *nl = strchr(line_buf, '\n');
+		if (nl)
+			*nl = '\0';
+		nl = strchr(line_buf, '\r');
+		if (nl)
+			*nl = '\0';
+
+		if (MM_IsCommentOrEmptyCfgLine(line_buf))
+			continue;
+
+		if (MM_ShouldSkipGtCfgLine(line_buf))
+		{
+			skipped++;
+			continue;
+		}
+
+		gi.AddCommandString(G_Fmt("{}\n", line_buf).data());
+		executed++;
+	}
+
+	fclose(f);
+}
 
 } // namespace
 
@@ -179,7 +311,7 @@ void MM_ChangeGametype(gametype_t gt)
 		}
 
 		if (g_gametype_cfg->integer && deathmatch->integer)
-			gi.AddCommandString(G_Fmt("exec gt-{}.cfg\n", gt_short_name_upper[(int)gt]).data());
+			MM_ExecGametypeCfg(gt);
 
 		extern bool g_map_list_shuffled;
 		g_map_list_shuffled = false;

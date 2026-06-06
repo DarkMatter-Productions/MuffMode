@@ -195,6 +195,7 @@ void MM_CmdGametype(gentity_t *ent)
 		gi.LocClient_Print(ent, PRINT_HIGH, "Warning: This gametype is not in the votable list, but setting it anyway (admin override).\n");
 
 	ChangeGametype(gt);
+	gi.AddCommandString("sv gt_changemap_first\n");
 }
 
 void MM_CmdRuleset(gentity_t *ent)
