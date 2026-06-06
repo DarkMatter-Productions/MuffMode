@@ -206,9 +206,11 @@ static bool G_alternate_flystep(gentity_t *ent, vec3_t move, bool relink, gentit
 
 	// FIXME
 	if (isnan(dir[0]) || isnan(dir[1]) || isnan(dir[2])) {
+		gi.Com_PrintFmt("WARNING: NaN velocity in G_alternate_flystep for {}\n", *ent);
 #if defined(_DEBUG) && defined(_WIN32)
 		__debugbreak();
 #endif
+		ent->velocity = vec3_origin;
 		return false;
 	}
 
@@ -313,9 +315,11 @@ static bool G_alternate_flystep(gentity_t *ent, vec3_t move, bool relink, gentit
 
 	// FIXME
 	if (isnan(final_dir[0]) || isnan(final_dir[1]) || isnan(final_dir[2])) {
+		gi.Com_PrintFmt("WARNING: NaN final_dir (pre-slerp) in G_alternate_flystep for {}\n", *ent);
 #if defined(_DEBUG) && defined(_WIN32)
 		__debugbreak();
 #endif
+		ent->velocity = vec3_origin;
 		return false;
 	}
 
@@ -378,9 +382,11 @@ static bool G_alternate_flystep(gentity_t *ent, vec3_t move, bool relink, gentit
 	// FIXME
 	if (isnan(final_dir[0]) || isnan(final_dir[1]) || isnan(final_dir[2]) ||
 		isnan(current_speed)) {
+		gi.Com_PrintFmt("WARNING: NaN final_dir/speed in G_alternate_flystep for {}\n", *ent);
 #if defined(_DEBUG) && defined(_WIN32)
 		__debugbreak();
 #endif
+		ent->velocity = vec3_origin;
 		return false;
 	}
 
