@@ -2332,7 +2332,7 @@ static void Drop_Ammo(gentity_t *ent, gitem_t *item) {
 			drop->count += 5;
 	}
 
-	drop->count = clamp(drop->count, drop->count, ent->client->pers.inventory[index]);
+	drop->count = min(drop->count, ent->client->pers.inventory[index]);
 
 	if (ent->client->pers.inventory[index] - drop->count < 0) {
 		G_FreeEntity(drop);

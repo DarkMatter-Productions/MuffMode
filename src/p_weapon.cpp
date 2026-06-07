@@ -649,7 +649,7 @@ void Drop_Weapon(gentity_t *ent, gitem_t *item) {
 	
 	drop->count = MM_Ruleset_WeaponDropAmmoQuantity(item, ammo);
 
-	drop->count = clamp(drop->count, drop->count, ent->client->pers.inventory[ammo->id]);
+	drop->count = min(drop->count, ent->client->pers.inventory[ammo->id]);
 
 	if (drop->count <= 0)
 		return;
