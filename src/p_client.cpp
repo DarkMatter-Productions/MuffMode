@@ -4099,6 +4099,10 @@ static void ClientTimerActions(gentity_t *ent) {
 
 	MM_ClampEntityHealthArmor(ent);
 
+	if (GT(GT_HORDE) && ent->client->eliminated && ent->client->sess.team != TEAM_SPECTATOR &&
+		level.round_state == roundst_t::ROUND_IN_PROGRESS)
+		gi.LocClient_Print(ent, PRINT_CENTER, "You will rejoin when the next wave countdown begins.");
+
 	ent->client->time_residual = level.time + 1_sec;
 }
 
@@ -4416,12 +4420,14 @@ void ClientThink(gentity_t *ent, usercmd_t *ucmd) {
 	// fire weapon from final position if needed
 	if (client->latched_buttons & BUTTON_ATTACK) {
 		if (!ClientIsPlaying(client) || (client->eliminated && !client->sess.is_a_bot)) {
-			client->latched_buttons = BUTTON_NONE;
+			if (!client->menu) {
+				client->latched_buttons = BUTTON_NONE;
 
-			if (client->follow_target) {
-				FreeFollower(ent);
-			} else
-				GetFollowTarget(ent);
+				if (client->follow_target) {
+					FreeFollower(ent);
+				} else
+					GetFollowTarget(ent);
+			}
 		} else if (!ent->client->weapon_thunk) {
 			// we can only do this during a ready state and
 			// if enough time has passed from last fire
