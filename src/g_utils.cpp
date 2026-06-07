@@ -655,13 +655,13 @@ void G_AssignPlayerSkin(gentity_t *ent, const char *s) {
 
 	switch (ent->client->sess.team) {
 	case TEAM_RED:
-		if (*g_team_red_model->string)
+		if (g_team_force_models->integer && *g_team_red_model->string)
 			t = G_Fmt("{}\\{}\\default", ent->client->resp.netname, g_team_red_model->string);
 		else
 			t = G_Fmt("{}\\{}{}\\default", ent->client->resp.netname, t, TEAM_RED_SKIN);
 		break;
 	case TEAM_BLUE:
-		if (*g_team_blue_model->string)
+		if (g_team_force_models->integer && *g_team_blue_model->string)
 			t = G_Fmt("{}\\{}\\default", ent->client->resp.netname, g_team_blue_model->string);
 		else
 			t = G_Fmt("{}\\{}{}\\default", ent->client->resp.netname, t, TEAM_BLUE_SKIN);
