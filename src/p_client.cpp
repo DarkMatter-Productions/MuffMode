@@ -2774,7 +2774,8 @@ void ClientSpawn(gentity_t *ent) {
 	// or new spawns in SP/coop)
 	const bool horde_elim_spectator = GT(GT_HORDE) && eliminated && ClientIsPlaying(client);
 	const bool horde_wave_rejoin = GT(GT_HORDE) && ClientIsPlaying(client) && !eliminated &&
-		level.round_state == roundst_t::ROUND_COUNTDOWN && level.round_number > 0;
+		level.round_state == roundst_t::ROUND_COUNTDOWN && level.round_number > 0 &&
+		client->pers.weapon != nullptr;
 
 	if (client->pers.health <= 0 && !horde_elim_spectator && !horde_wave_rejoin)
 		InitClientPersistant(ent, client);
