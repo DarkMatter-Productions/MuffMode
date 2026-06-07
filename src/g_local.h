@@ -2357,6 +2357,8 @@ extern cvar_t *run_roll;
 extern cvar_t *g_airaccelerate;
 extern cvar_t *g_allow_admin;
 extern cvar_t *g_allow_custom_skins;
+extern cvar_t *g_team_red_model;
+extern cvar_t *g_team_blue_model;
 extern cvar_t *g_allow_forfeit;
 extern cvar_t *g_allow_grapple;
 extern cvar_t *g_allow_kill;
