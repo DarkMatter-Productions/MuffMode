@@ -1688,6 +1688,7 @@ struct level_locals_t {
 	bool		horde_all_spawned;
 	gtime_t		horde_mark_time;
 	int16_t		horde_mark_living;
+	float		horde_map_scale_mult; // cached map-size multiplier, 0 = not yet computed
 
 	char		author[MAX_QPATH];
 	char		author2[MAX_QPATH];

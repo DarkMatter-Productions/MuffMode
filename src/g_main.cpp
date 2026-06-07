@@ -173,6 +173,9 @@ cvar_t *g_horde_player_scale_max;
 cvar_t *g_horde_lives;
 cvar_t *g_horde_mark_monsters_threshold;
 cvar_t *g_horde_mark_monsters_max;
+cvar_t *g_horde_map_scale;
+cvar_t *g_horde_map_scale_ref;
+cvar_t *g_horde_map_scale_factor;
 cvar_t *g_huntercam;
 cvar_t *g_inactivity;
 cvar_t *g_infinite_ammo;
@@ -431,6 +434,9 @@ static void InitGame() {
 	g_horde_lives = gi.cvar("g_horde_lives", "1", CVAR_NOFLAGS);
 	g_horde_mark_monsters_threshold = gi.cvar("g_horde_mark_monsters_threshold", "3", CVAR_NOFLAGS);
 	g_horde_mark_monsters_max = gi.cvar("g_horde_mark_monsters_max", "8", CVAR_NOFLAGS);
+	g_horde_map_scale = gi.cvar("g_horde_map_scale", "1", CVAR_NOFLAGS);
+	g_horde_map_scale_ref = gi.cvar("g_horde_map_scale_ref", "4000", CVAR_NOFLAGS);
+	g_horde_map_scale_factor = gi.cvar("g_horde_map_scale_factor", "0.5", CVAR_NOFLAGS);
 
 	g_huntercam = gi.cvar("g_huntercam", "1", CVAR_SERVERINFO | CVAR_LATCH);
 	g_dm_strong_mines = gi.cvar("g_dm_strong_mines", "0", CVAR_NOFLAGS);

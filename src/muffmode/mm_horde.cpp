@@ -266,6 +266,9 @@ extern cvar_t *g_horde_player_scale_max;
 extern cvar_t *g_horde_lives;
 extern cvar_t *g_horde_mark_monsters_threshold;
 extern cvar_t *g_horde_mark_monsters_max;
+extern cvar_t *g_horde_map_scale;
+extern cvar_t *g_horde_map_scale_ref;
+extern cvar_t *g_horde_map_scale_factor;
 
 static bool HordeActive()
 {
@@ -468,6 +471,43 @@ static float Horde_MultiplierFromFighters(int fighters)
 	return 1.f + (fighters - 1) * factor;
 }
 
+static float Horde_MapScaleMultiplier()
+{
+	if (!g_horde_map_scale->integer)
+		return 1.f;
+
+	if (level.horde_map_scale_mult != 0.f)
+		return level.horde_map_scale_mult;
+
+	if (level.num_spawn_spots < 2)
+	{
+		level.horde_map_scale_mult = 1.f;
+		return 1.f;
+	}
+
+	vec3_t bmin = level.spawn_spots[0]->s.origin;
+	vec3_t bmax = bmin;
+	for (int i = 1; i < level.num_spawn_spots; i++)
+	{
+		const vec3_t &o = level.spawn_spots[i]->s.origin;
+		bmin.x = min(bmin.x, o.x);
+		bmin.y = min(bmin.y, o.y);
+		bmin.z = min(bmin.z, o.z);
+		bmax.x = max(bmax.x, o.x);
+		bmax.y = max(bmax.y, o.y);
+		bmax.z = max(bmax.z, o.z);
+	}
+
+	const float diagonal = (bmax - bmin).length();
+	const float ref      = max(1.f, g_horde_map_scale_ref->value);
+	const float factor   = clamp(g_horde_map_scale_factor->value, 0.f, 10.f);
+	const float ratio    = diagonal / ref;
+	const float mult     = 1.f + (ratio - 1.f) * factor;
+
+	level.horde_map_scale_mult = max(0.1f, mult);
+	return level.horde_map_scale_mult;
+}
+
 int MM_Horde_CountFighters()
 {
 	int fighters = 0;
@@ -485,19 +525,20 @@ int MM_Horde_CountFighters()
 int MM_Horde_WavePointBudget()
 {
 	const int   fighters = MM_Horde_CountFighters();
-	const float mult = Horde_MultiplierFromFighters(fighters);
-	const int   base = g_horde_points_base->integer;
+	const float pmult    = Horde_MultiplierFromFighters(fighters);
+	const float msmult   = Horde_MapScaleMultiplier();
+	const int   base     = g_horde_points_base->integer;
 	const int   per_wave = g_horde_points_per_wave->integer;
-	const int   min_pts = g_horde_points_min->integer;
-	const int   max_pts = g_horde_points_max->integer;
-	int         budget = base + level.round_number * per_wave;
+	const int   min_pts  = g_horde_points_min->integer;
+	const int   max_pts  = g_horde_points_max->integer;
+	int         budget   = base + level.round_number * per_wave;
 
 	if (min_pts > 0)
 		budget = max(budget, min_pts);
 	if (max_pts > 0)
 		budget = min(budget, max_pts);
 
-	return max(1, static_cast<int>(budget * mult));
+	return max(1, static_cast<int>(budget * pmult * msmult));
 }
 
 static gtime_t Horde_SpawnInterval(bool warmup)
