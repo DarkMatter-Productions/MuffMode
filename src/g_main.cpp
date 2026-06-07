@@ -1521,7 +1521,7 @@ static void CheckDMCountdown(void) {
 	int t = (base + 1_sec - level.time).seconds<int>();
 
 	if (!level.countdown_check || level.countdown_check.seconds<int>() > t) {
-		if (!(t % 10) || t < 10) {
+		if (t > 0 && (!(t % 10) || t < 10)) {
 			AnnouncerSound(world, nullptr, G_Fmt("world/{}{}.wav", t, t >= 20 ? "sec" : "").data(), false);
 			//gi.positioned_sound(world->s.origin, world, CHAN_AUTO | CHAN_RELIABLE, gi.soundindex(G_Fmt("world/{}{}.wav", t, t >= 20 ? "sec" : "").data()), 1, ATTN_NONE, 0);
 			if (t <= 3) {
