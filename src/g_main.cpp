@@ -1437,7 +1437,7 @@ static void CheckDMRoundState(void) {
 		}
 
 		// hit the round time limit, check any other winning conditions
-		if (level.time >= level.round_state_timer) {
+		if (roundtimelimit->value > 0 && level.time >= level.round_state_timer) {
 			// highest number of players remaining or highest total health wins
 			if (GT(GT_CA)) {
 				int living_red = 0, living_blue = 0;
