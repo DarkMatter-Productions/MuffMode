@@ -230,7 +230,7 @@ enum gtf_t {
 extern int _gt[GT_NUM_GAMETYPES];
 
 #define GTF( x ) _gt[g_gametype->integer] & (x)
-#define GT( x ) g_gametype->integer == (int)(x)
+#define GT( x ) (g_gametype->integer == (int)(x))
 #define notGT( x ) g_gametype->integer != (int)(x)
 
 constexpr const char *gt_short_name[GT_NUM_GAMETYPES] = {
