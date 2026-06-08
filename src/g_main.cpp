@@ -1601,7 +1601,8 @@ static void CheckDMWarmupState(void) {
 	MM_Duel_QueueSpectatorBots();
 
 	min_players = GT(GT_DUEL) ? 2 : minplayers->integer;
-	if (level.match_state < matchst_t::MATCH_COUNTDOWN && !g_dm_do_warmup->integer && level.num_playing_clients >= min_players) {
+	if (level.match_state < matchst_t::MATCH_COUNTDOWN && !g_dm_do_warmup->integer && level.num_playing_clients >= min_players
+		&& (g_dm_allow_no_humans->integer || level.num_playing_human_clients > 0)) {
 		Match_Start();
 		return;
 	}

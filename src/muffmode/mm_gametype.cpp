@@ -275,13 +275,19 @@ void MM_ChangeGametype(gametype_t gt)
 			gt_short_name[(int)gt], (int)gt);
 		gi.cvar_forceset("g_gametype", G_Fmt("{}", (int)gt).data());
 
-		// Force all human clients through explicit join flow after gametype change.
+		// Force all clients through proper join flow after gametype change.
 		for (auto ec : active_clients())
 		{
 			if (!ec->client)
 				continue;
-			if (ec->client->sess.is_a_bot || (ec->svflags & SVF_BOT))
+			if (ec->client->sess.is_a_bot || (ec->svflags & SVF_BOT)) {
+				// Reset bots fully so they go through ClientConnect's spectator
+				// initialization path and are re-assigned by CheckDMWarmupState
+				// rather than inheriting TEAM_FREE from the previous gametype (e.g. horde).
+				ec->client->sess.team = TEAM_NONE;
+				ec->client->sess.initialised = false;
 				continue;
+			}
 			ec->client->sess.team = TEAM_NONE;
 			ec->client->sess.duel_queued = false;
 			ec->client->sess.initialised = false;
