@@ -1264,14 +1264,16 @@ function Publish-GitHubRelease {
         "--repo", $ReleaseRepo,
         "--title", $(if ((Get-ChannelDisplayName -Channel $Channel)) { "MuffMode v$TargetVersion $(Get-ChannelDisplayName -Channel $Channel)" } else { "MuffMode v$TargetVersion" }),
         "--notes-file", $ReleaseNotesPath,
-        "--latest",
         "--fail-on-no-commits"
     )
     if ($Prerelease) {
-        $args += "--prerelease"
+        $args += @("--prerelease", "--latest=false")
+    }
+    else {
+        $args += "--latest"
     }
 
-    $releaseState = if ($Prerelease) { "latest prerelease" } else { "latest stable release" }
+    $releaseState = if ($Prerelease) { "prerelease" } else { "latest stable release" }
     Write-Step "Publishing GitHub release v$TargetVersion as $releaseState"
     & gh @args
     if ($LASTEXITCODE -ne 0) {

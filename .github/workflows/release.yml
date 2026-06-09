@@ -304,11 +304,13 @@ jobs:
             "--repo", "${{ github.repository }}",
             "--title", $title,
             "--notes-file", $notes.FullName,
-            "--latest",
             "--fail-on-no-commits"
           )
           if ("${{ needs.version.outputs.is_prerelease }}" -eq "true") {
-            $arguments += "--prerelease"
+            $arguments += @("--prerelease", "--latest=false")
+          }
+          else {
+            $arguments += "--latest"
           }
 
           gh @arguments

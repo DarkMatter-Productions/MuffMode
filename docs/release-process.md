@@ -2,7 +2,7 @@
 
 [README](../README.md) | [Build Guide](build-guide.md) | [Configuration Reference](configuration-reference.md)
 
-This project is currently in **Beta**. The release script defaults to `-Channel beta`, names packages with the `-beta` suffix, and publishes GitHub releases with the prerelease flag while still marking them as latest.
+This project is currently in **Beta**. The release script defaults to `-Channel beta`, names packages with the `-beta` suffix, and publishes GitHub releases with the prerelease flag. GitHub does not allow prereleases to be marked as the repository's "Latest" release, so only stable releases force the latest flag.
 
 This project uses [VERSION](../VERSION) as the release version source of truth. The in-game mod version in [src/g_local.h](../src/g_local.h) must match it before publishing a release.
 
@@ -36,9 +36,9 @@ The Windows installer is built with [Inno Setup 6](https://jrsoftware.org/isinfo
 
 | Channel | Package suffix | GitHub release flag |
 | --- | --- | --- |
-| `alpha` | `-alpha` | Prerelease and latest |
-| `beta` | `-beta` | Prerelease and latest |
-| `rc` | `-rc` | Prerelease and latest |
+| `alpha` | `-alpha` | Prerelease, not latest |
+| `beta` | `-beta` | Prerelease, not latest |
+| `rc` | `-rc` | Prerelease, not latest |
 | `stable` | none | Latest release |
 
 Use the default `beta` channel until the project is ready to leave beta.
@@ -160,7 +160,7 @@ After committing version changes and ensuring the working tree is clean:
 .\scripts\release.ps1 -VersionMode auto -CreateGitHubRelease
 ```
 
-The script creates `v<version>`, uploads the package zip and Windows installer, uses the generated changelog as release notes, and passes `--latest` to `gh release create`. For the default beta channel it also passes `--prerelease`, so the release is both latest and clearly flagged as beta-stage.
+The script creates `v<version>`, uploads the package zip and Windows installer, and uses the generated changelog as release notes. Stable releases pass `--latest`; beta, alpha, and release-candidate builds pass `--prerelease --latest=false` because GitHub rejects releases that are both latest and prerelease.
 
 ## Changelog Scope
 
