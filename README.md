@@ -1,10 +1,22 @@
-# Welcome to Muff Mode BETA!
+<div align="center">
+  <img src="assets/img/logo.png" alt="MuffMode Logo" width="300">
+
+  [![Latest Release](https://img.shields.io/github/v/release/DarkMatter-Productions/MuffMode?label=release&color=blue)](https://github.com/DarkMatter-Productions/MuffMode/releases/latest)
+  [![License](https://img.shields.io/github/license/DarkMatter-Productions/MuffMode?color=blue)](LICENSE)
+  [![Release Build](https://img.shields.io/github/actions/workflow/status/DarkMatter-Productions/MuffMode/release.yml?label=release%20build)](https://github.com/DarkMatter-Productions/MuffMode/actions/workflows/release.yml)
+  [![Open Issues](https://img.shields.io/github/issues/DarkMatter-Productions/MuffMode)](https://github.com/DarkMatter-Productions/MuffMode/issues)
+  [![Stars](https://img.shields.io/github/stars/DarkMatter-Productions/MuffMode?style=flat)](https://github.com/DarkMatter-Productions/MuffMode/stargazers)
+</div>
+
+<div align="center">
+  <h2>Welcome to MuffMode</b></h2>
+</div>
 
 ## What is Muff Mode?
-Muff Mode is a server-side mod for [QUAKE II Remastered](https://github.com/id-Software/quake2-rerelease-dll) providing overall enhances functionality and refinements.
+Muff Mode is a server-side competitive multiplayer mod for [QUAKE II Remastered](https://github.com/id-Software/quake2-rerelease-dll) providing an overall enhanced multiplayer experience.
 
 ### It is for Server Hosts
-With a focus on multiplayer, it provides refined match handling and an extensive set of new capabilities for server owners to configure the game in a host of new ways.
+With a focus on multiplayer, it provides refined match handling and an extensive set of new settings and capabilities for server owners to configure the game in a host of new ways.
 
 ### It is for Level Designers
 New creative possibilities are unlocked for level designers, with an array of new map entities and keys and a range of added gametypes to design for.
