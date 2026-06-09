@@ -33,39 +33,55 @@ constexpr weighted_item_t items[] = {
 	{ "weapon_machinegun", -1, -1, 1.05f, 0 },
 	{ "weapon_chaingun", 3, -1, 1.01f, 0 },
 	{ "weapon_grenadelauncher", 4, -1, 0.75f, 0 },
+	{ "weapon_hyperblaster", 5, -1, 0.70f, 0 },
+	{ "weapon_rocketlauncher", 6, -1, 0.65f, 0 },
+	{ "weapon_railgun", 8, -1, 0.45f, 0 },
 
 	{ "ammo_shells", -1, -1, 1.25f, 0 },
 	{ "ammo_bullets", -1, -1, 1.25f, 0 },
 	{ "ammo_grenades", 2, -1, 1.25f, 0 },
+	{ "ammo_cells", 5, -1, 1.0f, 0 },
+	{ "ammo_rockets", 6, -1, 1.0f, 0 },
+	{ "ammo_slugs", 8, -1, 0.9f, 0 },
 };
 
+// Tuned for a 12-wave arc: soldiers -> gekks/flyers -> mid-tier -> heavies (8-10) -> commander finale (11-12).
+// 1-point chaff stays available all game so leftover budget points are always spendable.
+// Soldier-family weights are kept low so waves 2-4 diversify quickly (soldier share ~73/61/46%).
 constexpr weighted_item_t monsters[] = {
-	{ "monster_soldier_light", -1, 7, 1.50f, -0.45f, { IT_HEALTH_SMALL }, 1 },
-	{ "monster_soldier", -1, 7, 0.85f, -0.25f, { IT_AMMO_BULLETS_SMALL, IT_HEALTH_SMALL }, 1 },
-	{ "monster_soldier_ss", 2, 7, 1.01f, -0.125f, { IT_AMMO_SHELLS_SMALL, IT_HEALTH_SMALL }, 2 },
-	{ "monster_soldier_hypergun", 2, 9, 1.2f, 0.15f, { IT_AMMO_CELLS_SMALL, IT_HEALTH_SMALL }, 2 },
-	{ "monster_soldier_lasergun", 3, 9, 1.15f, 0.2f, { IT_AMMO_CELLS_SMALL, IT_HEALTH_SMALL }, 2 },
-	{ "monster_soldier_ripper", 3, 9, 1.25f, 0.25f, { IT_AMMO_CELLS_SMALL, IT_HEALTH_SMALL }, 2 },
-	{ "monster_infantry", 3, 16, 1.05f, 0.125f, { IT_AMMO_BULLETS_SMALL, IT_AMMO_BULLETS }, 2 },
-	{ "monster_gunner", 4, 16, 1.08f, 0.5f, { IT_AMMO_GRENADES, IT_AMMO_BULLETS_SMALL }, 3 },
-	{ "monster_berserk", 4, 16, 1.05f, 0.1f, { IT_ARMOR_SHARD }, 2 },
-	{ "monster_parasite", 5, 16, 1.04f, -0.08f, {}, 3 },
-	{ "monster_gladiator", 5, 16, 1.07f, 0.3f, { IT_AMMO_SLUGS }, 3 },
-	{ "monster_gekk", 6, 16, 0.99f, -0.15f, {}, 2 },
-	{ "monster_brain", 6, 16, 0.95f, 0, { IT_AMMO_CELLS_SMALL }, 3 },
-	{ "monster_flyer", 6, 16, 0.92f, 0.15f, { IT_AMMO_CELLS_SMALL }, 3 },
-	{ "monster_floater", 7, 16, 0.9f, 0, {}, 4 },
-	{ "monster_mutant", 7, 16, 0.85f, 0, {}, 4 },
-	{ "monster_hover", 8, 16, 0.8f, 0, {}, 4 },
-	{ "monster_guncmdr", 8, -1, 0, 0.125f, { IT_AMMO_GRENADES, IT_AMMO_BULLETS_SMALL, IT_AMMO_BULLETS, IT_AMMO_CELLS_SMALL }, 5 },
-	{ "monster_chick", 9, 20, 1.01f, -0.05f, { IT_AMMO_ROCKETS_SMALL, IT_AMMO_ROCKETS }, 4 },
-	{ "monster_daedalus", 9, -1, 0.99f, 0.05f, { IT_AMMO_CELLS_SMALL }, 4 },
-	{ "monster_medic", 10, 16, 0.95f, -0.05f, { IT_HEALTH_SMALL, IT_HEALTH_MEDIUM }, 5 },
-	{ "monster_tank", 11, -1, 0.85f, 0, { IT_AMMO_ROCKETS }, 6 },
-	{ "monster_chick_heat", 12, -1, 0.87f, 0.065f, { IT_AMMO_CELLS_SMALL, IT_AMMO_CELLS }, 5 },
-	{ "monster_tank_commander", 12, -1, 0.45f, 0.16f, { IT_AMMO_ROCKETS_SMALL, IT_AMMO_BULLETS_SMALL, IT_AMMO_ROCKETS, IT_AMMO_BULLETS }, 8 },
-	{ "monster_medic_commander", 13, -1, 0.4f, 0.15f, { IT_AMMO_CELLS_SMALL, IT_HEALTH_MEDIUM, IT_HEALTH_LARGE }, 8 },
-	{ "monster_kamikaze", 13, -1, 0.85f, 0.04f, {}, 8 },
+	// chaff
+	{ "monster_soldier_light", -1, -1, 1.00f, -0.04f, { IT_HEALTH_SMALL }, 1 },
+	{ "monster_soldier", -1, -1, 0.75f, -0.03f, { IT_AMMO_BULLETS_SMALL, IT_HEALTH_SMALL }, 1 },
+	{ "monster_soldier_ss", 2, 9, 0.85f, -0.08f, { IT_AMMO_SHELLS_SMALL, IT_HEALTH_SMALL }, 1 },
+	// early variety
+	{ "monster_gekk", 2, 10, 1.35f, -0.10f, {}, 2 },
+	{ "monster_soldier_hypergun", 2, 10, 0.90f, 0, { IT_AMMO_CELLS_SMALL, IT_HEALTH_SMALL }, 2 },
+	{ "monster_soldier_lasergun", 3, 10, 0.90f, 0.03f, { IT_AMMO_CELLS_SMALL, IT_HEALTH_SMALL }, 2 },
+	{ "monster_soldier_ripper", 3, 10, 0.90f, 0.03f, { IT_AMMO_CELLS_SMALL, IT_HEALTH_SMALL }, 2 },
+	{ "monster_infantry", 3, -1, 1.05f, 0.05f, { IT_AMMO_BULLETS_SMALL, IT_AMMO_BULLETS }, 2 },
+	{ "monster_flyer", 3, -1, 1.10f, 0.02f, { IT_AMMO_CELLS_SMALL }, 2 },
+	// mid-tier
+	{ "monster_gunner", 4, -1, 1.05f, 0.15f, { IT_AMMO_GRENADES, IT_AMMO_BULLETS_SMALL }, 3 },
+	{ "monster_berserk", 4, 14, 1.05f, 0.05f, { IT_ARMOR_SHARD }, 3 },
+	{ "monster_parasite", 4, 14, 1.00f, -0.05f, {}, 3 },
+	{ "monster_gladb", 5, 14, 1.00f, 0.05f, { IT_AMMO_CELLS_SMALL }, 3 },
+	{ "monster_stalker", 5, 14, 0.95f, 0.05f, { IT_AMMO_CELLS_SMALL }, 3 },
+	{ "monster_brain", 6, 14, 0.95f, 0, { IT_AMMO_CELLS_SMALL }, 3 },
+	{ "monster_mutant", 6, 14, 0.90f, 0, {}, 3 },
+	{ "monster_floater", 6, 14, 0.90f, 0, {}, 3 },
+	{ "monster_gladiator", 7, -1, 1.00f, 0.10f, { IT_AMMO_SLUGS }, 4 },
+	// heavies
+	{ "monster_hover", 8, -1, 0.85f, 0, {}, 4 },
+	{ "monster_guncmdr", 8, -1, 0.50f, 0.10f, { IT_AMMO_GRENADES, IT_AMMO_BULLETS_SMALL, IT_AMMO_BULLETS, IT_AMMO_CELLS_SMALL }, 5 },
+	{ "monster_chick", 8, -1, 0.95f, 0, { IT_AMMO_ROCKETS_SMALL, IT_AMMO_ROCKETS }, 4 },
+	{ "monster_daedalus", 9, -1, 0.85f, 0.05f, { IT_AMMO_CELLS_SMALL }, 5 },
+	{ "monster_medic", 9, -1, 0.80f, 0, { IT_HEALTH_SMALL, IT_HEALTH_MEDIUM }, 5 },
+	{ "monster_tank", 10, -1, 0.80f, 0.05f, { IT_AMMO_ROCKETS }, 6 },
+	{ "monster_chick_heat", 10, -1, 0.85f, 0.05f, { IT_AMMO_CELLS_SMALL, IT_AMMO_CELLS }, 4 },
+	{ "monster_shambler", 10, -1, 0.75f, 0.05f, {}, 6 },
+	// finale
+	{ "monster_tank_commander", 11, -1, 0.45f, 0.15f, { IT_AMMO_ROCKETS_SMALL, IT_AMMO_BULLETS_SMALL, IT_AMMO_ROCKETS, IT_AMMO_BULLETS }, 8 },
+	{ "monster_medic_commander", 11, -1, 0.40f, 0.12f, { IT_AMMO_CELLS_SMALL, IT_HEALTH_MEDIUM, IT_HEALTH_LARGE }, 8 },
 };
 
 struct picked_item_t {
@@ -106,7 +122,8 @@ gitem_t *Horde_PickItem()
 		if (item.max_level != -1 && level.round_number > item.max_level)
 			continue;
 
-		float weight = item.weight + ((level.round_number - item.min_level) * item.lvl_w_adjust);
+		// clamp so "-1 = always available" rows ramp from wave 1, not wave -1
+		float weight = item.weight + ((level.round_number - max(1, item.min_level)) * item.lvl_w_adjust);
 
 		if (weight <= 0)
 			continue;
@@ -162,7 +179,8 @@ static const char *Horde_PickMonster(weighted_item_t const **out_row, int remain
 		if (monster.spawn_points > remaining_points)
 			continue;
 
-		float weight = monster.weight + ((level.round_number - monster.min_level) * monster.lvl_w_adjust);
+		// clamp so "-1 = always available" rows ramp from wave 1, not wave -1
+		float weight = monster.weight + ((level.round_number - max(1, monster.min_level)) * monster.lvl_w_adjust);
 
 		if (weight <= 0)
 			continue;
@@ -736,6 +754,9 @@ static void Horde_PrecacheTableMonsters()
 	for (auto &monster : monsters) {
 		gentity_t *e = G_Spawn();
 		e->classname = monster.classname;
+		// don't let precache spawns inflate level.total_monsters; it starves
+		// the warmup spawner, which caps on total_monsters - killed_monsters
+		e->monsterinfo.aiflags |= AI_DO_NOT_COUNT;
 		ED_CallSpawn(e);
 		if (e->inuse)
 			G_FreeEntity(e);
@@ -746,6 +767,18 @@ void MM_Horde_Init()
 {
 	if (notGT(GT_HORDE))
 		return;
+
+	// The monster table's content curve peaks at waves 11-12; the global default
+	// roundlimit of 8 would end the match before heavies and commanders appear.
+	// Apply a horde default of 12 once per load, only when still at the global default.
+	static bool roundlimit_defaulted = false;
+	if (!roundlimit_defaulted) {
+		roundlimit_defaulted = true;
+		if (roundlimit->integer == 8) {
+			gi.cvar_forceset("roundlimit", "12");
+			gi.Com_PrintFmt("MM_Horde: roundlimit at global default (8), using horde default of 12.\n");
+		}
+	}
 
 	Horde_PrecacheTableMonsters();
 }

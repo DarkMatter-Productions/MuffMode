@@ -231,7 +231,9 @@ static void flyer_kamikaze_explode(gentity_t *self) {
 		T_Damage(self->enemy, self, self, dir, self->s.origin, vec3_origin, (int)50, (int)50, DAMAGE_RADIUS, MOD_UNKNOWN);
 	}
 
-	flyer_die(self, nullptr, nullptr, 0, dir, MOD_EXPLOSIVE);
+	// kill ourselves through the damage path (like flyer_blocked/kamikaze_touch)
+	// so G_MonsterKilled runs; calling flyer_die directly leaves the kill uncounted
+	T_Damage(self, self, self, vec3_origin, self->s.origin, vec3_origin, 9999, 100, DAMAGE_NONE, MOD_EXPLOSIVE);
 }
 
 void flyer_kamikaze(gentity_t *self) {
