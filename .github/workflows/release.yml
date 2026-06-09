@@ -1,0 +1,212 @@
+name: Release Muff Mode
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_mode:
+        description: Version bump mode when no exact version is supplied. Auto inspects changes since the previous release.
+        required: true
+        type: choice
+        default: auto
+        options:
+          - auto
+          - major
+          - minor
+          - patch
+          - latch
+      version:
+        description: Exact version to release, such as 0.23.0. Leave blank to use version mode.
+        required: false
+        type: string
+      previous_tag:
+        description: Previous release tag for changelog scope. Leave blank to auto-detect.
+        required: false
+        type: string
+      channel:
+        description: Release channel. Beta is the project default.
+        required: true
+        type: choice
+        default: beta
+        options:
+          - alpha
+          - beta
+          - rc
+          - stable
+      commit_version_files:
+        description: Update VERSION and src/g_local.h, commit, and push before publishing.
+        required: true
+        type: boolean
+        default: true
+      skip_installer:
+        description: Create only the zip package, without the Windows installer asset.
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-muff-mode
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build, Package, And Publish
+    runs-on: windows-latest
+    timeout-minutes: 90
+
+    env:
+      GH_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN }}
+      COPILOT_GITHUB_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN }}
+      VCPKG_ROOT: ${{ runner.temp }}\vcpkg
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Preflight Release Secrets
+        shell: pwsh
+        env:
+          DISCORD_RELEASE_WEBHOOK: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:GH_TOKEN)) {
+            throw "Set RELEASE_BOT_TOKEN to a fine-grained, Copilot-enabled GitHub PAT with Copilot Requests and repository release permissions. The built-in GITHUB_TOKEN is intentionally not used because release-created events from it will not trigger the Discord announcement workflow."
+          }
+
+          if ([string]::IsNullOrWhiteSpace($env:DISCORD_RELEASE_WEBHOOK)) {
+            throw "Set DISCORD_RELEASE_WEBHOOK so the Broadcast Release To Discord workflow can announce the published release."
+          }
+
+          gh auth status
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install And Prime GitHub Copilot CLI
+        shell: pwsh
+        run: |
+          npm install -g @github/copilot
+          copilot --help
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Setup vcpkg
+        shell: pwsh
+        run: |
+          git clone https://github.com/microsoft/vcpkg.git $env:VCPKG_ROOT
+          & "$env:VCPKG_ROOT\bootstrap-vcpkg.bat" -disableMetrics
+
+      - name: Cache vcpkg
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ runner.temp }}\vcpkg\downloads
+            ${{ runner.temp }}\vcpkg\buildtrees
+            ${{ runner.temp }}\vcpkg\packages
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('src/vcpkg.json') }}
+          restore-keys: vcpkg-${{ runner.os }}-
+
+      - name: Install vcpkg Dependencies
+        shell: pwsh
+        working-directory: src
+        run: '& "$env:VCPKG_ROOT\vcpkg.exe" install --triplet x64-windows-static'
+
+      - name: Install Inno Setup
+        if: ${{ inputs.skip_installer != true }}
+        shell: pwsh
+        run: choco install innosetup --yes --no-progress
+
+      - name: Prepare Version Commit
+        if: ${{ inputs.commit_version_files == true }}
+        shell: pwsh
+        run: |
+          $arguments = @(
+            "-VersionMode", "${{ inputs.version_mode }}",
+            "-Channel", "${{ inputs.channel }}",
+            "-UpdateVersionFiles",
+            "-VersionOnly",
+            "-AllowDirtyPackage"
+          )
+
+          if (-not [string]::IsNullOrWhiteSpace("${{ inputs.version }}")) {
+            $arguments += @("-Version", "${{ inputs.version }}")
+          }
+          if (-not [string]::IsNullOrWhiteSpace("${{ inputs.previous_tag }}")) {
+            $arguments += @("-PreviousTag", "${{ inputs.previous_tag }}")
+          }
+
+          .\scripts\release.ps1 @arguments
+
+          $changes = git status --porcelain VERSION src/g_local.h
+          if (-not $changes) {
+            Write-Host "Version files already match the requested release."
+            exit 0
+          }
+
+          $version = (Get-Content -Raw VERSION).Trim()
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add VERSION src/g_local.h
+          git commit -m "Bump Muff Mode to v$version"
+          git remote set-url origin "https://x-access-token:$env:GH_TOKEN@github.com/${{ github.repository }}.git"
+          git push origin "HEAD:${{ github.ref_name }}"
+
+      - name: Assert Clean Release Tree
+        shell: pwsh
+        run: |
+          $dirty = git status --porcelain
+          if ($dirty) {
+            $dirty
+            throw "Release workflow requires a clean working tree before publishing."
+          }
+
+      - name: Build Package And GitHub Release
+        shell: pwsh
+        run: |
+          $arguments = @(
+            "-VersionMode", "${{ inputs.version_mode }}",
+            "-Channel", "${{ inputs.channel }}",
+            "-CreateGitHubRelease"
+          )
+
+          if (-not [string]::IsNullOrWhiteSpace("${{ inputs.version }}")) {
+            $arguments += @("-Version", "${{ inputs.version }}")
+          }
+          if (-not [string]::IsNullOrWhiteSpace("${{ inputs.previous_tag }}")) {
+            $arguments += @("-PreviousTag", "${{ inputs.previous_tag }}")
+          }
+          if ("${{ inputs.skip_installer }}" -eq "true") {
+            $arguments += "-SkipInstaller"
+          }
+
+          .\scripts\release.ps1 @arguments
+
+      - name: Upload Release Build Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-output
+          path: |
+            dist/release/*.zip
+            dist/release/*.exe
+            dist/release/*.md
+            dist/release/*.html
+          if-no-files-found: ignore
+
+      - name: Discord Announcement Handoff
+        shell: pwsh
+        run: |
+          Write-Host "The GitHub release has been published."
+          Write-Host "The existing 'Broadcast Release To Discord' workflow is triggered by the release:published event and will post the Discord announcement."

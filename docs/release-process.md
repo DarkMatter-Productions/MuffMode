@@ -26,7 +26,7 @@ muffmode-<version>-beta.zip
 muffmode-<version>-beta-windows-installer.exe
 ```
 
-The script always generates both `CHANGELOG.md` and `README.html` through GitHub Copilot in non-interactive mode. If `gh copilot` is not installed or authenticated, the script fails instead of falling back to plain commit output.
+The script always generates both `CHANGELOG.md` and `README.html` through [GitHub Copilot CLI](https://docs.github.com/copilot/how-tos/set-up/install-copilot-cli) in non-interactive mode. If the standalone `copilot` CLI is not installed or authenticated, the script fails instead of falling back to plain commit output.
 It also writes `rerelease/baseq2/muffmode-version.json` and `rerelease/baseq2/muffmode.version` so the Windows updater can compare the installed version with GitHub releases.
 The package also includes the published Windows updater executable at the package root.
 
@@ -47,10 +47,11 @@ Use the default `beta` channel until the project is ready to leave beta.
 
 | Mode | Behavior |
 | --- | --- |
-| `auto` | Uses the current source version when it is newer than the latest GitHub release; otherwise bumps patch. |
+| `auto` | Inspects changes since the previous release and chooses major, minor, or patch. Breaking-change markers select major; new features, installer/updater/package/workflow additions, commands, cvars, maps, rulesets, gametypes, menu, or voting work select minor; smaller fixes and docs select patch. If the committed source version is already at or above the detected target, it is kept. |
 | `major` | Bumps from the latest release to the next major version. |
 | `minor` | Bumps from the latest release to the next minor version. |
 | `patch` | Bumps from the latest release to the next patch version. |
+| `latch` | Accepted as a patch alias. |
 
 You can also pass `-Version 0.23.0` to use an exact version.
 
@@ -120,7 +121,33 @@ dotnet publish updater\MuffMode.Updater\MuffMode.Updater.csproj -c Release -r wi
 
 See the [Updater Guide](updater-guide.md) for the updater workflow and local version marker behavior.
 
-## Publish A GitHub Release
+## Publish From GitHub Actions
+
+Use the **Release Muff Mode** workflow in GitHub Actions for normal releases. It runs [scripts/release.ps1](../scripts/release.ps1), updates and commits version files when requested, builds the DLL, publishes the updater, builds the Windows installer, creates the GitHub release, uploads the zip and installer assets, and leaves the Discord announcement to the existing **Broadcast Release To Discord** workflow.
+
+Required repository secrets:
+
+| Secret | Purpose |
+| --- | --- |
+| `RELEASE_BOT_TOKEN` | Fine-grained, Copilot-enabled GitHub token used by `copilot`, version-file commits, and `gh release create`. It needs Copilot Requests plus repository release permissions. Use a token rather than the built-in `GITHUB_TOKEN` so the `release:published` event can trigger the Discord workflow. |
+| `DISCORD_RELEASE_WEBHOOK` | Discord webhook consumed by the announcement workflow. The release workflow checks that it exists before publishing. |
+
+Workflow inputs:
+
+| Input | Purpose |
+| --- | --- |
+| `version_mode` | `auto`, `major`, `minor`, `patch`, or `latch` as a patch alias. |
+| `version` | Optional exact version, such as `0.23.0`. |
+| `previous_tag` | Optional changelog start tag override. |
+| `channel` | Defaults to `beta`; non-stable channels publish as prereleases. |
+| `commit_version_files` | Updates `VERSION` and `src/g_local.h`, commits, and pushes before publishing. |
+| `skip_installer` | Creates only the zip package when the installer is intentionally not wanted. |
+
+The release workflow installs the current standalone GitHub Copilot CLI with `npm install -g @github/copilot`, exports `COPILOT_GITHUB_TOKEN`, and primes `copilot --help` before generating the changelog and end-user HTML README.
+
+The Discord workflow is intentionally separate. Manual releases still announce through the `release:published` trigger, and Actions-created releases announce the same way when `RELEASE_BOT_TOKEN` is used.
+
+## Publish Locally
 
 After committing version changes and ensuring the working tree is clean:
 
@@ -134,6 +161,6 @@ The script creates `v<version>`, uploads the package zip and Windows installer, 
 
 The changelog is generated from `git log <previous-release-tag>..HEAD`, so it includes only commits since the previous release. Pass `-PreviousTag v0.22.15` to override the detected start tag.
 
-Copilot receives a structured change context for that exact range: commit subjects, merge subjects, changed files, diff stats, and compare URL. The prompt is piped into Copilot to avoid command-line length limits, uses silent/no-question mode, and grants only Git shell access for inspection. It is prompted to summarize by practical impact for casual players, competitive players, and server hosts, using only relevant categories such as player experience, competitive play, server hosting, gameplay and balance, fixes, documentation, packaging, and internal maintenance.
+Copilot receives a structured change context for that exact range: commit subjects, merge subjects, changed files, diff stats, and compare URL. The script writes the full prompt to `dist/release/copilot-prompts`, then gives Copilot a short programmatic instruction to read that file, which avoids Windows command-line length limits. The changelog prompt uses silent/no-question mode and grants only Git shell access for inspection. It is prompted to summarize by practical impact for casual players, competitive players, and server hosts, using only relevant categories such as player experience, competitive play, server hosting, gameplay and balance, fixes, documentation, packaging, and internal maintenance.
 
 The script validates that Copilot returned clean Markdown with a release title, category headings, bullet-point notes, the target version, and the previous release tag before it packages or publishes the notes.

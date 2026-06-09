@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet("auto", "major", "minor", "patch")]
+    [ValidateSet("auto", "major", "minor", "patch", "latch")]
     [string]$VersionMode = "auto",
 
     [string]$Version,
@@ -22,6 +22,7 @@ param(
     [switch]$SkipUpdaterBuild,
     [switch]$SkipInstaller,
     [switch]$UpdateVersionFiles,
+    [switch]$VersionOnly,
     [switch]$CreateGitHubRelease,
     [switch]$Prerelease,
     [switch]$AllowDirtyPackage
@@ -82,14 +83,32 @@ function Invoke-GitHubCopilot {
         [string[]]$AllowedTools = @()
     )
 
-    Assert-Command "gh"
+    Assert-Command "copilot"
 
-    $args = @("copilot", "-s", "--no-ask-user")
+    $promptDir = Join-Path (Resolve-RepoPath $OutputRoot) "copilot-prompts"
+    New-Item -ItemType Directory -Force -Path $promptDir | Out-Null
+
+    $safePurpose = ($Purpose.ToLowerInvariant() -replace '[^a-z0-9]+', '-').Trim('-')
+    if ([string]::IsNullOrWhiteSpace($safePurpose)) {
+        $safePurpose = "release"
+    }
+
+    $promptPath = Join-Path $promptDir ("{0}-{1}.md" -f (Get-Date -Format "yyyyMMddHHmmssfff"), $safePurpose)
+    Set-Content -LiteralPath $promptPath -Value $Prompt -Encoding utf8
+
+    $driverPrompt = @"
+Read the complete release automation prompt at this path:
+$promptPath
+
+Follow that file exactly. Return only the requested artifact. Do not edit files.
+"@
+
+    $args = @("-p", $driverPrompt, "--silent", "--no-ask-user", "--no-color", "--stream=off")
     foreach ($tool in $AllowedTools) {
         $args += "--allow-tool=$tool"
     }
 
-    $output = $Prompt | & gh @args 2>&1 | Out-String
+    $output = & copilot @args 2>&1 | Out-String
     if ($LASTEXITCODE -ne 0) {
         throw "GitHub Copilot failed while $Purpose.`n$output"
     }
@@ -98,11 +117,11 @@ function Invoke-GitHubCopilot {
 }
 
 function Assert-GitHubCopilot {
-    Assert-Command "gh"
+    Assert-Command "copilot"
 
-    $output = & gh copilot -- --help 2>&1 | Out-String
+    $output = & copilot --help 2>&1 | Out-String
     if ($LASTEXITCODE -ne 0) {
-        throw "GitHub Copilot CLI is required for release changelog and README generation. Install and authenticate Copilot CLI so 'gh copilot' can run in non-interactive mode.`n$output"
+        throw "GitHub Copilot CLI is required for release changelog and README generation. Install @github/copilot and authenticate it so 'copilot' can run in non-interactive mode.`n$output"
     }
 }
 
@@ -127,6 +146,47 @@ function Compare-SemVer {
         if ($Left.$part -lt $Right.$part) { return -1 }
     }
     return 0
+}
+
+function Get-BumpedVersion {
+    param($BaseVersion, [string]$Mode)
+
+    switch ($Mode) {
+        "major" { return "$($BaseVersion.Major + 1).0.0" }
+        "minor" { return "$($BaseVersion.Major).$($BaseVersion.Minor + 1).0" }
+        "patch" { return "$($BaseVersion.Major).$($BaseVersion.Minor).$($BaseVersion.Patch + 1)" }
+        "latch" { return "$($BaseVersion.Major).$($BaseVersion.Minor).$($BaseVersion.Patch + 1)" }
+    }
+}
+
+function Resolve-AutoVersionMode {
+    param([string]$ChangeStartTag)
+
+    $range = "$ChangeStartTag..HEAD"
+    $log = git -C $RepoRoot log --date=short --pretty=format:'%s%n%b' $range 2>$null | Out-String
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not inspect git history for automatic versioning range $range."
+    }
+    if ([string]::IsNullOrWhiteSpace($log)) {
+        throw "No commits found in $range. Refusing to auto-version an empty release."
+    }
+
+    $changedFiles = git -C $RepoRoot diff --find-renames --name-status $range 2>$null | Out-String
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not inspect changed files for automatic versioning range $range."
+    }
+
+    $text = "$log`n$changedFiles".ToLowerInvariant()
+
+    if ($text -match '(?m)(breaking change|breaking-change|breaks compatibility|^[a-z]+(\([^)]+\))?!:|^.*!:)') {
+        return "major"
+    }
+
+    if ($text -match '(?m)^(feat|feature)(\(|:)|\badd(ed|s)?\b|\bnew\b|\bintroduce(d|s)?\b|\binstaller\b|\bupdater\b|\bgametype\b|\bruleset\b|\bweapon\b|\bentity\b|\bcvar\b|\bcommand\b|\bmap\b|\bvoting\b|\bmenu\b|\bpackage\b|\bworkflow\b') {
+        return "minor"
+    }
+
+    return "patch"
 }
 
 function Get-ChannelDisplayName {
@@ -195,7 +255,7 @@ function Get-LatestReleaseTag {
 }
 
 function Resolve-TargetVersion {
-    param([string]$LatestTag)
+    param([string]$LatestTag, [string]$ChangeStartTag)
 
     if ($Version) {
         return (ConvertTo-SemVer $Version).Text
@@ -205,14 +265,20 @@ function Resolve-TargetVersion {
     $current = ConvertTo-SemVer (Get-CurrentSourceVersion)
 
     switch ($VersionMode) {
-        "major" { return "$($latest.Major + 1).0.0" }
-        "minor" { return "$($latest.Major).$($latest.Minor + 1).0" }
-        "patch" { return "$($latest.Major).$($latest.Minor).$($latest.Patch + 1)" }
+        "major" { return Get-BumpedVersion -BaseVersion $latest -Mode "major" }
+        "minor" { return Get-BumpedVersion -BaseVersion $latest -Mode "minor" }
+        "patch" { return Get-BumpedVersion -BaseVersion $latest -Mode "patch" }
+        "latch" { return Get-BumpedVersion -BaseVersion $latest -Mode "patch" }
         "auto" {
-            if ((Compare-SemVer $current $latest) -gt 0) {
+            $autoMode = Resolve-AutoVersionMode -ChangeStartTag $ChangeStartTag
+            $candidate = ConvertTo-SemVer (Get-BumpedVersion -BaseVersion $latest -Mode $autoMode)
+            Write-Step "Auto version mode selected: $autoMode"
+
+            if ((Compare-SemVer $current $candidate) -ge 0) {
                 return $current.Text
             }
-            return "$($latest.Major).$($latest.Minor).$($latest.Patch + 1)"
+
+            return $candidate.Text
         }
     }
 }
@@ -821,7 +887,6 @@ Push-Location $RepoRoot
 try {
     Assert-Command "git"
     Assert-Command "gh"
-    Assert-GitHubCopilot
 
     $dirty = Get-GitStatus
     if ($dirty -and -not $AllowDirtyPackage -and -not $UpdateVersionFiles) {
@@ -829,7 +894,8 @@ try {
     }
 
     $latestReleaseTag = Get-LatestReleaseTag
-    $targetVersion = Resolve-TargetVersion -LatestTag $latestReleaseTag
+    $changeStartTag = if ($PreviousTag) { $PreviousTag } else { $latestReleaseTag }
+    $targetVersion = Resolve-TargetVersion -LatestTag $latestReleaseTag -ChangeStartTag $changeStartTag
     $previousReleaseTag = Resolve-PreviousTag -TargetVersion $targetVersion -FallbackLatestTag $latestReleaseTag
     $isPrerelease = (Test-IsPrereleaseChannel -Channel $Channel) -or [bool]$Prerelease
 
@@ -842,6 +908,13 @@ try {
         Update-VersionFiles -TargetVersion $targetVersion
     }
     Assert-VersionFilesMatch -TargetVersion $targetVersion
+
+    if ($VersionOnly) {
+        Write-Step "Version files are ready for $targetVersion"
+        return
+    }
+
+    Assert-GitHubCopilot
 
     if ($CreateGitHubRelease) {
         $dirtyAfterVersion = Get-GitStatus
