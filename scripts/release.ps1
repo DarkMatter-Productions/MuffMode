@@ -15,9 +15,12 @@ param(
     [string]$Platform = "x64",
     [string]$UpdaterProject = "updater/MuffMode.Updater/MuffMode.Updater.csproj",
     [string]$UpdaterRuntime = "win-x64",
+    [string]$InstallerScript = "packaging/installer/muffmode-installer.iss",
+    [string]$InnoSetupCompiler,
 
     [switch]$SkipBuild,
     [switch]$SkipUpdaterBuild,
+    [switch]$SkipInstaller,
     [switch]$UpdateVersionFiles,
     [switch]$CreateGitHubRelease,
     [switch]$Prerelease,
@@ -139,6 +142,16 @@ function Get-ChannelDisplayName {
 function Test-IsPrereleaseChannel {
     param([string]$Channel)
     return $Channel -ne "stable"
+}
+
+function Get-ReleasePackageName {
+    param(
+        [string]$TargetVersion,
+        [string]$Channel
+    )
+
+    $suffix = if ($Channel -eq "stable") { "" } else { "-$Channel" }
+    return "muffmode-$TargetVersion$suffix"
 }
 
 function Get-CurrentSourceVersion {
@@ -342,6 +355,42 @@ function Resolve-ExistingUpdaterExecutable {
         throw "-SkipUpdaterBuild was supplied, but MuffModeUpdater.exe does not exist at $updaterExe."
     }
     return $updaterExe
+}
+
+function Resolve-InnoSetupCompiler {
+    param([string]$CompilerPath)
+
+    if ($CompilerPath) {
+        $resolved = Resolve-RepoPath $CompilerPath
+        if (-not (Test-Path -LiteralPath $resolved)) {
+            throw "Inno Setup compiler was not found: $resolved"
+        }
+        return $resolved
+    }
+
+    $command = Get-Command "iscc.exe" -ErrorAction SilentlyContinue
+    if (-not $command) {
+        $command = Get-Command "iscc" -ErrorAction SilentlyContinue
+    }
+    if ($command) {
+        return $command.Source
+    }
+
+    $candidates = @()
+    if (${env:ProgramFiles(x86)}) {
+        $candidates += (Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe")
+    }
+    if ($env:ProgramFiles) {
+        $candidates += (Join-Path $env:ProgramFiles "Inno Setup 6\ISCC.exe")
+    }
+
+    foreach ($candidate in $candidates) {
+        if (Test-Path -LiteralPath $candidate) {
+            return $candidate
+        }
+    }
+
+    throw "Inno Setup compiler (ISCC.exe) was not found. Install Inno Setup 6, add ISCC.exe to PATH, pass -InnoSetupCompiler, or pass -SkipInstaller."
 }
 
 function Get-ReleaseChangeContext {
@@ -580,6 +629,7 @@ Audience and scope:
 - Primary audience: Quake II Remastered players and server hosts installing this release.
 - This project is currently in $Channel channel. Make that release state visible but not alarming.
 - Include installation, first-use guidance, player usage, voting, common host setup, gametype overview, ruleset overview, offhand hook bind, debugging pointer, package contents, and the changelog.
+- Explain that most Windows users can use the installer, which defaults to Steam and offers Epic Online Store / Epic Games Store, GOG, and custom folder choices. Also include the zip/manual extraction path for users who prefer it.
 - Do not include build instructions, source compilation steps, contributor notes, GitHub badges, or repository development workflow.
 - Keep it polished, friendly, and practical. Avoid marketing fluff.
 
@@ -636,8 +686,7 @@ function New-ReleasePackage {
         [string]$AssetRoot
     )
 
-    $suffix = if ($Channel -eq "stable") { "" } else { "-$Channel" }
-    $packageName = "muffmode-$TargetVersion$suffix"
+    $packageName = Get-ReleasePackageName -TargetVersion $TargetVersion -Channel $Channel
     $outputRootAbs = Resolve-RepoPath $OutputRoot
     $stagingRoot = Join-Path $outputRootAbs "staging"
     $packageRoot = Join-Path $stagingRoot $packageName
@@ -676,14 +725,65 @@ function New-ReleasePackage {
 
     Write-Step "Creating package $zipPath"
     Compress-Archive -LiteralPath $packageRoot -DestinationPath $zipPath -CompressionLevel Optimal
-    return $zipPath
+    return [pscustomobject]@{
+        Name = $packageName
+        Root = $packageRoot
+        ZipPath = $zipPath
+    }
+}
+
+function New-WindowsInstaller {
+    param(
+        [string]$TargetVersion,
+        [string]$Channel,
+        [string]$PackageRoot,
+        [string]$OutputRoot,
+        [string]$InstallerScript,
+        [string]$InnoSetupCompiler
+    )
+
+    $scriptPath = Resolve-RepoPath $InstallerScript
+    if (-not (Test-Path -LiteralPath $scriptPath)) {
+        throw "Installer script was not found: $scriptPath"
+    }
+
+    $packageName = Get-ReleasePackageName -TargetVersion $TargetVersion -Channel $Channel
+    $outputRootAbs = Resolve-RepoPath $OutputRoot
+    $compiler = Resolve-InnoSetupCompiler -CompilerPath $InnoSetupCompiler
+    $channelName = Get-ChannelDisplayName -Channel $Channel
+    $releaseLabel = if ($channelName) { "Muff Mode v$TargetVersion $channelName" } else { "Muff Mode v$TargetVersion" }
+    $installerBaseName = "$packageName-windows-installer"
+    $installerPath = Join-Path $outputRootAbs "$installerBaseName.exe"
+
+    if (Test-Path -LiteralPath $installerPath) {
+        Remove-Item -LiteralPath $installerPath -Force
+    }
+
+    Write-Step "Creating Windows installer $installerPath"
+    & $compiler `
+        "/DAppVersion=$TargetVersion" `
+        "/DChannel=$Channel" `
+        "/DReleaseLabel=$releaseLabel" `
+        "/DPackageRoot=$PackageRoot" `
+        "/DOutputDir=$outputRootAbs" `
+        "/DInstallerBaseName=$installerBaseName" `
+        $scriptPath
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "Inno Setup failed while creating the Windows installer."
+    }
+    if (-not (Test-Path -LiteralPath $installerPath)) {
+        throw "Expected installer was not created: $installerPath"
+    }
+
+    return $installerPath
 }
 
 function Publish-GitHubRelease {
     param(
         [string]$TargetVersion,
         [string]$Channel,
-        [string]$ZipPath,
+        [string[]]$AssetPaths,
         [string]$ReleaseNotesPath,
         [bool]$Prerelease
     )
@@ -695,8 +795,10 @@ function Publish-GitHubRelease {
     }
 
     $args = @(
-        "release", "create", "v$TargetVersion",
-        $ZipPath,
+        "release", "create", "v$TargetVersion"
+    )
+    $args += $AssetPaths
+    $args += @(
         "--repo", $ReleaseRepo,
         "--title", $(if ((Get-ChannelDisplayName -Channel $Channel)) { "MuffMode v$TargetVersion $(Get-ChannelDisplayName -Channel $Channel)" } else { "MuffMode v$TargetVersion" }),
         "--notes-file", $ReleaseNotesPath,
@@ -778,7 +880,7 @@ try {
     New-ReleaseChangelog -TargetVersion $targetVersion -PreviousTag $previousReleaseTag -Channel $Channel -OutputPath $releaseNotesPath
     New-CopilotHtmlReadme -TargetVersion $targetVersion -Channel $Channel -ChangelogPath $releaseNotesPath -OutputPath $readmeHtmlPath
 
-    $zipPath = New-ReleasePackage `
+    $package = New-ReleasePackage `
         -TargetVersion $targetVersion `
         -Channel $Channel `
         -DllPath $dllPath `
@@ -788,16 +890,39 @@ try {
         -OutputRoot $OutputRoot `
         -AssetRoot $AssetRoot
 
-    $hash = Get-FileHash -Algorithm SHA256 -LiteralPath $zipPath
+    $releaseAssetPaths = New-Object System.Collections.Generic.List[string]
+    $releaseAssetPaths.Add($package.ZipPath)
+
+    $installerPath = $null
+    if ($SkipInstaller) {
+        Write-Host "Windows installer not created because -SkipInstaller was supplied."
+    }
+    else {
+        $installerPath = New-WindowsInstaller `
+            -TargetVersion $targetVersion `
+            -Channel $Channel `
+            -PackageRoot $package.Root `
+            -OutputRoot $OutputRoot `
+            -InstallerScript $InstallerScript `
+            -InnoSetupCompiler $InnoSetupCompiler
+        $releaseAssetPaths.Add($installerPath)
+    }
+
+    $hash = Get-FileHash -Algorithm SHA256 -LiteralPath $package.ZipPath
     Write-Step "Package ready"
-    Write-Host "Package: $zipPath"
+    Write-Host "Package: $($package.ZipPath)"
     Write-Host "SHA256:  $($hash.Hash.ToLowerInvariant())"
+    if ($installerPath) {
+        $installerHash = Get-FileHash -Algorithm SHA256 -LiteralPath $installerPath
+        Write-Host "Installer: $installerPath"
+        Write-Host "SHA256:    $($installerHash.Hash.ToLowerInvariant())"
+    }
     Write-Host "Notes:   $releaseNotesPath"
     Write-Host "README:  $readmeHtmlPath"
     Write-Host "Updater: $updaterPath"
 
     if ($CreateGitHubRelease) {
-        Publish-GitHubRelease -TargetVersion $targetVersion -Channel $Channel -ZipPath $zipPath -ReleaseNotesPath $releaseNotesPath -Prerelease $isPrerelease
+        Publish-GitHubRelease -TargetVersion $targetVersion -Channel $Channel -AssetPaths $releaseAssetPaths.ToArray() -ReleaseNotesPath $releaseNotesPath -Prerelease $isPrerelease
     }
     else {
         Write-Host "GitHub release not created. Re-run with -CreateGitHubRelease to publish with --latest."

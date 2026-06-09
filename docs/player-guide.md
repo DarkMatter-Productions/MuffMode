@@ -14,11 +14,10 @@ This guide is for anyone joining a MuffMode game. You do not need to learn every
 
 ## Install
 
-1. Locate your Quake II install folder. Steam is usually at `C:\Program Files (x86)\Steam\steamapps\common\Quake 2`; rerelease files live inside its `rerelease` subfolder.
-2. Back up `rerelease\baseq2\game_x64.dll` before replacing it.
-3. Download the [latest MuffMode release](https://github.com/DarkMatter-Productions/MuffMode/releases/latest).
-4. Extract the release into the outer `Quake 2` folder and allow file replacements.
-5. Launch Quake II normally, then join or host a multiplayer game.
+1. Download the [latest Muff Mode release](https://github.com/DarkMatter-Productions/MuffMode/releases/latest).
+2. Use the Windows installer when available. It defaults to the Steam Quake II Remastered path and also offers Epic Online Store / Epic Games Store, GOG, and custom library choices.
+3. If you use the zip instead, extract it into the outer `Quake 2` folder and allow file replacements.
+4. Launch Quake II normally, then join or host a multiplayer game.
 
 If you are joining someone else's server, they control most match settings. Your client-side commands still let you adjust your display preferences, ready state, team, votes, and spectator behavior.
 

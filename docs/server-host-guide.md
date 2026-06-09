@@ -6,12 +6,11 @@ This guide is for lobby owners, dedicated server hosts, event organizers, and ad
 
 ## Install
 
-1. Locate your Quake II install folder. Steam is usually at `C:\Program Files (x86)\Steam\steamapps\common\Quake 2`; rerelease files live inside its `rerelease` subfolder.
-2. Back up the existing rerelease game DLL at `rerelease\baseq2\game_x64.dll`.
-3. Download the [latest MuffMode release](https://github.com/DarkMatter-Productions/MuffMode/releases/latest).
-4. Extract the release into the outer `Quake 2` install folder and allow file replacements.
-5. Start the game or dedicated server normally.
-6. Execute the bundled server config with `exec muff-sv.cfg` when it is available in the release package.
+1. Download the [latest Muff Mode release](https://github.com/DarkMatter-Productions/MuffMode/releases/latest).
+2. Use the Windows installer when available. It defaults to the Steam Quake II Remastered path and also offers Epic Online Store / Epic Games Store, GOG, and custom library choices.
+3. If you use the zip instead, extract it into the outer `Quake 2` install folder and allow file replacements.
+4. Start the game or dedicated server normally.
+5. Execute the bundled server config with `exec muff-sv.cfg` when it is available in the release package.
 
 For ready-to-use per-gametype config examples, see the [MuffMode Server Configs repository](https://github.com/ozy24/muffmode-server-configs).
 

@@ -166,7 +166,7 @@ internal static partial class InstallationManager
 
                 var sourcePath = releaseFiles[index];
                 var relativePath = Path.GetRelativePath(packageRoot, sourcePath);
-                var destinationPath = Path.Combine(normalizedInstallPath, relativePath);
+                var destinationPath = ResolveDestinationPath(normalizedInstallPath, relativePath);
                 if (IsRunningUpdaterDestination(destinationPath, runningUpdaterPath))
                 {
                     progress?.Report(new UpdaterProgress($"Skipping running updater executable: {relativePath}.", null));
@@ -302,6 +302,16 @@ internal static partial class InstallationManager
 
         yield return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Steam", "steamapps", "common", "Quake 2");
         yield return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Steam", "steamapps", "common", "Quake 2");
+
+        foreach (var epicPath in EnumerateEpicInstallCandidates())
+        {
+            yield return epicPath;
+        }
+
+        foreach (var gogPath in EnumerateGogInstallCandidates())
+        {
+            yield return gogPath;
+        }
     }
 
     private static IEnumerable<string> EnumerateSteamLibraryRoots()
@@ -365,6 +375,145 @@ internal static partial class InstallationManager
         yield return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Steam");
     }
 
+    private static IEnumerable<string> EnumerateEpicInstallCandidates()
+    {
+        foreach (var candidate in new[]
+        {
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Epic Games", "Quake 2"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Epic Games", "QuakeII"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Epic Games", "Quake2"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Epic Games", "Quake 2"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Epic Games", "QuakeII"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Epic Games", "Quake2")
+        })
+        {
+            yield return candidate;
+        }
+
+        var manifestsRoot = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+            "Epic",
+            "EpicGamesLauncher",
+            "Data",
+            "Manifests");
+
+        if (!Directory.Exists(manifestsRoot))
+        {
+            yield break;
+        }
+
+        List<string> manifestPaths;
+        try
+        {
+            manifestPaths = Directory.EnumerateFiles(manifestsRoot, "*.item").ToList();
+        }
+        catch
+        {
+            yield break;
+        }
+
+        foreach (var manifestPath in manifestPaths)
+        {
+            var installLocation = TryReadEpicManifestInstallLocation(manifestPath);
+            if (!string.IsNullOrWhiteSpace(installLocation))
+            {
+                yield return installLocation;
+            }
+        }
+    }
+
+    private static string? TryReadEpicManifestInstallLocation(string manifestPath)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(manifestPath));
+            var root = document.RootElement;
+            var displayName = TryGetJsonString(root, "DisplayName");
+            var appName = TryGetJsonString(root, "AppName");
+            var installLocation = TryGetJsonString(root, "InstallLocation");
+
+            if (!string.IsNullOrWhiteSpace(installLocation)
+                && (LooksLikeQuake2Name(displayName) || LooksLikeQuake2Name(appName) || LooksLikeQuake2Name(installLocation)))
+            {
+                return NormalizePath(installLocation);
+            }
+        }
+        catch
+        {
+            // Broken launcher manifests should not keep the updater from opening.
+        }
+
+        return null;
+    }
+
+    private static IEnumerable<string> EnumerateGogInstallCandidates()
+    {
+        var systemDriveRoot = Path.GetPathRoot(Environment.GetFolderPath(Environment.SpecialFolder.System)) ?? @"C:\";
+        foreach (var candidate in new[]
+        {
+            Path.Combine(systemDriveRoot, "GOG Games", "Quake II"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "GOG Galaxy", "Games", "Quake II"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "GOG Galaxy", "Games", "Quake II")
+        })
+        {
+            yield return candidate;
+        }
+
+        foreach (var keyPath in new[]
+        {
+            @"SOFTWARE\GOG.com\Games",
+            @"SOFTWARE\WOW6432Node\GOG.com\Games"
+        })
+        {
+            foreach (var hive in new[] { Registry.CurrentUser, Registry.LocalMachine })
+            {
+                using var gamesKey = hive.OpenSubKey(keyPath);
+                if (gamesKey is null)
+                {
+                    continue;
+                }
+
+                foreach (var subKeyName in gamesKey.GetSubKeyNames())
+                {
+                    using var gameKey = gamesKey.OpenSubKey(subKeyName);
+                    var gameName = gameKey?.GetValue("gameName") as string
+                        ?? gameKey?.GetValue("title") as string
+                        ?? gameKey?.GetValue("name") as string;
+                    var path = gameKey?.GetValue("path") as string;
+
+                    if (!string.IsNullOrWhiteSpace(path)
+                        && (LooksLikeQuake2Name(gameName) || LooksLikeQuake2Name(path)))
+                    {
+                        yield return NormalizePath(path);
+                    }
+                }
+            }
+        }
+    }
+
+    private static string? TryGetJsonString(JsonElement element, string propertyName)
+    {
+        return element.TryGetProperty(propertyName, out var property) && property.ValueKind == JsonValueKind.String
+            ? property.GetString()
+            : null;
+    }
+
+    private static bool LooksLikeQuake2Name(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        var normalized = value.ToLowerInvariant()
+            .Replace('_', ' ')
+            .Replace('-', ' ');
+
+        return normalized.Contains("quake 2")
+            || normalized.Contains("quake2")
+            || normalized.Contains("quake ii");
+    }
+
     private static string ResolvePackageRoot(string extractRoot)
     {
         if (Directory.Exists(Path.Combine(extractRoot, "rerelease")))
@@ -380,6 +529,21 @@ internal static partial class InstallationManager
             .ToList();
 
         return packageDirectories.Count == 1 ? packageDirectories[0] : extractRoot;
+    }
+
+    private static string ResolveDestinationPath(string installPath, string relativePath)
+    {
+        var installRoot = Path.GetFullPath(installPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var destinationPath = Path.GetFullPath(Path.Combine(installRoot, relativePath));
+        var installRootPrefix = installRoot + Path.DirectorySeparatorChar;
+
+        if (!destinationPath.StartsWith(installRootPrefix, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(destinationPath, installRoot, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"Package entry would write outside the selected Quake 2 folder: {relativePath}");
+        }
+
+        return destinationPath;
     }
 
     private static string? GetRunningUpdaterPath()

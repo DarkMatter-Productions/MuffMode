@@ -6,7 +6,7 @@ This project is currently in **Beta**. The release script defaults to `-Channel 
 
 This project uses [VERSION](../VERSION) as the release version source of truth. The in-game mod version in [src/g_local.h](../src/g_local.h) must match it before publishing a release.
 
-The release script is [scripts/release.ps1](../scripts/release.ps1). It builds a beta package shaped like the `muffmode-0.22.15-beta.zip` release asset:
+The release script is [scripts/release.ps1](../scripts/release.ps1). It builds a beta zip package shaped like the `muffmode-0.22.15-beta.zip` release asset, plus a Windows installer asset:
 
 ```text
 muffmode-<version>-beta/
@@ -21,9 +21,16 @@ muffmode-<version>-beta/
       ...
 ```
 
+```text
+muffmode-<version>-beta.zip
+muffmode-<version>-beta-windows-installer.exe
+```
+
 The script always generates both `CHANGELOG.md` and `README.html` through GitHub Copilot in non-interactive mode. If `gh copilot` is not installed or authenticated, the script fails instead of falling back to plain commit output.
 It also writes `rerelease/baseq2/muffmode-version.json` and `rerelease/baseq2/muffmode.version` so the Windows updater can compare the installed version with GitHub releases.
 The package also includes the published Windows updater executable at the package root.
+
+The Windows installer is built with [Inno Setup 6](https://jrsoftware.org/isinfo.php). The release script looks for `ISCC.exe` on `PATH`, then in the normal Inno Setup install folders. You can pass `-InnoSetupCompiler "C:\Path\To\ISCC.exe"` to override detection or `-SkipInstaller` for a zip-only local package.
 
 ## Release State
 
@@ -84,8 +91,24 @@ Run from a Visual Studio developer shell:
 
 Use `-SkipBuild` only when `game_x64.dll` already exists at the repository root.
 Use `-SkipUpdaterBuild` only when `MuffModeUpdater.exe` already exists under the updater publish output.
+Use `-SkipInstaller` only when you intentionally want to create the zip without the Windows installer asset.
 
 The package and generated release files are written to `dist/release`.
+
+## Windows Installer
+
+The installer is generated from [packaging/installer/muffmode-installer.iss](../packaging/installer/muffmode-installer.iss). It installs the same payload as the zip into the outer Quake II folder, not directly into `rerelease` or `baseq2`.
+
+Installer behavior:
+
+| Choice | Default path |
+| --- | --- |
+| Steam | `C:\Program Files (x86)\Steam\steamapps\common\Quake 2` |
+| Epic Online Store / Epic Games Store | `C:\Program Files\Epic Games\Quake 2` |
+| GOG | `C:\GOG Games\Quake II` |
+| Custom or another library | User-selected folder |
+
+Steam is selected by default. The installer lets users browse after choosing a preset, warns if `rerelease\baseq2` is not found, corrects accidental `rerelease` folder selection back to the outer Quake II folder, and backs up an existing `rerelease\baseq2\game_x64.dll` under `rerelease\baseq2\MuffModeBackups` before replacing it.
 
 ## Updater
 
@@ -105,7 +128,7 @@ After committing version changes and ensuring the working tree is clean:
 .\scripts\release.ps1 -VersionMode auto -CreateGitHubRelease
 ```
 
-The script creates `v<version>`, uploads the package zip, uses the generated changelog as release notes, and passes `--latest` to `gh release create`. For the default beta channel it also passes `--prerelease`, so the release is both latest and clearly flagged as beta-stage.
+The script creates `v<version>`, uploads the package zip and Windows installer, uses the generated changelog as release notes, and passes `--latest` to `gh release create`. For the default beta channel it also passes `--prerelease`, so the release is both latest and clearly flagged as beta-stage.
 
 ## Changelog Scope
 

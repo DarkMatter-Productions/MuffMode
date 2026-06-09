@@ -42,12 +42,11 @@ internal sealed class GitHubReleaseClient : IDisposable
         }
 
         var asset = release.Assets
-            .Where(asset => !string.IsNullOrWhiteSpace(asset.Name) && !string.IsNullOrWhiteSpace(asset.BrowserDownloadUrl))
-            .Where(asset => asset.Name!.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
-            .OrderByDescending(asset => asset.Name!.Contains("muffmode", StringComparison.OrdinalIgnoreCase))
+            .Where(IsReleasePackageZip)
+            .OrderByDescending(asset => AssetNameMatchesRelease(asset.Name!, version, release.Prerelease))
             .ThenBy(asset => asset.Name, StringComparer.OrdinalIgnoreCase)
             .FirstOrDefault()
-            ?? throw new InvalidOperationException("The latest MuffMode release does not include a downloadable .zip asset.");
+            ?? throw new InvalidOperationException("The latest MuffMode release does not include a downloadable muffmode-<version>[-channel].zip package asset.");
 
         return new ReleaseInfo(
             version,
@@ -103,4 +102,36 @@ internal sealed class GitHubReleaseClient : IDisposable
     }
 
     public void Dispose() => _httpClient.Dispose();
+
+    private static bool IsReleasePackageZip(GitHubAssetDto asset)
+    {
+        if (string.IsNullOrWhiteSpace(asset.Name) || string.IsNullOrWhiteSpace(asset.BrowserDownloadUrl))
+        {
+            return false;
+        }
+
+        var name = asset.Name!;
+        return name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)
+            && name.StartsWith("muffmode-", StringComparison.OrdinalIgnoreCase)
+            && !name.Contains("installer", StringComparison.OrdinalIgnoreCase)
+            && !name.Contains("source", StringComparison.OrdinalIgnoreCase)
+            && SemanticVersion.TryParse(name, out _);
+    }
+
+    private static bool AssetNameMatchesRelease(string assetName, SemanticVersion version, bool prerelease)
+    {
+        var expectedVersion = version.ToString();
+        if (!assetName.Contains(expectedVersion, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return prerelease
+            ? assetName.Contains("beta", StringComparison.OrdinalIgnoreCase)
+                || assetName.Contains("alpha", StringComparison.OrdinalIgnoreCase)
+                || assetName.Contains("rc", StringComparison.OrdinalIgnoreCase)
+            : !assetName.Contains("beta", StringComparison.OrdinalIgnoreCase)
+                && !assetName.Contains("alpha", StringComparison.OrdinalIgnoreCase)
+                && !assetName.Contains("rc", StringComparison.OrdinalIgnoreCase);
+    }
 }
