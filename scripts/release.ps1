@@ -695,8 +695,10 @@ function Build-ReleaseDll {
     Assert-Command "msbuild"
     $solution = Join-Path $RepoRoot "src/MuffMode.sln"
     Write-Step "Building $Configuration|$Platform"
-    & msbuild $solution "/p:Configuration=$Configuration" "/p:Platform=$Platform"
-    if ($LASTEXITCODE -ne 0) {
+    $buildOutput = & msbuild $solution "/p:Configuration=$Configuration" "/p:Platform=$Platform" 2>&1
+    $buildExitCode = $LASTEXITCODE
+    $buildOutput | ForEach-Object { Write-Host $_ }
+    if ($buildExitCode -ne 0) {
         throw "MSBuild failed."
     }
 
@@ -727,7 +729,7 @@ function Publish-UpdaterExecutable {
     New-Item -ItemType Directory -Force -Path $publishRoot | Out-Null
 
     Write-Step "Publishing MuffMode updater ($Configuration, $Runtime)"
-    & dotnet publish $projectPath `
+    $publishOutput = & dotnet publish $projectPath `
         -c $Configuration `
         -r $Runtime `
         --self-contained true `
@@ -735,9 +737,12 @@ function Publish-UpdaterExecutable {
         -p:IncludeNativeLibrariesForSelfExtract=true `
         -p:DebugType=embedded `
         -p:DebugSymbols=false `
-        -o $publishRoot
+        -o $publishRoot 2>&1
 
-    if ($LASTEXITCODE -ne 0) {
+    $publishExitCode = $LASTEXITCODE
+    $publishOutput | ForEach-Object { Write-Host $_ }
+
+    if ($publishExitCode -ne 0) {
         throw "dotnet publish failed for the MuffMode updater."
     }
 
@@ -1211,16 +1216,19 @@ function New-WindowsInstaller {
     }
 
     Write-Step "Creating Windows installer $installerPath"
-    & $compiler `
+    $installerOutput = & $compiler `
         "/DAppVersion=$TargetVersion" `
         "/DChannel=$Channel" `
         "/DReleaseLabel=$releaseLabel" `
         "/DPackageRoot=$PackageRoot" `
         "/DOutputDir=$outputRootAbs" `
         "/DInstallerBaseName=$installerBaseName" `
-        $scriptPath
+        $scriptPath 2>&1
 
-    if ($LASTEXITCODE -ne 0) {
+    $installerExitCode = $LASTEXITCODE
+    $installerOutput | ForEach-Object { Write-Host $_ }
+
+    if ($installerExitCode -ne 0) {
         throw "Inno Setup failed while creating the Windows installer."
     }
     if (-not (Test-Path -LiteralPath $installerPath)) {
