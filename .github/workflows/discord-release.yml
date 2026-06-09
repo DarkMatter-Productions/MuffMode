@@ -1,0 +1,84 @@
+name: Broadcast Release To Discord
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  announce:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Send release embed
+        uses: actions/github-script@v7
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}
+        with:
+          script: |
+            const release = context.payload.release;
+
+            const assets = release.assets || [];
+            const assetLinks = assets.slice(0, 6).map(asset =>
+              `[${asset.name}](${asset.browser_download_url})`
+            );
+
+            const notes = (release.body || "")
+              .replace(/\r/g, "")
+              .trim();
+
+            const description = notes
+              ? (notes.length > 1200 ? `${notes.slice(0, 1197)}...` : notes)
+              : "Release notes and downloads are available on GitHub.";
+
+            const isBeta = release.prerelease;
+            const releaseState = isBeta ? "Beta release" : "Stable release";
+
+            const payload = {
+              username: "Muff Mode Releases",
+              avatar_url: "https://raw.githubusercontent.com/DarkMatter-Productions/MuffMode/main/assets/img/logo.png",
+              allowed_mentions: { parse: [] },
+              content: `**${releaseState} published:** ${release.name || release.tag_name}`,
+              embeds: [
+                {
+                  title: release.name || `Muff Mode ${release.tag_name}`,
+                  url: release.html_url,
+                  description,
+                  color: isBeta ? 0x8fbf26 : 0x5dff5d,
+                  fields: [
+                    {
+                      name: "Version",
+                      value: release.tag_name,
+                      inline: true
+                    },
+                    {
+                      name: "State",
+                      value: isBeta ? "Beta / prerelease" : "Latest stable",
+                      inline: true
+                    },
+                    {
+                      name: "Downloads",
+                      value: assetLinks.length
+                        ? assetLinks.join("\n").slice(0, 1000)
+                        : `[Open release](${release.html_url})`
+                    }
+                  ],
+                  footer: {
+                    text: "Muff Mode for Quake II Remastered"
+                  },
+                  timestamp: release.published_at
+                }
+              ]
+            };
+
+            const response = await fetch(process.env.DISCORD_WEBHOOK_URL, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload)
+            });
+
+            if (!response.ok) {
+              core.setFailed(`Discord webhook failed: ${response.status} ${await response.text()}`);
+            }
