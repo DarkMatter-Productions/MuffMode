@@ -1,4 +1,5 @@
 name: Release Muff Mode
+run-name: Release Muff Mode
 
 on:
   workflow_dispatch:
@@ -42,6 +43,11 @@ on:
         required: true
         type: boolean
         default: false
+      dry_run:
+        description: Validate workflow startup and version resolution without building or publishing.
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -59,7 +65,7 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN }}
       COPILOT_GITHUB_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN }}
-      VCPKG_ROOT: ${{ runner.temp }}\vcpkg
+      VCPKG_ROOT: ${{ github.workspace }}\..\vcpkg
 
     steps:
       - name: Checkout
@@ -73,6 +79,11 @@ jobs:
         env:
           DISCORD_RELEASE_WEBHOOK: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}
         run: |
+          if ("${{ inputs.dry_run }}" -eq "true") {
+            Write-Host "Dry run selected; release secrets are not required."
+            exit 0
+          }
+
           if ([string]::IsNullOrWhiteSpace($env:GH_TOKEN)) {
             throw "Set RELEASE_BOT_TOKEN to a fine-grained, Copilot-enabled GitHub PAT with Copilot Requests and repository release permissions. The built-in GITHUB_TOKEN is intentionally not used because release-created events from it will not trigger the Discord announcement workflow."
           }
@@ -83,53 +94,69 @@ jobs:
 
           gh auth status
 
+      - name: Dry Run Workflow Validation
+        if: ${{ inputs.dry_run == true }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = (Get-Content -Raw VERSION).Trim()
+          .\scripts\release.ps1 -Version $version -VersionOnly -AllowDirtyPackage
+
       - name: Setup Node.js
+        if: ${{ inputs.dry_run != true }}
         uses: actions/setup-node@v4
         with:
           node-version: 22
 
       - name: Install And Prime GitHub Copilot CLI
+        if: ${{ inputs.dry_run != true }}
         shell: pwsh
         run: |
           npm install -g @github/copilot
           copilot --help
 
       - name: Setup .NET
+        if: ${{ inputs.dry_run != true }}
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 8.0.x
 
       - name: Setup MSBuild
+        if: ${{ inputs.dry_run != true }}
         uses: microsoft/setup-msbuild@v2
 
       - name: Setup vcpkg
+        if: ${{ inputs.dry_run != true }}
         shell: pwsh
         run: |
           git clone https://github.com/microsoft/vcpkg.git $env:VCPKG_ROOT
           & "$env:VCPKG_ROOT\bootstrap-vcpkg.bat" -disableMetrics
 
       - name: Cache vcpkg
+        if: ${{ inputs.dry_run != true }}
         uses: actions/cache@v4
         with:
           path: |
-            ${{ runner.temp }}\vcpkg\downloads
-            ${{ runner.temp }}\vcpkg\buildtrees
-            ${{ runner.temp }}\vcpkg\packages
+            ${{ github.workspace }}\..\vcpkg\downloads
+            ${{ github.workspace }}\..\vcpkg\buildtrees
+            ${{ github.workspace }}\..\vcpkg\packages
           key: vcpkg-${{ runner.os }}-${{ hashFiles('src/vcpkg.json') }}
           restore-keys: vcpkg-${{ runner.os }}-
 
       - name: Install vcpkg Dependencies
+        if: ${{ inputs.dry_run != true }}
         shell: pwsh
         working-directory: src
         run: '& "$env:VCPKG_ROOT\vcpkg.exe" install --triplet x64-windows-static'
 
       - name: Install Inno Setup
-        if: ${{ inputs.skip_installer != true }}
+        if: ${{ inputs.dry_run != true && inputs.skip_installer != true }}
         shell: pwsh
         run: choco install innosetup --yes --no-progress
 
       - name: Prepare Version Commit
-        if: ${{ inputs.commit_version_files == true }}
+        if: ${{ inputs.dry_run != true && inputs.commit_version_files == true }}
         shell: pwsh
         run: |
           $arguments = @(
@@ -164,6 +191,7 @@ jobs:
           git push origin "HEAD:${{ github.ref_name }}"
 
       - name: Assert Clean Release Tree
+        if: ${{ inputs.dry_run != true }}
         shell: pwsh
         run: |
           $dirty = git status --porcelain
@@ -173,6 +201,7 @@ jobs:
           }
 
       - name: Build Package And GitHub Release
+        if: ${{ inputs.dry_run != true }}
         shell: pwsh
         run: |
           $arguments = @(
@@ -194,7 +223,7 @@ jobs:
           .\scripts\release.ps1 @arguments
 
       - name: Upload Release Build Artifacts
-        if: always()
+        if: ${{ always() && inputs.dry_run != true }}
         uses: actions/upload-artifact@v4
         with:
           name: release-output
@@ -206,6 +235,7 @@ jobs:
           if-no-files-found: ignore
 
       - name: Discord Announcement Handoff
+        if: ${{ inputs.dry_run != true }}
         shell: pwsh
         run: |
           Write-Host "The GitHub release has been published."
