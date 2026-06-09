@@ -26,7 +26,7 @@ muffmode-<version>-beta.zip
 muffmode-<version>-beta-windows-installer.exe
 ```
 
-The script always generates both `CHANGELOG.md` and `README.html` through [GitHub Copilot CLI](https://docs.github.com/copilot/how-tos/set-up/install-copilot-cli) in non-interactive mode. If the standalone `copilot` CLI is not installed or authenticated, the script fails instead of falling back to plain commit output.
+The script prefers [GitHub Copilot CLI](https://docs.github.com/copilot/how-tos/set-up/install-copilot-cli) for both `CHANGELOG.md` and `README.html` in non-interactive mode. If Copilot is not installed or authenticated, it falls back to deterministic release notes and a styled end-user HTML README so packaging can still complete. Pass `-RequireCopilot` when you intentionally want the release to fail unless Copilot generation succeeds.
 It also writes `rerelease/baseq2/muffmode-version.json` and `rerelease/baseq2/muffmode.version` so the Windows updater can compare the installed version with GitHub releases.
 The package also includes the published Windows updater executable at the package root.
 
@@ -136,7 +136,7 @@ Required repository secrets:
 | `COPILOT_GITHUB_TOKEN` | Fine-grained user PAT used only by the standalone `copilot` CLI. It must belong to a user with GitHub Copilot access and include the Copilot Requests permission. |
 | `DISCORD_RELEASE_WEBHOOK` | Discord webhook consumed by the release announcement job. The release workflow checks that it exists before publishing. |
 
-`RELEASE_BOT_TOKEN` is accepted as a legacy fallback for Copilot authentication, but the built-in `GITHUB_TOKEN` now handles version-file commits and `gh release create`. Because releases created with `GITHUB_TOKEN` do not trigger other workflows, this release workflow posts the Discord announcement itself after the GitHub release is published. The separate **Broadcast Release To Discord** workflow remains useful for releases published manually through GitHub.
+`RELEASE_BOT_TOKEN` is accepted as a legacy fallback for Copilot authentication, but the built-in `GITHUB_TOKEN` now handles version-file commits and `gh release create`. If no Copilot token is present, the workflow warns and uses the deterministic documentation generator unless `require_copilot` is enabled. Because releases created with `GITHUB_TOKEN` do not trigger other workflows, this release workflow posts the Discord announcement itself after the GitHub release is published. The separate **Broadcast Release To Discord** workflow remains useful for releases published manually through GitHub.
 
 Workflow inputs:
 
@@ -148,8 +148,9 @@ Workflow inputs:
 | `channel` | Defaults to `beta`; non-stable channels publish as prereleases. |
 | `commit_version_files` | Updates `VERSION` and `src/g_local.h`, commits, and pushes before publishing. |
 | `skip_installer` | Creates only the zip package when the installer is intentionally not wanted. |
+| `require_copilot` | Requires GitHub Copilot CLI generation and fails if Copilot authentication is unavailable. Leave disabled to use the deterministic fallback when needed. |
 
-The release workflow installs the current standalone GitHub Copilot CLI with `npm install -g @github/copilot`, exports `COPILOT_GITHUB_TOKEN`, and primes `copilot --help` before generating the changelog and end-user HTML README.
+When a Copilot token is configured, the release workflow installs the current standalone GitHub Copilot CLI with `npm install -g @github/copilot`, exports `COPILOT_GITHUB_TOKEN`, and primes `copilot --help` before generating the changelog and end-user HTML README.
 
 ## Publish Locally
 
@@ -165,6 +166,6 @@ The script creates `v<version>`, uploads the package zip and Windows installer, 
 
 The changelog is generated from `git log <previous-release-tag>..HEAD`, so it includes only commits since the previous release. Pass `-PreviousTag v0.22.15` to override the detected start tag.
 
-Copilot receives a structured change context for that exact range: commit subjects, merge subjects, changed files, diff stats, and compare URL. The script writes the full prompt to `dist/release/copilot-prompts`, then gives Copilot a short programmatic instruction to read that file, which avoids Windows command-line length limits. The changelog prompt uses silent/no-question mode and grants only Git shell access for inspection. It is prompted to summarize by practical impact for casual players, competitive players, and server hosts, using only relevant categories such as player experience, competitive play, server hosting, gameplay and balance, fixes, documentation, packaging, and internal maintenance.
+When Copilot is available, it receives a structured change context for that exact range: commit subjects, merge subjects, changed files, diff stats, and compare URL. The script writes the full prompt to `dist/release/copilot-prompts`, then gives Copilot a short programmatic instruction to read that file, which avoids Windows command-line length limits. The changelog prompt uses silent/no-question mode and grants only Git shell access for inspection. It is prompted to summarize by practical impact for casual players, competitive players, and server hosts, using only relevant categories such as player experience, competitive play, server hosting, gameplay and balance, fixes, documentation, packaging, and internal maintenance.
 
-The script validates that Copilot returned clean Markdown with a release title, category headings, bullet-point notes, the target version, and the previous release tag before it packages or publishes the notes.
+The script validates Copilot output before packaging. If Copilot is unavailable and `-RequireCopilot` is not used, the deterministic fallback still scopes the changelog to the same git range and creates a Quake II styled end-user README focused on installation, usage, hosting, package contents, and the changelog.

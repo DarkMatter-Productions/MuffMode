@@ -25,6 +25,7 @@ param(
     [switch]$VersionOnly,
     [switch]$CreateGitHubRelease,
     [switch]$Prerelease,
+    [switch]$RequireCopilot,
     [switch]$AllowDirtyPackage
 )
 
@@ -123,6 +124,344 @@ function Assert-GitHubCopilot {
     if ($LASTEXITCODE -ne 0) {
         throw "GitHub Copilot CLI is required for release changelog and README generation. Install @github/copilot and authenticate it so 'copilot' can run in non-interactive mode.`n$output"
     }
+}
+
+function Test-GitHubCopilotCommand {
+    return [bool](Get-Command "copilot" -ErrorAction SilentlyContinue)
+}
+
+function ConvertTo-ReleaseSentence {
+    param([string]$Text)
+
+    $clean = ($Text -replace '^(feat|feature|fix|docs|doc|chore|ci|build|refactor|style|test)(\([^)]+\))?!?:\s*', '').Trim()
+    if ([string]::IsNullOrWhiteSpace($clean)) {
+        return $Text.Trim()
+    }
+
+    if ($clean.Length -eq 1) {
+        return $clean.ToUpperInvariant()
+    }
+
+    return "$($clean.Substring(0, 1).ToUpperInvariant())$($clean.Substring(1))"
+}
+
+function Get-DeterministicReleaseCategory {
+    param([string]$Subject)
+
+    $text = $Subject.ToLowerInvariant()
+
+    if ($text -match '\b(server|host|hosting|admin|cvar|config|configs|diagnostic|doctor|updater|installer)\b') {
+        return "Server Hosting"
+    }
+    if ($text -match '\b(competitive|match|duel|tdm|team|captain|ready|timeout|overtime|ruleset|vote|voting)\b') {
+        return "Competitive Play"
+    }
+    if ($text -match '\b(gametype|weapon|balance|item|map|entity|horde|arena|hook|grapple)\b') {
+        return "Gameplay and Balance"
+    }
+    if ($text -match '\b(fix|bug|crash|error|resolve|repair|correct)\b') {
+        return "Fixes"
+    }
+    if ($text -match '\b(doc|docs|readme|release|package|workflow|changelog|installer|asset)\b') {
+        return "Documentation and Packaging"
+    }
+
+    return "Internal Maintenance"
+}
+
+function New-DeterministicReleaseChangelog {
+    param(
+        [string]$TargetVersion,
+        [string]$PreviousTag,
+        [string]$Channel,
+        [string]$OutputPath
+    )
+
+    Write-Step "Compiling deterministic changelog from $PreviousTag..HEAD"
+    $range = "$PreviousTag..HEAD"
+    $compareUrl = "https://github.com/$ReleaseRepo/compare/$PreviousTag...v$TargetVersion"
+    $channelName = Get-ChannelDisplayName -Channel $Channel
+    $releaseLabel = if ($channelName) { "Muff Mode v$TargetVersion $channelName" } else { "Muff Mode v$TargetVersion" }
+
+    $commitLines = git -C $RepoRoot log --no-merges --date=short --pretty=format:'%h%x09%s' $range
+    if (-not $commitLines) {
+        $commitLines = git -C $RepoRoot log --date=short --pretty=format:'%h%x09%s' $range
+    }
+    if (-not $commitLines) {
+        throw "No commits found in $range. Refusing to create an empty changelog."
+    }
+
+    $categories = [ordered]@{
+        "Highlights" = New-Object System.Collections.Generic.List[string]
+        "Player Experience" = New-Object System.Collections.Generic.List[string]
+        "Competitive Play" = New-Object System.Collections.Generic.List[string]
+        "Server Hosting" = New-Object System.Collections.Generic.List[string]
+        "Gameplay and Balance" = New-Object System.Collections.Generic.List[string]
+        "Fixes" = New-Object System.Collections.Generic.List[string]
+        "Documentation and Packaging" = New-Object System.Collections.Generic.List[string]
+        "Internal Maintenance" = New-Object System.Collections.Generic.List[string]
+    }
+
+    $seen = New-Object System.Collections.Generic.HashSet[string]
+    foreach ($line in $commitLines) {
+        if ([string]::IsNullOrWhiteSpace($line)) { continue }
+        $parts = $line -split "`t", 2
+        if ($parts.Count -lt 2) { continue }
+
+        $hash = $parts[0].Trim()
+        $subject = $parts[1].Trim()
+        if ([string]::IsNullOrWhiteSpace($subject)) { continue }
+        if ($subject -match '^Bump Muff Mode to v') { continue }
+
+        $summary = ConvertTo-ReleaseSentence $subject
+        if (-not $seen.Add($summary.ToLowerInvariant())) { continue }
+
+        $category = Get-DeterministicReleaseCategory $subject
+        if ($categories[$category].Count -lt 8) {
+            $categories[$category].Add("- $summary ([``$hash``](https://github.com/$ReleaseRepo/commit/$hash))")
+        }
+    }
+
+    if ($categories["Highlights"].Count -eq 0) {
+        foreach ($categoryName in @("Player Experience", "Competitive Play", "Server Hosting", "Gameplay and Balance", "Fixes", "Documentation and Packaging")) {
+            if ($categories[$categoryName].Count -gt 0 -and $categories["Highlights"].Count -lt 3) {
+                $plain = $categories[$categoryName][0] -replace '\s+\(\[`?[0-9a-f]+`?\]\([^)]+\)\)$', ''
+                $categories["Highlights"].Add($plain)
+            }
+        }
+    }
+
+    $lines = New-Object System.Collections.Generic.List[string]
+    $lines.Add("# $releaseLabel Changelog")
+    $lines.Add("")
+    $lines.Add("These are the notable changes since $PreviousTag for the $Channel release channel.")
+    $lines.Add("")
+    $lines.Add("Compare: [$PreviousTag...v$TargetVersion]($compareUrl)")
+
+    foreach ($categoryName in $categories.Keys) {
+        if ($categories[$categoryName].Count -eq 0) { continue }
+        $lines.Add("")
+        $lines.Add("## $categoryName")
+        foreach ($entry in $categories[$categoryName]) {
+            $lines.Add($entry)
+        }
+    }
+
+    Set-Content -LiteralPath $OutputPath -Value ($lines -join "`n") -Encoding utf8
+}
+
+function ConvertTo-HtmlText {
+    param([AllowNull()][string]$Text)
+    if ($null -eq $Text) {
+        return ""
+    }
+    return [System.Net.WebUtility]::HtmlEncode($Text)
+}
+
+function Convert-InlineMarkdownToHtml {
+    param([AllowNull()][string]$Text)
+
+    $encoded = ConvertTo-HtmlText $Text
+    $encoded = [regex]::Replace($encoded, '\[([^\]]+)\]\((https?://[^)]+)\)', '<a href="$2">$1</a>')
+    $encoded = [regex]::Replace($encoded, '`([^`]+)`', '<code>$1</code>')
+    return $encoded
+}
+
+function Convert-SimpleMarkdownToHtml {
+    param([string]$Markdown)
+
+    $builder = [System.Text.StringBuilder]::new()
+    $inList = $false
+
+    foreach ($line in ($Markdown -split "`r?`n")) {
+        if ($line -match '^\s*$') {
+            if ($inList) {
+                [void]$builder.AppendLine("</ul>")
+                $inList = $false
+            }
+            continue
+        }
+
+        if ($line -match '^###\s+(.+)$') {
+            if ($inList) { [void]$builder.AppendLine("</ul>"); $inList = $false }
+            [void]$builder.AppendLine("<h3>$(Convert-InlineMarkdownToHtml $Matches[1])</h3>")
+            continue
+        }
+        if ($line -match '^##\s+(.+)$') {
+            if ($inList) { [void]$builder.AppendLine("</ul>"); $inList = $false }
+            [void]$builder.AppendLine("<h2>$(Convert-InlineMarkdownToHtml $Matches[1])</h2>")
+            continue
+        }
+        if ($line -match '^#\s+(.+)$') {
+            if ($inList) { [void]$builder.AppendLine("</ul>"); $inList = $false }
+            [void]$builder.AppendLine("<h1>$(Convert-InlineMarkdownToHtml $Matches[1])</h1>")
+            continue
+        }
+        if ($line -match '^\s*-\s+(.+)$') {
+            if (-not $inList) {
+                [void]$builder.AppendLine("<ul>")
+                $inList = $true
+            }
+            [void]$builder.AppendLine("<li>$(Convert-InlineMarkdownToHtml $Matches[1])</li>")
+            continue
+        }
+
+        if ($inList) {
+            [void]$builder.AppendLine("</ul>")
+            $inList = $false
+        }
+        [void]$builder.AppendLine("<p>$(Convert-InlineMarkdownToHtml $line)</p>")
+    }
+
+    if ($inList) {
+        [void]$builder.AppendLine("</ul>")
+    }
+
+    return $builder.ToString()
+}
+
+function New-DeterministicHtmlReadme {
+    param(
+        [string]$TargetVersion,
+        [string]$Channel,
+        [string]$ChangelogPath,
+        [string]$OutputPath
+    )
+
+    Write-Step "Generating deterministic end-user README.html"
+    $channelName = Get-ChannelDisplayName -Channel $Channel
+    $releaseLabel = if ($channelName) { "MuffMode v$TargetVersion $channelName" } else { "MuffMode v$TargetVersion" }
+    $changelogMarkdown = Get-Content -Raw -LiteralPath $ChangelogPath
+    $changelogHtml = Convert-SimpleMarkdownToHtml $changelogMarkdown
+    $encodedLabel = ConvertTo-HtmlText $releaseLabel
+
+    $html = @"
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>$encodedLabel End-User README</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --gunmetal: #151b1f;
+      --steel: #232c31;
+      --panel: #2e3737;
+      --slime: #9ccc2f;
+      --slime-bright: #c5f44e;
+      --rust: #b65a2b;
+      --amber: #e0aa45;
+      --concrete: #b8c0b7;
+      --muted: #879186;
+      --line: rgba(197, 244, 78, 0.22);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: radial-gradient(circle at top left, rgba(156, 204, 47, 0.12), transparent 34rem), linear-gradient(135deg, #101417, var(--gunmetal));
+      color: #eef3e9;
+      font: 16px/1.55 "Segoe UI", Arial, sans-serif;
+    }
+    a { color: var(--slime-bright); }
+    code { color: var(--amber); background: rgba(0, 0, 0, 0.28); padding: 0.08rem 0.28rem; border-radius: 4px; }
+    header, main { width: min(1120px, calc(100% - 32px)); margin: 0 auto; }
+    header { padding: 3rem 0 1.5rem; border-bottom: 1px solid var(--line); }
+    .eyebrow { color: var(--slime); text-transform: uppercase; letter-spacing: 0.08em; font-weight: 700; }
+    h1, h2, h3 { line-height: 1.15; margin: 0 0 0.8rem; }
+    h1 { font-size: clamp(2rem, 6vw, 4rem); }
+    h2 { color: var(--slime-bright); margin-top: 2rem; }
+    h3 { color: var(--amber); margin-top: 1.2rem; }
+    .lede { max-width: 760px; color: var(--concrete); font-size: 1.1rem; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1rem; margin: 1.5rem 0; }
+    .card {
+      background: linear-gradient(180deg, rgba(46, 55, 55, 0.96), rgba(28, 34, 35, 0.96));
+      border: 1px solid rgba(224, 170, 69, 0.24);
+      border-radius: 8px;
+      padding: 1rem;
+      box-shadow: 0 18px 50px rgba(0, 0, 0, 0.24);
+    }
+    .card strong { color: #ffffff; }
+    .tag { display: inline-block; color: #18200b; background: var(--slime); border-radius: 999px; padding: 0.18rem 0.55rem; font-weight: 800; }
+    section { padding: 1.2rem 0; }
+    ul, ol { padding-left: 1.25rem; }
+    li { margin: 0.35rem 0; }
+    table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
+    th, td { border-bottom: 1px solid rgba(184, 192, 183, 0.18); padding: 0.65rem; text-align: left; vertical-align: top; }
+    th { color: var(--slime); }
+    .changelog {
+      background: rgba(0, 0, 0, 0.2);
+      border-left: 4px solid var(--rust);
+      padding: 1rem;
+      border-radius: 0 8px 8px 0;
+    }
+    footer { color: var(--muted); padding: 2rem 0 3rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="eyebrow">Quake II Remastered server-side mod</div>
+    <h1>$encodedLabel</h1>
+    <p class="lede">A practical release package for casual games, competitive matches, and the server hosts keeping MuffMode sessions running. This package is flagged as <span class="tag">$Channel</span>.</p>
+  </header>
+  <main>
+    <section>
+      <h2>Install</h2>
+      <div class="grid">
+        <article class="card">
+          <h3>Windows Installer</h3>
+          <p>Use the installer for the cleanest setup. It defaults to Steam's Quake II Remastered folder and also offers Epic Online Store / Epic Games Store, GOG, and custom library choices.</p>
+        </article>
+        <article class="card">
+          <h3>Zip Package</h3>
+          <p>Extract the zip into the outer <code>Quake 2</code> folder, not directly into <code>rerelease</code> or <code>baseq2</code>. Allow file replacement when prompted.</p>
+        </article>
+        <article class="card">
+          <h3>Included Files</h3>
+          <p>The release contains <code>game_x64.dll</code>, <code>MuffModeUpdater.exe</code>, version marker files, this README, and the release changelog.</p>
+        </article>
+      </div>
+    </section>
+    <section>
+      <h2>First Use</h2>
+      <ul>
+        <li>Launch Quake II normally after installing.</li>
+        <li>Players can use the game menu for team joining, voting, server info, and common actions.</li>
+        <li>Useful player commands include <code>team auto</code>, <code>readyup</code>, <code>maplist</code>, <code>motd</code>, <code>callvote</code>, and <code>vote yes</code> / <code>vote no</code>.</li>
+        <li>For offhand hook servers, try <code>alias +hook hook</code>, <code>alias -hook unhook</code>, then <code>bind mouse2 +hook</code>.</li>
+      </ul>
+    </section>
+    <section>
+      <h2>Server Hosting</h2>
+      <ul>
+        <li>Execute the bundled server config with <code>exec muff-sv.cfg</code> when it is included in the package.</li>
+        <li>Start casual servers with open voting, clear map rotation, and a short MOTD.</li>
+        <li>Start competitive servers with ready-up, controlled voting, known gametypes, known rulesets, captain/admin tools, and timeout rules.</li>
+        <li>Run <code>doctor</code> after changing server settings to catch risky cvar combinations.</li>
+      </ul>
+    </section>
+    <section>
+      <h2>Gametype And Ruleset Notes</h2>
+      <div class="grid">
+        <article class="card"><strong>Common gametypes:</strong> FFA, Duel, TDM, CTF, Clan Arena, Freeze Tag, CaptureStrike, Red Rover, LMS, Horde, ProBall, Instagib, and NadeFest.</article>
+        <article class="card"><strong>Rulesets:</strong> Quake II Rerelease, Muff Mode, Quake III Arena style, Q2RE Balanced, Quake style, and Quake Champions style.</article>
+      </div>
+    </section>
+    <section>
+      <h2>Changelog</h2>
+      <div class="changelog">
+        $changelogHtml
+      </div>
+    </section>
+    <footer>
+      Generated from the MuffMode release documentation and release changelog.
+    </footer>
+  </main>
+</body>
+</html>
+"@
+
+    Set-Content -LiteralPath $OutputPath -Value $html -Encoding utf8
 }
 
 function ConvertTo-SemVer {
@@ -606,17 +945,40 @@ GIT RANGE CONTEXT:
 $changeContext
 "@
 
-    $output = Invoke-GitHubCopilot `
-        -Prompt $prompt `
-        -Purpose "generating the release changelog" `
-        -AllowedTools @("shell(git:*)")
+    if (Test-GitHubCopilotCommand) {
+        try {
+            $output = Invoke-GitHubCopilot `
+                -Prompt $prompt `
+                -Purpose "generating the release changelog" `
+                -AllowedTools @("shell(git:*)")
 
-    $markdown = Convert-CopilotOutputToMarkdown `
-        -Output $output `
+            $markdown = Convert-CopilotOutputToMarkdown `
+                -Output $output `
+                -TargetVersion $TargetVersion `
+                -PreviousTag $PreviousTag
+
+            Set-Content -LiteralPath $OutputPath -Value $markdown -Encoding utf8
+            return
+        }
+        catch {
+            if ($RequireCopilot) {
+                throw
+            }
+            Write-Warning "GitHub Copilot changelog generation failed; using deterministic release notes instead. $($_.Exception.Message)"
+        }
+    }
+    else {
+        if ($RequireCopilot) {
+            throw "GitHub Copilot CLI is required because -RequireCopilot was supplied, but 'copilot' was not found on PATH."
+        }
+        Write-Warning "GitHub Copilot CLI was not found; using deterministic release notes instead."
+    }
+
+    New-DeterministicReleaseChangelog `
         -TargetVersion $TargetVersion `
-        -PreviousTag $PreviousTag
-
-    Set-Content -LiteralPath $OutputPath -Value $markdown -Encoding utf8
+        -PreviousTag $PreviousTag `
+        -Channel $Channel `
+        -OutputPath $OutputPath
 }
 
 function Get-ReadmeSourceMarkdown {
@@ -716,11 +1078,34 @@ CHANGELOG:
 $changelog
 "@
 
-    Write-Step "Generating end-user README.html with GitHub Copilot"
-    $output = Invoke-GitHubCopilot -Prompt $prompt -Purpose "generating README.html"
+    if (Test-GitHubCopilotCommand) {
+        try {
+            Write-Step "Generating end-user README.html with GitHub Copilot"
+            $output = Invoke-GitHubCopilot -Prompt $prompt -Purpose "generating README.html"
 
-    $html = Convert-CopilotOutputToHtml $output
-    Set-Content -LiteralPath $OutputPath -Value $html -Encoding utf8
+            $html = Convert-CopilotOutputToHtml $output
+            Set-Content -LiteralPath $OutputPath -Value $html -Encoding utf8
+            return
+        }
+        catch {
+            if ($RequireCopilot) {
+                throw
+            }
+            Write-Warning "GitHub Copilot README generation failed; using deterministic HTML README instead. $($_.Exception.Message)"
+        }
+    }
+    else {
+        if ($RequireCopilot) {
+            throw "GitHub Copilot CLI is required because -RequireCopilot was supplied, but 'copilot' was not found on PATH."
+        }
+        Write-Warning "GitHub Copilot CLI was not found; using deterministic HTML README instead."
+    }
+
+    New-DeterministicHtmlReadme `
+        -TargetVersion $TargetVersion `
+        -Channel $Channel `
+        -ChangelogPath $ChangelogPath `
+        -OutputPath $OutputPath
 }
 
 function Copy-ReleaseAssets {
@@ -913,8 +1298,6 @@ try {
         Write-Step "Version files are ready for $targetVersion"
         return
     }
-
-    Assert-GitHubCopilot
 
     if ($CreateGitHubRelease) {
         $dirtyAfterVersion = Get-GitStatus
