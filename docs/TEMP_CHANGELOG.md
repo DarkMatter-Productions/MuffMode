@@ -4,6 +4,10 @@
 
 ### Change
 
+- **Horde gametype display name:** Renamed from "Horde Mode" to "Horde" in the gametype long-name table.
+- **Horde mid-wave join prevention:** Players who connect or spawn during an in-progress horde wave are now immediately set to eliminated spectator and must wait for the next wave countdown before fighting.
+- **Team model forcing (`g_team_red_model`, `g_team_blue_model`, `g_team_force_models`):** New cvars force a specific model/skin for each team (default `male/ctf_r` for red, `female/ctf_b` for blue). `g_team_force_models` (default 1) enables or disables the override without clearing the model cvar values; when 0, player-chosen models are used.
+
 - **Thin-vanilla refactor:** MuffMode gameplay and server logic moved from monolithic vanilla files into `src/muffmode/`; `g_main.cpp`, `g_cmds.cpp`, `g_spawn.cpp`, and peers remain thin orchestration hooks that call `MM_*()` APIs. Refactor declared complete (Phases 1–6, Tier 1–2); remaining `GT()`/`RS()` gates in vanilla are intentional.
 - **MuffMode module map:** Feature bodies now live in dedicated modules — vote/registry/menu (`mm_vote`, `mm_vote_menu`), maps/shuffle/MyMap (`mm_maps`), gametype/ruleset (`mm_gametype`), admin (`mm_admin`), Horde (`mm_horde`), duel queue (`mm_duel`), ruleset caps/weapons/decay (`mm_ruleset`, `mm_ruleset_weapons`), spawn loadout/filter (`mm_spawn_loadout`, `mm_spawn_filter`), item rules (`mm_items_rules`), statusbar (`mm_statusbar`), MOTD (`mm_motd`), and debug logging (`mm_debug`).
 - **Header/module boundaries:** Vote types/registry, map queue, and MOTD load/commands moved out of `g_local.h` / vanilla TUs into their modules; dead wrappers removed (`G_RevertVote`, `G_ShuffleMapList`, etc.). Duel weapon-restriction handicap (admin command, vote type, and enforcement) removed end-to-end as unused.
@@ -24,6 +28,12 @@
 - **Horde QoL:** Eliminated fighters see a center message that they rejoin at the next wave (`MM_Horde_NotifyEliminatedSpectator`, deduped per wave). When living monsters drop to `g_horde_mark_monsters_threshold` (default 3) or below, remaining monsters get KEX automap POIs (`loc_ping`, same as team location pings) for all fighters and eliminated spectators; cleared when count rises or the wave ends.
 
 ### Fix
+
+- **Horde mid-game joiners no weapons/ammo:** Players who joined an in-progress horde match (during wave countdown, `round_number > 0`) with `pers.weapon == nullptr` were incorrectly treated as a wave-rejoin path, skipping `InitClientPersistant` and spawning with no weapons or ammo. The wave-rejoin fast-path now requires a non-null `pers.weapon`.
+- **Horde mid-wave joiners ammo (chase cam):** Even after mid-wave join prevention, a newly-joining spectator who entered chase cam had `pers.weapon` overwritten from the chase target's state; when they later spawned the weapon pointer was foreign, leaving ammo wrong. Removed the `pers.weapon` copy from `UpdateChaseCam`.
+- **Round ending immediately when `roundtimelimit` is 0:** The timer-expiry branch in `CheckDMRoundState` fired as soon as the round started because `level.time >= round_state_timer` is immediately true when no limit is set. The check is now skipped when `roundtimelimit` is 0.
+- **Round timer shown on HUD when `roundtimelimit` is 0 or gametype is Horde:** The dual bottom timer (match elapsed + round remaining) was always rendered during `ROUND_IN_PROGRESS`, showing a meaningless countdown when `roundtimelimit` is 0 or in Horde. Both modes now show only the match-elapsed time.
+- **Horde-to-duel hard lock:** Switching from Horde (where bots run as `TEAM_FREE`) to Duel left bots with stale team assignments, preventing them from being queued by `CheckDMWarmupState`. Bot sessions now have `team = TEAM_NONE` and `initialised = false` reset on gametype change. Additionally, `Match_Start` in the no-warmup path is now guarded against human-free matches (requires at least one human client unless `g_dm_allow_no_humans` is set).
 
 - **Invalid entity string pointer crash:** `G_FindByString` only checked non-null before `strlen`, so corrupted low pointers (e.g. `0xB`) could AV during entity scans (match end, spawns, pain daemon cleanup). Added `G_IsValidStringPtr`, skip-and-log in `G_FindByString`, safe `changemap` check in `BeginIntermission`, and guarded entity `classname` formatting.
 - **Miniscore match limit HUD:** Show frag/round/capture limit with statusbar `num` and a numeric `STAT_SCORELIMIT` so the value centers under miniscore faces on vanilla and Muff Mode clients (replaces left-aligned `stat_string`).
