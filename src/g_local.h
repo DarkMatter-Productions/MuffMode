@@ -276,7 +276,7 @@ constexpr const char *gt_long_name[GT_NUM_GAMETYPES] = {
 	"CaptureStrike",
 	"Red Rover",
 	"Last Man Standing",
-	"Horde Mode",
+	"Horde",
 	"ProBall",
 	"Instagib",
 	"NadeFest"
