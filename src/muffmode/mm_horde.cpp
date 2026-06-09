@@ -804,6 +804,21 @@ void MM_Horde_RunSpawning()
 		select_spawn_result_t result = SelectDeathmatchSpawnPoint(nullptr, vec3_origin, SPAWN_FARTHEST, false, true, false, false);
 
 		if (result.any_valid && result.spot) {
+			// Validate spawn point fits a large monster (tank commander is the worst-case hull).
+			// CheckSpawnPoint also rejects non-world solids (doors, movers) unlike a raw startsolid check.
+			constexpr vec3_t horde_check_mins = { -32.f, -32.f, -16.f };
+			constexpr vec3_t horde_check_maxs = {  32.f,  32.f,  64.f };
+			if (!CheckSpawnPoint(result.spot->s.origin, horde_check_mins, horde_check_maxs)) {
+				// Try a different candidate by excluding the failed spot from selection.
+				// avoid_point is honoured when g_dm_respawn_point_min_dist > 0 (default 256).
+				select_spawn_result_t retry = SelectDeathmatchSpawnPoint(nullptr, result.spot->s.origin, SPAWN_FARTHEST, false, true, false, false);
+				if (retry.any_valid && retry.spot && retry.spot != result.spot &&
+					CheckSpawnPoint(retry.spot->s.origin, horde_check_mins, horde_check_maxs))
+					result = retry;
+				// else: no point passes the large-bbox check (e.g. all spawn points are tight on this map).
+				// Fall through and spawn anyway — monster_start_go will attempt stuck-fixing.
+			}
+
 			e->s.origin = result.spot->s.origin;
 			e->s.angles = result.spot->s.angles;
 
