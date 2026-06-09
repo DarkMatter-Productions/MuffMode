@@ -638,6 +638,9 @@ function Update-VersionFiles {
         1
     )
     if ($updated -eq $content) {
+        if ($content -match "GAMEMOD_VERSION\s*=\s*`"$([regex]::Escape($TargetVersion))`"") {
+            return
+        }
         throw "Could not update GAMEMOD_VERSION in src/g_local.h."
     }
     Set-Content -LiteralPath $localHeader -Value $updated -Encoding utf8
