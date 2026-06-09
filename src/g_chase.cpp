@@ -85,7 +85,6 @@ void UpdateChaseCam(gentity_t *ent) {
 		ent->client->ps.pmove.viewheight = targ->client->ps.pmove.viewheight;
 		
 		ent->client->pers.hand = targ->client->pers.hand;
-		ent->client->pers.weapon = targ->client->pers.weapon;
 		
 		//FIXME: color shells and damage blends not working
 
