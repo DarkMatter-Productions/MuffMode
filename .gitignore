@@ -412,5 +412,6 @@ build.bat
 build_dev.bat
 
 # Local vcpkg artifacts
+/vcpkg/
 src/vcpkg_installed/
 **/vcpkg_installed/
