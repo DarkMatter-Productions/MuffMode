@@ -108,33 +108,38 @@ jobs:
         id: version
         shell: pwsh
         run: |
-          $arguments = @("-VersionOnly", "-AllowDirtyPackage", "-Channel", "${{ inputs.channel }}")
+          $parameters = @{
+            VersionOnly = $true
+            AllowDirtyPackage = $true
+            Channel = "${{ inputs.channel }}"
+          }
 
           if ("${{ inputs.dry_run }}" -eq "true") {
-            $arguments += @("-Version", (Get-Content -Raw VERSION).Trim())
+            $parameters["Version"] = (Get-Content -Raw VERSION).Trim()
           }
           elseif ("${{ inputs.commit_version_files }}" -eq "true") {
-            $arguments += @("-VersionMode", "${{ inputs.version_mode }}", "-UpdateVersionFiles")
+            $parameters["VersionMode"] = "${{ inputs.version_mode }}"
+            $parameters["UpdateVersionFiles"] = $true
             if (-not [string]::IsNullOrWhiteSpace("${{ inputs.version }}")) {
-              $arguments += @("-Version", "${{ inputs.version }}")
+              $parameters["Version"] = "${{ inputs.version }}"
             }
             if (-not [string]::IsNullOrWhiteSpace("${{ inputs.previous_tag }}")) {
-              $arguments += @("-PreviousTag", "${{ inputs.previous_tag }}")
+              $parameters["PreviousTag"] = "${{ inputs.previous_tag }}"
             }
           }
           else {
             if (-not [string]::IsNullOrWhiteSpace("${{ inputs.version }}")) {
-              $arguments += @("-Version", "${{ inputs.version }}")
+              $parameters["Version"] = "${{ inputs.version }}"
             }
             else {
-              $arguments += @("-Version", (Get-Content -Raw VERSION).Trim())
+              $parameters["Version"] = (Get-Content -Raw VERSION).Trim()
             }
             if (-not [string]::IsNullOrWhiteSpace("${{ inputs.previous_tag }}")) {
-              $arguments += @("-PreviousTag", "${{ inputs.previous_tag }}")
+              $parameters["PreviousTag"] = "${{ inputs.previous_tag }}"
             }
           }
 
-          .\scripts\release.ps1 @arguments
+          .\scripts\release.ps1 @parameters
 
           if ("${{ inputs.dry_run }}" -ne "true" -and "${{ inputs.commit_version_files }}" -eq "true") {
             $changes = git status --porcelain VERSION src/g_local.h
@@ -234,19 +239,19 @@ jobs:
       - name: Build Release Package
         shell: pwsh
         run: |
-          $arguments = @(
-            "-Version", "${{ needs.version.outputs.target_version }}",
-            "-Channel", "${{ inputs.channel }}"
-          )
+          $parameters = @{
+            Version = "${{ needs.version.outputs.target_version }}"
+            Channel = "${{ inputs.channel }}"
+          }
 
           if (-not [string]::IsNullOrWhiteSpace("${{ inputs.previous_tag }}")) {
-            $arguments += @("-PreviousTag", "${{ inputs.previous_tag }}")
+            $parameters["PreviousTag"] = "${{ inputs.previous_tag }}"
           }
           if ("${{ inputs.skip_installer }}" -eq "true") {
-            $arguments += "-SkipInstaller"
+            $parameters["SkipInstaller"] = $true
           }
 
-          .\scripts\release.ps1 @arguments
+          .\scripts\release.ps1 @parameters
 
       - name: Upload Release Package
         uses: actions/upload-artifact@v7
