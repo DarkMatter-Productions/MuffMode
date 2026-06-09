@@ -7,7 +7,7 @@
 </div>
 
 <div align="center">
-  <h2>Welcome to MuffMode</b></h2>
+  <h2>Welcome to Muff Mode</b></h2>
 </div>
 
 ## What is Muff Mode?
