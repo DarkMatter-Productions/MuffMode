@@ -1764,6 +1764,8 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
 		// "disconnect" all players since the level is switching
 		game.clients[i].pers.connected = false;
 		game.clients[i].pers.spawned = false;
+		// clear eliminated so horde-eliminated players don't deadlock the new map's warmup
+		game.clients[i].eliminated = false;
 	}
 
 	// reserve some spots for dead player bodies for coop / deathmatch
