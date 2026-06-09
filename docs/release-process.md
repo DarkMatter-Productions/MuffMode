@@ -127,6 +127,8 @@ Use the **Release Muff Mode** workflow in GitHub Actions for normal releases. It
 
 GitHub's workflow graph shows jobs, not individual steps. This workflow is intentionally split into visible release jobs: **Preflight**, **Resolve Version**, **Build And Package**, **Publish GitHub Release**, and **Announce On Discord**.
 
+Use the separate **Validate Release Workflow** action when you only want to verify workflow startup and version resolution. It never builds, publishes, or announces a release, which keeps dry-run validation out of the actual release graph.
+
 Required repository secrets:
 
 | Secret | Purpose |
@@ -146,7 +148,6 @@ Workflow inputs:
 | `channel` | Defaults to `beta`; non-stable channels publish as prereleases. |
 | `commit_version_files` | Updates `VERSION` and `src/g_local.h`, commits, and pushes before publishing. |
 | `skip_installer` | Creates only the zip package when the installer is intentionally not wanted. |
-| `dry_run` | Validates workflow startup and version resolution without building, publishing, or requiring release secrets. |
 
 The release workflow installs the current standalone GitHub Copilot CLI with `npm install -g @github/copilot`, exports `COPILOT_GITHUB_TOKEN`, and primes `copilot --help` before generating the changelog and end-user HTML README.
 

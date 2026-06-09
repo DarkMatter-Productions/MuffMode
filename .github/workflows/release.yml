@@ -43,12 +43,6 @@ on:
         required: true
         type: boolean
         default: false
-      dry_run:
-        description: Validate workflow startup and version resolution without building or publishing.
-        required: true
-        type: boolean
-        default: false
-
 permissions:
   contents: write
 
@@ -70,11 +64,6 @@ jobs:
           LEGACY_RELEASE_BOT_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN }}
           DISCORD_RELEASE_WEBHOOK: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}
         run: |
-          if ("${{ inputs.dry_run }}" -eq "true") {
-            Write-Host "Dry run selected; release secrets are not required."
-            exit 0
-          }
-
           if ([string]::IsNullOrWhiteSpace($env:COPILOT_GITHUB_TOKEN) -and [string]::IsNullOrWhiteSpace($env:LEGACY_RELEASE_BOT_TOKEN)) {
             throw "Set COPILOT_GITHUB_TOKEN to a fine-grained user PAT with the Copilot Requests permission. RELEASE_BOT_TOKEN is accepted as a legacy fallback, but the built-in GITHUB_TOKEN cannot authenticate Copilot CLI."
           }
@@ -114,10 +103,7 @@ jobs:
             Channel = "${{ inputs.channel }}"
           }
 
-          if ("${{ inputs.dry_run }}" -eq "true") {
-            $parameters["Version"] = (Get-Content -Raw VERSION).Trim()
-          }
-          elseif ("${{ inputs.commit_version_files }}" -eq "true") {
+          if ("${{ inputs.commit_version_files }}" -eq "true") {
             $parameters["VersionMode"] = "${{ inputs.version_mode }}"
             $parameters["UpdateVersionFiles"] = $true
             if (-not [string]::IsNullOrWhiteSpace("${{ inputs.version }}")) {
@@ -141,7 +127,7 @@ jobs:
 
           .\scripts\release.ps1 @parameters
 
-          if ("${{ inputs.dry_run }}" -ne "true" -and "${{ inputs.commit_version_files }}" -eq "true") {
+          if ("${{ inputs.commit_version_files }}" -eq "true") {
             $changes = git status --porcelain VERSION src/g_local.h
             if ($changes) {
               $version = (Get-Content -Raw VERSION).Trim()
@@ -174,7 +160,6 @@ jobs:
   build:
     name: Build And Package
     needs: version
-    if: ${{ inputs.dry_run != true }}
     runs-on: windows-2025-vs2026
     timeout-minutes: 90
 
@@ -269,7 +254,6 @@ jobs:
     needs:
       - version
       - build
-    if: ${{ inputs.dry_run != true }}
     runs-on: windows-2025-vs2026
     timeout-minutes: 20
 
@@ -320,7 +304,6 @@ jobs:
     needs:
       - version
       - publish
-    if: ${{ inputs.dry_run != true }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
