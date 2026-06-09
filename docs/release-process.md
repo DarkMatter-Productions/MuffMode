@@ -123,14 +123,18 @@ See the [Updater Guide](updater-guide.md) for the updater workflow and local ver
 
 ## Publish From GitHub Actions
 
-Use the **Release Muff Mode** workflow in GitHub Actions for normal releases. It runs [scripts/release.ps1](../scripts/release.ps1), updates and commits version files when requested, builds the DLL, publishes the updater, builds the Windows installer, creates the GitHub release, uploads the zip and installer assets, and leaves the Discord announcement to the existing **Broadcast Release To Discord** workflow.
+Use the **Release Muff Mode** workflow in GitHub Actions for normal releases. It runs [scripts/release.ps1](../scripts/release.ps1), updates and commits version files when requested, builds the DLL, publishes the updater, builds the Windows installer, creates the GitHub release, uploads the zip and installer assets, and posts the Discord announcement.
+
+GitHub's workflow graph shows jobs, not individual steps. This workflow is intentionally split into visible release jobs: **Preflight**, **Resolve Version**, **Build And Package**, **Publish GitHub Release**, and **Announce On Discord**.
 
 Required repository secrets:
 
 | Secret | Purpose |
 | --- | --- |
-| `RELEASE_BOT_TOKEN` | Fine-grained, Copilot-enabled GitHub token used by `copilot`, version-file commits, and `gh release create`. It needs Copilot Requests plus repository release permissions. Use a token rather than the built-in `GITHUB_TOKEN` so the `release:published` event can trigger the Discord workflow. |
-| `DISCORD_RELEASE_WEBHOOK` | Discord webhook consumed by the announcement workflow. The release workflow checks that it exists before publishing. |
+| `COPILOT_GITHUB_TOKEN` | Fine-grained user PAT used only by the standalone `copilot` CLI. It must belong to a user with GitHub Copilot access and include the Copilot Requests permission. |
+| `DISCORD_RELEASE_WEBHOOK` | Discord webhook consumed by the release announcement job. The release workflow checks that it exists before publishing. |
+
+`RELEASE_BOT_TOKEN` is accepted as a legacy fallback for Copilot authentication, but the built-in `GITHUB_TOKEN` now handles version-file commits and `gh release create`. Because releases created with `GITHUB_TOKEN` do not trigger other workflows, this release workflow posts the Discord announcement itself after the GitHub release is published. The separate **Broadcast Release To Discord** workflow remains useful for releases published manually through GitHub.
 
 Workflow inputs:
 
@@ -145,8 +149,6 @@ Workflow inputs:
 | `dry_run` | Validates workflow startup and version resolution without building, publishing, or requiring release secrets. |
 
 The release workflow installs the current standalone GitHub Copilot CLI with `npm install -g @github/copilot`, exports `COPILOT_GITHUB_TOKEN`, and primes `copilot --help` before generating the changelog and end-user HTML README.
-
-The Discord workflow is intentionally separate. Manual releases still announce through the `release:published` trigger, and Actions-created releases announce the same way when `RELEASE_BOT_TOKEN` is used.
 
 ## Publish Locally
 
