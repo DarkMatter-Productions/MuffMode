@@ -281,7 +281,7 @@ jobs:
           name: release-output
           path: dist/release
 
-      - name: Publish Latest Release
+      - name: Publish GitHub Release
         shell: pwsh
         run: |
           $version = "${{ needs.version.outputs.target_version }}"
