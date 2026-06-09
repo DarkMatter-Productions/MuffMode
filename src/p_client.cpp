@@ -2648,6 +2648,9 @@ void ClientSpawn(gentity_t *ent) {
 	if (GTF(GTF_ROUNDS) && GTF(GTF_ELIMINATION) && level.match_state == matchst_t::MATCH_IN_PROGRESS && notGT(GT_HORDE))
 		if (level.round_state == roundst_t::ROUND_IN_PROGRESS || level.round_state == roundst_t::ROUND_ENDED)
 			ClientSetEliminated(ent);
+	if (GT(GT_HORDE) && level.match_state == matchst_t::MATCH_IN_PROGRESS &&
+		level.round_state == roundst_t::ROUND_IN_PROGRESS && !ent->client->eliminated)
+		ClientSetEliminated(ent);
 	bool eliminated = ent->client->eliminated;
 	int lives = 0;
 	if (InCoopStyle() && notGT(GT_HORDE) && g_coop_enable_lives->integer)
