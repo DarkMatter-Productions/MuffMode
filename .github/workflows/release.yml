@@ -69,7 +69,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -105,7 +105,7 @@ jobs:
 
       - name: Setup Node.js
         if: ${{ inputs.dry_run != true }}
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 22
 
@@ -118,13 +118,13 @@ jobs:
 
       - name: Setup .NET
         if: ${{ inputs.dry_run != true }}
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: 8.0.x
 
       - name: Setup MSBuild
         if: ${{ inputs.dry_run != true }}
-        uses: microsoft/setup-msbuild@v2
+        uses: microsoft/setup-msbuild@v3
 
       - name: Setup vcpkg
         if: ${{ inputs.dry_run != true }}
@@ -135,7 +135,7 @@ jobs:
 
       - name: Cache vcpkg
         if: ${{ inputs.dry_run != true }}
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ${{ github.workspace }}\..\vcpkg\downloads
@@ -224,7 +224,7 @@ jobs:
 
       - name: Upload Release Build Artifacts
         if: ${{ always() && inputs.dry_run != true }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-output
           path: |

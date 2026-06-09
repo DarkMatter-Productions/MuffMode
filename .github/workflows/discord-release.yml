@@ -13,7 +13,7 @@ jobs:
 
     steps:
       - name: Send release embed
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}
         with:
