@@ -1,11 +1,9 @@
 <div align="center">
-  <img src="assets/img/logo.png" alt="MuffMode Logo" width="300">
+  <img src="assets/img/logo.png" alt="MuffMode Logo" width="600">
 
   [![Latest Release](https://img.shields.io/github/v/release/DarkMatter-Productions/MuffMode?label=release&color=blue)](https://github.com/DarkMatter-Productions/MuffMode/releases/latest)
   [![License](https://img.shields.io/github/license/DarkMatter-Productions/MuffMode?color=blue)](LICENSE)
   [![Release Build](https://img.shields.io/github/actions/workflow/status/DarkMatter-Productions/MuffMode/release.yml?label=release%20build)](https://github.com/DarkMatter-Productions/MuffMode/actions/workflows/release.yml)
-  [![Open Issues](https://img.shields.io/github/issues/DarkMatter-Productions/MuffMode)](https://github.com/DarkMatter-Productions/MuffMode/issues)
-  [![Stars](https://img.shields.io/github/stars/DarkMatter-Productions/MuffMode?style=flat)](https://github.com/DarkMatter-Productions/MuffMode/stargazers)
 </div>
 
 <div align="center">
