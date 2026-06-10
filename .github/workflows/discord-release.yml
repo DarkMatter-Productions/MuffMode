@@ -38,7 +38,7 @@ jobs:
 
             const payload = {
               username: "Muff Mode Releases",
-              avatar_url: "https://raw.githubusercontent.com/DarkMatter-Productions/MuffMode/main/assets/img/logo.png",
+              avatar_url: "https://raw.githubusercontent.com/DarkMatter-Productions/MuffMode/main/assets/img/discord-avatar.png",
               allowed_mentions: { parse: [] },
               content: `**${releaseState} published:** ${release.name || release.tag_name}`,
               embeds: [
