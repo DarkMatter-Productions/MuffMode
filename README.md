@@ -6,7 +6,7 @@
   [![Build](https://img.shields.io/github/actions/workflow/status/DarkMatter-Productions/MuffMode/build.yml?label=build)](https://github.com/DarkMatter-Productions/MuffMode/actions/workflows/build.yml)
   [![Open Issues](https://img.shields.io/github/issues/DarkMatter-Productions/MuffMode)](https://github.com/DarkMatter-Productions/MuffMode/issues)
   [![Stars](https://img.shields.io/github/stars/DarkMatter-Productions/MuffMode?style=flat)](https://github.com/DarkMatter-Productions/MuffMode/stargazers)
-
+  
   <h1>Muff Mode</h1>
   <p><strong>Server-side multiplayer upgrades for Quake II Remastered.</strong></p>
 </div>
@@ -68,7 +68,7 @@ The project builds on Windows with Visual Studio 2022/MSBuild. See the [Build Gu
 ## Credits
 
 This project was started by [themuffinator](https://github.com/themuffinator), later with regular and significant development/maintenance/testing by [ozy](https://github.com/ozy24). It would not be possible without the outstanding work from the Nightdive Team who worked on [Quake II Rerelease](https://bethesda.net/en/game/quakeii) ([source code here](https://github.com/id-Software/quake2-rerelease-dll)).
-Muff Mode exists thanks to the DarkMatter community, the Nightdive team, id Software, the Quake II Rerelease player community, [Paril's Q2 Horde work](https://github.com/Paril/q2horde), ceeeKay's EyeCam code from [Q2Eaks](https://github.com/ceeeKay/Q2Eaks), and the [Stingy Hat Games modding tutorial](https://www.youtube.com/watch?v=PiSMiS3Epyk&t=261s&pp=ygUYU3Rpbmd5IEhhdCBHYW1lcyBxdWFrZSAy0gcJCTkLAYcqIYzv).
+Muff Mode exists thanks to the [DarkMatter Discord community](https://discord.gg/T32mFejwR4), the Nightdive team, id Software, the Quake II Rerelease player community, [Paril's Q2 Horde work](https://github.com/Paril/q2horde), ceeeKay's EyeCam code from [Q2Eaks](https://github.com/ceeeKay/Q2Eaks), and the [Stingy Hat Games modding tutorial](https://www.youtube.com/watch?v=PiSMiS3Epyk&t=261s&pp=ygUYU3Rpbmd5IEhhdCBHYW1lcyBxdWFrZSAy0gcJCTkLAYcqIYzv).
 
 ## Disclaimer
 
