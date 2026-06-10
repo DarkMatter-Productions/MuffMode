@@ -11,7 +11,7 @@
   <p><strong>Server-side multiplayer upgrades for Quake II Remastered.</strong></p>
 </div>
 
-Muff Mode is a server-side multiplayer mod for [Quake II Remastered](https://github.com/id-Software/quake2-rerelease-dll). It is built for casual public games, competitive matches, and the hosts who keep those servers running: easier menus for players, cleaner match flow for organized play, and practical controls for server owners.
+**Muff Mode** is a server-side multiplayer mod for [Quake II Rerelease]([https://github.com/id-Software/quake2-rerelease-dll](https://bethesda.net/en/game/quakeii)). It is built for casual public games, competitive matches, and the hosts who keep those servers running: easier menus for players, cleaner match flow for organized play, and practical controls for server owners.
 
 ## Who It's For
 
@@ -57,22 +57,25 @@ For a more careful walkthrough, use the [Player Guide](docs/player-guide.md) or 
 
 ## Included Content
 
-Muff Mode releases are intended to include the game logic DLL, server configuration material, bot support files, and map entity overrides. The source repository contains the C++ game code, project files, docs, and image assets used by the project.
+**Muff Mode** releases are intended to include the game logic DLL, server configuration material, bot support files, and map entity overrides. The source repository contains the C++ game code, project files, docs, and image assets used by the project.
 
 ## Development
 
 The project builds on Windows with Visual Studio 2022/MSBuild. See the [Build Guide](docs/build-guide.md) for prerequisites, commands, output location, and local test installation.
 
-## Roadmap
-
-- Extend MyMap support for deathmatch flags.
-- Continue Freeze Tag refinements.
-- Explore server-side player configs, stats, Elo, ranked matches, and Elo team balancing.
-- Continue Gladiator bot work.
-- Keep improving the menu, voting, admin, MyMap, and player configuration flows.
+---
 
 ## Credits
 
-Muff Mode exists thanks to the Quake II Sanctuary community, the Nightdive team, id Software, the Quake II rerelease player community, [Paril's Q2 Horde work](https://github.com/Paril/q2horde), ceeeKay's EyeCam code from Q2Eaks, and the Stingy Hat Games modding tutorials.
+This project was started by [themuffinator](https://github.com/themuffinator), later with regular and significant development/maintenance/testing by [ozy](https://github.com/ozy24). It would not be possible without the outstanding work from the Nightdive Team who worked on [Quake II Rerelease](https://bethesda.net/en/game/quakeii) ([source code here](https://github.com/id-Software/quake2-rerelease-dll)).
+Muff Mode exists thanks to the DarkMatter community, the Nightdive team, id Software, the Quake II Rerelease player community, [Paril's Q2 Horde work](https://github.com/Paril/q2horde), ceeeKay's EyeCam code from [Q2Eaks](https://github.com/ceeeKay/Q2Eaks), and the [Stingy Hat Games modding tutorial](https://www.youtube.com/watch?v=PiSMiS3Epyk&t=261s&pp=ygUYU3Rpbmd5IEhhdCBHYW1lcyBxdWFrZSAy0gcJCTkLAYcqIYzv).
+
+## Disclaimer
+
+**Muff Mode** is an independent project and is not affiliated with, endorsed by, or sponsored by Nightdive Studios, id Software, Bethesda, or ZeniMax Media. Quake II is a trademark of ZeniMax Media Inc.
+
+The software is provided "as is" without warranty of any kind. **Muff Mode** requires a legitimate Quake II Rerelease installation.
+
+---
 
 See [LICENSE](LICENSE) for license details.
