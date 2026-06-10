@@ -798,6 +798,35 @@ void MM_Horde_BeginWave()
 	level.horde_monster_spawn_time = level.time + gtime_t::from_ms(delay_ms);
 }
 
+// Horde spawn points are deathmatch player spawns; their origins are placed for
+// the player hull (which gets a +9 lift and stuck-fixing in client spawn code) and
+// can sit low enough that monster hulls start embedded in the floor — on bloodrun
+// every spawn origin is only 15u above its floor. A monster spawned embedded in a
+// thin floor gets teleported through it by M_droptofloor (a trace does not clip
+// against a brush it starts inside), e.g. into the blood pool under the walkway at
+// 1104 208 -633. Lift the origin clear before validating, and nudge as a fallback.
+// Also rejects spots whose ground is liquid. Returns false if the spot is unusable.
+static bool Horde_ValidateSpawnOrigin(vec3_t &origin, const vec3_t &check_mins, const vec3_t &check_maxs)
+{
+	origin[2] += 16.f;
+
+	if (!CheckSpawnPoint(origin, check_mins, check_maxs)) {
+		if (G_FixStuckObject_Generic(origin, check_mins, check_maxs,
+				[](const vec3_t &start, const vec3_t &mins, const vec3_t &maxs, const vec3_t &end) {
+					return gi.trace(start, mins, maxs, end, nullptr, MASK_MONSTERSOLID);
+				}) == stuck_result_t::NO_GOOD_POSITION)
+			return false;
+		if (!CheckSpawnPoint(origin, check_mins, check_maxs))
+			return false;
+	}
+
+	trace_t tr = gi.trace(origin, check_mins, check_maxs, origin - vec3_t{ 0.f, 0.f, 64.f }, nullptr, MASK_MONSTERSOLID);
+	if (gi.pointcontents(tr.endpos) & (CONTENTS_LAVA | CONTENTS_SLIME))
+		return false;
+
+	return true;
+}
+
 void MM_Horde_RunSpawning()
 {
 	if (notGT(GT_HORDE))
@@ -841,18 +870,30 @@ void MM_Horde_RunSpawning()
 			// CheckSpawnPoint also rejects non-world solids (doors, movers) unlike a raw startsolid check.
 			constexpr vec3_t horde_check_mins = { -32.f, -32.f, -16.f };
 			constexpr vec3_t horde_check_maxs = {  32.f,  32.f,  64.f };
-			if (!CheckSpawnPoint(result.spot->s.origin, horde_check_mins, horde_check_maxs)) {
+			vec3_t spawn_origin = result.spot->s.origin;
+			if (!Horde_ValidateSpawnOrigin(spawn_origin, horde_check_mins, horde_check_maxs)) {
 				// Try a different candidate by excluding the failed spot from selection.
 				// avoid_point is honoured when g_dm_respawn_point_min_dist > 0 (default 256).
 				select_spawn_result_t retry = SelectDeathmatchSpawnPoint(nullptr, result.spot->s.origin, SPAWN_FARTHEST, false, true, false, false);
-				if (retry.any_valid && retry.spot && retry.spot != result.spot &&
-					CheckSpawnPoint(retry.spot->s.origin, horde_check_mins, horde_check_maxs))
-					result = retry;
-				// else: no point passes the large-bbox check (e.g. all spawn points are tight on this map).
-				// Fall through and spawn anyway — monster_start_go will attempt stuck-fixing.
+				bool retry_ok = false;
+				if (retry.any_valid && retry.spot && retry.spot != result.spot) {
+					spawn_origin = retry.spot->s.origin;
+					if (Horde_ValidateSpawnOrigin(spawn_origin, horde_check_mins, horde_check_maxs)) {
+						result = retry;
+						retry_ok = true;
+					}
+				}
+				if (!retry_ok) {
+					// No spot can safely hold a large monster right now. Spawning anyway would
+					// place it embedded and let monster_start_go's stuck-fixing relocate it
+					// through thin floors or into walls; skip this attempt and retry shortly.
+					G_FreeEntity(e);
+					level.horde_monster_spawn_time = warmup ? level.time + 5_sec : level.time + 1_sec;
+					return;
+				}
 			}
 
-			e->s.origin = result.spot->s.origin;
+			e->s.origin = spawn_origin;
 			e->s.angles = result.spot->s.angles;
 
 			e->item = Horde_PickDropItem(monster_row);
