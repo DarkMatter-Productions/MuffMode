@@ -1580,6 +1580,18 @@ static void CheckDMWarmupState(void) {
 	uint8_t min_players;
 
 	if (!level.num_playing_clients) {
+		// Horde: every playing client leaving mid-match counts as a defeat;
+		// run the normal end-of-match flow instead of silently abandoning the
+		// wave (which would leave stale wave state and idle monsters behind).
+		if (MM_Horde_CheckDesertionDefeat())
+			return;
+
+		// let a queued/running intermission complete - with no playing clients
+		// it auto-exits to the next map shortly. Resetting match state here
+		// would strand it.
+		if (level.intermission_queued || level.intermission_time)
+			return;
+
 		if (level.match_state != matchst_t::MATCH_NONE) {
 			level.match_state = matchst_t::MATCH_NONE;
 			level.match_state_timer = 0_sec;

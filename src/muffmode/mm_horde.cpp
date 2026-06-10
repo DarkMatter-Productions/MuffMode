@@ -667,6 +667,20 @@ bool MM_Horde_CheckAllFightersLost()
 	return true;
 }
 
+bool MM_Horde_CheckDesertionDefeat()
+{
+	if (!HordeActive())
+		return false;
+	if (level.match_state != matchst_t::MATCH_IN_PROGRESS)
+		return false;
+	if (level.intermission_queued || level.intermission_time)
+		return false;
+
+	gi.Broadcast_Print(PRINT_CENTER, "DEFEATED!");
+	QueueIntermission("ALL FIGHTERS LOST!", true, false);
+	return true;
+}
+
 void MM_Horde_CleanWaveTransition()
 {
 	if (!HordeActive())

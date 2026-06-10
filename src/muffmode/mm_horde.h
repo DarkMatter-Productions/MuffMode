@@ -29,6 +29,10 @@ void MM_Horde_NotifyEliminatedSpectator(gentity_t *ent);
 // CheckDMExitRules / round tick; return true when defeat intermission was queued.
 bool MM_Horde_CheckAllFightersLost();
 
+// CheckDMWarmupState hook for when every playing client has left mid-match;
+// counts it as a defeat. Returns true when defeat intermission was queued.
+bool MM_Horde_CheckDesertionDefeat();
+
 // Returns true when the wave is cleared (caller should invoke Round_End).
 bool MM_Horde_UpdateRoundInProgress();
 
