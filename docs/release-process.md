@@ -136,6 +136,12 @@ Required repository secrets:
 | `COPILOT_GITHUB_TOKEN` | Fine-grained user PAT used only by the standalone `copilot` CLI. It must belong to a user with GitHub Copilot access and include the Copilot Requests permission. |
 | `DISCORD_RELEASE_WEBHOOK` | Discord webhook consumed by the release announcement job. The release workflow checks that it exists before publishing. |
 
+Optional repository variables:
+
+| Variable | Purpose |
+| --- | --- |
+| `DISCORD_RELEASE_MENTIONS` | Text appended to the Discord announcement headline. Defaults to `@quake2 @playtester`. Use Discord role mention IDs such as `<@&123456789>` if you want actual role notifications. |
+
 `RELEASE_BOT_TOKEN` is accepted as a legacy fallback for Copilot authentication, but the built-in `GITHUB_TOKEN` now handles version-file commits and `gh release create`. If no Copilot token is present, the workflow warns and uses the deterministic documentation generator unless `require_copilot` is enabled. Because releases created with `GITHUB_TOKEN` do not trigger other workflows, this release workflow posts the Discord announcement itself after the GitHub release is published. The separate **Broadcast Release To Discord** workflow remains useful for releases published manually through GitHub.
 
 Workflow inputs:

@@ -329,6 +329,7 @@ jobs:
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}
           RELEASE_TAG: ${{ needs.version.outputs.release_tag }}
+          DISCORD_RELEASE_MENTIONS: ${{ vars.DISCORD_RELEASE_MENTIONS || '@quake2 @playtester' }}
         with:
           script: |
             const { owner, repo } = context.repo;
@@ -339,23 +340,98 @@ jobs:
             });
 
             const data = release.data;
-            const assetLinks = (data.assets || []).slice(0, 6).map(asset =>
-              `[${asset.name}](${asset.browser_download_url})`
-            );
+            const cleanReleaseName = (data.name || data.tag_name)
+              .replace(/\bMuff\s*Mode\b\s*/ig, "")
+              .replace(/\bMuffMode\b\s*/ig, "")
+              .replace(/\s+/g, " ")
+              .trim() || data.tag_name;
+
             const notes = (data.body || "").replace(/\r/g, "").trim();
-            const description = notes
-              ? (notes.length > 1200 ? `${notes.slice(0, 1197)}...` : notes)
-              : "Release notes and downloads are available on GitHub.";
             const isBeta = data.prerelease;
+            const mentions = (process.env.DISCORD_RELEASE_MENTIONS || "@quake2 @playtester").trim();
+
+            function buildPlayerIntro(body) {
+              const lower = body.toLowerCase();
+              const mode = isBeta ? "beta build" : "release";
+
+              if (/(gameplay|balance|weapon|loadout|arena|match|duel|ctf)/.test(lower)) {
+                return `Fresh ${mode} on deck: this update sharpens the action, tightens up match flow, and is ready for players to put through real games.`;
+              }
+
+              if (/(server|host|admin|cvar|config|rotation|vote)/.test(lower)) {
+                return `Fresh ${mode} on deck: this one should make servers smoother to run and matches easier to keep moving.`;
+              }
+
+              if (/(fix|crash|bug|stability|cleanup)/.test(lower)) {
+                return `Fresh ${mode} on deck: a cleaner, steadier build with fixes worth testing before the next proper throwdown.`;
+              }
+
+              return `Fresh ${mode} on deck: grab the new build, jump into a few rounds, and let us know how it feels in play.`;
+            }
+
+            function stripReleasePreamble(body) {
+              if (!body) {
+                return "";
+              }
+
+              const lines = body.split("\n");
+              const firstSection = lines.findIndex(line => /^#{2,3}\s+\S/.test(line));
+              const changelogLines = firstSection >= 0
+                ? lines.slice(firstSection)
+                : lines.filter(line => !/^#\s+/.test(line));
+
+              return changelogLines
+                .join("\n")
+                .replace(/\n{3,}/g, "\n\n")
+                .trim();
+            }
+
+            function limitText(text, maxLength) {
+              if (text.length <= maxLength) {
+                return text;
+              }
+              return `${text.slice(0, maxLength - 3).trimEnd()}...`;
+            }
+
+            function buildDownloadLinks() {
+              const assets = data.assets || [];
+              const installer = assets.find(asset => /windows-installer\.exe$/i.test(asset.name));
+              const packageZip = assets.find(asset => /\.zip$/i.test(asset.name));
+              const knownAssets = new Set([installer, packageZip].filter(Boolean).map(asset => asset.id));
+              const links = [];
+
+              if (installer) {
+                links.push(`[Windows Installer](${installer.browser_download_url})`);
+              }
+              if (packageZip) {
+                links.push(`[Windows \`.zip\`](${packageZip.browser_download_url})`);
+              }
+
+              for (const asset of assets.filter(asset => !knownAssets.has(asset.id)).slice(0, 3)) {
+                links.push(`[${asset.name}](${asset.browser_download_url})`);
+              }
+
+              links.push(`[Source Code](https://github.com/${owner}/${repo}/archive/refs/tags/${data.tag_name}.zip)`);
+              return links;
+            }
+
+            const changelog = stripReleasePreamble(notes);
+            const description = limitText([
+              buildPlayerIntro(notes),
+              "**Please provide any feedback in #muffmode**",
+              changelog ? `## Changelog\n\n${changelog}` : `[Open the full changelog](${data.html_url})`
+            ].join("\n\n"), 2200);
+
+            const assetLinks = buildDownloadLinks();
 
             const payload = {
               username: "Muff Mode Releases",
               avatar_url: "https://raw.githubusercontent.com/DarkMatter-Productions/MuffMode/main/assets/img/logo.png",
-              allowed_mentions: { parse: [] },
-              content: `**${isBeta ? "Beta release" : "Stable release"} published:** ${data.name || data.tag_name}`,
+              allowed_mentions: { parse: ["roles"] },
+              content: `:quake2: ${cleanReleaseName} release published!${mentions ? ` ${mentions}` : ""}`,
               embeds: [
                 {
-                  title: data.name || `Muff Mode ${data.tag_name}`,
+                  title: cleanReleaseName,
                   url: data.html_url,
                   description,
                   color: isBeta ? 0x8fbf26 : 0x5dff5d,
@@ -367,7 +443,7 @@ jobs:
                       value: assetLinks.length ? assetLinks.join("\n").slice(0, 1000) : `[Open release](${data.html_url})`
                     }
                   ],
-                  footer: { text: "Muff Mode for Quake II Remastered" },
+                  footer: { text: "Quake II Remastered mod" },
                   timestamp: data.published_at
                 }
               ]
