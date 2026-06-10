@@ -9,19 +9,24 @@
   
   <h1>Muff Mode</h1>
   <p><strong>Server-side multiplayer upgrades for Quake II Remastered.</strong></p>
+  <p>
+    <a href="https://discord.gg/T32mFejwR4">
+      <img src="https://img.shields.io/badge/Join%20us%20on-Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Join us on Discord">
+    </a>
+  </p>
 </div>
 
-**Muff Mode** is a server-side multiplayer mod for [Quake II Rerelease]([https://github.com/id-Software/quake2-rerelease-dll](https://bethesda.net/en/game/quakeii)). It is built for casual public games, competitive matches, and the hosts who keep those servers running: easier menus for players, cleaner match flow for organized play, and practical controls for server owners.
+**Muff Mode** is a **server-side multiplayer mod** for [Quake II Rerelease](https://bethesda.net/en/game/quakeii), built to make every kind of session feel better: **drop-in public games**, **serious competitive matches**, and **well-run community servers**. It combines a more readable match experience for players with deeper match control for hosts, so the same install can support a quick casual night, a pickup, or a polished event.
 
-## Who It's For
+<h2 align="center">Who It's For</h2>
 
 | Audience | What Muff Mode gives you |
 | --- | --- |
-| Casual players | Clearer HUD information, menu-driven voting, approachable team joining, and extra modes such as Horde, Instagib, and NadeFest. |
-| Competitive players | Ready-up flow, countdowns, overtime, timeouts, Duel/TDM/CA support, rulesets, captain controls, and cleaner match administration. |
-| Server hosts | Per-gametype configs, map rotations and pools, voting limits, admin commands, team controls, debug logging, and diagnostics. |
+| Casual players | **Clearer HUD information**, **menu-driven voting**, approachable team joining, and extra modes such as **Horde**, **Instagib**, and **NadeFest**. |
+| Competitive players | **Ready-up flow**, **countdowns**, **timeouts**, **overtime**, support for **Duel / TDM / CA / CTF**, flexible rulesets, and captain-led team control. |
+| Server hosts | **Per-gametype configs**, curated map rotations, voting limits, admin tools, team management, **debug logging**, and built-in diagnostics like `doctor`. |
 
-## Start Here
+<h2 align="center">Start Here</h2>
 
 | I want to... | Read |
 | --- | --- |
@@ -34,43 +39,44 @@
 | Compile the DLL from source | [Build Guide](docs/build-guide.md) |
 | Prepare and publish a release package | [Release Process](docs/release-process.md) |
 
-## Quick Install
+<h2 align="center">Quick Install</h2>
 
 1. Download the [latest Muff Mode release](https://github.com/DarkMatter-Productions/MuffMode/releases/latest).
-2. Use the Windows installer when available. It defaults to the Steam Quake II Remastered path and also offers Epic Online Store / Epic Games Store, GOG, and custom library choices.
-3. If you use the zip instead, extract it into the outer `Quake 2` folder and allow file replacements.
-4. Launch the game normally. Server hosts can execute the bundled server config with `exec muff-sv.cfg` when it is included in the release package.
+2. Use the **Windows installer** when available. It defaults to the **Steam** Quake II Remastered path and also supports **Epic Online Store / Epic Games Store**, **GOG**, and custom library locations.
+3. If you use the zip instead, extract it into the outer **`Quake 2`** folder and allow file replacements.
+4. Launch the game normally. Server hosts can execute the bundled server config with **`exec muff-sv.cfg`** when it is included in the release package.
 
 For a more careful walkthrough, use the [Player Guide](docs/player-guide.md) or [Server Host Guide](docs/server-host-guide.md).
 
-## Highlights
+<h2 align="center">Highlights</h2>
 
-- Clearer HUD and scoreboard information for public games and competitive matches.
-- Menu-driven voting for maps, gametypes, rulesets, settings, and administrative actions.
-- Match handling for warmups, ready checks, countdowns, post-match delays, sudden death, overtime, and round-based modes.
-- Team captain support, team locking, auto-balance options, forced-balance rules, and team item-drop notices.
-- New and expanded gametypes, including Duel, Clan Arena, CaptureStrike, Red Rover, Horde, Freeze Tag, ProBall, Instagib, and NadeFest.
-- Rulesets inspired by Quake II rerelease, Muff Mode balance, Quake III Arena, Quake, and Quake Champions.
-- Player conveniences such as kill beeps, configurable frag messages, EyeCam spectating, offhand hook support, MyMap queueing, and improved vote access.
-- Host controls for per-gametype configs, map pools, votable gametype and ruleset lists, debug logging, MOTD files, and diagnostics.
-- Level-designer controls for conditional entity spawning, item replacement, `.ent` overrides, new target entities, new item types, and map-specific tweaks.
+ - **Built for every lobby style** — supports **casual public servers**, **private friend sessions**, **pickups**, **scrims**, and more organized competitive events.
+ - **A fuller mode lineup** — includes **Deathmatch**, **Duel**, **TDM**, **CTF**, **Clan Arena**, **CaptureStrike**, **Red Rover**, **Last Man Standing**, **Horde**, **Freeze Tag**, **ProBall**, **Instagib**, and **NadeFest**.
+ - **Flexible rulesets** — switch between **Quake II Rerelease**, **Muff Mode**, **Q2RE Balanced**, **Quake III Arena style**, **Quake style**, and **Quake Champions style** depending on the feel you want.
+ - **Better match flow** — warmups, ready checks, countdowns, post-match delays, sudden death, overtime, round handling, and timeouts help games start cleanly and stay organized.
+ - **Player-friendly interface improvements** — a purpose-built HUD, compact scoreboard, frag messages, timer support, help text, MOTD access, and match-state feedback keep important information visible without overwhelming the screen.
+ - **Fast, accessible voting** — use **GUI or console voting** for maps, gametypes, rulesets, server settings, and administrative actions, with host-side controls to keep votes focused.
+ - **Stronger teamplay tools** — captains, captain transfer, team locking, auto-balance, forced balance, and team item-drop notices make coordinated play easier to run.
+ - **Quality-of-life touches players notice** — **kill beeps**, **offhand hook support**, **EyeCam spectating**, **MyMap queueing**, and smarter auto-switch behavior all help matches feel smoother.
+ - **Host controls that scale up** — tune per-gametype configs, map lists and pools, votable options, MOTDs, debug logging, and server diagnostics without needing separate builds for different communities.
+ - **Modding and map support** — Muff Mode also adds **custom maps**, **entity overrides**, **item replacement**, conditional entity spawning, and new mapper-focused entities for more tailored server content.
 
-## Included Content
+<h2 align="center">Included Content</h2>
 
-**Muff Mode** releases are intended to include the game logic DLL, server configuration material, bot support files, and map entity overrides. The source repository contains the C++ game code, project files, docs, and image assets used by the project.
+**Muff Mode** releases are intended to include the **game logic DLL**, **server configuration material**, **bot support files**, **map entity overrides**, and the **Windows updater**. The source repository contains the C++ game code, Visual Studio project files, updater source, documentation, packaging assets, and project media used to ship the mod.
 
-## Development
+<h2 align="center">Development</h2>
 
-The project builds on Windows with Visual Studio 2022/MSBuild. See the [Build Guide](docs/build-guide.md) for prerequisites, commands, output location, and local test installation.
+The project builds on **Windows** with **Visual Studio 2022 / MSBuild**. See the [Build Guide](docs/build-guide.md) for prerequisites, commands, output location, and local test installation.
 
 ---
 
-## Credits
+<h2 align="center">Credits</h2>
 
 This project was started by [themuffinator](https://github.com/themuffinator), later with regular and significant development/maintenance/testing by [ozy](https://github.com/ozy24). It would not be possible without the outstanding work from the Nightdive Team who worked on [Quake II Rerelease](https://bethesda.net/en/game/quakeii) ([source code here](https://github.com/id-Software/quake2-rerelease-dll)).
 Muff Mode exists thanks to the [DarkMatter Discord community](https://discord.gg/T32mFejwR4), the Nightdive team, id Software, the Quake II Rerelease player community, [Paril's Q2 Horde work](https://github.com/Paril/q2horde), ceeeKay's EyeCam code from [Q2Eaks](https://github.com/ceeeKay/Q2Eaks), and the [Stingy Hat Games modding tutorial](https://www.youtube.com/watch?v=PiSMiS3Epyk&t=261s&pp=ygUYU3Rpbmd5IEhhdCBHYW1lcyBxdWFrZSAy0gcJCTkLAYcqIYzv).
 
-## Disclaimer
+<h2 align="center">Disclaimer</h2>
 
 **Muff Mode** is an independent project and is not affiliated with, endorsed by, or sponsored by Nightdive Studios, id Software, Bethesda, or ZeniMax Media. Quake II is a trademark of ZeniMax Media Inc.
 
