@@ -1,0 +1,392 @@
+{
+	"sky" "unit1_"
+	"sounds" "64"
+	"nextmap" "q64/dm1"
+	"message" "Overflow"
+	"classname" "worldspawn"
+}
+{
+	"origin" "992 608 24"
+	"angle" "225"
+	"classname" "info_player_team1"
+}
+{
+	"origin" "24 192 56"
+	"classname" "ammo_grenades"
+}
+{
+	"origin" "616 120 -104"
+	"classname" "ammo_rockets"
+}
+{
+	"origin" "-552 672 64"
+	"classname" "ammo_rockets"
+}
+{
+	"origin" "24 840 -104"
+	"classname" "ammo_rockets"
+}
+{
+	"spawnflags" "2048"
+	"targetname" "t16"
+	"origin" "856 528 104"
+	"classname" "target_changelevel"
+}
+{
+	"spawnflags" "2047"
+	"targetname" "t16"
+	"origin" "856 528 104"
+	"classname" "target_teleporter"
+}
+{
+	"target" "t16"
+	"model" "*1"
+	"angle" "180"
+	"classname" "func_button"
+}
+{
+	"model" "*2"
+	"classname" "func_wall"
+}
+{
+	"target" "t15"
+	"model" "*3"
+	"angle" "180"
+	"classname" "func_button"
+}
+{
+	"lip" "32"
+	"spawnflags" "32"
+	"targetname" "t15"
+	"model" "*4"
+	"angle" "-2"
+	"classname" "func_door"
+}
+{
+	"sounds" "78"
+	"origin" "361 692 115"
+	"angles" "35.91 51.95 0"
+	"classname" "target_camera"
+}
+{
+	"origin" "32 192 -104"
+	"angle" "45"
+	"classname" "info_player_deathmatch"
+}
+{
+	"origin" "-96 640 -104"
+	"angle" "180"
+	"classname" "info_player_deathmatch"
+}
+{
+	"origin" "-160 704 -296"
+	"angle" "225"
+	"classname" "info_player_deathmatch"
+}
+{
+	"origin" "256 64 -104"
+	"angle" "90"
+	"classname" "info_player_deathmatch"
+}
+{
+	"origin" "-432 712 -296"
+	"angle" "270"
+	"classname" "info_player_team2"
+}
+{
+	"origin" "-544 704 -296"
+	"classname" "item_flag_team2"
+}
+{
+	"origin" "992 512 32"
+	"classname" "item_flag_team1"
+}
+{
+	"origin" "992 376 56"
+	"angle" "90"
+	"classname" "info_player_deathmatch"
+}
+{
+	"origin" "-320 512 -96"
+	"classname" "item_adrenaline"
+}
+{
+	"origin" "-248 712 -96"
+	"classname" "item_armor_shard"
+}
+{
+	"origin" "-168 312 -96"
+	"classname" "item_health_small"
+}
+{
+	"origin" "-544 320 64"
+	"classname" "item_armor_combat"
+}
+{
+	"origin" "-512 712 64"
+	"classname" "item_health"
+}
+{
+	"origin" "-88 312 64"
+	"classname" "ammo_bullets"
+}
+{
+	"origin" "616 768 -96"
+	"classname" "item_health"
+}
+{
+	"origin" "352 904 -96"
+	"classname" "ammo_cells"
+}
+{
+	"origin" "352 120 -96"
+	"classname" "item_health"
+}
+{
+	"origin" "1120 584 64"
+	"classname" "item_health_large"
+}
+{
+	"origin" "792 144 32"
+	"classname" "ammo_bullets"
+}
+{
+	"origin" "984 648 32"
+	"classname" "ammo_shells"
+}
+{
+	"origin" "896 560 32"
+	"classname" "item_health_small"
+}
+{
+	"origin" "896 464 32"
+	"classname" "item_health_small"
+}
+{
+	"origin" "896 608 32"
+	"classname" "item_armor_shard"
+}
+{
+	"origin" "1120 392 56"
+	"classname" "ammo_slugs"
+}
+{
+	"origin" "1120 648 64"
+	"classname" "weapon_hyperblaster"
+}
+{
+	"origin" "-64 512 -288"
+	"classname" "item_armor_jacket"
+}
+{
+	"origin" "-576 512 -288"
+	"classname" "item_health"
+}
+{
+	"origin" "-576 384 -288"
+	"classname" "item_health_small"
+}
+{
+	"origin" "-64 640 -288"
+	"classname" "item_armor_shard"
+}
+{
+	"origin" "-320 512 -288"
+	"classname" "weapon_rocketlauncher"
+}
+{
+	"origin" "64 512 -104"
+	"classname" "weapon_chaingun"
+}
+{
+	"origin" "256 952 -104"
+	"angle" "270"
+	"classname" "info_player_deathmatch"
+}
+{
+	"team" "dmitem"
+	"spawnflags" "0"
+	"origin" "672 152 32"
+	"classname" "item_invulnerability"
+}
+{
+	"team" "dmitem"
+	"spawnflags" "0"
+	"origin" "672 152 32"
+	"classname" "item_quad"
+}
+{
+	"team" "dmitem"
+	"spawnflags" "0"
+	"origin" "672 152 32"
+	"classname" "item_invisibility"
+}
+{
+	"origin" "-480 512 -104"
+	"classname" "weapon_railgun"
+}
+{
+	"origin" "224 512 -96"
+	"classname" "weapon_bfg"
+}
+{
+	"origin" "64 512 56"
+	"classname" "weapon_supershotgun"
+}
+{
+	"origin" "-480 512 56"
+	"classname" "weapon_grenadelauncher"
+}
+{
+	"spawnflags" "0"
+	"targetname" "t2"
+	"origin" "256 80 -104"
+	"angle" "90"
+	"classname" "misc_teleporter_dest"
+}
+{
+	"target" "t2"
+	"spawnflags" "4"
+	"origin" "-544 704 -296"
+	"angle" "270"
+	"classname" "misc_teleporter"
+}
+{
+	"spawnflags" "0"
+	"targetname" "t1"
+	"origin" "-96 704 56"
+	"angle" "225"
+	"classname" "misc_teleporter_dest"
+}
+{
+	"target" "t1"
+	"spawnflags" "4"
+	"origin" "1120 512 24"
+	"angle" "180"
+	"classname" "misc_teleporter"
+}
+{
+	"spawnflags" "1"
+	"model" "*5"
+	"height" "160"
+	"classname" "func_plat"
+}
+{
+	"origin" "-592 512 64"
+	"classname" "info_player_start"
+}
+{
+	"origin" "-64 384 -288"
+	"classname" "item_armor_shard"
+}
+{
+	"origin" "-576 640 -288"
+	"classname" "item_health_small"
+}
+{
+	"origin" "1120 432 56"
+	"classname" "ammo_cells"
+}
+{
+	"origin" "896 512 32"
+	"classname" "item_armor_shard"
+}
+{
+	"origin" "896 416 32"
+	"classname" "item_armor_shard"
+}
+{
+	"origin" "1024 648 32"
+	"classname" "ammo_shells"
+}
+{
+	"origin" "840 168 32"
+	"classname" "ammo_bullets"
+}
+{
+	"origin" "544 120 -96"
+	"classname" "item_health"
+}
+{
+	"origin" "544 904 -96"
+	"classname" "ammo_slugs"
+}
+{
+	"origin" "616 728 -96"
+	"classname" "item_health"
+}
+{
+	"origin" "-128 312 64"
+	"classname" "ammo_bullets"
+}
+{
+	"origin" "-168 312 64"
+	"classname" "ammo_bullets"
+}
+{
+	"origin" "-552 712 64"
+	"classname" "item_health"
+}
+{
+	"origin" "-208 312 -96"
+	"classname" "item_health_small"
+}
+{
+	"origin" "-248 312 -96"
+	"classname" "item_health_small"
+}
+{
+	"origin" "-208 712 -96"
+	"classname" "item_armor_shard"
+}
+{
+	"origin" "-168 712 -96"
+	"classname" "item_armor_shard"
+}
+{
+	"origin" "-392 712 -296"
+	"angle" "270"
+	"classname" "info_player_team2"
+}
+{
+	"origin" "-352 712 -296"
+	"angle" "270"
+	"classname" "info_player_team2"
+}
+{
+	"origin" "-312 712 -296"
+	"angle" "270"
+	"classname" "info_player_team2"
+}
+{
+	"model" "*6"
+	"classname" "func_wall"
+}
+{
+	"origin" "24 800 -104"
+	"classname" "ammo_rockets"
+}
+{
+	"origin" "24 152 56"
+	"classname" "ammo_grenades"
+}
+{
+	"origin" "1056 544 24"
+	"angle" "225"
+	"classname" "info_player_team1"
+}
+{
+	"origin" "1056 480 24"
+	"angle" "135"
+	"classname" "info_player_team1"
+}
+{
+	"origin" "992 416 24"
+	"angle" "135"
+	"classname" "info_player_team1"
+}
+{
+	"origin" "576 512 -16"
+	"angle" "180"
+	"classname" "info_player_intermission"
+}

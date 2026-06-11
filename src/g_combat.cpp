@@ -441,9 +441,15 @@ static void M_ReactToDamage(gentity_t *targ, gentity_t *attacker, gentity_t *inf
 
 // check if the two given entities are on the same team
 bool OnSameTeam(gentity_t *ent1, gentity_t *ent2) {
-	// monsters are never on our team atm
-	if (!ent1->client || !ent2->client)
+	if (!ent1 || !ent2)
 		return false;
+
+	// monsters are never on the same team (except Horde: no monster-vs-monster damage)
+	if (!ent1->client || !ent2->client) {
+		if (GT(GT_HORDE) && (ent1->svflags & SVF_MONSTER) && (ent2->svflags & SVF_MONSTER))
+			return true;
+		return false;
+	}
 
 	// we're never on our own team
 	else if (ent1 == ent2)
@@ -483,12 +489,15 @@ void T_Damage(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, const 
 	const vec3_t &normal, int damage, int knockback, damageflags_t dflags, mod_t mod) {
 	gclient_t *client;
 	int			take, save;
-	int			asave, psave;
+	int			asave = 0, psave = 0;
 	int			te_sparks;
 	bool		sphere_notified;
 
 	if (!targ->takedamage)
 		return;
+
+	if (!attacker)
+		attacker = world;
 
 	if ((g_instagib->integer || GT(GT_INSTAGIB)) && attacker->client && targ->client) {
 		// [Kex] always kill no matter what on instagib
@@ -554,12 +563,7 @@ void T_Damage(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, const 
 			knockback = 200;
 	}
 
-/*freeze*/
-	if (GT(GT_FREEZE) && client && client->eliminated)
-		knockback *= 2;
-	else
-/*freeze*/
-		if ((targ->flags & FL_NO_KNOCKBACK) ||
+	if ((targ->flags & FL_NO_KNOCKBACK) ||
 			((targ->flags & FL_ALIVE_KNOCKBACK_ONLY) && (!targ->deadflag || targ->dead_time != level.time)))
 			knockback = 0;
 
@@ -602,21 +606,10 @@ void T_Damage(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, const 
 	save = 0;
 
 	if (!(dflags & DAMAGE_NO_PROTECTION)) {
-		if (IsCombatDisabled() || GT(GT_BALL)) {
+		if (IsCombatDisabled()) {
 			take = 0;
 			save = damage;
 		}
-
-/*freeze*/
-#if 0
-		if (GT(GT_FREEZE) && playerDamage(targ, attacker, damage)) {
-			take = 0;
-			save = damage;
-			SpawnDamage(te_sparks, point, normal, save);
-			return;
-		}
-#endif
-/*freeze*/
 
 		// instagib railgun splash never inflicts damage
 		if (mod.id == MOD_RAILGUN_SPLASH) {
@@ -792,10 +785,6 @@ void T_Damage(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, const 
 				targ->flags |= FL_ALIVE_KNOCKBACK_ONLY;
 				targ->dead_time = level.time;
 
-				// don't gib in freeze tag unless thawing
-				if (GT(GT_FREEZE) && mod.id != MOD_THAW && targ->health <= targ->gib_health) {
-					targ->health = targ->gib_health + 1;
-				}
 			}
 			targ->monsterinfo.damage_blood += take;
 			targ->monsterinfo.damage_attacker = attacker;

@@ -5,6 +5,7 @@
 #include "g_local.h"
 #include "g_debug_log.h"
 #include <cerrno>
+#include <ctime>
 
 /*
 =============
@@ -30,6 +31,29 @@ gentity_t *G_Find(gentity_t *from, std::function<bool(gentity_t *e)> matcher) {
 	}
 
 	return nullptr;
+}
+
+void G_LogInvalidEntityString(gentity_t *e, const char *ptr, const char *context) {
+	const int ent_num = e ? (int)(e - g_entities) : -1;
+	MuffModeLog("WARN", "G_FindByString: skipping ent %d invalid string ptr %p (search '%s')",
+		ent_num, (void *)ptr, context ? context : "");
+
+	// #region agent log
+	{
+		FILE *f = fopen("debug-9a6197.log", "a");
+		if (f) {
+			const auto ts = (long long)time(nullptr) * 1000LL;
+			fprintf(f,
+				"{\"sessionId\":\"9a6197\",\"runId\":\"post-fix\",\"hypothesisId\":\"H1\","
+				"\"location\":\"g_utils.cpp:G_LogInvalidEntityString\","
+				"\"message\":\"invalid entity string ptr skipped\","
+				"\"data\":{\"ent\":%d,\"ptr\":\"%p\",\"search\":\"%s\",\"inuse\":%d},"
+				"\"timestamp\":%lld}\n",
+				ent_num, (void *)ptr, context ? context : "", e ? (int)e->inuse : 0, ts);
+			fclose(f);
+		}
+	}
+	// #endregion
 }
 
 /*
@@ -631,10 +655,16 @@ void G_AssignPlayerSkin(gentity_t *ent, const char *s) {
 
 	switch (ent->client->sess.team) {
 	case TEAM_RED:
-		t = G_Fmt("{}\\{}{}\\default", ent->client->resp.netname, t, TEAM_RED_SKIN);
+		if (g_team_force_models->integer && *g_team_red_model->string)
+			t = G_Fmt("{}\\{}\\default", ent->client->resp.netname, g_team_red_model->string);
+		else
+			t = G_Fmt("{}\\{}{}\\default", ent->client->resp.netname, t, TEAM_RED_SKIN);
 		break;
 	case TEAM_BLUE:
-		t = G_Fmt("{}\\{}{}\\default", ent->client->resp.netname, t, TEAM_BLUE_SKIN);
+		if (g_team_force_models->integer && *g_team_blue_model->string)
+			t = G_Fmt("{}\\{}\\default", ent->client->resp.netname, g_team_blue_model->string);
+		else
+			t = G_Fmt("{}\\{}{}\\default", ent->client->resp.netname, t, TEAM_BLUE_SKIN);
 		break;
 	default:
 		t = G_Fmt("{}\\{}\\default", ent->client->resp.netname, s);
@@ -667,21 +697,6 @@ void G_AdjustPlayerScore(gclient_t *cl, int32_t offset, bool adjust_team, int32_
 
 	if (adjust_team && team_offset)
 		G_AdjustTeamScore(cl->sess.team, team_offset);
-}
-
-/*
-===================
-Horde_AdjustPlayerScore
-===================
-*/
-void Horde_AdjustPlayerScore(gclient_t *cl, int32_t offset) {
-	if (notGT(GT_HORDE)) return;
-	if (!cl || !cl->pers.connected) return;
-
-	if (IsScoringDisabled())
-		return;
-
-	G_AdjustPlayerScore(cl, offset, false, 0);
 }
 
 /*

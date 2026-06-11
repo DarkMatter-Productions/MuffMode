@@ -1,0 +1,409 @@
+{
+"classname" "worldspawn"
+"message" "RAW"
+"author" "Bobby 'Xcalibur' Pavlock"
+}
+{
+"origin" "512 -640 24"
+"classname" "weapon_grenadelauncher"
+}
+{
+"origin" "96 -728 -104"
+"classname" "item_adrenaline"
+}
+{
+"origin" "320 -320 192"
+"classname" "weapon_rocketlauncher"
+}
+{
+"origin" "-288 -736 -96"
+"classname" "ammo_bullets"
+}
+{
+"origin" "-224 -736 -96"
+"classname" "ammo_bullets"
+}
+{
+"origin" "-288 -288 -96"
+"classname" "weapon_machinegun"
+}
+{
+"origin" "-192 -288 -96"
+"classname" "item_armor_shard"
+}
+{
+"origin" "-128 -288 -96"
+"classname" "item_armor_shard"
+}
+{
+"origin" "-64 -288 -96"
+"classname" "item_armor_shard"
+}
+{
+"origin" "352 -352 -96"
+"classname" "ammo_rockets"
+}
+{
+"origin" "416 -864 32"
+"classname" "ammo_grenades"
+}
+{
+"origin" "368 -864 32"
+"classname" "ammo_grenades"
+}
+{
+"origin" "-384 -652 192"
+"classname" "ammo_slugs"
+}
+{
+"origin" "-448 -652 192"
+"classname" "item_armor_shard"
+}
+{
+"origin" "-492 -604 192"
+"classname" "item_armor_shard"
+}
+{
+"origin" "-536 -560 192"
+"classname" "item_armor_shard"
+}
+{
+"origin" "384 -512 -96"
+"angle" "183"
+"classname" "info_player_start"
+}
+{
+"origin" "-576 -416 -224"
+"classname" "weapon_supershotgun"
+}
+{
+"origin" "-1152 -672 48"
+"classname" "item_armor_body"
+}
+{
+"origin" "-416 224 -96"
+"classname" "weapon_rocketlauncher"
+}
+{
+"origin" "-960 224 96"
+"classname" "weapon_hyperblaster"
+}
+{
+"origin" "-280 520 -104"
+"classname" "item_pack"
+}
+{
+"origin" "-16 80 -96"
+"classname" "weapon_chaingun"
+}
+{
+"origin" "192 352 96"
+"classname" "weapon_railgun"
+}
+{
+"origin" "-336 656 142"
+"target" "lowdest"
+"classname" "misc_teleporter"
+}
+{
+"origin" "-336 576 142"
+"targetname" "hidest"
+"angle" "272"
+"classname" "misc_teleporter_dest"
+}
+{
+"origin" "96 -1112 14"
+"target" "hidest"
+"classname" "misc_teleporter"
+}
+{
+"origin" "96 -1024 14"
+"targetname" "lowdest"
+"angle" "87"
+"classname" "misc_teleporter_dest"
+}
+{
+"origin" "480 -832 14"
+"angle" "182"
+"classname" "info_player_deathmatch"
+}
+{
+"origin" "-160 -320 174"
+"classname" "info_player_deathmatch"
+}
+{
+"origin" "-672 -672 78"
+"angle" "90"
+"classname" "info_player_deathmatch"
+}
+{
+"origin" "-984 -312 -242"
+"classname" "info_player_deathmatch"
+}
+{
+"origin" "-400 528 -242"
+"angle" "272"
+"classname" "info_player_deathmatch"
+}
+{
+"origin" "96 -48 78"
+"angle" "183"
+"classname" "info_player_deathmatch"
+}
+{
+"origin" "-400 416 -224"
+"classname" "weapon_shotgun"
+}
+{
+"origin" "-992 -64 -224"
+"classname" "item_health_large"
+}
+{
+"origin" "-1024 160 -96"
+"classname" "item_armor_shard"
+}
+{
+"origin" "-976 208 -96"
+"classname" "item_armor_shard"
+}
+{
+"origin" "-1072 112 -96"
+"classname" "item_armor_shard"
+}
+{
+"origin" "-1248 -352 -96"
+"classname" "ammo_bullets"
+}
+{
+"origin" "-1248 -288 -96"
+"classname" "ammo_bullets"
+}
+{
+"origin" "-736 128 -224"
+"classname" "ammo_rockets"
+}
+{
+"origin" "-544 -704 -96"
+"classname" "ammo_slugs"
+}
+{
+"origin" "-768 -704 -96"
+"classname" "item_health_small"
+}
+{
+"origin" "-768 -640 -96"
+"classname" "item_health_small"
+}
+{
+"origin" "-544 -256 -224"
+"classname" "ammo_shells"
+}
+{
+"origin" "-1040 -512 -96"
+"classname" "ammo_cells"
+}
+{
+"origin" "-992 -560 -96"
+"classname" "ammo_cells"
+}
+{
+"origin" "-1184 -704 -96"
+"classname" "item_health"
+}
+{
+"origin" "352 -672 -96"
+"classname" "ammo_shells"
+}
+{
+"origin" "-448 -96 -224"
+"classname" "ammo_grenades"
+}
+{
+"origin" "-384 -96 -224"
+"classname" "ammo_grenades"
+}
+{
+"origin" "-320 -96 -224"
+"classname" "ammo_grenades"
+}
+{
+"origin" "0 384 -224"
+"classname" "ammo_slugs"
+}
+{
+"origin" "224 544 -96"
+"classname" "item_armor_shard"
+}
+{
+"origin" "224 480 -96"
+"classname" "item_armor_shard"
+}
+{
+"origin" "-64 -96 96"
+"classname" "item_armor_shard"
+}
+{
+"origin" "0 -96 96"
+"classname" "item_armor_shard"
+}
+{
+"origin" "-128 -96 96"
+"classname" "item_armor_shard"
+}
+{
+"origin" "-448 128 -224"
+"classname" "ammo_bullets"
+}
+{
+"model" "*1"
+"height" "160"
+"accel" "500"
+"lip" "8"
+"speed" "200"
+"classname" "func_plat"
+}
+{
+"origin" "-624 -704 96"
+"classname" "ammo_rockets"
+}
+{
+"origin" "-560 256 96"
+"classname" "item_health"
+}
+{
+"origin" "-608 256 96"
+"classname" "item_health"
+}
+{
+"origin" "-592 -256 -224"
+"classname" "ammo_shells"
+}
+{
+"origin" "-592 -704 -96"
+"classname" "ammo_slugs"
+}
+{
+"origin" "320 -864 32"
+"classname" "ammo_grenades"
+}
+{
+"origin" "-288 -288 192"
+"classname" "item_health"
+}
+{
+"origin" "-240 -288 192"
+"classname" "item_health"
+}
+{
+"origin" "-448 544 -224"
+"classname" "item_health"
+}
+{
+"origin" "-352 544 -224"
+"classname" "item_health"
+}
+{
+"origin" "-96 96 -224"
+"classname" "ammo_rockets"
+}
+{
+"origin" "-400 128 -224"
+"classname" "ammo_bullets"
+}
+{
+"origin" "224 416 -96"
+"classname" "item_armor_shard"
+}
+{
+"origin" "224 32 -96"
+"classname" "ammo_cells"
+}
+{
+"origin" "224 80 -96"
+"classname" "ammo_cells"
+}
+{
+"origin" "512 -640 104"
+"volume" "1.0"
+"attenuation" "3"
+"noise" "world/amb7.wav"
+"spawnflags" "1"
+"classname" "target_speaker"
+}
+{
+"origin" "320 -320 264"
+"volume" "1.0"
+"attenuation" "3"
+"noise" "world/amb7.wav"
+"spawnflags" "1"
+"classname" "target_speaker"
+}
+{
+"origin" "-256 -840 264"
+"volume" "1.0"
+"attenuation" "3"
+"noise" "world/amb7.wav"
+"spawnflags" "1"
+"classname" "target_speaker"
+}
+{
+"origin" "96 -1056 48"
+"volume" "1.0"
+"attenuation" "3"
+"noise" "world/bubl3.wav"
+"spawnflags" "1"
+"classname" "target_speaker"
+}
+{
+"origin" "-1152 -672 -32"
+"volume" "1.0"
+"attenuation" "3"
+"noise" "world/amb7.wav"
+"spawnflags" "1"
+"classname" "target_speaker"
+}
+{
+"origin" "-416 224 8"
+"volume" "1.0"
+"attenuation" "3"
+"noise" "world/amb7.wav"
+"spawnflags" "1"
+"classname" "target_speaker"
+}
+{
+"origin" "-88 208 408"
+"volume" "1.0"
+"attenuation" "3"
+"noise" "world/wind2.wav"
+"spawnflags" "1"
+"classname" "target_speaker"
+}
+{
+"origin" "96 -576 408"
+"volume" "1.0"
+"attenuation" "3"
+"noise" "world/wind2.wav"
+"spawnflags" "1"
+"classname" "target_speaker"
+}
+{
+"origin" "-576 -488 -192"
+"volume" "1.0"
+"attenuation" "3"
+"noise" "world/drip_amb.wav"
+"spawnflags" "1"
+"classname" "target_speaker"
+}
+{
+"origin" "-336 624 176"
+"volume" "1.0"
+"attenuation" "3"
+"noise" "world/bubl3.wav"
+"spawnflags" "1"
+"classname" "target_speaker"
+}
+{
+"origin" "-1112 -16 16"
+"angle" "315"
+"classname" "info_player_intermission"
+}

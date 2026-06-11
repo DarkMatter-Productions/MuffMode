@@ -5,12 +5,13 @@
 #pragma once
 
 #include "bg_local.h"
+#include "muffmode/mm_vote_types.h"
 
 // the "gameversion" client command will print this plus compile date
 constexpr const char *GAMEVERSION = "baseq2";
 
 constexpr const char *GAMEMOD_TITLE = "Muff Mode";
-constexpr const char *GAMEMOD_VERSION = "0.23.1";
+constexpr const char *GAMEMOD_VERSION = "0.30.00 BETA";
 
 //==================================================================
 
@@ -188,26 +189,6 @@ constexpr const char *rs_long_name[RS_NUM_RULESETS] = {
 	"Quake Champions style",
 };
 
-constexpr const char *stock_maps[] = {
-	"badlands", "base1", "base2", "base3", "base64", "biggun", "boss1", "boss2", "bunk1", "city1", "city2", "city3", "city64", "command", "cool1",
-	"e3/bunk_e3", "e3/fact_e3", "e3/jail_e3", "e3/jail4_e3", "e3/lab_e3", "e3/mine_e3", "e3/space_e3", "e3/ware1a_e3", "e3/ware2_e3", "e3/waste_e3",
-	"ec/base_ec", "ec/base3_ec", "ec/command_ec", "ec/factx_ec", "ec/jail_ec", "ec/kmdm3_ec", "ec/mine1_ec", "ec/power_ec", "ec/space_ec", "ec/waste_ec",
-	"fact1", "fact2", "fact3", "hangar1", "hangar2", "industry", "jail1", "jail2", "jail3", "jail4", "jail5", "lab", "mgdm1", "mgu1m1", "mgu1m2", "mgu1m3",
-	"mgu1m4", "mgu1m5", "mgu1trial", "mgu2m1", "mgu2m2", "mgu2m3", "mgu3m1", "mgu3m2", "mgu3m3", "mgu3m4", "mgu3secret", "mgu4m1", "mgu4m2", "mgu4m3", "mgu4trial",
-	"mgu5m1", "mgu5m2", "mgu5m3", "mgu5trial", "mgu6m1", "mgu6m2", "mgu6m3", "mgu6trial", "mguboss", "mguhub", "mine1", "mine2", "mine3", "mine4", "mintro", "ndctf0",
-	"old/baseold", "old/city2_4", "old/fact1", "old/fact2", "old/fact3", "old/facthub", "old/hangarold", "old/kmdm3", "old/pjtrain1", "old/ware1", "old/xcommand5",
-	"outbase", "power1", "power2", "q2ctf1", "q2ctf2", "q2ctf3", "q2ctf4", "q2ctf5", "q2dm1", "q2dm2", "q2dm3", "q2dm4", "q2dm5", "q2dm6", "q2dm7", "q2dm8", "q2kctf1",
-	"q2kctf2", "q64/bio", "q64/cargo", "q64/comm", "q64/command", "q64/complex", "q64/conduits", "q64/core", "q64/dm1", "q64/dm10", "q64/dm2", "q64/dm3", "q64/dm4",
-	"q64/dm5", "q64/dm6", "q64/dm7", "q64/dm8", "q64/dm9", "q64/geo-stat", "q64/intel", "q64/jail", "q64/lab", "q64/mines", "q64/orbit", "q64/organic", "q64/outpost",
-	"q64/process", "q64/rtest", "q64/ship", "q64/station", "q64/storage", "rammo1", "rammo2", "rbase1", "rbase2", "rboss", "rdm1", "rdm10", "rdm11", "rdm12", "rdm13",
-	"rdm14", "rdm2", "rdm3", "rdm4", "rdm5", "rdm6", "rdm7", "rdm8", "rdm9", "refinery", "rhangar1", "rhangar2", "rlava1", "rlava2", "rmine1", "rmine2", "rsewer1",
-	"rsewer2", "rware1", "rware2", "security", "sewer64", "space", "strike", "test/base1_flashlight", "test/gekk", "test/mals_barrier_test", "test/mals_box",
-	"test/mals_ladder_test", "test/mals_locked_door_test", "test/paril_health_relay", "test/paril_ladder", "test/paril_poi", "test/paril_scaled_monsters",
-	"test/paril_soundstage", "test/paril_steps", "test/paril_waterlight", "test/skysort", "test/spbox", "test/spbox2", "test/test_jerry", "test/test_kaiser",
-	"test/tom_test_01", "train", "tutorial", "w_treat", "ware1", "ware2", "waste1", "waste2", "waste3", "xcompnd1", "xcompnd2", "xdm1", "xdm2", "xdm3", "xdm4", "xdm5",
-	"xdm6", "xdm7", "xhangar1", "xhangar2", "xintell", "xmoon1", "xmoon2", "xreactor", "xsewer1", "xsewer2", "xship", "xswamp", "xware"
-};
-
 enum team_t {
 	TEAM_NONE,
 	TEAM_SPECTATOR,
@@ -249,7 +230,7 @@ enum gtf_t {
 extern int _gt[GT_NUM_GAMETYPES];
 
 #define GTF( x ) _gt[g_gametype->integer] & (x)
-#define GT( x ) g_gametype->integer == (int)(x)
+#define GT( x ) (g_gametype->integer == (int)(x))
 #define notGT( x ) g_gametype->integer != (int)(x)
 
 constexpr const char *gt_short_name[GT_NUM_GAMETYPES] = {
@@ -295,19 +276,10 @@ constexpr const char *gt_long_name[GT_NUM_GAMETYPES] = {
 	"CaptureStrike",
 	"Red Rover",
 	"Last Man Standing",
-	"Horde Mode",
+	"Horde",
 	"ProBall",
 	"Instagib",
 	"NadeFest"
-};
-
-enum monflags_t {
-	MF_NONE		= 0x00,
-	MF_GROUND	= 0x01,
-	MF_AIR		= 0x02,
-	MF_WATER	= 0x04,
-	MF_MEDIUM	= 0x08,
-	MF_BOSS		= 0x10
 };
 
 typedef enum {
@@ -371,26 +343,6 @@ enum grapple_state_t {
 	GRAPPLE_STATE_FLY,
 	GRAPPLE_STATE_PULL,
 	GRAPPLE_STATE_HANG
-};
-
-struct vcmds_t {
-	const		char *name;
-	bool		(*val_func)(gentity_t *ent);
-	void		(*func)();
-	int32_t		flag;
-	int8_t		min_args;
-	const		char *args;
-	const		char *help;
-};
-extern vcmds_t vote_cmds[];
-
-enum class VoteState {
-	IDLE,			// No vote in progress
-	ACTIVE,			// Vote is being voted on
-	PASSED,			// Vote passed, waiting to execute
-	EXECUTING,		// Currently executing the vote command
-	FAILED,			// Vote failed or timed out
-	COMPLETE		// Vote executed successfully
 };
 
 extern int ii_highlight;
@@ -1411,7 +1363,6 @@ enum mod_id_t : uint8_t {
 	MOD_HUNTER_SPHERE,
 	MOD_DEFENDER_SPHERE,
 	MOD_TRACKER,
-	MOD_THAW,
 	MOD_DOPPEL_EXPLODE,
 	MOD_DOPPEL_VENGEANCE,
 	MOD_DOPPEL_HUNTER,
@@ -1504,13 +1455,6 @@ struct game_locals_t {
 };
 
 constexpr size_t MAX_HEALTH_BARS = 2;
-
-enum voting_t {
-	VOTING_NONE,
-	VOTING_MATCH,
-	VOTING_ADMIN,
-	VOTING_MAP
-};
 
 struct ghost_t {
 	char	netname[MAX_NETNAME];
@@ -1671,7 +1615,6 @@ struct level_locals_t {
 
 	//voting (state machine)
 	VoteStateData vote_state;
-	int8_t		num_voting_clients;		// set by CalculateRanks (kept for compatibility)
 
 	uint8_t		num_connected_clients;
 	uint8_t		num_nonspectator_clients;	// includes connecting clients
@@ -1740,8 +1683,12 @@ struct level_locals_t {
 	bool		strike_turn_blue;
 
 	gtime_t		horde_monster_spawn_time;
-	int8_t		horde_num_monsters_to_spawn;
+	int32_t		horde_spawn_points_remaining;
+	int8_t		horde_fighters_snapshotted;
 	bool		horde_all_spawned;
+	gtime_t		horde_mark_time;
+	int16_t		horde_mark_living;
+	float		horde_map_scale_mult; // cached map-size multiplier, 0 = not yet computed
 
 	char		author[MAX_QPATH];
 	char		author2[MAX_QPATH];
@@ -2269,12 +2216,6 @@ constexpr gtime_t DUCK_INTERVAL = 5000_ms;
 
 extern game_locals_t  game;
 
-constexpr int32_t G_RULESET_HEALTH_CAP = 200;
-constexpr int32_t G_RULESET_ARMOR_CAP = 150;
-[[nodiscard]] inline bool G_RulesetHealthArmorCap() {
-	return game.ruleset == RS_VANILLA_PLUS || game.ruleset == RS_QC;
-}
-
 extern level_locals_t level;
 extern game_export_t  globals;
 extern spawn_temp_t	  st;
@@ -2416,6 +2357,9 @@ extern cvar_t *run_roll;
 extern cvar_t *g_airaccelerate;
 extern cvar_t *g_allow_admin;
 extern cvar_t *g_allow_custom_skins;
+extern cvar_t *g_team_force_models;
+extern cvar_t *g_team_red_model;
+extern cvar_t *g_team_blue_model;
 extern cvar_t *g_allow_forfeit;
 extern cvar_t *g_allow_grapple;
 extern cvar_t *g_allow_kill;
@@ -2432,6 +2376,7 @@ extern cvar_t *g_coop_enable_lives;
 extern cvar_t *g_coop_health_scaling;
 extern cvar_t *g_coop_instanced_items;
 extern cvar_t *g_coop_num_lives;
+extern cvar_t *g_horde_lives;
 extern cvar_t *g_coop_player_collision;
 extern cvar_t *g_coop_squad_respawn;
 extern cvar_t *g_corpse_sink_time;
@@ -2481,7 +2426,6 @@ extern cvar_t *g_fast_doors;
 extern cvar_t *g_frag_messages;
 extern cvar_t *g_frenzy;
 extern cvar_t *g_friendly_fire;
-extern cvar_t *g_frozen_time;
 extern cvar_t *g_grapple_damage;
 extern cvar_t *g_grapple_fly_speed;
 extern cvar_t *g_grapple_offhand;
@@ -2603,23 +2547,8 @@ bool AllowClientTeamSwitch(gentity_t *ent);
 int TeamBalance(bool force);
 void Cmd_ReadyUp_f(gentity_t *ent);
 
-void VoteCommandStore(gentity_t *ent);
 void TransitionVoteState(VoteState new_state);
 void ClearVote();
-vcmds_t *FindVoteCmdByName(const char *name);
-bool ValidateMenuVoteCommand(gentity_t *ent, vcmds_t *cc, const char *arg);
-bool IsGametypeVotable(gametype_t gt);
-bool IsRulesetVotable(ruleset_t rs);
-void Vote_Pass_Map();
-void Vote_Pass_RestartMatch();
-void Vote_Pass_Gametype();
-void Vote_Pass_NextMap();
-void Vote_Pass_ShuffleTeams();
-void Vote_Pass_ReadyAll();
-void Vote_Pass_Cointoss();
-void Vote_Pass_Random();
-void Vote_Pass_Timelimit();
-void Vote_Pass_Scorelimit();
 bool TeamShuffle();
 void TimeoutEnd();
 
@@ -2675,6 +2604,16 @@ void		fire_doppelganger(gentity_t *ent, const vec3_t &start, const vec3_t &aimdi
 bool KillBox(gentity_t *ent, bool from_spawning, mod_id_t mod = MOD_TELEFRAG, bool bsp_clipping = true);
 gentity_t *G_Find(gentity_t *from, std::function<bool(gentity_t *e)> matcher);
 
+// Reject null-page and other non-canonical pointers before strlen/strcmp.
+constexpr bool G_IsValidStringPtr(const char *p) {
+	if (!p)
+		return false;
+	const auto addr = reinterpret_cast<uintptr_t>(p);
+	return addr >= 0x1000 && addr <= 0x7FFFFFFFFFFF;
+}
+
+void G_LogInvalidEntityString(gentity_t *e, const char *ptr, const char *context);
+
 // utility template for getting the type of a field
 template<typename>
 struct member_object_type {};
@@ -2688,7 +2627,13 @@ gentity_t *G_FindByString(gentity_t *from, const std::string_view &value) {
 	static_assert(std::is_same_v<member_object_type_t<decltype(M)>, const char *>, "can only use string member functions");
 
 	return G_Find(from, [&](gentity_t *e) {
-		return e->*M && strlen(e->*M) == value.length() && !Q_strncasecmp(e->*M, value.data(), value.length());
+		const char *field = e->*M;
+		if (!G_IsValidStringPtr(field)) {
+			if (field)
+				G_LogInvalidEntityString(e, field, value.data());
+			return false;
+		}
+		return strlen(field) == value.length() && !Q_strncasecmp(field, value.data(), value.length());
 		});
 }
 
@@ -2714,7 +2659,6 @@ const char *Teams_OtherTeamName(team_t team);
 team_t Teams_OtherTeam(team_t team);
 bool Teams();
 void G_AdjustPlayerScore(gclient_t *cl, int32_t offset, bool adjust_team, int32_t team_offset);
-void Horde_AdjustPlayerScore(gclient_t *cl, int32_t offset);
 void G_SetPlayerScore(gclient_t *cl, int32_t value);
 void G_AdjustTeamScore(team_t team, int32_t offset);
 void G_SetTeamScore(team_t team, int32_t value);
@@ -3107,8 +3051,6 @@ void CTF_CheckHurtCarrier(gentity_t *targ, gentity_t *attacker);
 // g_menu.cpp
 //
 void G_Menu_Join_Open(gentity_t *ent);
-void G_Menu_Vote_Open(gentity_t *ent);
-bool Vote_Menu_Active(gentity_t *ent);
 
 //
 // g_player.cpp
@@ -3216,23 +3158,16 @@ void CalculateRanks();
 void CheckDMExitRules();
 int GT_ScoreLimit();
 const char *GT_ScoreLimitString();
-void G_RevertVote(gclient_t *client);
-void Vote_Passed();
 void ExitLevel();
 void Teams_CalcRankings(std::array<uint32_t, MAX_CLIENTS> &player_ranks); // [Paril-KEX]
 void ReadyAll();
 void UnReadyAll();
 void QueueIntermission(const char *msg, bool boo, bool reset);
-void Match_Reset();
-int MQ_Count();
-bool MQ_Add(gentity_t *ent, const char *mapname);
 gentity_t *CreateTargetChangeLevel(const char *map);
 bool InAMatch();
 void ChangeGametype(gametype_t gt);
 void GT_Changes();
-void G_ShuffleMapList();
 void SpawnEntities(const char *mapname, const char *entities, const char *spawnpoint);
-void G_LoadMOTD();
 
 //
 // g_chase.cpp
@@ -3549,12 +3484,6 @@ struct client_respawn_t {
 	bool				ready;
 	ghost_t				*ghost; // for ghost codes
 
-/*freeze*/
-	gentity_t			*thawer;
-	int					help;
-	int					thawed;
-/*freeze*/
-
 	int32_t				kill_count;	// for rampage award, reset on respawn
 
 	bool				showed_motd;
@@ -3788,12 +3717,7 @@ struct gclient_t {
 	gtime_t	 last_firing_time;
 
 	bool		eliminated;
-/*freeze*/
-	gentity_t		*viewed;
-	float		thaw_time;
-	float		frozen_time;
-	float		moan_time;
-/*freeze*/
+	int16_t		horde_elim_msg_wave;
 
 	bool		ready_to_exit;
 
@@ -3811,16 +3735,6 @@ struct gclient_t {
 
 	gtime_t		time_residual;
 
-	// Duel handicap system (only active in GT_DUEL mode)
-	struct {
-		// Weapon restrictions (bitmask of IT_WEAPON_* IDs)
-		uint32_t	restricted_weapons;
-		
-		// Numerical modifiers (1.0 = normal, <1.0 = debuff, >1.0 = buff)
-		float		damage_dealt_multiplier;     // Multiplier for damage dealt (default: 1.0)
-		float		damage_received_multiplier;   // Multiplier for damage received (default: 1.0)
-		float		health_multiplier;           // Multiplier for max health (default: 1.0)
-	} handicap;
 };
 
 // ==========================================
@@ -4327,9 +4241,10 @@ struct fmt::formatter<gentity_t> {
 
 	template<typename FormatContext>
 	auto format(const gentity_t &p, FormatContext &ctx) -> decltype(ctx.out()) {
+		const char *classname = G_IsValidStringPtr(p.classname) ? p.classname : "<invalid-classname>";
 		if (p.linked)
-			return fmt::format_to(ctx.out(), FMT_STRING("{} @ {}"), p.classname, (p.absmax + p.absmin) * 0.5f);
-		return fmt::format_to(ctx.out(), FMT_STRING("{} @ {}"), p.classname, p.s.origin);
+			return fmt::format_to(ctx.out(), FMT_STRING("{} @ {}"), classname, (p.absmax + p.absmin) * 0.5f);
+		return fmt::format_to(ctx.out(), FMT_STRING("{} @ {}"), classname, p.s.origin);
 	}
 };
 
@@ -4364,6 +4279,9 @@ enum pois_t : uint16_t {
 	POI_BLUE_FLAG, // blue flag/carrier
 	POI_PING,
 	POI_PING_END = POI_PING + MAX_CLIENTS - 1,
+
+	POI_HORDE_MONSTER_0,
+	POI_HORDE_MONSTER_END = POI_HORDE_MONSTER_0 + 7,
 };
 
 // implementation of pierce stuff
@@ -4446,4 +4364,3 @@ template<> cached_imageindex *cached_imageindex::head;
 
 extern cached_modelindex sm_meat_index;
 extern cached_soundindex snd_fry;
-

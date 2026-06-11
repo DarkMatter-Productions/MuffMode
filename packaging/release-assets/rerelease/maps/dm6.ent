@@ -1,0 +1,416 @@
+{
+	"sky" "unit1_"
+	"sounds" "68"
+	"nextmap" "q64/dm7"
+	"message" "Cold Steel"
+	"classname" "worldspawn"
+}
+{
+	"target" "t338"
+	"model" "*1"
+	"classname" "trigger_multiple"
+}
+{
+	"health" "1"
+	"target" "t338"
+	"model" "*2"
+	"angle" "90"
+	"classname" "func_button"
+}
+{
+	"targetname" "t338"
+	"model" "*3"
+	"angle" "-1"
+	"classname" "func_door"
+}
+{
+	"spawnflags" "1792"
+	"origin" "-1600 1344 16"
+	"classname" "item_armor_body"
+}
+{
+	"spawnflags" "1792"
+	"origin" "-624 1168 16"
+	"classname" "ammo_shells"
+}
+{
+	"spawnflags" "1792"
+	"origin" "-688 1168 16"
+	"classname" "weapon_shotgun"
+}
+{
+	"spawnflags" "1792"
+	"origin" "-1312 1824 208"
+	"classname" "weapon_grenadelauncher"
+}
+{
+	"spawnflags" "1792"
+	"origin" "-1104 1424 16"
+	"classname" "ammo_shells"
+}
+{
+	"spawnflags" "1792"
+	"origin" "-1056 1376 16"
+	"classname" "weapon_supershotgun"
+}
+{
+	"origin" "-736 1120 24"
+	"angle" "180"
+	"classname" "info_player_start"
+}
+{
+	"targetname" "t337"
+	"origin" "-780 1188 132"
+	"classname" "info_notnull"
+}
+{
+	"sounds" "78"
+	"pathtarget" "t337"
+	"origin" "-984 1048 256"
+	"classname" "target_camera"
+}
+{
+	"team" "powerup"
+	"spawnflags" "1792"
+	"origin" "-96 1088 64"
+	"classname" "item_invisibility"
+}
+{
+	"team" "powerup"
+	"spawnflags" "1792"
+	"origin" "-96 1088 64"
+	"classname" "item_invulnerability"
+}
+{
+	"team" "powerup"
+	"spawnflags" "1792"
+	"origin" "-96 1088 64"
+	"classname" "item_quad"
+}
+{
+	"origin" "-352 752 24"
+	"angle" "90"
+	"classname" "info_player_deathmatch"
+}
+{
+	"origin" "-672 1376 24"
+	"angle" "180"
+	"classname" "info_player_deathmatch"
+}
+{
+	"spawnflags" "1792"
+	"origin" "-976 944 208"
+	"classname" "ammo_rockets"
+}
+{
+	"spawnflags" "1792"
+	"origin" "-976 1000 208"
+	"classname" "weapon_rocketlauncher"
+}
+{
+	"spawnflags" "1792"
+	"origin" "-512 1560 16"
+	"classname" "ammo_bullets"
+}
+{
+	"spawnflags" "1792"
+	"origin" "-448 1520 16"
+	"classname" "weapon_machinegun"
+}
+{
+	"spawnflags" "1792"
+	"origin" "-960 704 16"
+	"classname" "weapon_hyperblaster"
+}
+{
+	"spawnflags" "1792"
+	"origin" "-776 704 16"
+	"classname" "ammo_cells"
+}
+{
+	"spawnflags" "1792"
+	"origin" "-480 616 16"
+	"classname" "item_armor_shard"
+}
+{
+	"spawnflags" "3840"
+	"origin" "-848 928 216"
+	"classname" "item_flag_team2"
+}
+{
+	"origin" "-1376 864 24"
+	"angle" "180"
+	"classname" "info_player_deathmatch"
+}
+{
+	"origin" "-1312 1440 24"
+	"angle" "270"
+	"classname" "info_player_deathmatch"
+}
+{
+	"spawnflags" "1792"
+	"origin" "-1216 896 16"
+	"classname" "item_health"
+}
+{
+	"spawnflags" "1792"
+	"origin" "-1432 704 16"
+	"classname" "item_armor_shard"
+}
+{
+	"spawnflags" "1792"
+	"origin" "-1376 1768 16"
+	"classname" "ammo_bullets"
+}
+{
+	"spawnflags" "1792"
+	"origin" "-1328 1680 16"
+	"classname" "weapon_chaingun"
+}
+{
+	"spawnflags" "1792"
+	"origin" "-1880 896 16"
+	"classname" "item_health_large"
+}
+{
+	"spawnflags" "1792"
+	"origin" "-1632 704 16"
+	"classname" "ammo_cells"
+}
+{
+	"target" "t187"
+	"model" "*4"
+	"angle" "90"
+	"classname" "func_button"
+}
+{
+	"spawnflags" "1792"
+	"origin" "-1568 960 16"
+	"classname" "weapon_railgun"
+}
+{
+	"spawnflags" "1792"
+	"origin" "-1880 1304 80"
+	"classname" "ammo_slugs"
+}
+{
+	"spawnflags" "1792"
+	"origin" "-1440 1880 216"
+	"classname" "item_flag_team1"
+}
+{
+	"spawnflags" "1"
+	"model" "*5"
+	"height" "176"
+	"speed" "350"
+	"classname" "func_plat"
+}
+{
+	"spawnflags" "2048"
+	"targetname" "t186"
+	"origin" "-1640 1064 56"
+	"classname" "target_changelevel"
+}
+{
+	"spawnflags" "2047"
+	"targetname" "t186"
+	"origin" "-1640 1064 56"
+	"classname" "target_teleporter"
+}
+{
+	"target" "t186"
+	"model" "*6"
+	"angle" "180"
+	"classname" "func_button"
+}
+{
+	"lip" "32"
+	"wait" "10"
+	"targetname" "t187"
+	"model" "*7"
+	"angle" "-2"
+	"speed" "200"
+	"classname" "func_door"
+}
+{
+	"spawnflags" "1"
+	"model" "*8"
+	"height" "176"
+	"speed" "350"
+	"classname" "func_plat"
+}
+{
+	"origin" "-1376 1920 216"
+	"angle" "270"
+	"classname" "info_player_team1"
+}
+{
+	"origin" "-1376 1840 216"
+	"angle" "270"
+	"classname" "info_player_team1"
+}
+{
+	"spawnflags" "1792"
+	"origin" "-1880 1256 80"
+	"classname" "ammo_slugs"
+}
+{
+	"spawnflags" "1792"
+	"origin" "-1688 704 16"
+	"classname" "ammo_cells"
+}
+{
+	"spawnflags" "1792"
+	"origin" "-1440 1768 16"
+	"classname" "ammo_bullets"
+}
+{
+	"spawnflags" "1792"
+	"origin" "-1504 1768 16"
+	"classname" "ammo_bullets"
+}
+{
+	"spawnflags" "1792"
+	"origin" "-1328 1928 208"
+	"classname" "ammo_grenades"
+}
+{
+	"spawnflags" "1792"
+	"origin" "-1328 1880 208"
+	"classname" "ammo_grenades"
+}
+{
+	"spawnflags" "1792"
+	"origin" "-1376 704 16"
+	"classname" "item_armor_shard"
+}
+{
+	"spawnflags" "1792"
+	"origin" "-1320 704 16"
+	"classname" "item_armor_shard"
+}
+{
+	"spawnflags" "1792"
+	"origin" "-1216 832 16"
+	"classname" "item_health"
+}
+{
+	"origin" "-800 976 216"
+	"angle" "90"
+	"classname" "info_player_team2"
+}
+{
+	"origin" "-912 976 216"
+	"angle" "90"
+	"classname" "info_player_team2"
+}
+{
+	"spawnflags" "1792"
+	"origin" "-416 616 16"
+	"classname" "item_armor_shard"
+}
+{
+	"spawnflags" "1792"
+	"origin" "-352 616 16"
+	"classname" "item_armor_shard"
+}
+{
+	"spawnflags" "1792"
+	"origin" "-480 872 80"
+	"classname" "item_health_large"
+}
+{
+	"spawnflags" "1792"
+	"origin" "-696 704 16"
+	"classname" "ammo_cells"
+}
+{
+	"spawnflags" "1792"
+	"origin" "-576 1560 16"
+	"classname" "ammo_bullets"
+}
+{
+	"spawnflags" "1792"
+	"origin" "-320 1560 16"
+	"classname" "ammo_bullets"
+}
+{
+	"spawnflags" "1792"
+	"origin" "-384 1560 16"
+	"classname" "ammo_bullets"
+}
+{
+	"spawnflags" "1792"
+	"origin" "-976 896 208"
+	"classname" "ammo_rockets"
+}
+{
+	"spawnflags" "1792"
+	"origin" "-1104 1328 16"
+	"classname" "ammo_shells"
+}
+{
+	"origin" "-1496 1920 216"
+	"angle" "270"
+	"classname" "info_player_team1"
+}
+{
+	"origin" "-1496 1840 216"
+	"angle" "270"
+	"classname" "info_player_team1"
+}
+{
+	"spawnflags" "3840"
+	"origin" "-640 896 16"
+	"classname" "weapon_rocketlauncher"
+}
+{
+	"origin" "-800 872 216"
+	"angle" "90"
+	"classname" "info_player_team2"
+}
+{
+	"origin" "-912 872 216"
+	"angle" "90"
+	"classname" "info_player_team2"
+}
+{
+	"spawnflags" "1792"
+	"origin" "-1800 1648 16"
+	"classname" "item_health_large"
+}
+{
+	"spawnflags" "3840"
+	"origin" "-1632 1920 16"
+	"classname" "weapon_grenadelauncher"
+}
+{
+	"spawnflags" "1792"
+	"origin" "-1576 704 16"
+	"classname" "ammo_cells"
+}
+{
+	"spawnflags" "1792"
+	"origin" "-1104 1680 16"
+	"classname" "ammo_grenades"
+}
+{
+	"spawnflags" "1792"
+	"origin" "-1024 1680 16"
+	"classname" "ammo_grenades"
+}
+{
+	"spawnflags" "1792"
+	"origin" "-944 1680 16"
+	"classname" "ammo_grenades"
+}
+{
+	"spawnflags" "1792"
+	"origin" "-1536 1120 16"
+	"classname" "item_health_large"
+}
+{
+	"origin" "-1020 1188 122"
+	"angle" "315"
+	"classname" "info_player_intermission"
+}

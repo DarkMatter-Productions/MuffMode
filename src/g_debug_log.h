@@ -3,9 +3,7 @@
 
 #pragma once
 
-// ==================== CENTRALIZED DEBUG LOGGING ====================
-// All MuffMode debug logs go to muffmode_debug.log, controlled by g_muffmode_debug cvar
-
-void MuffModeLog(const char* category, const char* format, ...);
-void MuffModeLog_Separator();
+// [MuffMode] Compatibility shim during Phase 1 refactor.
+// Prefer including "muffmode/mm_debug.h" (or "muffmode/muffmode.h") in new code.
+#include "muffmode/mm_debug.h"
 

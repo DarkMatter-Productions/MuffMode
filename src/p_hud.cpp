@@ -2,6 +2,7 @@
 // Licensed under the GNU General Public License 2.0.
 #include "g_local.h"
 #include "g_statusbar.h"
+#include "muffmode/mm_vote_menu.h"
 
 /*
 ======================================================================
@@ -1079,7 +1080,9 @@ void Cmd_Help_f(gentity_t *ent) {
 // even if we're spectating
 void G_SetCoopStats(gentity_t *ent) {
 
-	if (InCoopStyle() && g_coop_enable_lives->integer)
+	if (GT(GT_HORDE) && g_horde_lives->integer > 0)
+		ent->client->ps.stats[STAT_LIVES] = ent->client->pers.lives;
+	else if (InCoopStyle() && g_coop_enable_lives->integer)
 		ent->client->ps.stats[STAT_LIVES] = ent->client->pers.lives + 1;
 	else
 		ent->client->ps.stats[STAT_LIVES] = 0;
@@ -1875,8 +1878,13 @@ void G_SetStats(gentity_t *ent) {
 					if (level.round_state == roundst_t::ROUND_COUNTDOWN) {
 						s1 = "COUNTDOWN";
 					} else if (level.round_state == roundst_t::ROUND_IN_PROGRESS) {
-						int t2 = (level.round_state_timer - level.time).milliseconds();
-						s1 = G_Fmt("{} ({})", G_TimeString(t, false), G_TimeString(t2, false)).data();
+						if (roundtimelimit->value > 0 && notGT(GT_HORDE)) {
+							int t2 = (level.round_state_timer - level.time).milliseconds();
+							std::string match_time_str = G_TimeString(t, false);
+							s1 = G_Fmt("{} ({})", match_time_str, G_TimeString(t2, false)).data();
+						} else {
+							s1 = G_TimeString(t, false);
+						}
 					} else {
 						s1 = "";
 					}

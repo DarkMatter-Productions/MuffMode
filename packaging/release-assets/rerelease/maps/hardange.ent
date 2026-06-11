@@ -1,0 +1,207 @@
+{
+"nextmap" "q2dm1"
+"message" "Hard Angels"
+"classname" "worldspawn"
+"fog_density" ".03"
+"fog_color" "0.486275 0.454902 0.305882"
+"fog_sky_factor" ".1"
+}
+{
+"origin" "384 -64 192"
+"angle" "263"
+"classname" "info_player_start"
+}
+{
+"origin" "288 -256 432"
+"light" "150"
+"classname" "light"
+}
+{
+"origin" "480 -256 432"
+"light" "150"
+"classname" "light"
+}
+{
+"origin" "-480 -1312 408"
+"angle" "90"
+"classname" "info_player_deathmatch"
+}
+{
+"model" "*1"
+"height" "112"
+"accel" "500"
+"lip" "4"
+"speed" "200"
+"classname" "func_plat"
+}
+{
+"origin" "1104 -1088 -208"
+"target" "telep1"
+"angle" "183"
+"classname" "misc_teleporter"
+}
+{
+"origin" "288 -1120 408"
+"targetname" "telep1"
+"angle" "222"
+"classname" "misc_teleporter_dest"
+}
+{
+"origin" "32 -480 24"
+"angle" "51"
+"classname" "info_player_deathmatch"
+}
+{
+"origin" "1024 -864 152"
+"angle" "87"
+"classname" "info_player_deathmatch"
+}
+{
+"origin" "-672 -224 24"
+"angle" "309"
+"classname" "info_player_deathmatch"
+}
+{
+"origin" "32 -928 152"
+"angle" "273"
+"classname" "info_player_deathmatch"
+}
+{
+"origin" "-480 -1184 336"
+"classname" "weapon_shotgun"
+}
+{
+"origin" "-672 -1056 -232"
+"angle" "273"
+"classname" "info_player_deathmatch"
+}
+{
+"origin" "32 -1184 176"
+"classname" "weapon_machinegun"
+}
+{
+"origin" "384 -256 192"
+"classname" "weapon_rocketlauncher"
+}
+{
+"origin" "1024 -576 -208"
+"classname" "weapon_railgun"
+}
+{
+"origin" "-176 -1232 -208"
+"classname" "weapon_supershotgun"
+}
+{
+"origin" "-384 -1408 176"
+"classname" "weapon_hyperblaster"
+}
+{
+"origin" "-176 -256 48"
+"classname" "weapon_chaingun"
+}
+{
+"origin" "1024 -288 176"
+"classname" "weapon_grenadelauncher"
+}
+{
+"origin" "160 -1120 344"
+"classname" "weapon_bfg"
+}
+{
+"origin" "0 -1360 184"
+"classname" "item_armor_combat"
+}
+{
+"origin" "-1008 -1344 -240"
+"classname" "item_health"
+}
+{
+"origin" "-1008 -1296 -240"
+"classname" "item_health"
+}
+{
+"origin" "-16 -1088 -216"
+"classname" "item_armor_shard"
+}
+{
+"origin" "48 -1088 -216"
+"classname" "item_armor_shard"
+}
+{
+"origin" "112 -1088 -216"
+"classname" "item_armor_shard"
+}
+{
+"origin" "176 -1088 -216"
+"classname" "item_armor_shard"
+}
+{
+"origin" "1024 -288 -208"
+"classname" "item_adrenaline"
+}
+{
+"origin" "-864 -928 16"
+"classname" "ammo_shells"
+}
+{
+"origin" "-816 -928 16"
+"classname" "ammo_bullets"
+}
+{
+"origin" "216 -928 144"
+"classname" "ammo_cells"
+}
+{
+"origin" "168 -928 144"
+"classname" "ammo_cells"
+}
+{
+"origin" "352 -1504 144"
+"classname" "item_health"
+}
+{
+"origin" "304 -1504 144"
+"classname" "item_health"
+}
+{
+"origin" "384 -256 16"
+"classname" "ammo_slugs"
+}
+{
+"origin" "616 -368 144"
+"classname" "ammo_grenades"
+}
+{
+"origin" "576 -368 144"
+"classname" "ammo_grenades"
+}
+{
+"origin" "656 -768 144"
+"classname" "ammo_bullets"
+}
+{
+"origin" "752 -768 144"
+"classname" "ammo_bullets"
+}
+{
+"origin" "704 -1248 -232"
+"angle" "90"
+"classname" "info_player_deathmatch"
+}
+{
+"origin" "-384 -704 48"
+"classname" "weapon_shotgun"
+}
+{
+"origin" "-12 -704 84"
+"classname" "ammo_grenades"
+}
+{
+"origin" "32 -704 96"
+"classname" "ammo_grenades"
+}
+{
+"origin" "-644 -1042 224"
+"angle" "315"
+"classname" "info_player_intermission"
+}

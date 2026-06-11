@@ -566,11 +566,11 @@ static THINK(Grenade_Explode) (gentity_t *ent) -> void {
 	vec3_t origin;
 	mod_t  mod;
 
-	if (ent->owner->client)
+	if (ent->owner && ent->owner->client)
 		PlayerNoise(ent->owner, ent->s.origin, PNOISE_IMPACT);
 
 	// FIXME: if we are onground then raise our Z just a bit since we are a point?
-	if (ent->enemy) {
+	if (ent->enemy && ent->enemy->inuse) {
 		float  points;
 		vec3_t v;
 		vec3_t dir;
@@ -586,7 +586,8 @@ static THINK(Grenade_Explode) (gentity_t *ent) -> void {
 			mod = MOD_GRENADE;
 		T_Damage(ent->enemy, ent, ent->owner, dir, ent->s.origin, vec3_origin, (int)points, (int)points, DAMAGE_RADIUS | DAMAGE_STAT_ONCE, mod);
 
-		MS_Adjust(ent->owner->client, MSTAT_HITS, 1);
+		if (ent->owner && ent->owner->client)
+			MS_Adjust(ent->owner->client, MSTAT_HITS, 1);
 		//MS_Adjust(ent->owner->client, (mod.id == MOD_HANDGRENADE) ? MSTAT_WP_HG_HITS : MSTAT_WP_GL_HITS, 1);
 	}
 
@@ -596,7 +597,7 @@ static THINK(Grenade_Explode) (gentity_t *ent) -> void {
 		mod = MOD_HG_SPLASH;
 	else
 		mod = MOD_G_SPLASH;
-	T_RadiusDamage(ent, ent->owner, (float)ent->dmg, ent->enemy, ent->splash_radius, DAMAGE_NONE | DAMAGE_STAT_ONCE, mod);
+	T_RadiusDamage(ent, ent->owner ? ent->owner : ent, (float)ent->dmg, ent->enemy, ent->splash_radius, DAMAGE_NONE | DAMAGE_STAT_ONCE, mod);
 
 	origin = ent->s.origin + (ent->velocity * -0.02f);
 	gi.WriteByte(svc_temp_entity);
@@ -636,16 +637,6 @@ static TOUCH(Grenade_Touch) (gentity_t *ent, gentity_t *other, const trace_t &tr
 			gi.sound(ent, CHAN_VOICE, gi.soundindex("weapons/grenlb1b.wav"), 1, ATTN_NORM, 0);
 		}
 		return;
-	}
-
-	if (GT(GT_BALL)) {
-		if ((tr.contents & CONTENTS_LAVA) || (tr.contents & CONTENTS_SLIME)) {
-			G_FreeEntity(ent);
-			return;
-		}
-		if (other->client) {
-			other->client->pers.inventory[IT_BALL] = 1;
-		}
 	}
 
 	ent->enemy = other;
@@ -751,29 +742,12 @@ void fire_handgrenade(gentity_t *self, const vec3_t &start, const vec3_t &aimdir
 
 	grenade->flags |= (FL_DODGE | FL_TRAP);
 
-	if (GT(GT_BALL)) {
-		gitem_t *it = GetItemByIndex(IT_BALL);
-		if (it)
-			Drop_Item(self, it);
-		//return;
-		/*
-		grenade->s.effects |= EF_GRENADE | EF_COLOR_SHELL;
-		grenade->s.renderfx |= RF_GLOW | RF_NO_LOD | RF_IR_VISIBLE | RF_SHELL_RED | RF_SHELL_GREEN;
-		grenade->s.modelindex = gi.modelindex("models/items/ammo/grenades/medium/tris.md2");
-		grenade->s.scale = 4.0f;
-		grenade->mins = { -15, -15, -15 };
-		grenade->maxs = { 15, 15, 15 };
-		grenade->movetype = MOVETYPE_TOSS;
-		grenade->solid = SOLID_TRIGGER;
-		*/
-	} else {
-		grenade->solid = SOLID_BBOX;
-		grenade->svflags |= SVF_PROJECTILE;
+	grenade->solid = SOLID_BBOX;
+	grenade->svflags |= SVF_PROJECTILE;
 
-		grenade->s.effects |= EF_GRENADE;
-		grenade->s.modelindex = gi.modelindex("models/objects/grenade3/tris.md2");
-		grenade->s.scale = 1.25f;
-	}
+	grenade->s.effects |= EF_GRENADE;
+	grenade->s.modelindex = gi.modelindex("models/objects/grenade3/tris.md2");
+	grenade->s.scale = 1.25f;
 
 	grenade->owner = self;
 	grenade->touch = Grenade_Touch;

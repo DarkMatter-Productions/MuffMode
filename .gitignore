@@ -404,14 +404,19 @@ FodyWeavers.xsd
 *.sln.iml
 *.dll
 game_x64.exp
-game_x64.exp
+game_x64.map
 /pack
 changes_v0.19.60_to_v0.21.0.patch
 patches_v0.19.60_to_v0.21.0/
 build.bat
 build_dev.bat
+play.bat
+deploy.bat
 
 # Local vcpkg artifacts
 /vcpkg/
 src/vcpkg_installed/
 **/vcpkg_installed/
+
+# Runtime logs
+/logs/

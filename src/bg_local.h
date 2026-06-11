@@ -245,7 +245,7 @@ enum player_stat_t {
 	// [Paril-KEX]
 	STAT_ACTIVE_WEAPON,
 
-	STAT_SCORELIMIT,
+	STAT_SCORELIMIT, // match limit value for miniscore HUD (frag/round/capture); 0 = hidden
 	STAT_DUEL_HEADER,
 
 	STAT_SHOW_STATUSBAR,

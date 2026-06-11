@@ -1,0 +1,165 @@
+{
+"classname" "worldspawn"
+"message" "Railgun 101"
+}
+{
+"classname" "item_armor_shard"
+"origin" "128 -224 160"
+}
+{
+"_color" "0.133333 0.240000 1.000000"
+"classname" "light"
+"light" "145"
+"origin" "704 296 104"
+}
+{
+"origin" "-184 416 104"
+"classname" "light"
+"light" "145"
+"_color" "0.133333 0.240000 1.000000"
+}
+{
+"origin" "712 64 104"
+"light" "145"
+"classname" "light"
+"_color" "0.133333 0.240000 1.000000"
+}
+{
+"origin" "712 192 104"
+"light" "145"
+"classname" "light"
+"_color" "0.133333 0.240000 1.000000"
+}
+{
+"origin" "496 248 248"
+"light" "145"
+"classname" "light"
+"_color" "0.133333 0.240000 1.000000"
+}
+{
+"origin" "592 408 104"
+"light" "145"
+"classname" "light"
+"_color" "0.133333 0.240000 1.000000"
+}
+{
+"origin" "448 440 104"
+"light" "145"
+"classname" "light"
+"_color" "0.133333 0.240000 1.000000"
+}
+{
+"origin" "320 440 104"
+"light" "145"
+"classname" "light"
+"_color" "0.133333 0.240000 1.000000"
+}
+{
+"origin" "184 440 104"
+"light" "145"
+"classname" "light"
+"_color" "0.133333 0.240000 1.000000"
+}
+{
+"origin" "64 440 104"
+"light" "145"
+"classname" "light"
+"_color" "0.133333 0.240000 1.000000"
+}
+{
+"light" "145"
+"classname" "light"
+"origin" "-64 440 104"
+"_color" "0.133333 0.240000 1.000000"
+}
+{
+"light" "145"
+"classname" "light"
+"origin" "-208 256 256"
+"_color" "0.133333 0.240000 1.000000"
+}
+{
+"light" "145"
+"classname" "light"
+"origin" "-296 312 104"
+"_color" "0.133333 0.240000 1.000000"
+}
+{
+"light" "145"
+"classname" "light"
+"origin" "-328 192 104"
+"_color" "0.133333 0.240000 1.000000"
+}
+{
+"light" "145"
+"classname" "light"
+"origin" "-328 64 104"
+"_color" "0.133333 0.240000 1.000000"
+}
+{
+"classname" "light"
+"light" "145"
+"origin" "-344 -56 104"
+"_color" "0.133333 0.240000 1.000000"
+}
+{
+"classname" "light"
+"light" "145"
+"origin" "704 -56 104"
+"_color" "0.133333 0.240000 1.000000"
+}
+{
+"classname" "weapon_railgun"
+"origin" "444 -104 32"
+}
+{
+"classname" "weapon_railgun"
+"origin" "-176 -132 32"
+}
+{
+"classname" "weapon_railgun"
+"origin" "-164 216 32"
+}
+{
+"classname" "weapon_railgun"
+"origin" "444 204 32"
+}
+{
+"classname" "info_player_deathmatch"
+"origin" "516 216 40"
+"angle" "225"
+}
+{
+"angle" "270"
+"origin" "-4 252 40"
+"classname" "info_player_deathmatch"
+}
+{
+"classname" "info_player_deathmatch"
+"origin" "-252 308 104"
+"angle" "315"
+}
+{
+"classname" "info_player_deathmatch"
+"origin" "-304 -256 152"
+"angle" "45"
+}
+{
+"angle" "225"
+"origin" "580 328 104"
+"classname" "info_player_deathmatch"
+}
+{
+"classname" "info_player_deathmatch"
+"origin" "688 -304 152"
+"angle" "135"
+}
+{
+"classname" "info_player_start"
+"origin" "128 -32 56"
+}
+{
+"classname" "info_player_intermission"
+"origin" "-160 232 148"
+"angle" "320"
+}

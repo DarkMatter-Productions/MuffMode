@@ -206,9 +206,11 @@ static bool G_alternate_flystep(gentity_t *ent, vec3_t move, bool relink, gentit
 
 	// FIXME
 	if (isnan(dir[0]) || isnan(dir[1]) || isnan(dir[2])) {
+		gi.Com_PrintFmt("WARNING: NaN velocity in G_alternate_flystep for {}\n", *ent);
 #if defined(_DEBUG) && defined(_WIN32)
 		__debugbreak();
 #endif
+		ent->velocity = vec3_origin;
 		return false;
 	}
 
@@ -313,9 +315,11 @@ static bool G_alternate_flystep(gentity_t *ent, vec3_t move, bool relink, gentit
 
 	// FIXME
 	if (isnan(final_dir[0]) || isnan(final_dir[1]) || isnan(final_dir[2])) {
+		gi.Com_PrintFmt("WARNING: NaN final_dir (pre-slerp) in G_alternate_flystep for {}\n", *ent);
 #if defined(_DEBUG) && defined(_WIN32)
 		__debugbreak();
 #endif
+		ent->velocity = vec3_origin;
 		return false;
 	}
 
@@ -378,9 +382,11 @@ static bool G_alternate_flystep(gentity_t *ent, vec3_t move, bool relink, gentit
 	// FIXME
 	if (isnan(final_dir[0]) || isnan(final_dir[1]) || isnan(final_dir[2]) ||
 		isnan(current_speed)) {
+		gi.Com_PrintFmt("WARNING: NaN final_dir/speed in G_alternate_flystep for {}\n", *ent);
 #if defined(_DEBUG) && defined(_WIN32)
 		__debugbreak();
 #endif
+		ent->velocity = vec3_origin;
 		return false;
 	}
 
@@ -579,6 +585,10 @@ static bool G_movestep(gentity_t *ent, vec3_t move, bool relink) {
 
 	contents_t mask = (ent->svflags & SVF_MONSTER) ? MASK_MONSTERSOLID : (MASK_SOLID | CONTENTS_MONSTER | CONTENTS_PLAYER);
 
+	// Horde: monsters don't treat each other as solid for step traces (see q2horde)
+	if (GT(GT_HORDE))
+		mask &= ~CONTENTS_MONSTER;
+
 	vec3_t start_up = oldorg + ent->gravityVector * (-1 * stepsize);
 
 	start_up = gi.trace(oldorg, ent->mins, ent->maxs, start_up, ent, mask).endpos;
@@ -642,7 +652,8 @@ static bool G_movestep(gentity_t *ent, vec3_t move, bool relink) {
 			ent->s.origin += move;
 			if (relink) {
 				gi.linkentity(ent);
-				G_TouchTriggers(ent);
+				if (notGT(GT_HORDE))
+					G_TouchTriggers(ent);
 			}
 			ent->groundentity = nullptr;
 			return true;
@@ -707,7 +718,8 @@ static bool G_movestep(gentity_t *ent, vec3_t move, bool relink) {
 			// and is trying to correct
 			if (relink) {
 				gi.linkentity(ent);
-				G_TouchTriggers(ent);
+				if (notGT(GT_HORDE))
+					G_TouchTriggers(ent);
 			}
 			return true;
 		}
@@ -750,8 +762,10 @@ static bool G_movestep(gentity_t *ent, vec3_t move, bool relink) {
 
 		// [Paril-KEX] this is something N64 does to avoid doors opening
 		// at the start of a level, which triggers some monsters to spawn.
-		if (!level.is_n64 || level.time > FRAME_TIME_S)
-			G_TouchTriggers(ent);
+		if (notGT(GT_HORDE)) {
+			if (!level.is_n64 || level.time > FRAME_TIME_S)
+				G_TouchTriggers(ent);
+		}
 	}
 
 	if (stepped)
@@ -870,12 +884,14 @@ static bool G_StepDirection(gentity_t *ent, float yaw, float dist, bool allow_no
 			}
 		}
 		gi.linkentity(ent);
-		G_TouchTriggers(ent);
+		if (notGT(GT_HORDE))
+			G_TouchTriggers(ent);
 		G_TouchProjectiles(ent, oldorigin);
 		return true;
 	}
 	gi.linkentity(ent);
-	G_TouchTriggers(ent);
+	if (notGT(GT_HORDE))
+		G_TouchTriggers(ent);
 	ent->ideal_yaw = old_ideal_yaw;
 	ent->s.angles[YAW] = old_current_yaw;
 	return false;

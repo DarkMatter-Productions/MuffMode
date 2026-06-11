@@ -2,6 +2,7 @@
 // Licensed under the GNU General Public License 2.0.
 #include "g_local.h"
 #include "bots/bot_includes.h"
+#include "muffmode/mm_horde.h"
 
 //
 // monster weapons
@@ -616,7 +617,8 @@ void M_ProcessPain(gentity_t *e) {
 		if (!e->deadflag) {
 			int32_t score_value = ceil(e->monsterinfo.base_health / 100);
 			if (score_value < 1) score_value = 1;
-			Horde_AdjustPlayerScore(e->monsterinfo.damage_attacker->client, score_value);
+			if (e->monsterinfo.damage_attacker && e->monsterinfo.damage_attacker->client)
+				MM_Horde_AdjustPlayerScore(e->monsterinfo.damage_attacker->client, score_value);
 		}
 		e->die(e, e->monsterinfo.damage_inflictor, e->monsterinfo.damage_attacker, e->monsterinfo.damage_blood, e->monsterinfo.damage_from, e->monsterinfo.damage_mod);
 

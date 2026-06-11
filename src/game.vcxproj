@@ -76,6 +76,7 @@
     <Link>
       <SubSystem>NotSet</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
+      <GenerateMapFile>true</GenerateMapFile>
       <AdditionalDependencies>jsoncpp.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>$(ProjectDir)vcpkg_installed\x64-windows-static\debug\lib;$(ProjectDir)vcpkg_installed\x64-windows-static\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
@@ -152,6 +153,23 @@
     <ClInclude Include="monsters\m_turret.h" />
     <ClInclude Include="monsters\m_widow.h" />
     <ClInclude Include="monsters\m_widow2.h" />
+    <ClInclude Include="muffmode\mm_admin.h" />
+    <ClInclude Include="muffmode\mm_debug.h" />
+    <ClInclude Include="muffmode\mm_duel.h" />
+    <ClInclude Include="muffmode\mm_gametype.h" />
+    <ClInclude Include="muffmode\mm_horde.h" />
+    <ClInclude Include="muffmode\mm_items_rules.h" />
+    <ClInclude Include="muffmode\mm_maps.h" />
+    <ClInclude Include="muffmode\mm_motd.h" />
+    <ClInclude Include="muffmode\mm_ruleset.h" />
+    <ClInclude Include="muffmode\mm_ruleset_weapons.h" />
+    <ClInclude Include="muffmode\mm_spawn_filter.h" />
+    <ClInclude Include="muffmode\mm_spawn_loadout.h" />
+    <ClInclude Include="muffmode\mm_statusbar.h" />
+    <ClInclude Include="muffmode\mm_vote.h" />
+    <ClInclude Include="muffmode\mm_vote_menu.h" />
+    <ClInclude Include="muffmode\mm_vote_types.h" />
+    <ClInclude Include="muffmode\muffmode.h" />
     <ClInclude Include="p_menu.h" />
     <ClInclude Include="q_std.h" />
     <ClInclude Include="q_vec3.h" />
@@ -169,7 +187,6 @@
     <ClCompile Include="g_cmds.cpp" />
     <ClCompile Include="g_combat.cpp" />
     <ClCompile Include="g_ctf.cpp" />
-    <ClCompile Include="g_debug_log.cpp" />
     <ClCompile Include="g_func.cpp" />
     <ClCompile Include="g_items.cpp" />
     <ClCompile Include="g_main.cpp" />
@@ -220,6 +237,21 @@
     <ClCompile Include="monsters\m_turret.cpp" />
     <ClCompile Include="monsters\m_widow.cpp" />
     <ClCompile Include="monsters\m_widow2.cpp" />
+    <ClCompile Include="muffmode\mm_admin.cpp" />
+    <ClCompile Include="muffmode\mm_debug.cpp" />
+    <ClCompile Include="muffmode\mm_duel.cpp" />
+    <ClCompile Include="muffmode\mm_gametype.cpp" />
+    <ClCompile Include="muffmode\mm_horde.cpp" />
+    <ClCompile Include="muffmode\mm_items_rules.cpp" />
+    <ClCompile Include="muffmode\mm_maps.cpp" />
+    <ClCompile Include="muffmode\mm_motd.cpp" />
+    <ClCompile Include="muffmode\mm_ruleset.cpp" />
+    <ClCompile Include="muffmode\mm_ruleset_weapons.cpp" />
+    <ClCompile Include="muffmode\mm_spawn_filter.cpp" />
+    <ClCompile Include="muffmode\mm_spawn_loadout.cpp" />
+    <ClCompile Include="muffmode\mm_statusbar.cpp" />
+    <ClCompile Include="muffmode\mm_vote.cpp" />
+    <ClCompile Include="muffmode\mm_vote_menu.cpp" />
     <ClCompile Include="p_client.cpp" />
     <ClCompile Include="p_hud.cpp" />
     <ClCompile Include="p_menu.cpp" />

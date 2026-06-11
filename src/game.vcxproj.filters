@@ -126,6 +126,33 @@
       <Filter>monsters</Filter>
     </ClInclude>
     <ClInclude Include="p_menu.h" />
+    <ClInclude Include="muffmode\mm_admin.h">
+      <Filter>muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="muffmode\mm_debug.h">
+      <Filter>muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="muffmode\mm_gametype.h">
+      <Filter>muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="muffmode\mm_maps.h">
+      <Filter>muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="muffmode\mm_motd.h">
+      <Filter>muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="muffmode\mm_vote.h">
+      <Filter>muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="muffmode\mm_vote_menu.h">
+      <Filter>muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="muffmode\mm_vote_types.h">
+      <Filter>muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="muffmode\muffmode.h">
+      <Filter>muffmode</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="cg_main.cpp" />
@@ -274,6 +301,27 @@
     <ClCompile Include="p_menu.cpp" />
     <ClCompile Include="g_menu.cpp" />
     <ClCompile Include="g_ctf.cpp" />
+    <ClCompile Include="muffmode\mm_debug.cpp">
+      <Filter>muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="muffmode\mm_maps.cpp">
+      <Filter>muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="muffmode\mm_motd.cpp">
+      <Filter>muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="muffmode\mm_vote.cpp">
+      <Filter>muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="muffmode\mm_vote_menu.cpp">
+      <Filter>muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="muffmode\mm_admin.cpp">
+      <Filter>muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="muffmode\mm_gametype.cpp">
+      <Filter>muffmode</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="bots">
@@ -281,6 +329,9 @@
     </Filter>
     <Filter Include="monsters">
       <UniqueIdentifier>{14e9d741-abb2-49e4-ad94-ca4aee1ffa62}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="muffmode">
+      <UniqueIdentifier>{3f48d5f5-a89d-4f1c-95af-6976e46ff1a0}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
 </Project>

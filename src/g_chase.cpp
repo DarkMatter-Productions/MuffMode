@@ -48,6 +48,8 @@ void UpdateChaseCam(gentity_t *ent) {
 	if (!targ || !targ->inuse || !targ->client || !ClientIsPlaying(targ->client) || targ->client->eliminated) {
 		//SetTeam(ent, TEAM_SPECTATOR, false, false, false);
 		FreeClientFollowers(targ);
+		if (!ClientIsPlaying(ent->client) || ent->client->eliminated)
+			GetFollowTarget(ent);
 		return;
 	}
 
@@ -83,7 +85,6 @@ void UpdateChaseCam(gentity_t *ent) {
 		ent->client->ps.pmove.viewheight = targ->client->ps.pmove.viewheight;
 		
 		ent->client->pers.hand = targ->client->pers.hand;
-		ent->client->pers.weapon = targ->client->pers.weapon;
 		
 		//FIXME: color shells and damage blends not working
 
