@@ -17,4 +17,3 @@ bool MM_MQ_Add(gentity_t *ent, const char *mapname);
 const char *MM_MQ_Go_Next();
 void MM_CmdMapList(gentity_t *ent);
 void MM_CmdMyMap(gentity_t *ent);
-

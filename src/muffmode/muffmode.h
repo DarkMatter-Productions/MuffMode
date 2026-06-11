@@ -20,4 +20,3 @@
 #include "mm_statusbar.h"
 #include "mm_vote.h"
 #include "mm_vote_menu.h"
-

@@ -126,4 +126,3 @@ void MuffModeLog_Separator()
 	g_muffmode_log << "----------------------------------------\n";
 	g_muffmode_log.flush();
 }
-

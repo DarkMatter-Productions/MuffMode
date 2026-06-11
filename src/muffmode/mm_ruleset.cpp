@@ -52,4 +52,3 @@ void MM_ClampEntityHealthArmor(gentity_t *ent)
 			ent->client->pers.inventory[aid] = MM_RULESET_ARMOR_CAP;
 	}
 }
-

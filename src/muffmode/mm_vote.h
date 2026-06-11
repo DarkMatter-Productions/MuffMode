@@ -55,4 +55,3 @@ void MM_VoteCommandStore(gentity_t *ent);
 void MM_CmdCallVote(gentity_t *ent);
 void MM_CmdVote(gentity_t *ent);
 void MM_RevertVote(gclient_t *client);
-

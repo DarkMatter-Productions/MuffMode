@@ -62,16 +62,16 @@ msbuild src\MuffMode.sln /p:Configuration=Debug /p:Platform=x64
 
 ## Output
 
-The build produces `game_x64.dll`.  
+The build produces `game_x64.dll`.
 After building, copy the DLL into your Quake 2 rerelease `muffmode` game folder to test in-game.
 
 ## Common Issues
 
-- **`msbuild` is not recognized**  
+- **`msbuild` is not recognized**
   Open a Visual Studio Developer Command Prompt/PowerShell, then run the command again.
-- **Build fails with missing C++ tools**  
+- **Build fails with missing C++ tools**
   Install Visual Studio C++ build components and Windows SDK.
-- **MSB8020: build tools for v145 cannot be found**  
+- **MSB8020: build tools for v145 cannot be found**
   You have VS 2022 (toolset `v143`). Run `build.bat` as-is, or pass `build.bat x64 v143`. Install VS 2026+ for `v145`.
-- **DLL copy/test issues**  
+- **DLL copy/test issues**
   Verify your Quake 2 install path and folder permissions.

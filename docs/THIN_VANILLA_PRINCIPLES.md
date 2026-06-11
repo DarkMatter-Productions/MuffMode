@@ -218,4 +218,3 @@ When unsure, ask:
 **"Can this stay in `muffmode/` with only a tiny vanilla hook?"**
 
 If the answer is "yes," do that.
-

@@ -15,7 +15,7 @@ Enhanced HUD info and a number of changable settings.
 ## Installation
 1. Locate your installation. For Steam, this is normally "C:\Program Files (x86)\Steam\steamapps\common\Quake 2\rerelease".
 2. Back up your baseq2/game_x64.dll.
-3. Download the latest [Muff Mode release](https://github.com/themuffinator/muffmode/releases/latest).
+3. Download the latest [Muff Mode release](https://github.com/DarkMatter-Productions/MuffMode/releases/latest).
 4. Extract the entire zip to your "Quake 2" folder (not rerelease), allow file replacements (unless you already have Muff Mode, this should only replace the .dll).
 5. Load the game up as normal. A range of configs can be executed to apply settings once a game has been set up.
 6. Once a lobby has been set up, you can execute the included server config via ``exec muff-sv.cfg``.
@@ -106,7 +106,7 @@ Restrict voting further with **`g_votable_gametypes`** (subset of enabled modes 
 - Intermission pre-delay: a one second intermission pre-delay means you can see your winning frag or capture before final scores (no damage is taken or additional scoring during this delay).
 - Minimum respawn delay: a short respawn delay helps avoid accidental respawning and creates a smoother transition.
 - Kill beeps and frag messages highlight your frags and rank.
- 
+
 ### Offhand Hook
 - Added 'hook' and 'unhook' commands to use off-hand hook. Use `g_grapple_offhand 1` to enable this.
 - Players can use ``alias +hook hook; alias -hook unhook; bind mouse2 +hook`` to use it as a button command
@@ -206,7 +206,7 @@ Modern arena shooter mechanics inspired by Quake Champions:
  - **Plasma Beam** damage 15 (default)
  - Faster overall gameplay pace and modern weapon balance
  - Enhanced movement mechanics and timing
- 
+
 ## Commands and Variables
 
 ### Admin Commands
@@ -238,7 +238,7 @@ Use **[command] [arg]** for the below listed client commands:
  - **id**: toggle crosshair ID drawing
  - **kb**: toggle kill beeps
  - **timer**: toggle match timer drawing
- 
+
 ### Client Commands - Gameplay
  - **hook/unhook**: hook/unhook off-hand grapple
  - **captain**: in team modes, claim captain if vacant, or show current team captain.
@@ -339,7 +339,7 @@ The config files follow the naming convention: `gt-[GAMETYPE].cfg`
 
 Available config files (for enabled gametypes):
 - `gt-FFA.cfg` - Free for All settings
-- `gt-DUEL.cfg` - Duel settings  
+- `gt-DUEL.cfg` - Duel settings
 - `gt-TDM.cfg` - Team Deathmatch settings
 - `gt-CTF.cfg` - Capture the Flag settings
 - `gt-CA.cfg` - Clan Arena settings
@@ -442,7 +442,7 @@ The following cvars are only available in DEBUG builds for testing and developme
  - **g_rocketlauncher_speed**: sets rocket launcher projectile speed (default 0)
 
 ## Level Controls
- 
+
 ### New Items
 - Personal Teleporter (item_teleporter): holdable item for deathmatch, teleports the players to a spawn point upon activation.
 - Small ammo items for shells, bullets, rockets, cells and slugs (ie: ammo_bullets_small)
@@ -451,7 +451,7 @@ The following cvars are only available in DEBUG builds for testing and developme
 
 ### Map Tweaks
 Some entity overrides are included which add some subtle ambient sounds, mover sounds, intermission cams and gametype-specific item tweaks.
- 
+
 ### Map Entity Controls
  * Map Item Replacement Control:
 	 - **<disable/replace>_[classname]** and **[mapname]_<disable/replace>_[classname]** user cvars to remove or replace specific DM map items (by classname) or only in specific maps if desired
@@ -482,41 +482,41 @@ Some entity overrides are included which add some subtle ambient sounds, mover s
  * Hacky Map Fixes:
 	* bunk1: button for lift to ware2 now has a wait of -1 (never returns), stops co-op players from pushing the button again and toggling the lift!
  * "nobots" and "nohumans": keys for info_player_deathmatch to avoid using for bots or humans respectively
-	
+
 ### Entity Keys
 * SPAWNFLAGS:
 	- spawnflags & 8: suspends items (don't fall to ground)
 * Worldspawn:
 	- **author** and **author2**: sets level author information, this can be seen in the server info submenu.
-	
+
 ### Entity Changes
  - misc_nuke: now applies nuke effect (screen flash, earthquake)
  - trigger_push: target a target_position/info_notnull to set a direction and apogee like in Q3, no target reverts to original behaviour
  - trigger_key: does not remove inventory item in deathmatch, deathmatch or spawnflags 1 now allows multiple uses.
  - trigger_coop_relay: annoying "all players must be present" feature in co-op has been removed as it proves a game breaker in games with afk players, always treated like a trigger_relay now
-	
+
 ### New Entities
 - target_remove_powerups:
 	Takes away all the activator's powerups, techs, held items, keys and CTF flags.
-	
+
 - target_remove_weapons:
 	Takes away all the activator's weapons and ammo (except blaster).
 	BLASTER : also remove blaster
-	
+
 - target_give:
 	Gives the activator the targetted item.
-	
+
 - target_delay:
 	Sets a delay before firing its targets.
 	"wait" seconds to pause before firing targets.
 	"random" delay variance, total delay = delay +/- random seconds
-	
+
 - target_print:
 	Sends a center-printed message to clients.
 	"message"	text to print
 	spawnflags: REDTEAM BLUETEAM PRIVATE
 	If "PRIVATE", only the activator gets the message. If no checks, all clients get the message.
-	
+
 - target_setskill:
 	Set skill level.
 	"message" : skill level to set to (0-3)
@@ -525,83 +525,83 @@ Some entity overrides are included which add some subtle ambient sounds, mover s
 	1 = Medium
 	2 = Hard
 	3 = Nightmare/Hard+
-	
+
 - target_score:
 	"count" number of points to adjust by, default 1.
 	The activator is given this many points.
 	spawnflags: TEAM
 	TEAM : also adjust team score
-	
+
 - target_teleporter:
 	The activator will be teleported to the targetted destination.
 	If no target set, it will find a player spawn point instead.
-	
+
 - target_relay:
 	Correctly named trigger_relay.
-	
+
 - target_kill:
 	Kills the activator.
-	
+
 - target_cvar:
 	When targetted sets a cvar to a value.
 	"cvar" : name of cvar to set
 	"cvarValue" : value to set cvar to
-	
+
 - target_shooter_grenade:
 	Fires a grenade in the set direction when triggered.
 	dmg		default is 120
 	speed	default is 600
-	
+
 - target_shooter_rocket:
 	Fires a rocket in the set direction when triggered.
 	dmg		default is 120
 	speed	default is 600
-	
+
 - target_shooter_bfg:
 	Fires a BFG projectile in the set direction when triggered.
 	dmg			default is 200 in DM, 500 in campaigns
 	speed		default is 400
-	
+
 - target_shooter_prox:
 	Fires a prox mine in the set direction when triggered.
 	dmg			default is 90
 	speed		default is 600
-	
+
 - target_shooter_ionripper:
 	Fires an ionripper projectile in the set direction when triggered.
 	dmg			default is 20 in DM and 50 in campaigns
 	speed		default is 800
-	
+
 - target_shooter_phalanx:
 	Fires a phalanx projectile in the set direction when triggered.
 	dmg			default is 80
 	speed		default is 725
-	
+
 - target_shooter_flechette:
 	Fires a flechette in the set direction when triggered.
 	dmg			default is 10
 	speed		default is 1150
-	
+
 - target_position:
 	Alias for info_notnull.
-	
+
 - trigger_deathcount:
 	Fires targets only if minimum death count has been achieved in the level.
 	Deaths considered are monsters during campaigns and players during deathmatch.
 	"count"	minimum number of deaths required (default 10)
 	spawnflags: REPEAT
 	REPEAT : repeats per every 'count' deaths
-	
+
 - trigger_no_monsters:
 	Fires targets only if all monsters have been killed or none are present.
 	Auto-removed in deathmatch (except horde mode).
 	ONCE : will be removed after firing once
-	
+
 - trigger_monsters:
 	Fires targets only if monsters are present in the level.
 	Auto-removed in deathmatch (except horde mode).
 	ONCE : will be removed after firing once
-	
+
 ## Roadmap:
 - tastyspleen.net's mymap system: add support for dm flags
 - Re-enable CaptureStrike and Red Rover when match/round scoring is production-ready
@@ -613,7 +613,7 @@ Some entity overrides are included which add some subtle ambient sounds, mover s
 - Quake II Sanctuary community for testing. A shout out particularly to Sata, TurboPtys_drk and Jobe for their help.
 - The Stingy Hat Games YouTube channel for their excellent modding tutorial, without it I would never be able to compile the damned source!
 - Nightdive team for the impressive remaster, also some on the team who patiently answered all my annoying modding questions (particularly Paril, sponge, Edward850)
-- Paril for some of the Horde Mode code (really just the spawn code), [link to Paril's mod](https://github.com/Paril/q2horde) 
+- Paril for some of the Horde Mode code (really just the spawn code), [link to Paril's mod](https://github.com/Paril/q2horde)
 - id Software, both for Quake II and Quake III Arena (some code ported from the latter)
 - ceeeKay for the eyecam code from Q2Eaks
 - The Q2Re player community for bug spotting and general feedback

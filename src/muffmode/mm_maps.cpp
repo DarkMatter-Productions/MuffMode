@@ -416,4 +416,3 @@ void MM_CmdMyMap(gentity_t *ent)
 	if (text.size())
 		gi.LocBroadcast_Print(PRINT_HIGH, "MyMap Queue => {}\n", text.data());
 }
-

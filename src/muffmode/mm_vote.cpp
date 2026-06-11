@@ -1203,4 +1203,3 @@ vcmds_t *FindVoteCmdByName(const char *name)
 
 	return nullptr;
 }
-

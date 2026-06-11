@@ -1,0 +1,55 @@
+name: Validate Release Workflow
+run-name: Validate Release Workflow
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: Release channel to validate.
+        required: true
+        type: choice
+        default: beta
+        options:
+          - alpha
+          - beta
+          - rc
+          - stable
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    name: Preflight
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 10
+
+    steps:
+      - name: Validate Workflow Metadata
+        shell: pwsh
+        run: |
+          Write-Host "Validation workflow only. It will not build, publish, or announce a release."
+
+  version:
+    name: Resolve Version
+    needs: preflight
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Validate Version Resolution
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = (Get-Content -Raw VERSION).Trim()
+          .\scripts\release.ps1 `
+            -Version $version `
+            -Channel "${{ inputs.channel }}" `
+            -VersionOnly `
+            -AllowDirtyPackage

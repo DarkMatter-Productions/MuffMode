@@ -1,0 +1,460 @@
+name: Release Muff Mode
+run-name: Release Muff Mode
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_mode:
+        description: Version bump mode when no exact version is supplied. Auto inspects changes since the previous release.
+        required: true
+        type: choice
+        default: auto
+        options:
+          - auto
+          - major
+          - minor
+          - patch
+          - latch
+      version:
+        description: Exact version to release, such as 0.23.0. Leave blank to use version mode.
+        required: false
+        type: string
+      previous_tag:
+        description: Previous release tag for changelog scope. Leave blank to auto-detect.
+        required: false
+        type: string
+      channel:
+        description: Release channel. Beta is the project default.
+        required: true
+        type: choice
+        default: beta
+        options:
+          - alpha
+          - beta
+          - rc
+          - stable
+      commit_version_files:
+        description: Update VERSION and src/g_local.h, commit, and push before publishing.
+        required: true
+        type: boolean
+        default: true
+      skip_installer:
+        description: Create only the zip package, without the Windows installer asset.
+        required: true
+        type: boolean
+        default: false
+      require_copilot:
+        description: Fail instead of using deterministic release notes/README when Copilot CLI authentication is unavailable.
+        required: true
+        type: boolean
+        default: false
+permissions:
+  contents: write
+
+concurrency:
+  group: release-muff-mode
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    name: Preflight
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 10
+
+    steps:
+      - name: Validate Inputs And Secrets
+        shell: pwsh
+        env:
+          COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+          LEGACY_RELEASE_BOT_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN }}
+          DISCORD_RELEASE_WEBHOOK: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:COPILOT_GITHUB_TOKEN) -and [string]::IsNullOrWhiteSpace($env:LEGACY_RELEASE_BOT_TOKEN)) {
+            if ("${{ inputs.require_copilot }}" -eq "true") {
+              throw "Set COPILOT_GITHUB_TOKEN to a fine-grained user PAT with the Copilot Requests permission, or disable require_copilot to use deterministic release documentation."
+            }
+
+            Write-Warning "COPILOT_GITHUB_TOKEN is not set. The release package will use deterministic release notes and README generation."
+          }
+
+          if ([string]::IsNullOrWhiteSpace($env:DISCORD_RELEASE_WEBHOOK)) {
+            throw "Set DISCORD_RELEASE_WEBHOOK so the release workflow can announce the published release."
+          }
+
+  version:
+    name: Resolve Version
+    needs: preflight
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 20
+
+    outputs:
+      target_version: ${{ steps.version.outputs.target_version }}
+      release_tag: ${{ steps.version.outputs.release_tag }}
+      release_title: ${{ steps.version.outputs.release_title }}
+      is_prerelease: ${{ steps.version.outputs.is_prerelease }}
+
+    env:
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Resolve And Optionally Commit Version
+        id: version
+        shell: pwsh
+        run: |
+          $parameters = @{
+            VersionOnly = $true
+            AllowDirtyPackage = $true
+            Channel = "${{ inputs.channel }}"
+          }
+
+          if ("${{ inputs.commit_version_files }}" -eq "true") {
+            $parameters["VersionMode"] = "${{ inputs.version_mode }}"
+            $parameters["UpdateVersionFiles"] = $true
+            if (-not [string]::IsNullOrWhiteSpace("${{ inputs.version }}")) {
+              $parameters["Version"] = "${{ inputs.version }}"
+            }
+            if (-not [string]::IsNullOrWhiteSpace("${{ inputs.previous_tag }}")) {
+              $parameters["PreviousTag"] = "${{ inputs.previous_tag }}"
+            }
+          }
+          else {
+            if (-not [string]::IsNullOrWhiteSpace("${{ inputs.version }}")) {
+              $parameters["Version"] = "${{ inputs.version }}"
+            }
+            else {
+              $parameters["Version"] = (Get-Content -Raw VERSION).Trim()
+            }
+            if (-not [string]::IsNullOrWhiteSpace("${{ inputs.previous_tag }}")) {
+              $parameters["PreviousTag"] = "${{ inputs.previous_tag }}"
+            }
+          }
+
+          .\scripts\release.ps1 @parameters
+
+          if ("${{ inputs.commit_version_files }}" -eq "true") {
+            $changes = git status --porcelain VERSION src/g_local.h
+            if ($changes) {
+              $version = (Get-Content -Raw VERSION).Trim()
+              git config user.name "github-actions[bot]"
+              git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+              git add VERSION src/g_local.h
+              git commit -m "Bump Muff Mode to v$version"
+              git push origin "HEAD:${{ github.ref_name }}"
+            }
+            else {
+              Write-Host "Version files already match the requested release."
+            }
+          }
+
+          $targetVersion = (Get-Content -Raw VERSION).Trim()
+          $channelName = switch ("${{ inputs.channel }}") {
+            "alpha" { "Alpha" }
+            "beta" { "Beta" }
+            "rc" { "Release Candidate" }
+            default { "" }
+          }
+          $releaseTitle = if ($channelName) { "MuffMode v$targetVersion $channelName" } else { "MuffMode v$targetVersion" }
+          $isPrerelease = if ("${{ inputs.channel }}" -eq "stable") { "false" } else { "true" }
+
+          "target_version=$targetVersion" >> $env:GITHUB_OUTPUT
+          "release_tag=v$targetVersion" >> $env:GITHUB_OUTPUT
+          "release_title=$releaseTitle" >> $env:GITHUB_OUTPUT
+          "is_prerelease=$isPrerelease" >> $env:GITHUB_OUTPUT
+
+  build:
+    name: Build And Package
+    needs: version
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 90
+
+    env:
+      GH_TOKEN: ${{ github.token }}
+      COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN != '' && secrets.COPILOT_GITHUB_TOKEN || secrets.RELEASE_BOT_TOKEN }}
+      COPILOT_TOKEN_PRESENT: ${{ (secrets.COPILOT_GITHUB_TOKEN != '' || secrets.RELEASE_BOT_TOKEN != '') && 'true' || 'false' }}
+      VCPKG_ROOT: ${{ github.workspace }}\..\vcpkg
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ github.ref_name }}
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Install And Prime GitHub Copilot CLI
+        if: ${{ inputs.require_copilot == true || env.COPILOT_TOKEN_PRESENT == 'true' }}
+        shell: pwsh
+        run: |
+          npm install -g @github/copilot
+          copilot --help
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v3
+
+      - name: Setup vcpkg
+        shell: pwsh
+        run: |
+          git clone https://github.com/microsoft/vcpkg.git $env:VCPKG_ROOT
+          & "$env:VCPKG_ROOT\bootstrap-vcpkg.bat" -disableMetrics
+
+      - name: Cache vcpkg
+        uses: actions/cache@v5
+        with:
+          path: |
+            ${{ github.workspace }}\..\vcpkg\downloads
+            ${{ github.workspace }}\..\vcpkg\buildtrees
+            ${{ github.workspace }}\..\vcpkg\packages
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('src/vcpkg.json') }}
+          restore-keys: vcpkg-${{ runner.os }}-
+
+      - name: Install vcpkg Dependencies
+        shell: pwsh
+        working-directory: src
+        run: '& "$env:VCPKG_ROOT\vcpkg.exe" install --triplet x64-windows-static'
+
+      - name: Install Inno Setup
+        if: ${{ inputs.skip_installer != true }}
+        shell: pwsh
+        run: choco install innosetup --yes --no-progress
+
+      - name: Build Release Package
+        shell: pwsh
+        run: |
+          $parameters = @{
+            Version = "${{ needs.version.outputs.target_version }}"
+            Channel = "${{ inputs.channel }}"
+          }
+
+          if (-not [string]::IsNullOrWhiteSpace("${{ inputs.previous_tag }}")) {
+            $parameters["PreviousTag"] = "${{ inputs.previous_tag }}"
+          }
+          if ("${{ inputs.skip_installer }}" -eq "true") {
+            $parameters["SkipInstaller"] = $true
+          }
+          if ("${{ inputs.require_copilot }}" -eq "true") {
+            $parameters["RequireCopilot"] = $true
+          }
+
+          .\scripts\release.ps1 @parameters
+
+      - name: Upload Release Package
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-output
+          path: |
+            dist/release/*.zip
+            dist/release/*.exe
+            dist/release/*.md
+            dist/release/*.html
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub Release
+    needs:
+      - version
+      - build
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 20
+
+    env:
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Download Release Package
+        uses: actions/download-artifact@v7
+        with:
+          name: release-output
+          path: dist/release
+
+      - name: Publish GitHub Release
+        shell: pwsh
+        run: |
+          $version = "${{ needs.version.outputs.target_version }}"
+          $tag = "${{ needs.version.outputs.release_tag }}"
+          $title = "${{ needs.version.outputs.release_title }}"
+          $notes = Get-ChildItem -LiteralPath dist/release -Filter "muffmode-$version-release-notes.md" | Select-Object -First 1
+          if (-not $notes) {
+            throw "Could not find generated release notes for $version."
+          }
+
+          $assets = @(Get-ChildItem -LiteralPath dist/release -Filter "*.zip")
+          $assets += @(Get-ChildItem -LiteralPath dist/release -Filter "*.exe")
+          if (-not $assets) {
+            throw "No release assets were downloaded."
+          }
+
+          $arguments = @("release", "create", $tag)
+          $arguments += @($assets | ForEach-Object { $_.FullName })
+          $arguments += @(
+            "--repo", "${{ github.repository }}",
+            "--title", $title,
+            "--notes-file", $notes.FullName,
+            "--fail-on-no-commits"
+          )
+          if ("${{ needs.version.outputs.is_prerelease }}" -eq "true") {
+            $arguments += @("--prerelease", "--latest=false")
+          }
+          else {
+            $arguments += "--latest"
+          }
+
+          gh @arguments
+
+  discord:
+    name: Announce On Discord
+    needs:
+      - version
+      - publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Send Release Embed
+        uses: actions/github-script@v9
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}
+          RELEASE_TAG: ${{ needs.version.outputs.release_tag }}
+          DISCORD_RELEASE_MENTIONS: ${{ vars.DISCORD_RELEASE_MENTIONS || '@quake2 @playtester' }}
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const release = await github.rest.repos.getReleaseByTag({
+              owner,
+              repo,
+              tag: process.env.RELEASE_TAG
+            });
+
+            const data = release.data;
+            const cleanReleaseName = (data.name || data.tag_name)
+              .replace(/\bMuff\s*Mode\b\s*/ig, "")
+              .replace(/\bMuffMode\b\s*/ig, "")
+              .replace(/\s+/g, " ")
+              .trim() || data.tag_name;
+
+            const notes = (data.body || "").replace(/\r/g, "").trim();
+            const isBeta = data.prerelease;
+            const mentions = (process.env.DISCORD_RELEASE_MENTIONS || "@quake2 @playtester").trim();
+
+            function buildPlayerIntro(body) {
+              const lower = body.toLowerCase();
+              const mode = isBeta ? "beta build" : "release";
+
+              if (/(gameplay|balance|weapon|loadout|arena|match|duel|ctf)/.test(lower)) {
+                return `Fresh ${mode} on deck: this update sharpens the action, tightens up match flow, and is ready for players to put through real games.`;
+              }
+
+              if (/(server|host|admin|cvar|config|rotation|vote)/.test(lower)) {
+                return `Fresh ${mode} on deck: this one should make servers smoother to run and matches easier to keep moving.`;
+              }
+
+              if (/(fix|crash|bug|stability|cleanup)/.test(lower)) {
+                return `Fresh ${mode} on deck: a cleaner, steadier build with fixes worth testing before the next proper throwdown.`;
+              }
+
+              return `Fresh ${mode} on deck: grab the new build, jump into a few rounds, and let us know how it feels in play.`;
+            }
+
+            function stripReleasePreamble(body) {
+              if (!body) {
+                return "";
+              }
+
+              const lines = body.split("\n");
+              const firstSection = lines.findIndex(line => /^#{2,3}\s+\S/.test(line));
+              const changelogLines = firstSection >= 0
+                ? lines.slice(firstSection)
+                : lines.filter(line => !/^#\s+/.test(line));
+
+              return changelogLines
+                .join("\n")
+                .replace(/\n{3,}/g, "\n\n")
+                .trim();
+            }
+
+            function limitText(text, maxLength) {
+              if (text.length <= maxLength) {
+                return text;
+              }
+              return `${text.slice(0, maxLength - 3).trimEnd()}...`;
+            }
+
+            function buildDownloadLinks() {
+              const assets = data.assets || [];
+              const installer = assets.find(asset => /windows-installer\.exe$/i.test(asset.name));
+              const packageZip = assets.find(asset => /\.zip$/i.test(asset.name));
+              const knownAssets = new Set([installer, packageZip].filter(Boolean).map(asset => asset.id));
+              const links = [];
+
+              if (installer) {
+                links.push(`[Windows Installer](${installer.browser_download_url})`);
+              }
+              if (packageZip) {
+                links.push(`[Windows \`.zip\`](${packageZip.browser_download_url})`);
+              }
+
+              for (const asset of assets.filter(asset => !knownAssets.has(asset.id)).slice(0, 3)) {
+                links.push(`[${asset.name}](${asset.browser_download_url})`);
+              }
+
+              links.push(`[Source Code](https://github.com/${owner}/${repo}/archive/refs/tags/${data.tag_name}.zip)`);
+              return links;
+            }
+
+            const changelog = stripReleasePreamble(notes);
+            const description = limitText([
+              buildPlayerIntro(notes),
+              "**Please provide any feedback in #muffmode**",
+              changelog ? `## Changelog\n\n${changelog}` : `[Open the full changelog](${data.html_url})`
+            ].join("\n\n"), 2200);
+
+            const assetLinks = buildDownloadLinks();
+
+            const payload = {
+              username: "Muff Mode Releases",
+              avatar_url: "https://raw.githubusercontent.com/DarkMatter-Productions/MuffMode/main/assets/img/discord-avatar.png",
+              allowed_mentions: { parse: ["roles"] },
+              content: `:quake2: ${cleanReleaseName} release published!${mentions ? ` ${mentions}` : ""}`,
+              embeds: [
+                {
+                  title: cleanReleaseName,
+                  url: data.html_url,
+                  description,
+                  color: isBeta ? 0x8fbf26 : 0x5dff5d,
+                  fields: [
+                    { name: "Version", value: data.tag_name, inline: true },
+                    { name: "State", value: isBeta ? "Beta / prerelease" : "Latest stable", inline: true },
+                    {
+                      name: "Downloads",
+                      value: assetLinks.length ? assetLinks.join("\n").slice(0, 1000) : `[Open release](${data.html_url})`
+                    }
+                  ],
+                  footer: { text: "Quake II Remastered mod" },
+                  timestamp: data.published_at
+                }
+              ]
+            };
+
+            const response = await fetch(process.env.DISCORD_WEBHOOK_URL, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload)
+            });
+
+            if (!response.ok) {
+              core.setFailed(`Discord webhook failed: ${response.status} ${await response.text()}`);
+            }

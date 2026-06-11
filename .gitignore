@@ -34,6 +34,7 @@ x86/
 bld/
 [Bb]in/
 [Oo]bj/
+[Dd]ist/
 [Ll]og/
 [Ll]ogs/
 
@@ -413,6 +414,7 @@ play.bat
 deploy.bat
 
 # Local vcpkg artifacts
+/vcpkg/
 src/vcpkg_installed/
 **/vcpkg_installed/
 
