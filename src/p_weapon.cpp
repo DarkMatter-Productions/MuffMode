@@ -300,7 +300,7 @@ Weapon_RunThink
 */
 static void Weapon_RunThink(gentity_t *ent) {
 	// call active weapon think routine
-	if (!ent->client->pers.weapon->weaponthink)
+	if (!ent->client->pers.weapon || !ent->client->pers.weapon->weaponthink)
 		return;
 
 	P_DamageModifier(ent);

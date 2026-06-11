@@ -433,7 +433,7 @@ static void InitGame() {
 	g_horde_wave_spawn_delay_ms = gi.cvar("g_horde_wave_spawn_delay_ms", "500", CVAR_NOFLAGS);
 	g_horde_player_scale = gi.cvar("g_horde_player_scale", "1", CVAR_NOFLAGS);
 	g_horde_player_scale_factor = gi.cvar("g_horde_player_scale_factor", "0.4", CVAR_NOFLAGS);
-	g_horde_player_scale_max = gi.cvar("g_horde_player_scale_max", "4", CVAR_NOFLAGS);
+	g_horde_player_scale_max = gi.cvar("g_horde_player_scale_max", "8", CVAR_NOFLAGS);
 	g_horde_lives = gi.cvar("g_horde_lives", "1", CVAR_NOFLAGS);
 	g_horde_mark_monsters_threshold = gi.cvar("g_horde_mark_monsters_threshold", "3", CVAR_NOFLAGS);
 	g_horde_mark_monsters_max = gi.cvar("g_horde_mark_monsters_max", "8", CVAR_NOFLAGS);
