@@ -1,0 +1,282 @@
+{
+	"sky" "unit1_"
+	"sounds" "65"
+	"nextmap" "q64/dm10"
+	"message" "Empty Space"
+	"mass" "993"
+	"rgba" "4928512"
+	"classname" "worldspawn"
+}
+{
+	"origin" "616 168 24"
+	"classname" "ammo_slugs"
+}
+{
+	"origin" "544 -736 32"
+	"classname" "ammo_rockets"
+}
+{
+	"origin" "736 -864 88"
+	"classname" "ammo_bullets"
+}
+{
+	"origin" "-352 -1048 24"
+	"classname" "ammo_shells"
+}
+{
+	"origin" "-32 -736 24"
+	"classname" "ammo_grenades"
+}
+{
+	"origin" "-48 -32 24"
+	"classname" "ammo_cells"
+}
+{
+	"spawnflags" "2048"
+	"targetname" "t181"
+	"origin" "60 238 56"
+	"classname" "target_changelevel"
+}
+{
+	"spawnflags" "2047"
+	"targetname" "t181"
+	"origin" "60 238 56"
+	"classname" "target_teleporter"
+}
+{
+	"target" "t181"
+	"model" "*1"
+	"angle" "90"
+	"classname" "func_button"
+}
+{
+	"lip" "32"
+	"spawnflags" "32"
+	"targetname" "t180"
+	"model" "*2"
+	"angle" "-2"
+	"classname" "func_door"
+}
+{
+	"target" "t180"
+	"model" "*3"
+	"angle" "180"
+	"classname" "func_button"
+}
+{
+	"model" "*4"
+	"classname" "func_wall"
+}
+{
+	"origin" "800 -352 24"
+	"angle" "225"
+	"classname" "info_player_deathmatch"
+}
+{
+	"origin" "-416 -288 24"
+	"angle" "315"
+	"classname" "info_player_deathmatch"
+}
+{
+	"targetname" "b1"
+	"origin" "-64 -704 308"
+	"classname" "info_notnull"
+}
+{
+	"sounds" "78"
+	"pathtarget" "b1"
+	"origin" "384 -256 24"
+	"classname" "target_camera"
+}
+{
+	"origin" "256 -384 40"
+	"classname" "item_health_mega"
+}
+{
+	"origin" "352 160 32"
+	"angle" "270"
+	"classname" "info_player_team1"
+}
+{
+	"origin" "-224 -928 32"
+	"angle" "270"
+	"classname" "info_player_team2"
+}
+{
+	"origin" "-288 -864 32"
+	"angle" "180"
+	"classname" "info_player_team2"
+}
+{
+	"origin" "-288 -928 32"
+	"classname" "item_flag_team2"
+}
+{
+	"origin" "416 88 32"
+	"classname" "item_flag_team1"
+}
+{
+	"origin" "-96 -32 24"
+	"classname" "weapon_hyperblaster"
+}
+{
+	"origin" "800 -864 88"
+	"classname" "weapon_chaingun"
+}
+{
+	"origin" "-408 -1048 24"
+	"classname" "weapon_supershotgun"
+}
+{
+	"origin" "-96 -736 24"
+	"classname" "weapon_grenadelauncher"
+}
+{
+	"team" "dmitem"
+	"origin" "-64 128 152"
+	"classname" "item_invulnerability"
+}
+{
+	"team" "dmitem"
+	"origin" "-64 128 152"
+	"classname" "item_invisibility"
+}
+{
+	"team" "dmitem"
+	"origin" "-64 128 152"
+	"classname" "item_armor_body"
+}
+{
+	"team" "dmitem"
+	"origin" "-64 128 152"
+	"classname" "item_quad"
+}
+{
+	"origin" "576 128 24"
+	"classname" "weapon_railgun"
+}
+{
+	"origin" "448 -576 96"
+	"classname" "weapon_rocketlauncher"
+}
+{
+	"origin" "64 -192 96"
+	"classname" "weapon_bfg"
+}
+{
+	"model" "*5"
+	"classname" "func_wall"
+}
+{
+	"origin" "360 -1064 24"
+	"angle" "135"
+	"classname" "info_player_deathmatch"
+}
+{
+	"origin" "88 128 24"
+	"classname" "info_player_start"
+}
+{
+	"origin" "0 0 40"
+	"angle" "270"
+	"classname" "info_player_start"
+}
+{
+	"origin" "32 160 24"
+	"angle" "315"
+	"classname" "info_player_deathmatch"
+}
+{
+	"model" "*6"
+	"classname" "func_wall"
+}
+{
+	"model" "*7"
+	"classname" "func_wall"
+}
+{
+	"model" "*8"
+	"classname" "func_wall"
+}
+{
+	"model" "*9"
+	"classname" "func_wall"
+}
+{
+	"model" "*10"
+	"classname" "func_wall"
+}
+{
+	"model" "*11"
+	"classname" "func_wall"
+}
+{
+	"model" "*12"
+	"classname" "func_wall"
+}
+{
+	"model" "*13"
+	"classname" "func_wall"
+}
+{
+	"model" "*14"
+	"classname" "func_wall"
+}
+{
+	"model" "*15"
+	"classname" "func_wall"
+}
+{
+	"model" "*16"
+	"classname" "func_wall"
+}
+{
+	"model" "*17"
+	"classname" "func_wall"
+}
+{
+	"model" "*18"
+	"classname" "func_wall"
+}
+{
+	"model" "*19"
+	"classname" "func_wall"
+}
+{
+	"model" "*20"
+	"classname" "func_wall"
+}
+{
+	"origin" "-288 -800 32"
+	"angle" "180"
+	"classname" "info_player_team2"
+}
+{
+	"origin" "-160 -928 32"
+	"angle" "270"
+	"classname" "info_player_team2"
+}
+{
+	"origin" "416 160 32"
+	"angle" "270"
+	"classname" "info_player_team1"
+}
+{
+	"origin" "608 32 32"
+	"angle" "180"
+	"classname" "info_player_team1"
+}
+{
+	"origin" "608 -32 32"
+	"angle" "180"
+	"classname" "info_player_team1"
+}
+{
+	"model" "*21"
+	"classname" "func_wall"
+}
+{
+	"origin" "384 -512 144"
+	"angle" "135"
+	"classname" "info_player_intermission"
+}

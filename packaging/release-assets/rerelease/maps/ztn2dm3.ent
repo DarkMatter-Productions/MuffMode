@@ -1,0 +1,542 @@
+{
+"skyrotate" "0.05"
+"skyaxis" "1 0 1"
+"sky" "space1"
+"gravity" "800"
+"sounds" "10"
+"message" "The Rage"
+"author" "Sten 'ztn' Uusvali"
+"classname" "worldspawn"
+"fog_density" ".02"
+"heightfog_density" ".00015"
+"heightfog_end_dist" "-768"
+"heightfog_start_dist" "-64"
+"heightfog_start_color" "0.694118 0.662745 0.305882"
+"heightfog_falloff" ".035"
+"heightfog_end_color" "0.329412 0.309804 0.227451"
+"fog_color" "0.486275 0.454902 0.305882"
+"fog_sky_factor" ".1"
+}
+{
+"origin" "-32 -432 288"
+"angle" "70"
+"classname" "info_player_start"
+}
+{
+"model" "*1"
+"_minlight" "0.1"
+"height" "192"
+"accel" "500"
+"lip" "0"
+"speed" "200"
+"spawnflags" "1"
+"angle" "-1"
+"classname" "func_plat"
+}
+{
+"origin" "-160 200 368"
+"target" "cl1"
+"_color" "1.000 0.902 0.745"
+"light" "700"
+"classname" "light"
+}
+{
+"origin" "-32 200 368"
+"_cone" "10"
+"style" "0"
+"_color" "1.000 0.902 0.745"
+"light" "700"
+"target" "cl2"
+"classname" "light"
+}
+{
+"origin" "-160 200 344"
+"targetname" "cl1"
+"classname" "info_null"
+}
+{
+"origin" "-32 200 344"
+"targetname" "cl2"
+"classname" "info_null"
+}
+{
+"origin" "-248 -160 24"
+"targetname" "cl3"
+"classname" "info_null"
+}
+{
+"origin" "-248 -32 24"
+"targetname" "cl4"
+"classname" "info_null"
+}
+{
+"origin" "-248 -32 8"
+"_cone" "8"
+"style" "0"
+"_color" "1.000 0.902 0.745"
+"light" "1000"
+"target" "cl4"
+"classname" "light"
+}
+{
+"origin" "-248 -160 8"
+"_cone" "8"
+"style" "0"
+"_color" "1.000 0.902 0.745"
+"light" "1000"
+"target" "cl3"
+"classname" "light"
+}
+{
+"origin" "328 -160 368"
+"target" "cl5"
+"_color" "1.000 0.902 0.745"
+"light" "700"
+"classname" "light"
+}
+{
+"origin" "328 -160 344"
+"targetname" "cl5"
+"classname" "info_null"
+}
+{
+"origin" "328 -288 368"
+"_cone" "10"
+"style" "0"
+"_color" "1.000 0.902 0.745"
+"light" "700"
+"target" "cl6"
+"classname" "light"
+}
+{
+"origin" "328 -288 344"
+"targetname" "cl6"
+"classname" "info_null"
+}
+{
+"origin" "-608 264 8"
+"_cone" "6"
+"style" "0"
+"_color" "1.000 0.902 0.745"
+"light" "1500"
+"target" "wl2"
+"classname" "light"
+}
+{
+"origin" "-480 264 8"
+"_cone" "6"
+"style" "0"
+"_color" "1.000 0.902 0.745"
+"light" "1500"
+"target" "wl1"
+"classname" "light"
+}
+{
+"origin" "-608 264 24"
+"targetname" "wl2"
+"classname" "info_null"
+}
+{
+"origin" "-480 264 24"
+"targetname" "wl1"
+"classname" "info_null"
+}
+{
+"model" "*2"
+"_minlight" "0.1"
+"height" "192"
+"accel" "500"
+"lip" "0"
+"speed" "200"
+"spawnflags" "1"
+"angle" "-1"
+"classname" "func_plat"
+}
+{
+"origin" "-440 384 8"
+"_cone" "15"
+"style" "0"
+"_color" "1.000 0.902 0.741"
+"light" "1000"
+"target" "wl4"
+"classname" "light"
+}
+{
+"origin" "-440 576 8"
+"_cone" "15"
+"style" "0"
+"_color" "1.000 0.902 0.741"
+"light" "1000"
+"target" "wl3"
+"classname" "light"
+}
+{
+"origin" "-440 576 24"
+"targetname" "wl3"
+"classname" "info_null"
+}
+{
+"origin" "-440 384 24"
+"targetname" "wl4"
+"classname" "info_null"
+}
+{
+"origin" "-976 848 368"
+"light" "180"
+"_color" "1.000 0.824 0.651"
+"classname" "light"
+}
+{
+"origin" "-1024 576 320"
+"light" "150"
+"_color" "1.000 0.824 0.651"
+"classname" "light"
+}
+{
+"origin" "-1024 320 320"
+"light" "150"
+"_color" "1.000 0.824 0.651"
+"classname" "light"
+}
+{
+"origin" "-736 248 184"
+"angle" "90"
+"classname" "misc_banner"
+}
+{
+"origin" "-64 -256 272"
+"classname" "weapon_supershotgun"
+}
+{
+"origin" "-112 -368 272"
+"classname" "ammo_shells"
+}
+{
+"origin" "-112 -336 272"
+"classname" "ammo_shells"
+}
+{
+"origin" "768 144 208"
+"classname" "item_armor_body"
+}
+{
+"origin" "-944 448 80"
+"classname" "weapon_supershotgun"
+}
+{
+"origin" "-1008 560 80"
+"classname" "ammo_shells"
+}
+{
+"origin" "-1008 528 80"
+"classname" "ammo_shells"
+}
+{
+"origin" "-368 384 336"
+"classname" "item_health_mega"
+"angle" "180"
+}
+{
+"origin" "-688 280 144"
+"classname" "weapon_railgun"
+}
+{
+"origin" "-544 -96 16"
+"classname" "item_pack"
+}
+{
+"origin" "-784 280 144"
+"classname" "ammo_slugs"
+}
+{
+"origin" "-416 576 336"
+"classname" "weapon_grenadelauncher"
+}
+{
+"origin" "-368 560 336"
+"classname" "ammo_grenades"
+}
+{
+"origin" "-368 592 336"
+"classname" "ammo_grenades"
+}
+{
+"origin" "352 -544 78"
+"angle" "105"
+"classname" "info_player_deathmatch"
+}
+{
+"origin" "64 -352 80"
+"classname" "ammo_rockets"
+}
+{
+"origin" "512 -128 48"
+"classname" "item_adrenaline"
+}
+{
+"origin" "64 -304 80"
+"classname" "weapon_rocketlauncher"
+}
+{
+"origin" "384 304 144"
+"classname" "weapon_chaingun"
+}
+{
+"origin" "96 352 142"
+"angle" "280"
+"classname" "info_player_deathmatch"
+}
+{
+"origin" "304 -160 14"
+"angle" "215"
+"classname" "info_player_deathmatch"
+}
+{
+"origin" "416 -512 270"
+"angle" "180"
+"classname" "info_player_deathmatch"
+}
+{
+"origin" "-992 800 78"
+"angle" "340"
+"classname" "info_player_deathmatch"
+}
+{
+"origin" "-288 864 334"
+"angle" "225"
+"classname" "info_player_deathmatch"
+}
+{
+"origin" "-784 352 14"
+"angle" "55"
+"classname" "info_player_deathmatch"
+}
+{
+"origin" "-816 592 16"
+"classname" "item_health_small"
+}
+{
+"origin" "-1024 624 272"
+"classname" "item_health_large"
+}
+{
+"origin" "400 -48 144"
+"classname" "item_health"
+}
+{
+"origin" "432 -48 144"
+"classname" "item_health"
+}
+{
+"origin" "-16 -560 272"
+"classname" "item_health_small"
+}
+{
+"origin" "-48 -560 272"
+"classname" "item_health_small"
+}
+{
+"origin" "-80 -560 272"
+"classname" "item_health_small"
+}
+{
+"origin" "-112 -560 272"
+"classname" "item_health_small"
+}
+{
+"origin" "-320 256 80"
+"classname" "item_armor_shard"
+}
+{
+"origin" "-320 320 80"
+"classname" "item_armor_shard"
+}
+{
+"origin" "-320 384 80"
+"classname" "item_armor_shard"
+}
+{
+"origin" "-320 448 80"
+"classname" "item_armor_shard"
+}
+{
+"origin" "-320 512 80"
+"classname" "item_armor_shard"
+}
+{
+"origin" "104 -560 272"
+"classname" "ammo_grenades"
+}
+{
+"origin" "152 -560 272"
+"classname" "ammo_grenades"
+}
+{
+"origin" "352 368 144"
+"classname" "ammo_bullets"
+}
+{
+"origin" "416 368 144"
+"classname" "ammo_bullets"
+}
+{
+"origin" "384 368 144"
+"classname" "ammo_bullets"
+}
+{
+"origin" "-80 -384 80"
+"classname" "item_armor_combat"
+}
+{
+"origin" "-816 560 16"
+"classname" "item_health_small"
+}
+{
+"origin" "-640 848 80"
+"classname" "item_armor_jacket"
+}
+{
+"origin" "480 -48 144"
+"classname" "ammo_slugs"
+}
+{
+"origin" "240 -16 16"
+"classname" "item_health_small"
+}
+{
+"origin" "208 -16 16"
+"classname" "item_health_small"
+}
+{
+"origin" "176 -16 16"
+"classname" "item_health_small"
+}
+{
+"origin" "144 -16 16"
+"classname" "item_health_small"
+}
+{
+"origin" "-304 576 336"
+"classname" "item_armor_combat"
+}
+{
+"origin" "-768 624 16"
+"classname" "ammo_bullets"
+}
+{
+"origin" "-800 624 16"
+"classname" "ammo_rockets"
+}
+{
+"origin" "-816 528 16"
+"classname" "item_health_small"
+}
+{
+"origin" "-608 448 448"
+"volume" "0.8"
+"attenuation" "3"
+"noise" "world/wind2.wav"
+"spawnflags" "1"
+"classname" "target_speaker"
+}
+{
+"origin" "-288 384 432"
+"volume" "0.7"
+"attenuation" "3"
+"noise" "world/amb2.wav"
+"spawnflags" "1"
+"classname" "target_speaker"
+}
+{
+"origin" "-592 448 608"
+"pausetime" "0"
+"delay" "10"
+"random" "15"
+"wait" "45"
+"target" "btl1"
+"spawnflags" "1"
+"classname" "func_timer"
+}
+{
+"origin" "192 -96 384"
+"volume" "0.8"
+"attenuation" "3"
+"noise" "world/wind2.wav"
+"spawnflags" "1"
+"classname" "target_speaker"
+}
+{
+"origin" "512 -192 288"
+"volume" "0.7"
+"attenuation" "3"
+"noise" "world/amb2.wav"
+"spawnflags" "1"
+"classname" "target_speaker"
+}
+{
+"origin" "208 80 416"
+"volume" "0.9"
+"attenuation" "3"
+"noise" "world/amb16.wav"
+"spawnflags" "1"
+"classname" "target_speaker"
+}
+{
+"origin" "-320 432 208"
+"volume" "0.7"
+"attenuation" "3"
+"noise" "world/amb2.wav"
+"spawnflags" "1"
+"classname" "target_speaker"
+}
+{
+"origin" "80 768 432"
+"volume" "0.7"
+"attenuation" "3"
+"noise" "world/amb2.wav"
+"spawnflags" "1"
+"classname" "target_speaker"
+}
+{
+"model" "*3"
+"_minlight" "0"
+"classname" "func_wall"
+}
+{
+"origin" "-176 128 352"
+"angles" "25 320 0"
+"classname" "info_player_intermission"
+}
+{
+"origin" "-800 608 80"
+"angles" "340 315 0"
+"classname" "info_player_intermission"
+}
+{
+"origin" "-608 448 608"
+"noise" "world/battle3.wav"
+"volume" "0.5"
+"attenuation" "-1"
+"targetname" "btl1"
+"classname" "target_speaker"
+}
+{
+"model" "*4"
+"message" "My god! It's full of stars!"
+"delay" "0"
+"sounds" "1"
+"classname" "trigger_once"
+}
+{
+"origin" "-464 608 14"
+"angle" "270"
+"classname" "info_player_deathmatch"
+}
+{
+"model" "*5"
+"classname" "func_wall"
+}
+{
+"model" "*6"
+"classname" "func_wall"
+}

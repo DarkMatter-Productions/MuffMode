@@ -1,0 +1,270 @@
+{
+"skyrotate" "0"
+"skyaxis" "0"
+"sounds" "0"
+"gravity" "800"
+"message" "Cunning…Plan"
+"classname" "worldspawn"
+}
+{
+"model" "*1"
+"height" "224"
+"accel" "50"
+"lip" "0"
+"speed" "300"
+"wait" "0.2"
+"delay" "0.2"
+"classname" "func_plat"
+}
+{
+"origin" "64 -512 96"
+"_color" "100 100 200"
+"_cone" "10"
+"style" "0"
+"light" "200"
+"classname" "light"
+}
+{
+"origin" "192 -512 96"
+"_color" "100 100 200"
+"_cone" "10"
+"style" "0"
+"light" "200"
+"classname" "light"
+}
+{
+"model" "*2"
+"height" "256"
+"accel" "50"
+"lip" "0"
+"speed" "300"
+"wait" "0.2"
+"delay" "0.2"
+"classname" "func_plat"
+}
+{
+"origin" "-416 -512 32"
+"_color" "255 255 255"
+"_cone" "10"
+"style" "0"
+"light" "150"
+"classname" "light"
+}
+{
+"origin" "768 0 0"
+"light" "150"
+"classname" "light"
+}
+{
+"origin" "992 -128 -16"
+"classname" "weapon_bfg"
+}
+{
+"origin" "320 128 176"
+"classname" "weapon_chaingun"
+}
+{
+"origin" "-256 448 80"
+"classname" "item_armor_body"
+}
+{
+"origin" "416 -64 -80"
+"classname" "weapon_rocketlauncher"
+}
+{
+"origin" "32 32 80"
+"classname" "weapon_supershotgun"
+}
+{
+"origin" "192 -736 16"
+"classname" "weapon_grenadelauncher"
+}
+{
+"origin" "192 -832 256"
+"classname" "weapon_railgun"
+}
+{
+"origin" "-160 -512 240"
+"classname" "item_armor_combat"
+}
+{
+"origin" "64 -128 64"
+"classname" "info_player_start"
+}
+{
+"origin" "96 96 -96"
+"classname" "item_health_large"
+}
+{
+"origin" "96 64 -96"
+"classname" "item_health"
+}
+{
+"origin" "-448 -928 0"
+"classname" "item_health"
+}
+{
+"origin" "-416 -928 0"
+"classname" "item_health_large"
+}
+{
+"origin" "736 -224 224"
+"classname" "item_health"
+}
+{
+"origin" "768 -224 224"
+"classname" "item_health"
+}
+{
+"origin" "400 128 -32"
+"classname" "ammo_slugs"
+}
+{
+"origin" "432 128 -32"
+"classname" "ammo_slugs"
+}
+{
+"origin" "416 -304 -96"
+"classname" "ammo_bullets"
+}
+{
+"origin" "384 -304 -96"
+"classname" "ammo_shells"
+}
+{
+"origin" "-128 -288 64"
+"classname" "ammo_bullets"
+}
+{
+"origin" "-128 -256 64"
+"classname" "ammo_bullets"
+}
+{
+"origin" "-128 -128 64"
+"classname" "ammo_cells"
+}
+{
+"origin" "64 -352 46"
+"angle" "90"
+"classname" "info_player_deathmatch"
+}
+{
+"origin" "416 -224 -114"
+"angle" "140"
+"classname" "info_player_deathmatch"
+}
+{
+"origin" "544 0 206"
+"classname" "info_player_deathmatch"
+}
+{
+"origin" "416 -544 206"
+"angle" "180"
+"classname" "info_player_deathmatch"
+}
+{
+"origin" "352 -896 46"
+"angle" "140"
+"classname" "info_player_deathmatch"
+}
+{
+"origin" "-480 -800 -18"
+"classname" "info_player_deathmatch"
+}
+{
+"origin" "544 288 -50"
+"angle" "300"
+"classname" "info_player_deathmatch"
+}
+{
+"origin" "560 320 192"
+"classname" "ammo_shells"
+}
+{
+"origin" "592 320 192"
+"classname" "ammo_shells"
+}
+{
+"origin" "608 -384 224"
+"classname" "ammo_rockets"
+}
+{
+"origin" "512 96 224"
+"classname" "ammo_grenades"
+}
+{
+"origin" "512 64 224"
+"classname" "ammo_grenades"
+}
+{
+"origin" "512 -96 224"
+"classname" "ammo_grenades"
+}
+{
+"origin" "512 -64 224"
+"classname" "ammo_grenades"
+}
+{
+"origin" "1072 288 -64"
+"classname" "ammo_bullets"
+}
+{
+"origin" "1072 256 -64"
+"classname" "ammo_bullets"
+}
+{
+"origin" "1056 -400 0"
+"classname" "ammo_cells"
+}
+{
+"origin" "208 -800 0"
+"classname" "ammo_rockets"
+}
+{
+"origin" "176 -800 0"
+"classname" "ammo_rockets"
+}
+{
+"origin" "-304 -752 -32"
+"classname" "ammo_grenades"
+}
+{
+"origin" "-304 -672 -32"
+"classname" "ammo_grenades"
+}
+{
+"origin" "32 -448 224"
+"classname" "ammo_shells"
+}
+{
+"origin" "0 -448 224"
+"classname" "ammo_shells"
+}
+{
+"origin" "704 0 0"
+"attenuation" "3"
+"noise" "world/amb21.wav"
+"spawnflags" "1"
+"classname" "target_speaker"
+}
+{
+"origin" "288 -128 352"
+"attenuation" "2"
+"noise" "world/battle2.wav"
+"spawnflags" "1"
+"classname" "target_speaker"
+}
+{
+"origin" "128 -512 96"
+"attenuation" "3"
+"noise" "world/comp_hum2.wav"
+"spawnflags" "1"
+"classname" "target_speaker"
+}
+{
+"origin" "-416 -576 32"
+"attenuation" "3"
+"noise" "world/amb21.wav"
+"spawnflags" "1"
+"classname" "target_speaker"
+}
