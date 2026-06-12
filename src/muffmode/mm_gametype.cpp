@@ -5,6 +5,7 @@
 #include "muffmode/mm_debug.h"
 #include "muffmode/mm_gametype.h"
 #include "muffmode/mm_maps.h"
+#include "muffmode/mm_team.h"
 
 #include <cstdio>
 

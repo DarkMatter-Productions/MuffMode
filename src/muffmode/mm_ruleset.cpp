@@ -52,3 +52,26 @@ void MM_ClampEntityHealthArmor(gentity_t *ent)
 			ent->client->pers.inventory[aid] = MM_RULESET_ARMOR_CAP;
 	}
 }
+
+// [MuffMode] Ruleset-specific falling damage tuning (moved from p_client.cpp).
+// Q3A uses higher medium/far thresholds and fixed 5/10 damage values.
+int MM_RulesetFallDamageMedMin()
+{
+	return RS(RS_Q3A) ? 40 : 30;
+}
+
+int MM_RulesetFallDamageFarMin()
+{
+	return RS(RS_Q3A) ? 61 : 55;
+}
+
+int MM_RulesetFallDamage(bool far_fall, float delta)
+{
+	if (RS(RS_Q3A))
+		return far_fall ? 10 : 5;
+
+	int damage = (int)((delta - 30) / 2);
+	if (damage < 1)
+		damage = 1;
+	return damage;
+}

@@ -4,6 +4,8 @@
 
 #include "g_local.h"
 #include "g_debug_log.h"
+// [MuffMode] Team management lives in muffmode/mm_team
+#include "muffmode/mm_team.h"
 #include <cerrno>
 #include <ctime>
 
@@ -1011,18 +1013,6 @@ gametype_t GT_IndexFromString(const char *in) {
 			return (gametype_t)i;
 	}
 	return gametype_t::GT_NONE;
-}
-
-void BroadcastReadyReminderMessage() {
-	for (auto ec : active_players()) {
-		if (!ClientIsPlaying(ec->client))
-			continue;
-		if (ec->client->sess.is_a_bot)
-			continue;
-		if (ec->client->resp.ready)
-			continue;
-		gi.LocCenter_Print(ec, "%bind:+wheel2:Use Compass to toggle your ready status.%MATCH IS IN WARMUP\nYou are NOT ready.");
-	}
 }
 
 void TeleportPlayerToRandomSpawnPoint(gentity_t *ent, bool fx) {

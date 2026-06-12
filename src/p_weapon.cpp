@@ -4,6 +4,7 @@
 
 #include "g_local.h"
 #include "monsters/m_player.h"
+// [MuffMode] Per-ruleset weapon tuning hooks (MM_Ruleset_*)
 #include "muffmode/mm_ruleset_weapons.h"
 
 bool is_quad;

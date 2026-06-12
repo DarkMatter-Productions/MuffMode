@@ -3,6 +3,7 @@
 #include "g_local.h"
 #include "bots/bot_includes.h"
 #include "monsters/m_player.h"	//doppelganger
+#include "muffmode/mm_captain.h"
 #include "muffmode/mm_items_rules.h"
 #include "muffmode/mm_ruleset.h"
 
@@ -1111,73 +1112,6 @@ void Tech_ApplyTimeAccelSound(gentity_t *ent) {
 		ent->client->tech_sound_time = level.time + 1_sec;
 		gi.sound(ent, CHAN_AUX, gi.soundindex("ctf/tech3.wav"), volume, ATTN_NORM, 0);
 	}
-}
-
-void Tech_ApplyAutoDoc(gentity_t *ent) {
-	bool		noise = false;
-	gclient_t	*cl;
-	int			index;
-	float		volume = 1.0;
-	bool		mod = (g_instagib->integer || GT(GT_INSTAGIB)) || (g_nadefest->integer || GT(GT_NADEFEST));
-	bool		no_health = mod || GTF(GTF_ARENA) || g_no_health->integer;
-	int			max = g_vampiric_damage->integer ? ceil(g_vampiric_health_max->integer/2) : mod ? 100 : 150;
-
-	cl = ent->client;
-	if (!cl)
-		return;
-
-	if (ent->health <= 0 || ent->client->eliminated)
-		return;
-
-	if (cl->silencer_shots)
-		volume = 0.2f;
-
-	if (mod && !cl->tech_regen_time) {
-		cl->tech_regen_time = level.time;
-		return;
-	}
-
-	if (!(cl->pers.inventory[IT_TECH_AUTODOC] || mod))
-		return;
-
-	if (cl->tech_regen_time < level.time) {
-		bool mm = !!(RS(RS_MM));
-		gtime_t delay = mm ? 1_sec : 500_ms;
-
-		cl->tech_regen_time = level.time;
-		if (!g_vampiric_damage->integer) {
-			if (ent->health < max) {
-				ent->health += 5;
-				if (ent->health > max)
-					ent->health = max;
-				cl->tech_regen_time += delay;
-				noise = true;
-			}
-		}
-		//muff: don't regen armor at the same time as health
-		if (!no_health && (!mm || (!noise && mm))) {
-			index = ArmorIndex(ent);
-			if (index && cl->pers.inventory[index] < max) {
-				cl->pers.inventory[index] += g_vampiric_damage->integer ? 10 : 5;
-				if (cl->pers.inventory[index] > max)
-					cl->pers.inventory[index] = max;
-				cl->tech_regen_time += delay;
-				noise = true;
-			}
-		}
-	}
-	if (noise && cl->tech_sound_time < level.time) {
-		cl->tech_sound_time = level.time + 1_sec;
-		gi.sound(ent, CHAN_AUX, gi.soundindex("ctf/tech4.wav"), volume, ATTN_NORM, 0);
-	}
-}
-
-bool Tech_HasRegeneration(gentity_t *ent) {
-	if (!ent->client) return false;
-	if (ent->client->pers.inventory[IT_TECH_AUTODOC]) return true;
-	if (g_instagib->integer || GT(GT_INSTAGIB)) return true;
-	if (g_nadefest->integer || GT(GT_NADEFEST)) return true;
-	return false;
 }
 
 // ===============================================
@@ -3211,8 +3145,9 @@ void Compass_Update(gentity_t *ent, bool first) {
 }
 
 static void Use_Compass(gentity_t *ent, gitem_t *inv) {
+	// [MuffMode] Compass toggles ready status in deathmatch
 	if (deathmatch->integer) {
-		Cmd_ReadyUp_f(ent);
+		MM_CmdReadyUp(ent);
 		return;
 	}
 	if (!level.valid_poi) {

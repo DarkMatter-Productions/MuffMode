@@ -1,6 +1,10 @@
 // Copyright (c) ZeniMax Media Inc.
 // Licensed under the GNU General Public License 2.0.
 #include "g_local.h"
+#include "muffmode/mm_captain.h"
+#include "muffmode/mm_match.h"
+#include "muffmode/mm_menu.h"
+#include "muffmode/mm_team.h"
 #include "muffmode/mm_vote_menu.h"
 #include "monsters/m_player.h"
 
@@ -417,7 +421,7 @@ void G_Menu_HostInfo(gentity_t *ent, menu_hnd_t *p);
 void G_Menu_ServerInfo(gentity_t *ent, menu_hnd_t *p);
 
 static void G_Menu_ReadyUp(gentity_t *ent, menu_hnd_t *p) {
-	Cmd_ReadyUp_f(ent);
+	MM_CmdReadyUp(ent);
 }
 
 static const int jmenu_hostname = 0;
