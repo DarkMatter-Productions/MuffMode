@@ -13,6 +13,7 @@
 #include "mm_horde.h"
 #include "mm_items_rules.h"
 #include "mm_maps.h"
+#include "mm_match.h"
 #include "mm_menu.h"
 #include "mm_motd.h"
 #include "mm_pconfig.h"

@@ -11,7 +11,7 @@
 constexpr const char *GAMEVERSION = "baseq2";
 
 constexpr const char *GAMEMOD_TITLE = "Muff Mode";
-constexpr const char *GAMEMOD_VERSION = "0.33.7 BETA";
+constexpr const char *GAMEMOD_VERSION = "0.33.8 BETA";
 
 //==================================================================
 
@@ -2543,7 +2543,6 @@ void G_AssignPlayerSkin(gentity_t *ent, const char *s);
 
 void TransitionVoteState(VoteState new_state);
 void ClearVote();
-void TimeoutEnd();
 
 //
 // g_items.cpp
@@ -3129,10 +3128,7 @@ void		G_Impact(gentity_t *e1, const trace_t &trace);
 //
 void SaveClientData();
 void FetchClientEntData(gentity_t *ent);
-void Match_Start();
 void Match_End();
-void Match_Reset();
-void Round_End();
 void SetIntermissionPoint(void);
 void FindIntermissionPoint(void);
 void CalculateRanks();

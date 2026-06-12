@@ -144,6 +144,9 @@
     <ClInclude Include="muffmode\mm_maps.h">
       <Filter>muffmode</Filter>
     </ClInclude>
+    <ClInclude Include="muffmode\mm_match.h">
+      <Filter>muffmode</Filter>
+    </ClInclude>
     <ClInclude Include="muffmode\mm_menu.h">
       <Filter>muffmode</Filter>
     </ClInclude>
@@ -325,6 +328,9 @@
       <Filter>muffmode</Filter>
     </ClCompile>
     <ClCompile Include="muffmode\mm_maps.cpp">
+      <Filter>muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="muffmode\mm_match.cpp">
       <Filter>muffmode</Filter>
     </ClCompile>
     <ClCompile Include="muffmode\mm_menu.cpp">

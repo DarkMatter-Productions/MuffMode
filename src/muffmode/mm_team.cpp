@@ -4,6 +4,7 @@
 #include "g_local.h"
 #include "muffmode/mm_captain.h"
 #include "muffmode/mm_ghost.h"
+#include "muffmode/mm_match.h"
 #include "muffmode/mm_team.h"
 #include "muffmode/mm_vote.h"
 

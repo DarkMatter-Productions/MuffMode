@@ -2,6 +2,7 @@
 // Licensed under the GNU General Public License 2.0.
 #include "g_local.h"
 #include "muffmode/mm_captain.h"
+#include "muffmode/mm_match.h"
 #include "muffmode/mm_menu.h"
 #include "muffmode/mm_team.h"
 #include "muffmode/mm_vote_menu.h"

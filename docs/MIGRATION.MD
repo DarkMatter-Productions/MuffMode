@@ -379,6 +379,12 @@ Validated against vanilla Q2RE source (`q2re-src/`): every Phase 7 target is Muf
    - Command bodies became `MM_CmdTeam()`, `MM_CmdSetTeam()`, `MM_CmdShuffle()`, `MM_CmdBalanceTeams()`; wrappers stay in the command table.
    - `StopFollowing` intentionally stays in `g_cmds.cpp` (chase/spectator glue, not team logic).
 
+6. **R6 — Match/round state machine extracted (complete)**
+   - Added `mm_match.h` / `mm_match.cpp` (~1,100 lines from `g_main.cpp` and `g_cmds.cpp`): `Match_Start`, `Match_Reset`, `Round_End` (vanilla adapter names) plus module-local `Round_StartNew`, `SetMatchID`, `CheckReady`, `CheckDMWarmupState`, `CheckDMRoundState`, `CheckDMCountdown`, `CheckDMMatchEndWarning`, and the world-reset helpers `Entities_Reset`, `Entities_ItemTeams_Reset`, `Monsters_KillAll` (their only callers were inside the moved block).
+   - `CheckDMEndFrame()` in `g_main.cpp` now calls one hook, `MM_Match_RunFrame()`, which preserves the exact warmup → round → countdown → end-warning order, then continues to the vanilla-retained `CheckDMExitRules()`.
+   - Timeout system moved from `g_cmds.cpp`: `TimeoutEnd()` (adapter name, ticked from `G_RunFrame_`) and `MM_CmdTimeOut()`/`MM_CmdTimeIn()` with command-table wrappers.
+   - Intermission/exit orchestration (`Match_End`, `QueueIntermission`, `CheckDMExitRules`, `CheckDMIntermissionExit`, `BeginIntermission`, `CalculateRanks`) intentionally stays in `g_main.cpp`: MuffMode-owned rewrites of vanilla `CheckDMRules`/`EndDMLevel`, retained as the highest-fan-in orchestration hub.
+
 ## MuffMode module map
 
 | Module | Responsibility |
@@ -392,6 +398,7 @@ Validated against vanilla Q2RE source (`q2re-src/`): every Phase 7 target is Muf
 | `mm_horde` | GT_HORDE wave spawning, tables, and kill scoring |
 | `mm_items_rules` | Item pickup, respawn, inhibit, autoswitch rules |
 | `mm_maps` | Map list, queue, shuffle, MyMap |
+| `mm_match` | Match/round state machine, warmup/countdown, entity resets, timeouts |
 | `mm_menu` | Join/team, admin, readyup, player stats, host/match info, chasecam menus |
 | `mm_motd` | Message-of-the-day load and commands |
 | `mm_pconfig` | Player config persistence and preference commands |

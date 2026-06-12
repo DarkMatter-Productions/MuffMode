@@ -162,6 +162,7 @@
     <ClInclude Include="muffmode\mm_horde.h" />
     <ClInclude Include="muffmode\mm_items_rules.h" />
     <ClInclude Include="muffmode\mm_maps.h" />
+    <ClInclude Include="muffmode\mm_match.h" />
     <ClInclude Include="muffmode\mm_menu.h" />
     <ClInclude Include="muffmode\mm_motd.h" />
     <ClInclude Include="muffmode\mm_pconfig.h" />
@@ -250,6 +251,7 @@
     <ClCompile Include="muffmode\mm_horde.cpp" />
     <ClCompile Include="muffmode\mm_items_rules.cpp" />
     <ClCompile Include="muffmode\mm_maps.cpp" />
+    <ClCompile Include="muffmode\mm_match.cpp" />
     <ClCompile Include="muffmode\mm_menu.cpp" />
     <ClCompile Include="muffmode\mm_motd.cpp" />
     <ClCompile Include="muffmode\mm_pconfig.cpp" />
