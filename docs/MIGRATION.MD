@@ -359,13 +359,17 @@ Validated against vanilla Q2RE source (`q2re-src/`): every Phase 7 target is Muf
    - Public surface: `G_Menu_Join_Open()` (callers: `g_chase.cpp`, `g_cmds.cpp`, `p_client.cpp`) and `G_Menu_ReturnToMain()` (used by `mm_vote_menu`); declarations moved from `g_local.h` to `mm_menu.h`. `mm_vote_menu.cpp` now includes `mm_menu.h` instead of a forward declaration.
    - `p_menu.cpp` (pmenu framework) intentionally stays at `src/` root: quasi-vanilla shared infrastructure (vanilla keeps the equivalent in `ctf/p_ctf_menu.cpp`), used by both vanilla files and MuffMode modules.
 
+2. **R2 — Duel scoreboard and forfeit extracted (complete)**
+   - Moved `DuelScoreboardMessage` from `p_hud.cpp` (static, single caller) to `MM_Duel_ScoreboardMessage()` in `mm_duel`; `DeathmatchScoreboardMessage` keeps a marked `GT(GT_DUEL)` hook.
+   - Moved `Cmd_Forfeit_f` body from `g_cmds.cpp` to `MM_Duel_CmdForfeit()`; the command-table wrapper stays in `g_cmds.cpp`.
+
 ## MuffMode module map
 
 | Module | Responsibility |
 |--------|----------------|
 | `mm_admin` | Admin commands (gametype, ruleset, setmap, doctor) |
 | `mm_debug` | Debug logging |
-| `mm_duel` | GT_DUEL queue and match-end score adjustment |
+| `mm_duel` | GT_DUEL queue, match-end score adjustment, scoreboard layout, forfeit |
 | `mm_gametype` | Gametype/ruleset orchestration and display names |
 | `mm_horde` | GT_HORDE wave spawning, tables, and kill scoring |
 | `mm_items_rules` | Item pickup, respawn, inhibit, autoswitch rules |

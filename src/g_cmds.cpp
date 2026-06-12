@@ -3,6 +3,7 @@
 #include "g_local.h"
 #include "g_debug_log.h"
 #include "muffmode/mm_admin.h"
+#include "muffmode/mm_duel.h"
 #include "muffmode/mm_maps.h"
 #include "muffmode/mm_menu.h"
 #include "muffmode/mm_motd.h"
@@ -1043,25 +1044,9 @@ static void Cmd_InvDrop_f(gentity_t *ent) {
 Cmd_Forfeit_f
 =================
 */
+// [MuffMode] Forfeit body lives in muffmode/mm_duel
 static void Cmd_Forfeit_f(gentity_t *ent) {
-	if (notGT(GT_DUEL)) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "Forfeit is only available in a duel.\n");
-		return;
-	}
-	if (level.match_state < matchst_t::MATCH_IN_PROGRESS) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "Forfeit is not available during warmup.\n");
-		return;
-	}
-	if (ent->client != &game.clients[level.sorted_clients[1]]) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "Forfeit is only available to the losing player.\n");
-		return;
-	}
-	if (!g_allow_forfeit->integer) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "Forfeits are not enabled on this server.\n");
-		return;
-	}
-
-	QueueIntermission(G_Fmt("{} forfeits the match.", ent->client->resp.netname).data(), true, false);
+	MM_Duel_CmdForfeit(ent);
 }
 
 /*
