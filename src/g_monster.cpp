@@ -2,6 +2,7 @@
 // Licensed under the GNU General Public License 2.0.
 #include "g_local.h"
 #include "bots/bot_includes.h"
+// [MuffMode] Horde kill scoring hook
 #include "muffmode/mm_horde.h"
 
 //

@@ -350,7 +350,7 @@ This document tracks migration progress from a monolithic fork style toward thin
 2. **Q3A health/armor decay**
    - Added `MM_RulesetQ3AHealthArmorDecay()` to `mm_ruleset`; `ClientTimerActions` in `p_client.cpp` calls it before clamp.
 
-### Phase 7 — remaining extraction (in progress)
+### Phase 7 — remaining extraction (complete)
 
 Validated against vanilla Q2RE source (`q2re-src/`): every Phase 7 target is MuffMode-only code with zero overlap in vanilla files. Vanilla itself keeps its menu framework and ghost system inside the `ctf/` mod folder, mirroring the `muffmode/` boundary.
 
@@ -391,6 +391,11 @@ Validated against vanilla Q2RE source (`q2re-src/`): every Phase 7 target is Muf
    - Admin match-control and session command bodies (`startmatch`, `endmatch`, `resetmatch`, `forcevote`, `map_restart`, `nextmap`, `admin`) moved from `g_cmds.cpp` to `mm_admin` as `MM_Cmd*()`; wrappers stay in the command table.
    - Horde round-win/exit snippets: already absorbed by R6 — remaining horde presence in `g_main.cpp` is thin `MM_Horde_*` gates inside the retained `CheckDMExitRules` plus cvar registration.
 
+8. **R8 — Closure: header audit, marker pass, doc corrections (complete)**
+   - `g_local.h` audit: no orphaned declarations for moved functions remain; the intentional surface is documented under "Permanent vanilla surface" below.
+   - Bounded `[MuffMode]` marker pass at hook boundaries: module include blocks (`g_spawn.cpp`, `p_weapon.cpp`, `g_monster.cpp`, `g_chase.cpp`, `p_view.cpp`, `g_utils.cpp`), the `InitGame` horde cvar group, and the `g_cmds.cpp` command table header. Per the marker policy, one-line gates are exempt.
+   - Rewrote the completion claim, adapter table, and permanent-surface list to match post-Phase-7 reality.
+
 ## MuffMode module map
 
 | Module | Responsibility |
@@ -427,9 +432,9 @@ Validated against vanilla Q2RE source (`q2re-src/`): every Phase 7 target is Muf
 
 ## Refactor Complete
 
-**Status:** Thin-vanilla refactor declared complete (Phases 1–6, Tier 1–2, Phase 5 header boundaries).
+**Status:** Thin-vanilla refactor complete — Phases 1–6, Tier 1–2, header boundaries, and Phase 7 (R1–R8 remaining extraction, validated against vanilla Q2RE source).
 
-Cohesive MuffMode feature bodies live in `src/muffmode/`. Remaining vanilla code is intentionally thin: match orchestration hubs, 1–3 line `GT()`/`RS()`/`GTF()` gates, shared types/state in `g_local.h`, and cvar registration in `InitGame`. Removing every gametype/ruleset conditional from vanilla files is explicitly **out of scope** (see [`THIN_VANILLA_PRINCIPLES.md`](THIN_VANILLA_PRINCIPLES.md)).
+Cohesive MuffMode feature bodies live in `src/muffmode/` (22 modules). Remaining vanilla code is intentionally thin: the intermission/exit orchestration hub in `g_main.cpp`, the command dispatch table with thin wrappers in `g_cmds.cpp`, 1–3 line `GT()`/`RS()`/`GTF()` gates, shared types/state in `g_local.h`, and cvar registration in `InitGame`. Removing every gametype/ruleset conditional from vanilla files is explicitly **out of scope** (see [`THIN_VANILLA_PRINCIPLES.md`](THIN_VANILLA_PRINCIPLES.md)).
 
 ### Vanilla adapter table
 
@@ -455,9 +460,22 @@ Cohesive MuffMode feature bodies live in `src/muffmode/`. Remaining vanilla code
 | Duel warmup/match hooks | `MM_Duel_*()` | `mm_duel` |
 | Horde spawn/wave hooks | `MM_Horde_*()` | `mm_horde` |
 | Item pickup/respawn/inhibit | `MM_*` item helpers | `mm_items_rules` |
+| AutoDoc regen | `Tech_ApplyAutoDoc()` / `Tech_HasRegeneration()` (adapter names) | `mm_items_rules` |
 | Spawn health/armor/loadout | `MM_ApplyStartingHealthArmor()` / `MM_ApplySpawnLoadout()` | `mm_spawn_loadout` |
 | Weapon ruleset tuning | `MM_Ruleset_*()` | `mm_ruleset_weapons` |
-| Health/armor caps + Q3A decay | `MM_Clamp*()` / `MM_RulesetQ3AHealthArmorDecay()` | `mm_ruleset` |
+| Health/armor caps + Q3A decay + fall damage | `MM_Clamp*()` / `MM_RulesetQ3AHealthArmorDecay()` / `MM_RulesetFallDamage*()` | `mm_ruleset` |
+| `G_Menu_Join_Open()` / `G_Menu_ReturnToMain()` | same (implemented in module) | `mm_menu` |
+| `Cmd_Ghost_f` / match-reset ghost codes | `MM_CmdGhost()` / `MM_Ghost_Assign()` / `MM_Ghost_DoAssign()` | `mm_ghost` |
+| Connect-time player config + pref commands (`id`, `timer`, `fm`, `announcer`, `kb`) | `MM_ClientInitPConfig()` / `MM_Cmd*()` | `mm_pconfig` |
+| `SetCaptain()` / `VacateCaptain()` / `ValidateCaptains()` / `ReadyAll()` / `UnReadyAll()` / `BroadcastReadyReminderMessage()` | same (adapter names) | `mm_captain` |
+| Ready/captain/lock commands + `Use_Compass` readyup | `MM_CmdReady*()` / `MM_CmdCaptain()` / `MM_CmdLockTeam()` etc. | `mm_captain` |
+| `SetTeam()` / `PickTeam()` / `TeamBalance()` / `TeamShuffle()` / `BroadcastTeamChange()` / `AllowClientTeamSwitch()` | same (adapter names) | `mm_team` |
+| Team commands (`team`, `setteam`, `shuffle`, `balance`) | `MM_CmdTeam()` / `MM_CmdSetTeam()` / `MM_CmdShuffle()` / `MM_CmdBalanceTeams()` | `mm_team` |
+| `CheckDMEndFrame` state machine tick | `MM_Match_RunFrame()` | `mm_match` |
+| `Match_Start()` / `Match_Reset()` / `Round_End()` / `TimeoutEnd()` | same (adapter names) | `mm_match` |
+| Timeout commands (`time-out`, `time-in`) | `MM_CmdTimeOut()` / `MM_CmdTimeIn()` | `mm_match` |
+| `DeathmatchScoreboardMessage` duel branch / `forfeit` | `MM_Duel_ScoreboardMessage()` / `MM_Duel_CmdForfeit()` | `mm_duel` |
+| Admin match-control/session commands (`startmatch`, `endmatch`, `resetmatch`, `forcevote`, `map_restart`, `nextmap`, `admin`) | `MM_Cmd*()` | `mm_admin` |
 
 ### Include policy
 
@@ -468,40 +486,27 @@ Cohesive MuffMode feature bodies live in `src/muffmode/`. Remaining vanilla code
 
 ### Permanent vanilla surface (intentional)
 
-- **`g_main.cpp`** — match warmup/round/exit state machines, `CalculateRanks`, `Match_End`, `InitGame` cvar registration (~25 MuffMode cvars).
-- **`g_cmds.cpp`** — command dispatch table; remaining admin/captain/ready/duel SetTeam bodies; thin wrappers for extracted commands.
-- **`g_local.h`** — `gametype_t`, `ruleset_t`, name/index tables, `VoteStateData`, map queue/MOTD/horde/duel embedded fields, adapter function names.
-- **`p_hud.cpp`** — gametype scoreboard layout (Phase 6H deferred).
-- **`g_combat.cpp`** — scattered gametype/ruleset damage gates (Phase 6G deferred).
+These are MuffMode-owned or MuffMode-modified pieces that deliberately stay in vanilla files; everything here was re-evaluated against vanilla Q2RE source during Phase 7.
+
+- **`g_main.cpp`** — intermission/exit orchestration (`Match_End`, `QueueIntermission`, `CheckDMExitRules`, `CheckDMIntermissionExit`, `BeginIntermission`, `CalculateRanks`): MuffMode rewrites of vanilla `CheckDMRules`/`EndDMLevel`, retained as the highest-fan-in orchestration hub, delegating specifics via `MM_*` hooks. Plus `InitGame` cvar registration (marked).
+- **`g_cmds.cpp`** — command dispatch table (marked) with thin `Cmd_*_f` wrappers; spectator follow system (`Cmd_Follow*`, `StopFollowing` — chase-cam glue); player listing/info commands.
+- **`g_local.h`** — `gametype_t`/`ruleset_t` enums and `GT`/`RS`/`GTF` macros, name/index tables, embedded state (`VoteStateData`, `ghost_t`/`level.ghosts[]`, `level.captain[]`/`level.locked[]`, map queue/MOTD/horde/duel fields), cvar externs, and pre-existing vanilla-named adapter declarations (`TransitionVoteState`, `ClearVote`, `GT_*`).
+- **`p_client.cpp`** — connect/spawn/die glue (`InitPlayerTeam`, `MoveClientToFreeCam`, elimination predicates, rampage messages): extracting would obscure control flow.
+- **`p_hud.cpp`** — teams/FFA scoreboard layouts and line-level stat gates (a future `mm_hud` is justified if HUD work is planned; `SetCrosshairIDView` and `TeamsScoreboardMessage` would go there).
+- **`p_menu.cpp`** — pmenu framework: quasi-vanilla shared infrastructure (vanilla keeps the equivalent in `ctf/p_ctf_menu.cpp`), used by vanilla and MuffMode modules alike.
+- **`g_combat.cpp`** — scattered 1–5 line gametype/ruleset damage gates.
 - **1–5 line `GT()`/`RS()`/`GTF()` gates** across gameplay files where extraction would obscure control flow.
 
-### Post-completion backlog (optional future slices)
+### Marker policy
 
-**Priority A — extend existing modules**
+- `// [MuffMode]` markers annotate **hook boundaries**: module include blocks in vanilla files, multi-line hook blocks, the `InitGame` MuffMode cvar groups, and the command table header.
+- One-line `GT()`/`RS()`/`GTF()` gates and individual `MM_*()` calls inside otherwise-vanilla functions are **exempt** — blanket annotation would be blame noise that makes upstream merges harder.
 
-| Target | ~Lines | Module |
-|--------|--------|--------|
-| Duel scoreboard + vote gate (`p_hud.cpp`) | ~210 | `mm_duel` |
-| AutoDoc RS_MM regen + health pickup glue (`g_items.cpp`) | ~110 | `mm_items_rules` |
-| Fall damage Q3A thresholds (`p_client.cpp`) | ~30 | `mm_ruleset` |
-| Horde round-win/exit snippets (`g_main.cpp`) | ~20 | `mm_horde` |
-| Remaining admin commands (`g_cmds.cpp`) | ~210 | `mm_admin` |
-| Duel SetTeam/forfeit/screenshot (`g_cmds.cpp`, `g_main.cpp`) | ~220 | `mm_duel` |
+### Remaining optional slices (low value, no current plans)
 
-**Priority B — new modules (defer unless actively developing those modes)**
-
-| Target | ~Lines | Module |
-|--------|--------|--------|
-| Match warmup/round/exit state machines | ~600+ | `mm_match` |
-| Captain/lock/ready-team commands | ~470 | `mm_captain` / `mm_match` |
-| Team scoreboard layout | ~250 | `mm_hud` |
-| Combat gametype/ruleset blocks | ~55 | `mm_combat_rules` |
-| Strike CTF round logic | ~20 | `mm_gametype` |
-
-**Priority C — optional structural tidy**
-
-- `mm_types.h` to break `mm_vote.h` ↔ `g_local.h` circular include
-- `MM_RegisterCvars()` to consolidate MuffMode cvar registration from `InitGame`
+- Team/FFA scoreboard layouts + crosshair ID (`p_hud.cpp`, ~320 lines) → new `mm_hud`, only if HUD work is planned.
+- Combat gametype/ruleset blocks (`g_combat.cpp`, ~55 lines of gates) → covered by the out-of-scope ruling.
+- `mm_types.h` to break `mm_vote.h` ↔ `g_local.h` circular include; `MM_RegisterCvars()` consolidation — cosmetic.
 
 ### Final smoke-test matrix
 

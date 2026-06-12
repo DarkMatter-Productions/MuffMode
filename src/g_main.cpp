@@ -426,6 +426,7 @@ static void InitGame() {
 
 	g_stopspeed = gi.cvar("g_stopspeed", "100", CVAR_NOFLAGS);
 
+	// [MuffMode] Horde mode cvars (logic lives in muffmode/mm_horde)
 	g_horde_starting_wave = gi.cvar("g_horde_starting_wave", "1", CVAR_SERVERINFO | CVAR_LATCH);
 	g_horde_points_base = gi.cvar("g_horde_points_base", "15", CVAR_NOFLAGS);
 	g_horde_points_per_wave = gi.cvar("g_horde_points_per_wave", "5", CVAR_NOFLAGS);

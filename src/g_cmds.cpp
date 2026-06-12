@@ -2064,6 +2064,8 @@ static void Cmd_Motd_f(gentity_t *ent) {
 
 // =========================================
 
+// [MuffMode] Command table mixes vanilla and MuffMode commands; MuffMode
+// bodies live in muffmode/ modules behind thin Cmd_*_f wrappers above.
 cmds_t client_cmds[] = {
 	{"admin",			Cmd_Admin_f,			CF_ALLOW_INT | CF_ALLOW_SPEC},
 	{"alertall",		Cmd_AlertAll_f,			CF_ALLOW_SPEC | CF_CHEAT_PROTECT},
