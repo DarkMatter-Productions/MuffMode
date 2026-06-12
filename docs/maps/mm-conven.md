@@ -23,6 +23,11 @@ A broad, readable arena with enough weapon spread and a Quad to turn public FFA 
 
 Grom's Conventional is one of those late-classic Quake II community maps that feels built for server rotation: clear rooms, strong routes, and a name that undersells how lively it gets once the Quad comes up.
 
+## Archive And Author Notes
+
+- The How Delightful Wayback capture lists `grom_dm3` as Conventional by Grom, with the companion mapcfg putting it in the 1v1/FFA/TDM custom pool.
+- The WEBMAN/twists collection also links `grom_dm3.bsp` through Wayback. The Muff Mode source map expands the author credit to Robert "Grom" McLachlan.
+
 ## How It Plays
 
 Good for busy public play and light team games. The map has eight deathmatch starts, several major armors, and a Quad, so it benefits from players who will move rather than camp one room.
@@ -51,3 +56,5 @@ Counts are taken from the final Muff Mode BSP entity data.
 - Final Muff Mode BSP/source data: [source-maps/mm-conven.map](source-maps/mm-conven.map).
 - Preserved original BSP: [original-bsps/grom_dm3.bsp](original-bsps/grom_dm3.bsp).
 - DondeQ2 map archive: [https://dondeq2.com/2017/10/24/webman-twists-map-collection/](https://dondeq2.com/2017/10/24/webman-twists-map-collection/).
+- Wayback How Delightful map pack: [https://web.archive.org/web/20031227060529/http://hd.ausgamers.com:80/main.html](https://web.archive.org/web/20031227060529/http://hd.ausgamers.com:80/main.html).
+- Wayback How Delightful mapcfg: [https://web.archive.org/web/20040104011615if_/http://hd.ausgamers.com:80/mapcfg.txt](https://web.archive.org/web/20040104011615if_/http://hd.ausgamers.com:80/mapcfg.txt).

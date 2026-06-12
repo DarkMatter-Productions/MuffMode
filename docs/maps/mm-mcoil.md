@@ -23,6 +23,11 @@ A lean duel arena with a Quad, clean weapon set, and the rough charm of early co
 
 Retinal called Mortal Coil a deathmatch dump, but the map's compact routing has kept it interesting. Its readme even notes that lighting was done without GLQuake, a nice little time capsule from 1998 mapping.
 
+## Archive And Author Notes
+
+- Retinal's readme is wonderfully blunt, calling Mortal Coil a deathmatch dump, and it also lists earlier Quake maps by the author.
+- How Delightful lists `broken2` as Mortal Coil by Retinal, QDeveLS' Duel mod archive gives the map its `q2duel5` identity, and Archive.org's EDL#8 final map 3 metadata identifies it as Mortal Coil / `q2duel5`.
+
 ## How It Plays
 
 Good for one-on-one with occasional small FFA. The Quad makes it rowdier than some duel purists expect, so call it a pressure map rather than a sterile test chamber.
@@ -52,3 +57,7 @@ Counts are taken from the final Muff Mode BSP entity data.
 - Preserved original readme: [original-readmes/broken2-readme.txt](original-readmes/broken2-readme.txt).
 - Preserved original BSP: [original-bsps/broken2.bsp](original-bsps/broken2.bsp).
 - DondeQ2 map archive: [https://dondeq2.com/2017/10/24/webman-twists-map-collection/](https://dondeq2.com/2017/10/24/webman-twists-map-collection/).
+- Wayback How Delightful map pack: [https://web.archive.org/web/20031227060529/http://hd.ausgamers.com:80/main.html](https://web.archive.org/web/20031227060529/http://hd.ausgamers.com:80/main.html).
+- Wayback How Delightful mapcfg: [https://web.archive.org/web/20040104011615if_/http://hd.ausgamers.com:80/mapcfg.txt](https://web.archive.org/web/20040104011615if_/http://hd.ausgamers.com:80/mapcfg.txt).
+- QDeveLS Duel mod archive: [https://dondeq2.com/2017/12/13/qdevels-proudly-presents-duel-mod-for-quake-2/](https://dondeq2.com/2017/12/13/qdevels-proudly-presents-duel-mod-for-quake-2/).
+- Internet Archive EDL#8 final map 3: [https://archive.org/details/Purri_vs_Syanid_EDL8_Quake2_Final_map3](https://archive.org/details/Purri_vs_Syanid_EDL8_Quake2_Final_map3).

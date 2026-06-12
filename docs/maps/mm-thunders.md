@@ -23,6 +23,11 @@ A bare-knuckle arena classic: rail, rocket, Mega Health, and enough height chang
 
 Thunderstruck began as a Rocket Arena 3 arena by Firestarter and later became one of the most recognizable small-arena layouts in Quake Live culture. The Muff Mode port brings that aim-and-positioning test into Quake II.
 
+## Archive And Author Notes
+
+- The Rocket Arena 3 Standard Maps listing identifies `ra3map1b` as Thunderstruck and credits Firestarter as the original author.
+- Archive.org's QuakeUnity site rip preserves RA3 package traces such as `pur3ra3map1.zip` and `OspRa3map1.zip`, showing this arena's life inside the broader RA3/OSP file ecosystem.
+
 ## How It Plays
 
 Excellent for Clan Arena, Instagib, and duel-flavored warmups. The item set is intentionally sparse, so it plays as a mechanics test more than a full economy map.
@@ -50,3 +55,5 @@ Counts are taken from the final Muff Mode BSP entity data.
 
 - Final Muff Mode BSP/source data: [source-maps/mm-thunders.map](source-maps/mm-thunders.map).
 - Rocket Arena 3 interview archive: [https://dondeq2.com/2018/10/03/kablooie-rocket-arena-3-interviews-with-senn-and-g1zm0/](https://dondeq2.com/2018/10/03/kablooie-rocket-arena-3-interviews-with-senn-and-g1zm0/).
+- Internet Archive QuakeUnity site rip: [https://archive.org/details/quakeunity.com](https://archive.org/details/quakeunity.com).
+- Rocket Arena 3 Standard Maps listing: [https://steamcommunity.com/sharedfiles/filedetails/?id=1804631841](https://steamcommunity.com/sharedfiles/filedetails/?id=1804631841).

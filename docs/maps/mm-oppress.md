@@ -23,6 +23,11 @@ A ten-start arena with enough armor and health to hold a proper public brawl wit
 
 The Oppressor appeared in late-90s Quake II map coverage as msdm5 by Mike Shand. Its rotation-friendly footprint makes the Muff Mode name feel especially apt.
 
+## Archive And Author Notes
+
+- Quake2.com's old Best Q2 Maps coverage names The Oppressor as `msdm5.zip`, credits Mike Shand, and supplies the August 1998 date used here.
+- A direct Archive.org/Wayback item for the original zip was not located in this pass, so this page treats the public review/archive page as the strongest external evidence.
+
 ## How It Plays
 
 Use it for FFA and light team games. It carries a broad weapon set, multiple jacket armors, and an Ammo Pack, so players can recover after messy fights.

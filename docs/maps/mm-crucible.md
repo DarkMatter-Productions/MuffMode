@@ -23,6 +23,11 @@ A ztn classic with layered control, sharp drops into danger, and enough weapon d
 
 The Crucible was part of Sten Uusvali's influential Quake II duel run and later appeared in Quake II Netpack I: Extremities. Its directness makes it easy to learn, but its timing game is still nasty.
 
+## Archive And Author Notes
+
+- ztn's preserved readme gives the old contact trail and homepage, while Quake II Netpack I: Extremities anchors The Crucible in the 1998 commercial add-on era of selected community maps.
+- Both How Delightful and Q2Scene list `ztn2dm5`, showing the map kept circulating as a practical server and demo dependency after the Netpack moment.
+
 ## How It Plays
 
 Strong for duel and small FFA. The Body Armor, two Combat Armors, Mega Health, and Ammo Pack give players plenty to route, while the extra intermission cameras make it a polished spectator map.
@@ -52,3 +57,6 @@ Counts are taken from the final Muff Mode BSP entity data.
 - Preserved original readme: [original-readmes/ztn2dm5-readme.txt](original-readmes/ztn2dm5-readme.txt).
 - Preserved original BSP: [original-bsps/ztn2dm5.bsp](original-bsps/ztn2dm5.bsp).
 - Quake II Netpack I: Extremities: [https://archive.org/details/QuakeIINetpackIExtremitiesUSAEurope](https://archive.org/details/QuakeIINetpackIExtremitiesUSAEurope).
+- Wayback How Delightful map pack: [https://web.archive.org/web/20031227060529/http://hd.ausgamers.com:80/main.html](https://web.archive.org/web/20031227060529/http://hd.ausgamers.com:80/main.html).
+- Wayback How Delightful mapcfg: [https://web.archive.org/web/20040104011615if_/http://hd.ausgamers.com:80/mapcfg.txt](https://web.archive.org/web/20040104011615if_/http://hd.ausgamers.com:80/mapcfg.txt).
+- Q2Scene DemoSquad files: [https://q2scene.com/ds/index.php?op=files](https://q2scene.com/ds/index.php?op=files).

@@ -14,7 +14,6 @@ This guide covers the current authoritative final set from `mm-maps-finals-1`. E
 | `-rcN` | Release candidate N |
 | `-bN` | Beta N |
 | `-aN` | Alpha N |
-| `-buildN` | Internal work build N |
 
 ## Quick Picks
 
@@ -56,67 +55,30 @@ This guide covers the current authoritative final set from `mm-maps-finals-1`. E
 
 ## In Development
 
-These entries are copied only from `MuffMode-Map-Remasters/dev`. Older states for the same map identity are omitted.
+These entries are copied only from `MuffMode-Map-Remasters/dev`. Older states for the same map identity are omitted. Internal work snapshots and entries without both a source `.map` and compiled `.bsp` are excluded.
 
 | Map | Filename | Status | Source map | BSP in dev folder |
 | --- | --- | --- | --- | --- |
-| Ad Mortem | `mm-admortem-rc1` | Release candidate 1 | [mm-admortem-rc1.map](dev-source-maps/mm-admortem-rc1.map) | No |
 | Aggressor | `mm-aggressor-rc3` | Release candidate 3 | [mm-aggressor-rc3.map](dev-source-maps/mm-aggressor-rc3.map) | Yes |
-| Almost Lost | `mm-almostlost-b1` | Beta 1 | [mm-almostlost-b1.map](dev-source-maps/mm-almostlost-b1.map) | No |
+| Almost Lost | `mm-almostlost-a1` | Alpha 1 | [mm-almostlost-a1.map](dev-source-maps/mm-almostlost-a1.map) | Yes |
 | Arena of Death | `mm-arena-b1` | Beta 1 | [mm-arena-b1.map](dev-source-maps/mm-arena-b1.map) | Yes |
-| Asylum | `mm-asylum-build` | Work build | [mm-asylum-build.map](dev-source-maps/mm-asylum-build.map) | No |
-| Basewalk | `mm-basewalk-build2` | Work build 2 | [mm-basewalk-build2.map](dev-source-maps/mm-basewalk-build2.map) | No |
-| Battleforged | `mm-bttlforged-build` | Work build | [mm-bttlforged-build.map](dev-source-maps/mm-bttlforged-build.map) | No |
-| Bravado | `mm-bravado-build` | Work build | [mm-bravado-build.map](dev-source-maps/mm-bravado-build.map) | No |
-| Burn Cycle | `mm-burncycle-rc2` | Release candidate 2 | [mm-burncycle-rc2.map](dev-source-maps/mm-burncycle-rc2.map) | No |
-| Colours of War | `mm-coloursofwar-rc2` | Release candidate 2 | [mm-coloursofwar-rc2.map](dev-source-maps/mm-coloursofwar-rc2.map) | No |
-| Cunning Plan | `mm-cunningp-rc2` | Release candidate 2 | [mm-cunningp-rc2.map](dev-source-maps/mm-cunningp-rc2.map) | No |
-| Deep Inside | `mm-deepinside-build` | Work build | [mm-deepinside-build.map](dev-source-maps/mm-deepinside-build.map) | No |
-| Deva Station | `mm-devastation-b1` | Beta 1 | [mm-devastation-b1.map](dev-source-maps/mm-devastation-b1.map) | No |
-| Envy Flows | `mm-envyflos-rc1` | Release candidate 1 | [mm-envyflos-rc1.map](dev-source-maps/mm-envyflos-rc1.map) | No |
 | Evolution | `mm-evolution-a1` | Alpha 1 | [mm-evolution-a1.map](dev-source-maps/mm-evolution-a1.map) | Yes |
-| Eye to Eye | `mm-eye-build` | Work build | [mm-eye-build.map](dev-source-maps/mm-eye-build.map) | No |
-| Gothic Revenge | `mm-gothic-rc1` | Release candidate 1 | [mm-gothic-rc1.map](dev-source-maps/mm-gothic-rc1.map) | No |
-| Grim Remains | `mm-grimremains-a1` | Alpha 1 | [mm-grimremains-a1.map](dev-source-maps/mm-grimremains-a1.map) | No |
-| Hard Angels | `mm-hardangels-rc2` | Release candidate 2 | [mm-hardangels-rc2.map](dev-source-maps/mm-hardangels-rc2.map) | No |
-| Hidden Fortress | `mm-hiddenfortress-b1` | Beta 1 | [mm-hiddenfortress-b1.map](dev-source-maps/mm-hiddenfortress-b1.map) | No |
 | Hook in Mouth | `mm-hook-rc1` | Release candidate 1 | [mm-hook-rc1.map](dev-source-maps/mm-hook-rc1.map) | Yes |
 | House of Decay | `mm-housedecay-a1` | Alpha 1 | [mm-housedecay-a1.map](dev-source-maps/mm-housedecay-a1.map) | Yes |
-| Moebius Trip | `mm-moebiustrip-rc1` | Release candidate 1 | [mm-moebiustrip-rc1.map](dev-source-maps/mm-moebiustrip-rc1.map) | No |
 | One Must Fall | `mm-onemayfall-rc1` | Release candidate 1 | [mm-onemayfall-rc1.map](dev-source-maps/mm-onemayfall-rc1.map) | Yes |
 | Overkill | `mm-overkill-a2` | Alpha 2 | [mm-overkill-a2.map](dev-source-maps/mm-overkill-a2.map) | Yes |
 | Phrantic | `mm-phrantic-a1` | Alpha 1 | [mm-phrantic-a1.map](dev-source-maps/mm-phrantic-a1.map) | Yes |
 | Psychosis Fixation | `mm-psychosis-rc1` | Release candidate 1 | [mm-psychosis-rc1.map](dev-source-maps/mm-psychosis-rc1.map) | Yes |
-| Quarantine | `mm-quarantine-build` | Work build | [mm-quarantine-build.map](dev-source-maps/mm-quarantine-build.map) | No |
-| Reckless Abandon | `mm-reckless-rc1` | Release candidate 1 | [mm-reckless-rc1.map](dev-source-maps/mm-reckless-rc1.map) | No |
-| Retribution | `mm-retribution-build` | Work build | [mm-retribution-build.map](dev-source-maps/mm-retribution-build.map) | No |
-| REVENGE 3 panza@tic.de | `mm-revenge-rc1` | Release candidate 1 | [mm-revenge-rc1.map](dev-source-maps/mm-revenge-rc1.map) | No |
-| Sandstone Crypt | `mm-sandstone-rc1` | Release candidate 1 | [mm-sandstone-rc1.map](dev-source-maps/mm-sandstone-rc1.map) | No |
 | shifter | `mm-shifter-a1` | Alpha 1 | [mm-shifter-a1.map](dev-source-maps/mm-shifter-a1.map) | Yes |
-| Solid | `mm-solid-build` | Work build | [mm-solid-build.map](dev-source-maps/mm-solid-build.map) | No |
-| Space Chamber | `mm-spacech-build` | Work build | [mm-spacech-build.map](dev-source-maps/mm-spacech-build.map) | No |
-| SPEG 999 | `mm-speg-rc1` | Release candidate 1 | [mm-speg-rc1.map](dev-source-maps/mm-speg-rc1.map) | No |
 | The Bad Place | `mm-badplace-rc3` | Release candidate 3 | [mm-badplace-rc3.map](dev-source-maps/mm-badplace-rc3.map) | Yes |
-| The Bouncy Map | `mm-bouncy-a1` | Alpha 1 | [mm-bouncy-a1.map](dev-source-maps/mm-bouncy-a1.map) | No |
-| The Chastity Belt | `mm-chastitybelt-build2` | Work build 2 | [mm-chastitybelt-build2.map](dev-source-maps/mm-chastitybelt-build2.map) | No |
-| The Cistern | `mm-cistern-build2` | Work build 2 | [mm-cistern-build2.map](dev-source-maps/mm-cistern-build2.map) | No |
-| The Dark Zone | `mm-darkzone-rc1` | Release candidate 1 | No selected source map located | Yes |
-| The DredWerkz | `mm-dredwerkz-build` | Work build | [mm-dredwerkz-build.map](dev-source-maps/mm-dredwerkz-build.map) | No |
 | The Forgotten Place | `mm-forgottenplace-a1` | Alpha 1 | [mm-forgottenplace-a1.map](dev-source-maps/mm-forgottenplace-a1.map) | Yes |
 | The Fragging Yard 1v1 | `mm-fraggingyard-a1` | Alpha 1 | [mm-fraggingyard-a1.map](dev-source-maps/mm-fraggingyard-a1.map) | Yes |
 | The Fury | `mm-fury-rc2` | Release candidate 2 | [mm-fury-rc2.map](dev-source-maps/mm-fury-rc2.map) | Yes |
 | The Hunt | `mm-hunt-rc1` | Release candidate 1 | [mm-hunt-rc1.map](dev-source-maps/mm-hunt-rc1.map) | Yes |
-| The Nameless Place | `mm-nameless-build1` | Work build 1 | [mm-nameless-build1.map](dev-source-maps/mm-nameless-build1.map) | No |
-| The Proving Grounds | `mm-provinggrounds-a5` | Alpha 5 | [mm-provinggrounds-a5.map](dev-source-maps/mm-provinggrounds-a5.map) | No |
-| The Vomitorium | `mm-vomitorium-rc1` | Release candidate 1 | [mm-vomitorium-rc1.map](dev-source-maps/mm-vomitorium-rc1.map) | No |
+| The Proving Grounds | `mm-proving-a4` | Alpha 4 | [mm-proving-a4.map](dev-source-maps/mm-proving-a4.map) | Yes |
+| The Vomitorium | `mm-vomitorium-b1` | Beta 1 | [mm-vomitorium-b1.map](dev-source-maps/mm-vomitorium-b1.map) | Yes |
 | Theatre of Pain | `mm-tpain-a1` | Alpha 1 | [mm-tpain-a1.map](dev-source-maps/mm-tpain-a1.map) | Yes |
-| Torment | `mm-torm-rc1` | Release candidate 1 | [mm-torm-rc1.map](dev-source-maps/mm-torm-rc1.map) | No |
-| Toxicity | `mm-toxicity-build` | Work build | [mm-toxicity-build.map](dev-source-maps/mm-toxicity-build.map) | No |
-| Trinity | `mm-trinity-build` | Work build | [mm-trinity-build.map](dev-source-maps/mm-trinity-build.map) | No |
-| Ubiquity | `mm-ubiquity-rc1` | Release candidate 1 | [mm-ubiquity-rc1.map](dev-source-maps/mm-ubiquity-rc1.map) | No |
-| Under Pressure | `mm-upress-rc1` | Release candidate 1 | [mm-upress-rc1.map](dev-source-maps/mm-upress-rc1.map) | No |
 | Vertical Vengeance | `mm-verticalv-b1` | Beta 1 | [mm-verticalv-b1.map](dev-source-maps/mm-verticalv-b1.map) | Yes |
-| Worn and Torn | `mm-worn-rc1` | Release candidate 1 | [mm-worn-rc1.map](dev-source-maps/mm-worn-rc1.map) | No |
 
 ## Preserved Files
 
@@ -153,5 +115,6 @@ Original BSPs are kept under [original-bsps](original-bsps/README.md), original 
 - Local final BSPs and source maps provided the included filenames, final status, worldspawn titles, and entity/item counts.
 - Preserved local readmes supplied exact dates and author notes for Aerowalk, Railgun 101, the ztn maps, Mortal Coil, The Flesh Refinery, and Grind.
 - The Steam Quake II rerelease installation supplied several original community BSPs where readmes were not present locally.
-- DondeQ2's map collection helped cross-check community map names and authors: [WEBMAN and twists Quake 2 Map Collection](https://dondeq2.com/2017/10/24/webman-twists-map-collection/).
-- Additional history came from [PlanetQuake's Cold Zero Level of the Week](https://planetquake.gamespy.com/View38ff.html?id=177&view=LOTW.Detail), [Internet Archive's Quake II Netpack I: Extremities](https://archive.org/details/QuakeIINetpackIExtremitiesUSAEurope), [LvLWorld's Wicked readme](https://lvlworld.com/readme/id%3A701), [LvLWorld's MKSTEEL readme](https://lvlworld.com/readme/id%3A1250), [Daniel Nolan's Quake 2 maps page](https://dnolan.com/quake-2/), and Quake/Rocket Arena community listings linked from the individual pages.
+- Internet Archive and Wayback Machine research added several useful archive trails: [Quake II Netpack I: Extremities](https://archive.org/details/QuakeIINetpackIExtremitiesUSAEurope), the 2003 [How Delightful custom-map pack](https://web.archive.org/web/20031227060529/http://hd.ausgamers.com:80/main.html) and [mapcfg](https://web.archive.org/web/20040104011615if_/http://hd.ausgamers.com:80/mapcfg.txt), the [QuakeUnity site rip](https://archive.org/details/quakeunity.com), and Archive.org-hosted EDL finals videos linked from the individual ztn and Mortal Coil pages.
+- DondeQ2's [WEBMAN and twists Quake 2 Map Collection](https://dondeq2.com/2017/10/24/webman-twists-map-collection/), Q2Scene's [DemoSquad files](https://q2scene.com/ds/index.php?op=files), PlanetQuake Level of the Week pages, LvLWorld readmes, and author pages filled in names where Archive.org had only filename-level evidence.
+- A few maps still have deliberately modest history notes because no direct original readme or first-class Archive.org item was found for them. Those pages say so rather than pretending a weak mirror listing is a primary source.

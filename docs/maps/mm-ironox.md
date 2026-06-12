@@ -23,6 +23,11 @@ A steel-and-rust arena with practical Quake II combat lines, generous bullets, a
 
 Iron Oxide is credited to Killer as KTDM1. Later author notes on LvLWorld list it as part of Killer's earlier Quake II work, giving the map a useful historical breadcrumb even where its original readme is missing.
 
+## Archive And Author Notes
+
+- The WEBMAN/twists archive listing identifies `ktdm1.bsp` as Iron Oxide by Killer, which is the strongest located archive trace for the original Q2 map.
+- The later LvLWorld MKSTEEL readme ties Martin "Killer" Kilcoyne's Quake II work to his later Quake III mapping, giving the author trail a second breadcrumb.
+
 ## How It Plays
 
 A comfortable fit for small FFA or duel servers that want conventional Quake II weapons without a Mega Health centerpiece.
@@ -51,3 +56,4 @@ Counts are taken from the final Muff Mode BSP entity data.
 - Final Muff Mode BSP/source data: [source-maps/mm-ironox.map](source-maps/mm-ironox.map).
 - Preserved original BSP: [original-bsps/ktdm1.bsp](original-bsps/ktdm1.bsp).
 - LvLWorld MKSTEEL readme: [https://lvlworld.com/readme/id%3A1250](https://lvlworld.com/readme/id%3A1250).
+- WEBMAN and twists collection: [https://dondeq2.com/2017/10/24/webman-twists-map-collection/](https://dondeq2.com/2017/10/24/webman-twists-map-collection/).

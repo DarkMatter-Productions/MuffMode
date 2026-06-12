@@ -23,6 +23,11 @@ A broad twelve-start map with a full arsenal, Quad Damage, Power Shield, and eno
 
 Daniel Nolan lists Unknown Domain as trdm04a in his Quake 2 map series. A matching original readme or exact release date was not located, but the author lineage is clear.
 
+## Archive And Author Notes
+
+- Daniel Nolan's own Quake 2 page lists Unknown Domain as `trdm04a`, and WEBMAN/twists lists `trdm04a.bsp` as Unknown Domain by Trebz.
+- No exact original release date or readme was located, but the author and filename trail is unusually direct for a map without its text file.
+
 ## How It Plays
 
 Use it when the population is high. It is one of the heavier maps in the final set, with BFG, Quad, Power Shield, Mega Health, and lots of small health.

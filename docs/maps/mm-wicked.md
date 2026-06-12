@@ -23,6 +23,11 @@ A CPMA classic translated into Quake II language, with two rocket launchers, a P
 
 Wicked is best known as cpm1a, a Quake III/Challenge ProMode Arena duel staple by FxR|jude and Decker. Its movement heritage is different from Quake II, which makes this port one of the guide's livelier cross-game guests.
 
+## Archive And Author Notes
+
+- LvLWorld's cpm1a readme says Wicked was by FxR|jude and Decker, released in January 2000 and re-released in October, and notes the design began as a Quake II FFA map before becoming a Quake III duel staple.
+- How Delightful's 2003 mapcfg lists `foodm8` as Wicked by jude, while Archive.org's QuakeUnity rip preserves later Wicked-related media traces.
+
 ## How It Plays
 
 Good for duel and CA-minded sessions. It has no Mega Health or Quad in this register, so fights are about armor, position, and weapon conversion.
@@ -51,3 +56,6 @@ Counts are taken from the final Muff Mode BSP entity data.
 - Final Muff Mode BSP/source data: [source-maps/mm-wicked.map](source-maps/mm-wicked.map).
 - LvLWorld Wicked readme: [https://lvlworld.com/readme/id%3A701](https://lvlworld.com/readme/id%3A701).
 - ESReality Wicked coverage: [https://www.esreality.com/?a=coverage&event=2091304](https://www.esreality.com/?a=coverage&event=2091304).
+- Wayback How Delightful map pack: [https://web.archive.org/web/20031227060529/http://hd.ausgamers.com:80/main.html](https://web.archive.org/web/20031227060529/http://hd.ausgamers.com:80/main.html).
+- Wayback How Delightful mapcfg: [https://web.archive.org/web/20040104011615if_/http://hd.ausgamers.com:80/mapcfg.txt](https://web.archive.org/web/20040104011615if_/http://hd.ausgamers.com:80/mapcfg.txt).
+- Internet Archive QuakeUnity site rip: [https://archive.org/details/quakeunity.com](https://archive.org/details/quakeunity.com).

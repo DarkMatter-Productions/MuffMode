@@ -23,6 +23,11 @@ A stripped-down rail practice space: boxes, slugs, sightlines, and almost nothin
 
 SwanSong's original readme describes Railgun 101 as a small map for practicing railgun skills. It became a familiar warmup and Instagib-style room in Quake II server culture.
 
+## Archive And Author Notes
+
+- SwanSong's readme describes Railgun 101 as a small map for practicing railgun skills, and that practical purpose matches its later archive life.
+- Q2Scene lists `2box4.bsp` as a map file, while WEBMAN/twists lists `2box4.bsp` as Railgun 101 by SwanSong.
+
 ## How It Plays
 
 Use it for Instagib or warmups. The entity register intentionally has no weapon pickups, only slugs and a single armor shard, so the ruleset or server setup should supply the intended weapon behavior.
@@ -52,3 +57,4 @@ Counts are taken from the final Muff Mode BSP entity data.
 - Preserved original readme: [original-readmes/2box4-readme.txt](original-readmes/2box4-readme.txt).
 - Preserved original BSP: [original-bsps/2box4.bsp](original-bsps/2box4.bsp).
 - DondeQ2 map archive: [https://dondeq2.com/2017/10/24/webman-twists-map-collection/](https://dondeq2.com/2017/10/24/webman-twists-map-collection/).
+- Q2Scene DemoSquad files: [https://q2scene.com/ds/index.php?op=files](https://q2scene.com/ds/index.php?op=files).

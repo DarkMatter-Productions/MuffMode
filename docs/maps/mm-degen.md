@@ -23,6 +23,11 @@ A sturdy industrial fight map with two rockets, two chainguns, and enough armor 
 
 Degeneration sits in the paradies run of Quake II maps and has the late-90s custom-map feel: practical geometry, quick weapon access, and a layout that rewards returning to fights before they cool off.
 
+## Archive And Author Notes
+
+- The WEBMAN/twists archive listing is the main historic trace located in this pass: `paradm4.bsp` appears as Degeneration by paradies.
+- The Muff Mode source map expands the author credit to Jaan-Madis "paradies" Uusvali. No direct Archive.org item or original readme was found, so the page treats the date as coming from local/source lineage.
+
 ## How It Plays
 
 A good rotation pick when Aerowalk-sized maps are too cramped. It has no Mega Health, so armor timing and weapon pressure carry the match.

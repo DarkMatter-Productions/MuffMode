@@ -23,6 +23,11 @@ A tight ztn duel map with five starts, clean weapon access, and just enough item
 
 Painkiller is one of ztn's earliest Quake II duel maps and part of the same family that shaped a lot of competitive Q2 rotation thinking. Its readme names 2-4 players as the intended load.
 
+## Archive And Author Notes
+
+- Painkiller is anchored by ztn's original readme, Netpack's 1998 community-map selection, How Delightful's `ztn2dm1` entry, and Q2Scene's `ztn2dm1.zip` file listing.
+- The How Delightful page also lists `painklr2`, a nearby Painkiller II variant, which is useful context for the map-name confusion around Painkiller/Painkiller II in old Q2 archives.
+
 ## How It Plays
 
 Best as a duel map. The register includes Double Damage / Haste, so hosts should decide whether that belongs in their ruleset before putting it into a serious pool.
@@ -52,3 +57,6 @@ Counts are taken from the final Muff Mode BSP entity data.
 - Preserved original readme: [original-readmes/ztn2dm1-readme.txt](original-readmes/ztn2dm1-readme.txt).
 - Preserved original BSP: [original-bsps/ztn2dm1.bsp](original-bsps/ztn2dm1.bsp).
 - Quake II Netpack I: Extremities: [https://archive.org/details/QuakeIINetpackIExtremitiesUSAEurope](https://archive.org/details/QuakeIINetpackIExtremitiesUSAEurope).
+- Wayback How Delightful map pack: [https://web.archive.org/web/20031227060529/http://hd.ausgamers.com:80/main.html](https://web.archive.org/web/20031227060529/http://hd.ausgamers.com:80/main.html).
+- Wayback How Delightful mapcfg: [https://web.archive.org/web/20040104011615if_/http://hd.ausgamers.com:80/mapcfg.txt](https://web.archive.org/web/20040104011615if_/http://hd.ausgamers.com:80/mapcfg.txt).
+- Q2Scene DemoSquad files: [https://q2scene.com/ds/index.php?op=files](https://q2scene.com/ds/index.php?op=files).

@@ -23,6 +23,11 @@ A lean contest-map layout with open reads, strong rail lines, and enough health 
 
 Cold Zero came from Ven and is tied to PlanetQuake's Not Dead Yet! 600-brush contest coverage. That constraint gives the layout a pleasantly spare quality: readable, quick, and hard to hide in.
 
+## Archive And Author Notes
+
+- PlanetQuake's Level of the Week page says Kev "Ven" Pritchard's Cold Zero won the Not Dead Yet! 600-brush Quake II contest, which explains the map's clean, constraint-driven read.
+- How Delightful's mapcfg lists `q2rdm9` as Cold Zero by Ven and notes the underlying `ven_dm2` identity. WEBMAN/twists separately lists `ven_dm2.bsp` as Cold Zero by Ven.
+
 ## How It Plays
 
 Best for FFA and light team play. It has nine deathmatch starts, a full weapon spread, and a Mega Health, so it can absorb more players than the pure duel maps.
@@ -51,3 +56,5 @@ Counts are taken from the final Muff Mode BSP entity data.
 - Final Muff Mode BSP/source data: [source-maps/mm-czero.map](source-maps/mm-czero.map).
 - Preserved original BSP: [original-bsps/ven_dm2.bsp](original-bsps/ven_dm2.bsp).
 - PlanetQuake Level of the Week: [https://planetquake.gamespy.com/View38ff.html?id=177&view=LOTW.Detail](https://planetquake.gamespy.com/View38ff.html?id=177&view=LOTW.Detail).
+- Wayback How Delightful mapcfg: [https://web.archive.org/web/20040104011615if_/http://hd.ausgamers.com:80/mapcfg.txt](https://web.archive.org/web/20040104011615if_/http://hd.ausgamers.com:80/mapcfg.txt).
+- WEBMAN and twists collection: [https://dondeq2.com/2017/10/24/webman-twists-map-collection/](https://dondeq2.com/2017/10/24/webman-twists-map-collection/).

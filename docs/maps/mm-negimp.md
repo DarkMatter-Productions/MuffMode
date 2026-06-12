@@ -23,6 +23,11 @@ A larger, moody map with a full weapon spread, Quad Damage, and enough health to
 
 Negative Impulse is preserved locally as vd6dm2 and appears in the DondeQ2 archive listing. A precise original release date and readme were not found in this pass.
 
+## Archive And Author Notes
+
+- The WEBMAN/twists collection lists `vd6dm2.bsp` as Negative Impulse by VooDoo6, which is the cleanest located historic trace for the name and author.
+- No original readme or direct Archive.org item was found; the preserved BSP and Muff Mode source map therefore carry most of the local certainty.
+
 ## How It Plays
 
 A good FFA/TDM candidate. It has seven starts, two Super Shotguns, a Mega Health, Quad Damage, and strong armor coverage, so it rewards roaming control teams.

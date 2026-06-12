@@ -23,6 +23,11 @@ A compact Kamarov map with a disciplined weapon set, modest health, and no overs
 
 Reclamation is preserved as kamq2dm3 and is also associated with q2rdm7. The nearby kamq2dm4 readme mentions it as Kamarov's earlier Reclamation, but that readme belongs to Ubiquity and is not treated as this map's original readme.
 
+## Archive And Author Notes
+
+- How Delightful's mapcfg lists `q2rdm7` as Reclamation by Kamarov and notes the underlying `kamq2dm3` identity.
+- Q2Scene keeps `q2rmappack.zip` listed as the q2rdm1-q2rdm15 map pack, while WEBMAN/twists gives another archived route back to `kamq2dm3.bsp`.
+
 ## How It Plays
 
 A strong small-session map when the server wants quick fights without Quad or Mega Health. Four deathmatch starts keep it intimate.
@@ -51,3 +56,5 @@ Counts are taken from the final Muff Mode BSP entity data.
 - Final Muff Mode BSP/source data: [source-maps/mm-reclam.map](source-maps/mm-reclam.map).
 - Preserved original BSP: [original-bsps/kamq2dm3.bsp](original-bsps/kamq2dm3.bsp).
 - DondeQ2 map archive: [https://dondeq2.com/2017/10/24/webman-twists-map-collection/](https://dondeq2.com/2017/10/24/webman-twists-map-collection/).
+- Wayback How Delightful mapcfg: [https://web.archive.org/web/20040104011615if_/http://hd.ausgamers.com:80/mapcfg.txt](https://web.archive.org/web/20040104011615if_/http://hd.ausgamers.com:80/mapcfg.txt).
+- Q2Scene DemoSquad files: [https://q2scene.com/ds/index.php?op=files](https://q2scene.com/ds/index.php?op=files).

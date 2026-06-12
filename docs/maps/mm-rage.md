@@ -23,6 +23,11 @@ A classic ztn map with strong duel bones and enough spawns to flex into a lively
 
 The Rage followed Painkiller and The Killing Machine in ztn's 1998 run. The Muff Mode source map was copied from the final RC source as the final `mm-rage` reference.
 
+## Archive And Author Notes
+
+- The Rage carries ztn's preserved readme trail and appears in How Delightful as `ztn2dm3`; QDeveLS' Duel archive also calls it `q2duel8` by Sten "ztn" Uusvali.
+- Archive.org's EDL#7 map 4 item identifies the played map as `ztn2dm3`, "The Rage", showing the map was still a stage for top-level duel years after release.
+
 ## How It Plays
 
 Excellent for duel and small FFA. With no Quad but plenty of armor and Mega Health tension, it keeps control readable without being quiet.
@@ -52,3 +57,8 @@ Counts are taken from the final Muff Mode BSP entity data.
 - Preserved original readme: [original-readmes/ztn2dm3-readme.txt](original-readmes/ztn2dm3-readme.txt).
 - Preserved original BSP: [original-bsps/ztn2dm3.bsp](original-bsps/ztn2dm3.bsp).
 - Quake II Netpack I: Extremities: [https://archive.org/details/QuakeIINetpackIExtremitiesUSAEurope](https://archive.org/details/QuakeIINetpackIExtremitiesUSAEurope).
+- Wayback How Delightful map pack: [https://web.archive.org/web/20031227060529/http://hd.ausgamers.com:80/main.html](https://web.archive.org/web/20031227060529/http://hd.ausgamers.com:80/main.html).
+- Wayback How Delightful mapcfg: [https://web.archive.org/web/20040104011615if_/http://hd.ausgamers.com:80/mapcfg.txt](https://web.archive.org/web/20040104011615if_/http://hd.ausgamers.com:80/mapcfg.txt).
+- QDeveLS Duel mod archive: [https://dondeq2.com/2017/12/13/qdevels-proudly-presents-duel-mod-for-quake-2/](https://dondeq2.com/2017/12/13/qdevels-proudly-presents-duel-mod-for-quake-2/).
+- Q2Scene DemoSquad files: [https://q2scene.com/ds/index.php?op=files](https://q2scene.com/ds/index.php?op=files).
+- Internet Archive EDL#7 map 4: [https://archive.org/details/Purri_vs_Damiah_map4_EDL7_Quake2](https://archive.org/details/Purri_vs_Damiah_map4_EDL7_Quake2).

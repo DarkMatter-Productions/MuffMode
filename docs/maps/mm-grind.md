@@ -23,6 +23,11 @@ A crisp early Q2DM arena with a strong 2v2 recommendation and a secret Mega Heal
 
 headshot credited danimal's guns-and-ammo texture idea and recommended 2-on-2 play in the original readme. Grind is from the era when authors were still finding the Quake II duel language in public.
 
+## Archive And Author Notes
+
+- headshot's readme credits Dennis Kaltwasser, gives the early 1998 release date, and recommends the map for 2-on-2 as well as larger deathmatch.
+- How Delightful lists `grind` by headshot in the same custom pack as `ptrip`, giving this author two visible slots in the archived Australian OSP rotation.
+
 ## How It Plays
 
 Works well as a bridge between duel and small-team play. Combat Armor appears three times in the register, and the Mega Health can swing a fight if players remember the route.
@@ -52,3 +57,5 @@ Counts are taken from the final Muff Mode BSP entity data.
 - Preserved original readme: [original-readmes/grind-readme.txt](original-readmes/grind-readme.txt).
 - Preserved original BSP: [original-bsps/grind.bsp](original-bsps/grind.bsp).
 - DondeQ2 map archive: [https://dondeq2.com/2017/10/24/webman-twists-map-collection/](https://dondeq2.com/2017/10/24/webman-twists-map-collection/).
+- Wayback How Delightful map pack: [https://web.archive.org/web/20031227060529/http://hd.ausgamers.com:80/main.html](https://web.archive.org/web/20031227060529/http://hd.ausgamers.com:80/main.html).
+- Wayback How Delightful mapcfg: [https://web.archive.org/web/20040104011615if_/http://hd.ausgamers.com:80/mapcfg.txt](https://web.archive.org/web/20040104011615if_/http://hd.ausgamers.com:80/mapcfg.txt).

@@ -23,6 +23,11 @@ A Quake III Arena landmark recast for Quake II: void space, long sightlines, jum
 
 The Longest Yard is Quake III Arena's famous q3dm17, arriving with id Software's arena shooter in December 1999. This port makes the map a guest star in a Quake II ruleset.
 
+## Archive And Author Notes
+
+- The original is id Software's Q3DM17 from Quake III Arena; the Internet Archive has Quake III Arena software items that document the 1999 source game context.
+- Archive.org's QuakeUnity site rip includes `q3dm17vortex.zip`, showing the Longest Yard idea kept producing derivative archive material long after the stock Quake III release.
+
 ## How It Plays
 
 Best for Instagib, casual FFA, and novelty Clan Arena. It has sixteen starts and very sparse weapon variety, so it is about aim, movement, and not falling into space.
@@ -50,3 +55,5 @@ Counts are taken from the final Muff Mode BSP entity data.
 
 - Final Muff Mode BSP/source data: [source-maps/mm-longyd.map](source-maps/mm-longyd.map).
 - Quake III Arena overview: [https://quake.fandom.com/wiki/Quake_III_Arena](https://quake.fandom.com/wiki/Quake_III_Arena).
+- Internet Archive Quake III Arena: [https://archive.org/details/quake-3-arena](https://archive.org/details/quake-3-arena).
+- Internet Archive QuakeUnity site rip: [https://archive.org/details/quakeunity.com](https://archive.org/details/quakeunity.com).

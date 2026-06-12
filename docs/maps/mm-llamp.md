@@ -23,6 +23,11 @@ A big, energetic public-server map with rockets everywhere, nine starts, and eno
 
 The public listing for 4u2map12a identifies Lava Lamp as a Quake II map by [4u2]Squirrel. The local candidate readme did not match this map, so the guide preserves the BSP but treats the readme as not located.
 
+## Archive And Author Notes
+
+- Lava Lamp did not turn up as a first-class Archive.org item in this pass. The strongest located public traces are quake2.com.ru's map listing and long-running mirrors such as TastySpleen's baseq2 map index.
+- A Q3Arena news-feed snippet says [4u2]Squirrel's Lava Lamp placed second behind Maric's Pile O' Rocks, which helps explain why this public-server piece had enough visibility to survive.
+
 ## How It Plays
 
 Use it when the server population climbs. It has a BFG, two rocket launchers, lots of rockets and grenades, and a Mega Health, making it better for spectacle than for quiet duel discipline.
@@ -51,3 +56,5 @@ Counts are taken from the final Muff Mode BSP entity data.
 - Final Muff Mode BSP/source data: [source-maps/mm-llamp.map](source-maps/mm-llamp.map).
 - Preserved original BSP: [original-bsps/4u2map12a.bsp](original-bsps/4u2map12a.bsp).
 - quake2.com.ru listing: [https://quake2.com.ru/files/maps/5/](https://quake2.com.ru/files/maps/5/).
+- Q3Arena news feed: [https://www.q3arena.com/backend.php](https://www.q3arena.com/backend.php).
+- TastySpleen baseq2 map mirror: [https://tastyspleen.net/~quake2/baseq2/maps/](https://tastyspleen.net/~quake2/baseq2/maps/).

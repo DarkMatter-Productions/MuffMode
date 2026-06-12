@@ -23,6 +23,11 @@ A Rocket Arena import with vertical exchanges, Plasma Beam pressure, and a simpl
 
 Window Pain is associated with Senn's ra3map2 set, a Rocket Arena 3 map pack remembered for focused arena combat. The Muff Mode version keeps that practice-arena spirit.
 
+## Archive And Author Notes
+
+- The RA3 Standard Maps listing identifies `ra3map2c` as Window Pain and credits Senn as original author.
+- The Kablooie/Donde archive interview identifies ra3map2 as Senn's Liquid Blue pack and calls Window Pain one of its 1v1 arenas. QuakeUnity also preserves RA3 map2 package traces.
+
 ## How It Plays
 
 Best for CA, Instagib, or quick FFA warmups. Twelve starts make it roomy enough for a crowd, but the weapon set is narrow and aim-heavy.
@@ -51,3 +56,4 @@ Counts are taken from the final Muff Mode BSP entity data.
 - Final Muff Mode BSP/source data: [source-maps/mm-winpain.map](source-maps/mm-winpain.map).
 - Rocket Arena 3 Standard Maps listing: [https://steamcommunity.com/sharedfiles/filedetails/?id=1804631841](https://steamcommunity.com/sharedfiles/filedetails/?id=1804631841).
 - Rocket Arena 3 interview archive: [https://dondeq2.com/2018/10/03/kablooie-rocket-arena-3-interviews-with-senn-and-g1zm0/](https://dondeq2.com/2018/10/03/kablooie-rocket-arena-3-interviews-with-senn-and-g1zm0/).
+- Internet Archive QuakeUnity site rip: [https://archive.org/details/quakeunity.com](https://archive.org/details/quakeunity.com).
