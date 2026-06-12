@@ -230,7 +230,7 @@ void MM_MQ_PrintList(gentity_t *ent)
 			text += game.mapqueue[i] + " ";
 	}
 
-	gi.LocClient_Print(ent, PRINT_HIGH, G_Fmt("{}\n", text).data());
+	gi.LocClient_Print(ent, PRINT_HIGH, "{}\n", text.c_str());
 }
 
 constexpr size_t MAX_MAP_LIST_DISPLAY = 512;

@@ -3114,12 +3114,28 @@ ClientUserInfoChanged
 called whenever the player updates a userinfo variable.
 ============
 */
+// [MuffMode] Defence-in-depth for names that flow into structured sinks: drop control
+// chars (the engine's layout/format delimiters), quotes and fmt braces so a crafted name
+// can't break out of quoted layout fields or be mistaken for a localization format.
+static void MM_StripUnsafeNameChars(char *s) {
+	char *w = s;
+	for (const char *r = s; *r; r++) {
+		const unsigned char c = (unsigned char)*r;
+		if (c < 0x20 || c == '"' || c == '{' || c == '}')
+			continue;
+		*w++ = (char)c;
+	}
+	*w = '\0';
+}
+
 void ClientUserinfoChanged(gentity_t *ent, const char *userinfo) {
 	char val[MAX_INFO_VALUE] = { 0 };
 
 	// set name
 	if (!gi.Info_ValueForKey(userinfo, "name", ent->client->pers.netname, sizeof(ent->client->pers.netname)))
 		Q_strlcpy(ent->client->pers.netname, "badinfo", sizeof(ent->client->pers.netname));
+
+	MM_StripUnsafeNameChars(ent->client->pers.netname);
 
 	Q_strlcpy(ent->client->resp.netname, ent->client->pers.netname, sizeof(ent->client->resp.netname));
 
