@@ -350,6 +350,15 @@ This document tracks migration progress from a monolithic fork style toward thin
 2. **Q3A health/armor decay**
    - Added `MM_RulesetQ3AHealthArmorDecay()` to `mm_ruleset`; `ClientTimerActions` in `p_client.cpp` calls it before clamp.
 
+### Phase 7 — remaining extraction (in progress)
+
+Validated against vanilla Q2RE source (`q2re-src/`): every Phase 7 target is MuffMode-only code with zero overlap in vanilla files. Vanilla itself keeps its menu framework and ghost system inside the `ctf/` mod folder, mirroring the `muffmode/` boundary.
+
+1. **R1 — Join/admin/info menus extracted (complete)**
+   - Moved `g_menu.cpp` wholesale (via `git mv`, history preserved) to `mm_menu.cpp` with new `mm_menu.h`; `g_menu.cpp` deleted. Vanilla Q2RE has no `g_menu.cpp` — the file was 100% MuffMode UI (admin settings, join/team, readyup entry, player stats, host/match info, chasecam menus).
+   - Public surface: `G_Menu_Join_Open()` (callers: `g_chase.cpp`, `g_cmds.cpp`, `p_client.cpp`) and `G_Menu_ReturnToMain()` (used by `mm_vote_menu`); declarations moved from `g_local.h` to `mm_menu.h`. `mm_vote_menu.cpp` now includes `mm_menu.h` instead of a forward declaration.
+   - `p_menu.cpp` (pmenu framework) intentionally stays at `src/` root: quasi-vanilla shared infrastructure (vanilla keeps the equivalent in `ctf/p_ctf_menu.cpp`), used by both vanilla files and MuffMode modules.
+
 ## MuffMode module map
 
 | Module | Responsibility |
@@ -361,6 +370,7 @@ This document tracks migration progress from a monolithic fork style toward thin
 | `mm_horde` | GT_HORDE wave spawning, tables, and kill scoring |
 | `mm_items_rules` | Item pickup, respawn, inhibit, autoswitch rules |
 | `mm_maps` | Map list, queue, shuffle, MyMap |
+| `mm_menu` | Join/team, admin, readyup, player stats, host/match info, chasecam menus |
 | `mm_motd` | Message-of-the-day load and commands |
 | `mm_ruleset` | Health/armor caps, Q3A over-max decay, and clamp helpers |
 | `mm_ruleset_weapons` | Per-ruleset weapon tuning |

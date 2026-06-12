@@ -4,6 +4,7 @@
 #include "g_local.h"
 #include "g_debug_log.h"
 #include "muffmode/mm_gametype.h"
+#include "muffmode/mm_menu.h"
 #include "muffmode/mm_vote.h"
 #include "muffmode/mm_vote_menu.h"
 
@@ -12,8 +13,6 @@
 #include <string>
 #include <string_view>
 #include <vector>
-
-void G_Menu_ReturnToMain(gentity_t *ent, menu_hnd_t *p);
 
 namespace {
 static const int cvmenu_map = 3;

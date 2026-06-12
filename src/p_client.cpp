@@ -4,6 +4,7 @@
 #include "monsters/m_player.h"
 #include "bots/bot_includes.h"
 #include "muffmode/mm_horde.h"
+#include "muffmode/mm_menu.h"
 #include "muffmode/mm_ruleset.h"
 #include "muffmode/mm_spawn_loadout.h"
 #include "muffmode/mm_vote.h"

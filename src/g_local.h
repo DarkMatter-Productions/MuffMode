@@ -11,7 +11,7 @@
 constexpr const char *GAMEVERSION = "baseq2";
 
 constexpr const char *GAMEMOD_TITLE = "Muff Mode";
-constexpr const char *GAMEMOD_VERSION = "0.33.02 BETA";
+constexpr const char *GAMEMOD_VERSION = "0.33.03 BETA";
 
 //==================================================================
 
@@ -3046,11 +3046,6 @@ void CTF_ResetFlags();
 void CTF_ScoreBonuses(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker);
 void CTF_CheckHurtCarrier(gentity_t *targ, gentity_t *attacker);
 
-
-//
-// g_menu.cpp
-//
-void G_Menu_Join_Open(gentity_t *ent);
 
 //
 // g_player.cpp

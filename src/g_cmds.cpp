@@ -4,6 +4,7 @@
 #include "g_debug_log.h"
 #include "muffmode/mm_admin.h"
 #include "muffmode/mm_maps.h"
+#include "muffmode/mm_menu.h"
 #include "muffmode/mm_motd.h"
 #include "muffmode/mm_vote.h"
 #include "muffmode/mm_vote_menu.h"

@@ -138,6 +138,9 @@
     <ClInclude Include="muffmode\mm_maps.h">
       <Filter>muffmode</Filter>
     </ClInclude>
+    <ClInclude Include="muffmode\mm_menu.h">
+      <Filter>muffmode</Filter>
+    </ClInclude>
     <ClInclude Include="muffmode\mm_motd.h">
       <Filter>muffmode</Filter>
     </ClInclude>
@@ -299,7 +302,6 @@
       <Filter>monsters</Filter>
     </ClCompile>
     <ClCompile Include="p_menu.cpp" />
-    <ClCompile Include="g_menu.cpp" />
     <ClCompile Include="g_ctf.cpp" />
     <ClCompile Include="muffmode\mm_debug.cpp">
       <Filter>muffmode</Filter>
