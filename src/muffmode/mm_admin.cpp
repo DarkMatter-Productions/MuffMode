@@ -4,6 +4,7 @@
 #include "g_local.h"
 #include "muffmode/mm_admin.h"
 #include "muffmode/mm_gametype.h"
+#include "muffmode/mm_match.h"
 #include "muffmode/mm_vote.h"
 
 void MM_CmdDoctor(gentity_t *ent)
@@ -235,4 +236,132 @@ void MM_CmdSetMap(gentity_t *ent)
 
 	gi.LocBroadcast_Print(PRINT_HIGH, "[ADMIN]: Changing map to {}\n", gi.argv(1));
 	gi.AddCommandString(G_Fmt("gamemap \"{}\"\n", gi.argv(1)).data());
+}
+
+// [MuffMode] Admin match-control and session command bodies (moved from g_cmds.cpp).
+/*
+=================
+MM_CmdStartMatch
+=================
+*/
+void MM_CmdStartMatch(gentity_t *ent) {
+	if (level.match_state > matchst_t::MATCH_WARMUP_READYUP) {
+		gi.LocClient_Print(ent, PRINT_HIGH, "Match has already started.\n");
+		return;
+	}
+
+	gi.Broadcast_Print(PRINT_HIGH, "[ADMIN]: Forced match start.\n");
+	Match_Start();
+}
+
+/*
+=================
+MM_CmdEndMatch
+=================
+*/
+void MM_CmdEndMatch(gentity_t *ent) {
+	if (level.match_state < matchst_t::MATCH_IN_PROGRESS) {
+		gi.LocClient_Print(ent, PRINT_HIGH, "Match has not yet begun.\n");
+		return;
+	}
+	if (level.intermission_time) {
+		gi.LocClient_Print(ent, PRINT_HIGH, "Match has already ended.\n");
+		return;
+	}
+	QueueIntermission("[ADMIN]: Forced match end.", true, false);
+}
+
+/*
+=================
+MM_CmdResetMatch
+=================
+*/
+void MM_CmdResetMatch(gentity_t *ent) {
+	if (level.match_state < matchst_t::MATCH_IN_PROGRESS) {
+		gi.LocClient_Print(ent, PRINT_HIGH, "Match has not yet begun.\n");
+		return;
+	}
+	if (level.intermission_time) {
+		gi.LocClient_Print(ent, PRINT_HIGH, "Match has already ended.\n");
+		return;
+	}
+	
+	gi.LocBroadcast_Print(PRINT_HIGH, "[ADMIN]: Forced match reset.\n");
+	Match_Reset();
+}
+
+/*
+=================
+MM_CmdForceVote
+=================
+*/
+void MM_CmdForceVote(gentity_t *ent) {
+	if (!deathmatch->integer)
+		return;
+
+	if (gi.argc() < 2) {
+		gi.LocClient_Print(ent, PRINT_HIGH, "Usage: {} <yes|no>\n", gi.argv(0));
+		return;
+	}
+
+	if (level.vote_state.state == VoteState::IDLE) {
+		gi.LocClient_Print(ent, PRINT_HIGH, "No vote in progress.\n");
+		return;
+	}
+
+	const char *arg = gi.argv(1);
+
+	if (arg[0] == 'y' || arg[0] == 'Y' || arg[0] == '1') {
+		gi.Broadcast_Print(PRINT_HIGH, "[ADMIN]: Passed the vote.\n");
+		if (level.vote_state.state == VoteState::ACTIVE) {
+			TransitionVoteState(VoteState::PASSED);
+		} else if (level.vote_state.state == VoteState::PASSED) {
+			// Already passed, just execute immediately
+			TransitionVoteState(VoteState::EXECUTING);
+		}
+	} else {
+		gi.Broadcast_Print(PRINT_HIGH, "[ADMIN]: Failed the vote.\n");
+		TransitionVoteState(VoteState::FAILED);
+	}
+}
+
+extern void ClearWorldEntities();
+void MM_CmdMapRestart(gentity_t *ent) {
+	gi.Broadcast_Print(PRINT_HIGH, "[ADMIN]: Session reset.\n");
+
+	//TODO: reset match variables, clear world entities, reload world entities
+	//SpawnEntities(level.mapname, level.entstring.c_str(), nullptr);
+	//Match_Reset();
+	//ClearWorldEntities();
+	gi.AddCommandString(G_Fmt("gamemap {}\n", level.mapname).data());
+}
+
+void MM_CmdNextMap(gentity_t *ent) {
+	gi.Broadcast_Print(PRINT_HIGH, "[ADMIN]: Changing to next map.\n");
+	Match_End();
+	level.intermission_exit = true;
+}
+
+void MM_CmdAdmin(gentity_t *ent) {
+	if (!g_allow_admin->integer) {
+		gi.LocClient_Print(ent, PRINT_HIGH, "Administration is disabled\n");
+		return;
+	}
+	
+	if (gi.argc() > 1) {
+		if (ent->client->sess.admin) {
+			gi.Client_Print(ent, PRINT_HIGH, "You already have administrative rights.\n");
+			return;
+		}
+		if (admin_password->string && *admin_password->string && Q_strcasecmp(admin_password->string, gi.argv(1)) == 0) {
+			if (!ent->client->sess.admin) {
+				ent->client->sess.admin = true;
+				gi.LocBroadcast_Print(PRINT_HIGH, "{} has become an admin.\n", ent->client->resp.netname);
+			}
+			return;
+		}
+	}
+	
+	// run command if valid...
+
 }

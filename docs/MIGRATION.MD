@@ -385,6 +385,12 @@ Validated against vanilla Q2RE source (`q2re-src/`): every Phase 7 target is Muf
    - Timeout system moved from `g_cmds.cpp`: `TimeoutEnd()` (adapter name, ticked from `G_RunFrame_`) and `MM_CmdTimeOut()`/`MM_CmdTimeIn()` with command-table wrappers.
    - Intermission/exit orchestration (`Match_End`, `QueueIntermission`, `CheckDMExitRules`, `CheckDMIntermissionExit`, `BeginIntermission`, `CalculateRanks`) intentionally stays in `g_main.cpp`: MuffMode-owned rewrites of vanilla `CheckDMRules`/`EndDMLevel`, retained as the highest-fan-in orchestration hub.
 
+7. **R7 — Backlog mop-up (complete)**
+   - `Tech_ApplyAutoDoc` / `Tech_HasRegeneration` (RS_MM regen tuning, instagib/nadefest/vampiric branches) moved from `g_items.cpp` to `mm_items_rules` (vanilla adapter names; callers in `p_view.cpp`, `g_items.cpp`).
+   - Q3A falling-damage thresholds/damage moved from `P_FallingDamage` in `p_client.cpp` to `MM_RulesetFallDamageMedMin()/FarMin()/MM_RulesetFallDamage()` in `mm_ruleset`.
+   - Admin match-control and session command bodies (`startmatch`, `endmatch`, `resetmatch`, `forcevote`, `map_restart`, `nextmap`, `admin`) moved from `g_cmds.cpp` to `mm_admin` as `MM_Cmd*()`; wrappers stay in the command table.
+   - Horde round-win/exit snippets: already absorbed by R6 — remaining horde presence in `g_main.cpp` is thin `MM_Horde_*` gates inside the retained `CheckDMExitRules` plus cvar registration.
+
 ## MuffMode module map
 
 | Module | Responsibility |

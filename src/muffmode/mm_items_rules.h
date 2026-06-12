@@ -33,3 +33,7 @@ int MM_AmmoSlugPickupCount(int quantity);
 int MM_PickRespawnItemTeamIndex(int current_index, int count);
 void MM_OnPowerupItemRespawned(gentity_t *ent);
 bool MM_ShouldAnnouncePowerupUse();
+
+// [MuffMode] AutoDoc tech regen (vanilla adapter names; moved from g_items.cpp).
+void Tech_ApplyAutoDoc(gentity_t *ent);
+bool Tech_HasRegeneration(gentity_t *ent);

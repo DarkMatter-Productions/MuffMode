@@ -3744,8 +3744,9 @@ static void P_FallingDamage(gentity_t *ent, const pmove_t &pm) {
 		ent->client->fall_value = 40;
 	ent->client->fall_time = level.time + FALL_TIME();
 
-	int med_min = RS(RS_Q3A) ? 40 : 30;
-	int far_min = RS(RS_Q3A) ? 61 : 55;
+	// [MuffMode] Ruleset-specific fall thresholds live in muffmode/mm_ruleset
+	int med_min = MM_RulesetFallDamageMedMin();
+	int far_min = MM_RulesetFallDamageFarMin();
 
 	if (delta > med_min) {
 		if (delta >= far_min) {
@@ -3764,13 +3765,7 @@ static void P_FallingDamage(gentity_t *ent, const pmove_t &pm) {
 		}
 		if (!deathmatch->integer || !(g_dm_no_fall_damage->integer || GTF(GTF_ARENA))) {
 			ent->pain_debounce_time = level.time + FRAME_TIME_S; // no normal pain sound
-			if (RS(RS_Q3A))
-				damage = ent->s.event == EV_FALL_FAR ? 10 : 5;
-			else {
-				damage = (int)((delta - 30) / 2);
-				if (damage < 1)
-					damage = 1;
-			}
+			damage = MM_RulesetFallDamage(ent->s.event == EV_FALL_FAR, delta);
 			dir = { 0, 0, 1 };
 
 			T_Damage(ent, world, world, dir, ent->s.origin, vec3_origin, damage, 0, DAMAGE_NONE, MOD_FALLING);

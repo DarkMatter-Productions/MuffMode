@@ -420,3 +420,6 @@ src/vcpkg_installed/
 
 # Runtime logs
 /logs/
+
+# Local Q2RE source copy
+/q2re-src/

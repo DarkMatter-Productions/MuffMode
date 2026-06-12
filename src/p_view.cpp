@@ -4,6 +4,8 @@
 #include "g_local.h"
 #include "monsters/m_player.h"
 #include "bots/bot_includes.h"
+// [MuffMode] AutoDoc regen lives in muffmode/mm_items_rules
+#include "muffmode/mm_items_rules.h"
 
 static gentity_t *current_player;
 static gclient_t *current_client;

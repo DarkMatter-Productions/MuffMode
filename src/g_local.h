@@ -11,7 +11,7 @@
 constexpr const char *GAMEVERSION = "baseq2";
 
 constexpr const char *GAMEMOD_TITLE = "Muff Mode";
-constexpr const char *GAMEMOD_VERSION = "0.33.8 BETA";
+constexpr const char *GAMEMOD_VERSION = "0.33.9 BETA";
 
 //==================================================================
 
@@ -2561,8 +2561,6 @@ int			Tech_ApplyPowerAmp(gentity_t *ent, int dmg);
 bool		Tech_ApplyPowerAmpSound(gentity_t *ent);
 bool		Tech_ApplyTimeAccel(gentity_t *ent);
 void		Tech_ApplyTimeAccelSound(gentity_t *ent);
-void		Tech_ApplyAutoDoc(gentity_t *ent);
-bool		Tech_HasRegeneration(gentity_t *ent);
 void		PrecacheItem(gitem_t *it);
 bool		CheckItemEnabled(gitem_t *item);
 gitem_t		*CheckItemReplacements(gitem_t *item);
