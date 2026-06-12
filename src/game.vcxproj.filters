@@ -135,10 +135,19 @@
     <ClInclude Include="muffmode\mm_gametype.h">
       <Filter>muffmode</Filter>
     </ClInclude>
+    <ClInclude Include="muffmode\mm_captain.h">
+      <Filter>muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="muffmode\mm_ghost.h">
+      <Filter>muffmode</Filter>
+    </ClInclude>
     <ClInclude Include="muffmode\mm_maps.h">
       <Filter>muffmode</Filter>
     </ClInclude>
     <ClInclude Include="muffmode\mm_menu.h">
+      <Filter>muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="muffmode\mm_pconfig.h">
       <Filter>muffmode</Filter>
     </ClInclude>
     <ClInclude Include="muffmode\mm_motd.h">
@@ -306,7 +315,19 @@
     <ClCompile Include="muffmode\mm_debug.cpp">
       <Filter>muffmode</Filter>
     </ClCompile>
+    <ClCompile Include="muffmode\mm_captain.cpp">
+      <Filter>muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="muffmode\mm_ghost.cpp">
+      <Filter>muffmode</Filter>
+    </ClCompile>
     <ClCompile Include="muffmode\mm_maps.cpp">
+      <Filter>muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="muffmode\mm_menu.cpp">
+      <Filter>muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="muffmode\mm_pconfig.cpp">
       <Filter>muffmode</Filter>
     </ClCompile>
     <ClCompile Include="muffmode\mm_motd.cpp">

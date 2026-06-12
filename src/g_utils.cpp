@@ -1013,18 +1013,6 @@ gametype_t GT_IndexFromString(const char *in) {
 	return gametype_t::GT_NONE;
 }
 
-void BroadcastReadyReminderMessage() {
-	for (auto ec : active_players()) {
-		if (!ClientIsPlaying(ec->client))
-			continue;
-		if (ec->client->sess.is_a_bot)
-			continue;
-		if (ec->client->resp.ready)
-			continue;
-		gi.LocCenter_Print(ec, "%bind:+wheel2:Use Compass to toggle your ready status.%MATCH IS IN WARMUP\nYou are NOT ready.");
-	}
-}
-
 void TeleportPlayerToRandomSpawnPoint(gentity_t *ent, bool fx) {
 	bool	valid_spawn = false;
 	vec3_t	spawn_origin, spawn_angles;

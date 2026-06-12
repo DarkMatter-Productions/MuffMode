@@ -3,6 +3,7 @@
 #include "g_local.h"
 #include "bots/bot_includes.h"
 #include "monsters/m_player.h"	//doppelganger
+#include "muffmode/mm_captain.h"
 #include "muffmode/mm_items_rules.h"
 #include "muffmode/mm_ruleset.h"
 
@@ -3211,8 +3212,9 @@ void Compass_Update(gentity_t *ent, bool first) {
 }
 
 static void Use_Compass(gentity_t *ent, gitem_t *inv) {
+	// [MuffMode] Compass toggles ready status in deathmatch
 	if (deathmatch->integer) {
-		Cmd_ReadyUp_f(ent);
+		MM_CmdReadyUp(ent);
 		return;
 	}
 	if (!level.valid_poi) {

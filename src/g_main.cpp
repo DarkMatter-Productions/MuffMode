@@ -3,8 +3,10 @@
 
 #include "g_local.h"
 #include "g_debug_log.h"
+#include "muffmode/mm_captain.h"
 #include "muffmode/mm_duel.h"
 #include "muffmode/mm_gametype.h"
+#include "muffmode/mm_ghost.h"
 #include "muffmode/mm_horde.h"
 #include "muffmode/mm_maps.h"
 #include "muffmode/mm_motd.h"
@@ -863,7 +865,7 @@ static void Entities_Reset(bool reset_players, bool reset_ghost, bool reset_scor
 			if (ClientIsPlaying(ec->client)) {
 				if (reset_ghost) {
 					// make up a ghost code
-					Match_Ghost_Assign(ec);
+					MM_Ghost_Assign(ec);
 				}
 				//if (!ec->client->eliminated) {
 				Weapon_Grapple_DoReset(ec->client);
@@ -1210,32 +1212,6 @@ void Match_Reset() {
 	CalculateRanks();
 
 	gi.LocBroadcast_Print(PRINT_TTS, "The match has been reset.\n");
-}
-
-/*
-=============
-ReadyAll
-=============
-*/
-void ReadyAll() {
-	for (auto ec : active_clients()) {
-		if (!ClientIsPlaying(ec->client))
-			continue;
-		ec->client->resp.ready = true;
-	}
-}
-
-/*
-=============
-UnReadyAll
-=============
-*/
-void UnReadyAll() {
-	for (auto ec : active_clients()) {
-		if (!ClientIsPlaying(ec->client))
-			continue;
-		ec->client->resp.ready = false;
-	}
 }
 
 /*

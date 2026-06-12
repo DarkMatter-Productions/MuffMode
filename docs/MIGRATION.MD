@@ -363,11 +363,23 @@ Validated against vanilla Q2RE source (`q2re-src/`): every Phase 7 target is Muf
    - Moved `DuelScoreboardMessage` from `p_hud.cpp` (static, single caller) to `MM_Duel_ScoreboardMessage()` in `mm_duel`; `DeathmatchScoreboardMessage` keeps a marked `GT(GT_DUEL)` hook.
    - Moved `Cmd_Forfeit_f` body from `g_cmds.cpp` to `MM_Duel_CmdForfeit()`; the command-table wrapper stays in `g_cmds.cpp`.
 
+3. **R3 — Ghost rejoin and player config extracted (complete)**
+   - Added `mm_ghost.h` / `mm_ghost.cpp`: `Match_Ghost_Assign`/`Match_Ghost_DoAssign` (from `p_client.cpp`) and the `Cmd_Ghost_f` body (from `g_cmds.cpp`) became `MM_Ghost_Assign()`, `MM_Ghost_DoAssign()`, `MM_CmdGhost()`. The `ghost_t` struct and `level.ghosts[]` stay in `g_local.h` (embedded level state). Vanilla keeps its equivalent in `ctf/g_ctf.cpp` — same boundary.
+   - Added `mm_pconfig.h` / `mm_pconfig.cpp`: `PCfg_ClientInitPConfig` (from `p_client.cpp`) became `MM_ClientInitPConfig()`; client preference command bodies (`announcer`, `kb`, `fm`, `id`, `timer`) became `MM_Cmd*()` with thin wrappers in the `g_cmds.cpp` command table.
+
+4. **R4 — Captains, team locks and readyup extracted (complete)**
+   - Added `mm_captain.h` / `mm_captain.cpp` (~470 lines from `g_cmds.cpp`, `g_main.cpp`, `g_utils.cpp`).
+   - Keeps vanilla adapter names for high-fan-in calls: `SetCaptain()`, `VacateCaptain()`, `ValidateCaptains()`, `ReadyAll()`, `UnReadyAll()`, `BroadcastReadyReminderMessage()` — declarations moved from `g_local.h` to `mm_captain.h`.
+   - Command bodies became `MM_Cmd*()` (`captain`, `lockteam`, `unlockteam`, `ready`, `notready`, `readyup`, `readyall`, `unreadyall`, `readyteam`); wrappers stay in the command table. `Use_Compass` in `g_items.cpp` calls `MM_CmdReadyUp()`.
+   - Internal helpers (`FindNewCaptain`, `IsCaptainOrAdmin`, `ReadyConditions`, `BroadcastReadyStatus`) are file-local to the module. `level.captain[]` / `level.locked[]` stay in `g_local.h`.
+
 ## MuffMode module map
 
 | Module | Responsibility |
 |--------|----------------|
 | `mm_admin` | Admin commands (gametype, ruleset, setmap, doctor) |
+| `mm_captain` | Captain system, team locks, readyup commands |
+| `mm_ghost` | Match ghost codes and mid-match rejoin |
 | `mm_debug` | Debug logging |
 | `mm_duel` | GT_DUEL queue, match-end score adjustment, scoreboard layout, forfeit |
 | `mm_gametype` | Gametype/ruleset orchestration and display names |
@@ -376,6 +388,7 @@ Validated against vanilla Q2RE source (`q2re-src/`): every Phase 7 target is Muf
 | `mm_maps` | Map list, queue, shuffle, MyMap |
 | `mm_menu` | Join/team, admin, readyup, player stats, host/match info, chasecam menus |
 | `mm_motd` | Message-of-the-day load and commands |
+| `mm_pconfig` | Player config persistence and preference commands |
 | `mm_ruleset` | Health/armor caps, Q3A over-max decay, and clamp helpers |
 | `mm_ruleset_weapons` | Per-ruleset weapon tuning |
 | `mm_spawn_filter` | Entity classname remap and spawn-key filtering |

@@ -3,10 +3,13 @@
 #include "g_local.h"
 #include "g_debug_log.h"
 #include "muffmode/mm_admin.h"
+#include "muffmode/mm_captain.h"
 #include "muffmode/mm_duel.h"
+#include "muffmode/mm_ghost.h"
 #include "muffmode/mm_maps.h"
 #include "muffmode/mm_menu.h"
 #include "muffmode/mm_motd.h"
+#include "muffmode/mm_pconfig.h"
 #include "muffmode/mm_vote.h"
 #include "muffmode/mm_vote_menu.h"
 #include "monsters/m_player.h"
@@ -25,10 +28,6 @@ struct cmds_t {
 	void		(*func)(gentity_t *ent);
 	uint32_t	flags;
 };
-
-// forward declarations for captain system
-void SetCaptain(team_t team, gentity_t *ent);
-void VacateCaptain(team_t team, gentity_t *leaving);
 
 static void Cmd_Print_State(gentity_t *ent, bool on_state) {
 	const char *s = gi.argv(0);
@@ -2178,7 +2177,7 @@ bool SetTeam(gentity_t *ent, team_t desired_team, bool inactive, bool force, boo
 		MM_RevertVote(ent->client);
 
 		// assign a ghost code
-		Match_Ghost_DoAssign(ent);
+		MM_Ghost_DoAssign(ent);
 
 		// free any followers
 		FreeClientFollowers(ent);
@@ -2239,110 +2238,30 @@ static void Cmd_Team_f(gentity_t *ent) {
 	SetTeam(ent, team, false, false, false);
 }
 
-/*
-=================
-Cmd_CrosshairID_f
-=================
-*/
+// [MuffMode] Client preference command bodies live in muffmode/mm_pconfig
 static void Cmd_CrosshairID_f(gentity_t *ent) {
-	ent->client->sess.pc.show_id ^= true;
-	gi.LocClient_Print(ent, PRINT_HIGH, "Player identication display: {}\n", ent->client->sess.pc.show_id ? "ON" : "OFF");
+	MM_CmdCrosshairID(ent);
 }
 
-/*
-=================
-Cmd_Timer_f
-=================
-*/
 static void Cmd_Timer_f(gentity_t *ent) {
-	ent->client->sess.pc.show_timer ^= true;
-	gi.LocClient_Print(ent, PRINT_HIGH, "Match timer display: {}\n", ent->client->sess.pc.show_timer ? "ON" : "OFF");
+	MM_CmdTimer(ent);
 }
 
-/*
-=================
-Cmd_FragMessages_f
-=================
-*/
 static void Cmd_FragMessages_f(gentity_t *ent) {
-	ent->client->sess.pc.show_fragmessages ^= true;
-	gi.LocClient_Print(ent, PRINT_HIGH, "{} frag messages.\n", ent->client->sess.pc.show_fragmessages ? "Activating" : "Disabling");
+	MM_CmdFragMessages(ent);
 }
 
-/*
-=================
-Cmd_Announcer_f
-=================
-*/
 static void Cmd_Announcer_f(gentity_t *ent) {
-	ent->client->sess.pc.use_expanded ^= true;
-	gi.LocClient_Print(ent, PRINT_HIGH, "Match announcer: {}\n", ent->client->sess.pc.use_expanded ? "ON" : "OFF");
+	MM_CmdAnnouncer(ent);
 }
 
-/*
-=================
-Cmd_KillBeep_f
-=================
-*/
 static void Cmd_KillBeep_f(gentity_t *ent) {
-	int num = 0;
-	if (gi.argc() > 1) {
-		num = atoi(gi.argv(1));
-		if (num < 0)
-			num = 0;
-		else if (num > 4)
-			num = 4;
-	} else {
-		num = (ent->client->sess.pc.killbeep_num + 1) % 5;
-	}
-	const char *sb[5] = { "off", "clang", "beep-boop", "insane", "tang-tang" };
-	ent->client->sess.pc.killbeep_num = num;
-	gi.LocClient_Print(ent, PRINT_HIGH, "Kill beep changed to: {}\n", sb[num]);
+	MM_CmdKillBeep(ent);
 }
 
-
-/*
-=================
-Cmd_Ghost_f
-=================
-*/
+// [MuffMode] Ghost rejoin body lives in muffmode/mm_ghost
 static void Cmd_Ghost_f(gentity_t *ent) {
-	int i, n;
-
-	if (gi.argc() < 2) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "Usage: {} <code>\n", gi.argv(0));
-		return;
-	}
-
-	if (ClientIsPlaying(ent->client)) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "You are already in the game.\n");
-		return;
-	}
-	if (level.match_state != matchst_t::MATCH_IN_PROGRESS) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "No match is in progress.\n");
-		return;
-	}
-
-	n = atoi(gi.argv(1));
-
-	for (i = 0; i < MAX_CLIENTS_KEX; i++) {
-		if (level.ghosts[i].code && level.ghosts[i].code == n) {
-			gi.LocClient_Print(ent, PRINT_HIGH, "Ghost code accepted, your position has been reinstated.\n");
-			level.ghosts[i].ent->client->resp.ghost = nullptr;
-			ent->client->sess.team = level.ghosts[i].team;
-			ent->client->resp.ghost = level.ghosts + i;
-			ent->client->resp.score = level.ghosts[i].score;
-			ent->client->resp.ctf_state = 0;
-			level.ghosts[i].ent = ent;
-			ent->svflags = SVF_NONE;
-			ent->flags &= ~FL_GODMODE;
-			ClientSpawn(ent);
-			gi.LocBroadcast_Print(PRINT_HIGH, "{} has been reinstated to {} team.\n",
-				ent->client->resp.netname, Teams_TeamName(ent->client->sess.team));
-			return;
-		}
-	}
-	gi.LocClient_Print(ent, PRINT_HIGH, "Invalid ghost code.\n");
+	MM_CmdGhost(ent);
 }
 
 
@@ -2574,257 +2493,17 @@ static void Cmd_FollowPowerup_f(gentity_t *ent) {
 
 /*----------------------------------------------------------------*/
 
-/*
-=================
-SetCaptain
-
-Sets ent as captain of team. Pass nullptr to remove captain.
-=================
-*/
-void SetCaptain(team_t team, gentity_t *ent) {
-	level.captain[team] = ent;
-
-	if (ent) {
-		gi.LocBroadcast_Print(PRINT_HIGH, "{} became captain of {}.\n",
-			ent->client->resp.netname, Teams_TeamName(team));
-	}
-}
-
-/*
-=================
-FindNewCaptain
-
-Finds the longest-tenured teammate to auto-promote as captain.
-Returns nullptr if no eligible player found.
-=================
-*/
-static gentity_t *FindNewCaptain(team_t team, gentity_t *exclude = nullptr) {
-	gentity_t *best = nullptr;
-	gtime_t earliest = {};
-
-	for (auto ec : active_clients()) {
-		if (ec == exclude)
-			continue;
-		if (ec->client->sess.team != team)
-			continue;
-		if (ec->svflags & SVF_BOT)
-			continue;
-		if (!best || ec->client->sess.team_join_time < earliest) {
-			best = ec;
-			earliest = ec->client->sess.team_join_time;
-		}
-	}
-
-	return best;
-}
-
-/*
-=================
-VacateCaptain
-
-Called when a captain leaves their team. Auto-promotes the
-longest-tenured teammate, or clears captain if team is empty.
-=================
-*/
-void VacateCaptain(team_t team, gentity_t *leaving) {
-	level.captain[team] = nullptr;
-
-	gentity_t *replacement = FindNewCaptain(team, leaving);
-	if (replacement)
-		SetCaptain(team, replacement);
-}
-
-/*
-=================
-ValidateCaptains
-
-Called after match start / reset to ensure captain pointers
-are still valid. Keeps existing captains if valid, otherwise
-auto-promotes the longest-tenured teammate.
-=================
-*/
-void ValidateCaptains() {
-	if (!Teams())
-		return;
-
-	for (team_t t : { TEAM_RED, TEAM_BLUE }) {
-		gentity_t *cap = level.captain[t];
-		if (cap && cap->inuse && cap->client && cap->client->pers.connected && cap->client->sess.team == t)
-			continue; // captain is still valid
-		level.captain[t] = nullptr;
-		gentity_t *replacement = FindNewCaptain(t);
-		if (replacement)
-			SetCaptain(t, replacement);
-	}
-}
-
-/*
-=================
-IsCaptainOrAdmin
-
-Returns true if ent is captain of the given team, or is an admin.
-=================
-*/
-static bool IsCaptainOrAdmin(gentity_t *ent, team_t team) {
-	if (ent->client->sess.admin)
-		return true;
-	if (level.captain[team] == ent)
-		return true;
-	return false;
-}
-
-/*
-=================
-Cmd_Captain_f
-
-Usage:
-  captain          - claim captain (if none) or show current captain
-  captain <player> - transfer captain to a teammate (must be captain)
-=================
-*/
+// [MuffMode] Captain and team lock bodies live in muffmode/mm_captain
 static void Cmd_Captain_f(gentity_t *ent) {
-	if (!Teams()) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "Captain is only available in team modes.\n");
-		return;
-	}
-
-	team_t team = ent->client->sess.team;
-
-	if (team != TEAM_RED && team != TEAM_BLUE) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "You must be on a team to use this command.\n");
-		return;
-	}
-
-	if (gi.argc() == 1) {
-		if (level.captain[team] == ent) {
-			gi.LocClient_Print(ent, PRINT_HIGH, "You are the captain of {}.\n", Teams_TeamName(team));
-		} else if (level.captain[team]) {
-			gi.LocClient_Print(ent, PRINT_HIGH, "{} is the captain of {}.\n",
-				level.captain[team]->client->resp.netname, Teams_TeamName(team));
-		} else {
-			SetCaptain(team, ent);
-		}
-		return;
-	}
-
-	// transfer captain to another player
-	if (level.captain[team] != ent) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "You must be captain to transfer it to another player.\n");
-		return;
-	}
-
-	const char *args = gi.args();
-	size_t args_len = strlen(args);
-	char name_buf[MAX_NETNAME];
-	if (args_len >= 2 && args[0] == '"' && args[args_len - 1] == '"') {
-		size_t copy_len = std::min(args_len - 2, sizeof(name_buf) - 1);
-		memcpy(name_buf, args + 1, copy_len);
-		name_buf[copy_len] = '\0';
-		args = name_buf;
-	}
-
-	gentity_t *target = ClientEntFromString(args);
-
-	if (!target || !target->inuse || !target->client) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid player.\n");
-		return;
-	}
-
-	if (target == ent) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "You can't transfer captain to yourself.\n");
-		return;
-	}
-
-	if (target->client->sess.team != team) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "{} is not on your team.\n", target->client->resp.netname);
-		return;
-	}
-
-	gi.LocClient_Print(target, PRINT_HIGH, "{} transferred captain status to you.\n",
-		ent->client->resp.netname);
-	SetCaptain(team, target);
+	MM_CmdCaptain(ent);
 }
 
-/*
-=================
-Cmd_LockTeam_f
-
-Locks a team. Captains lock their own team; admins can specify a team.
-=================
-*/
 static void Cmd_LockTeam_f(gentity_t *ent) {
-	if (!Teams()) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "Team lock is only available in team modes.\n");
-		return;
-	}
-
-	team_t team;
-
-	if (ent->client->sess.admin && gi.argc() >= 2) {
-		team = StringToTeamNum(gi.argv(1));
-	} else {
-		team = ent->client->sess.team;
-	}
-
-	if (team != TEAM_RED && team != TEAM_BLUE) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid team.\n");
-		return;
-	}
-
-	if (!IsCaptainOrAdmin(ent, team)) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "Only team captains or admins can lock teams.\n");
-		return;
-	}
-
-	if (level.locked[team]) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "{} is already locked.\n", Teams_TeamName(team));
-		return;
-	}
-
-	level.locked[team] = true;
-	gi.LocBroadcast_Print(PRINT_HIGH, "{} has been locked.\n", Teams_TeamName(team));
-	P_Menu_Dirty();
+	MM_CmdLockTeam(ent);
 }
 
-/*
-=================
-Cmd_UnlockTeam_f
-
-Unlocks a team. Captains unlock their own team; admins can specify a team.
-=================
-*/
 static void Cmd_UnlockTeam_f(gentity_t *ent) {
-	if (!Teams()) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "Team unlock is only available in team modes.\n");
-		return;
-	}
-
-	team_t team;
-
-	if (ent->client->sess.admin && gi.argc() >= 2) {
-		team = StringToTeamNum(gi.argv(1));
-	} else {
-		team = ent->client->sess.team;
-	}
-
-	if (team != TEAM_RED && team != TEAM_BLUE) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid team.\n");
-		return;
-	}
-
-	if (!IsCaptainOrAdmin(ent, team)) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "Only team captains or admins can unlock teams.\n");
-		return;
-	}
-
-	if (!level.locked[team]) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "{} is already unlocked.\n", Teams_TeamName(team));
-		return;
-	}
-
-	level.locked[team] = false;
-	gi.LocBroadcast_Print(PRINT_HIGH, "{} has been unlocked.\n", Teams_TeamName(team));
-	P_Menu_Dirty();
+	MM_CmdUnlockTeam(ent);
 }
 
 /*
@@ -3042,141 +2721,29 @@ static void Cmd_Admin_f(gentity_t *ent) {
 
 /*----------------------------------------------------------------*/
 
-static bool ReadyConditions(gentity_t *ent, bool desired_status, bool admin_cmd) {
-	if (level.match_state == matchst_t::MATCH_WARMUP_READYUP)
-		return true;
-
-	const char *s = nullptr;
-	if (admin_cmd) {
-		s = "You cannot force ready status until ";
-	} else {
-		s = "You cannot change your ready status until ";
-	}
-
-	switch (level.warmup_requisite) {
-	case warmupreq_t::WARMUP_REQ_MORE_PLAYERS:
-	{
-		int minp = GT(GT_DUEL) ? 2 : minplayers->integer;
-		int req = minp - level.num_playing_clients;
-		gi.LocClient_Print(ent, PRINT_HIGH, "{}{} more player{} present.\n", s, req, req > 1 ? "s are" : " is");
-		break;
-	}
-	case warmupreq_t::WARMUP_REQ_BALANCE:
-		gi.LocClient_Print(ent, PRINT_HIGH, "{}teams are balanced.\n", s);
-		break;
-	default:
-		gi.LocClient_Print(ent, PRINT_HIGH, "You cannot {}ready at this stage of the match.\n", desired_status ? "" : "un");
-		break;
-	}
-	return false;
-}
-
+// [MuffMode] Readyup command bodies live in muffmode/mm_captain
 static void Cmd_ReadyAll_f(gentity_t *ent) {
-	if (!ReadyConditions(ent, true, true))
-		return;
-
-	ReadyAll();
-
-	gi.Broadcast_Print(PRINT_HIGH, "[ADMIN]: Forced all players to ready status\n");
+	MM_CmdReadyAll(ent);
 }
 
 static void Cmd_UnReadyAll_f(gentity_t *ent) {
-	if (!ReadyConditions(ent, false, true))
-		return;
-
-	UnReadyAll();
-
-	gi.Broadcast_Print(PRINT_HIGH, "[ADMIN]: Forced all players to NOT ready status\n");
+	MM_CmdUnReadyAll(ent);
 }
 
-/*
-=================
-Cmd_ReadyTeam_f
-
-Captain readies up all players on their team.
-=================
-*/
 static void Cmd_ReadyTeam_f(gentity_t *ent) {
-	if (!Teams()) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "This command is only available in team modes.\n");
-		return;
-	}
-
-	if (!ReadyConditions(ent, true, false))
-		return;
-
-	team_t team = ent->client->sess.team;
-
-	if (team != TEAM_RED && team != TEAM_BLUE) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "You must be on a team to use this command.\n");
-		return;
-	}
-
-	if (!IsCaptainOrAdmin(ent, team)) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "Only team captains or admins can ready the team.\n");
-		return;
-	}
-
-	int count = 0;
-	for (auto ec : active_clients()) {
-		if (!ClientIsPlaying(ec->client))
-			continue;
-		if (ec->client->sess.team != team)
-			continue;
-		if (!ec->client->resp.ready) {
-			ec->client->resp.ready = true;
-			count++;
-		}
-	}
-
-	if (count > 0)
-		gi.LocBroadcast_Print(PRINT_HIGH, "{} readied up {} ({} player{}).\n",
-			ent->client->resp.netname, Teams_TeamName(team), count, count > 1 ? "s" : "");
-	else
-		gi.LocClient_Print(ent, PRINT_HIGH, "All players on {} are already ready.\n", Teams_TeamName(team));
-}
-
-static void BroadcastReadyStatus(gentity_t *ent) {
-	gi.LocBroadcast_Print(PRINT_CENTER, "%bind:+wheel2:Use Compass to toggle your ready status.%MATCH IS IN WARMUP\n{} is {}ready.", ent->client->resp.netname, ent->client->resp.ready ? "" : "NOT ");
+	MM_CmdReadyTeam(ent);
 }
 
 static void Cmd_Ready_f(gentity_t *ent) {
-	if (!ReadyConditions(ent, true, false))
-		return;
-
-	if (level.match_state != matchst_t::MATCH_WARMUP_READYUP) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "You cannot ready at this stage of the match.\n");
-		return;
-	}
-
-	if (ent->client->resp.ready) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "You have already committed.\n");
-		return;
-	}
-
-	ent->client->resp.ready = true;
-	BroadcastReadyStatus(ent);
+	MM_CmdReady(ent);
 }
 
 static void Cmd_NotReady_f(gentity_t *ent) {
-	if (!ReadyConditions(ent, false, false))
-		return;
-
-	if (!ent->client->resp.ready) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "You haven't committed.\n");
-		return;
-	}
-
-	ent->client->resp.ready = false;
-	BroadcastReadyStatus(ent);
+	MM_CmdNotReady(ent);
 }
 
-void Cmd_ReadyUp_f(gentity_t *ent) {
-	if (!ReadyConditions(ent, !ent->client->resp.ready, false))
-		return;
-
-	ent->client->resp.ready ^= true;
-	BroadcastReadyStatus(ent);
+static void Cmd_ReadyUp_f(gentity_t *ent) {
+	MM_CmdReadyUp(ent);
 }
 
 static void Cmd_Hook_f(gentity_t *ent) {

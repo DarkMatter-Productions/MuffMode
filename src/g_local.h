@@ -11,7 +11,7 @@
 constexpr const char *GAMEVERSION = "baseq2";
 
 constexpr const char *GAMEMOD_TITLE = "Muff Mode";
-constexpr const char *GAMEMOD_VERSION = "0.33.03 BETA";
+constexpr const char *GAMEMOD_VERSION = "0.33.6 BETA";
 
 //==================================================================
 
@@ -2545,7 +2545,6 @@ team_t PickTeam(int ignoreClientNum);
 void BroadcastTeamChange(gentity_t *ent, int old_team, bool inactive, bool silent);
 bool AllowClientTeamSwitch(gentity_t *ent);
 int TeamBalance(bool force);
-void Cmd_ReadyUp_f(gentity_t *ent);
 
 void TransitionVoteState(VoteState new_state);
 void ClearVote();
@@ -2666,9 +2665,6 @@ const char *G_PlaceString(int rank);
 bool ItemSpawnsEnabled();
 bool loc_CanSee(gentity_t *targ, gentity_t *inflictor);
 bool SetTeam(gentity_t *ent, team_t desired_team, bool inactive, bool force, bool silent);
-void SetCaptain(team_t team, gentity_t *ent);
-void VacateCaptain(team_t team, gentity_t *leaving);
-void ValidateCaptains();
 const char *G_TimeString(const int msec, bool state);
 const char *G_TimeStringMs(const int msec, bool state);
 void BroadcastFriendlyMessage(team_t team, const char *msg);
@@ -2678,7 +2674,6 @@ bool IsCombatDisabled();
 bool IsPickupsDisabled();
 gametype_t GT_IndexFromString(const char *in);
 bool IsScoringDisabled();
-void BroadcastReadyReminderMessage();
 void TeleportPlayerToRandomSpawnPoint(gentity_t *ent, bool fx);
 bool InCoopStyle();
 gentity_t *ClientEntFromString(const char *in);
@@ -3015,8 +3010,6 @@ void InitBodyQue();
 void CopyToBodyQue(gentity_t *ent);
 void ClientBeginServerFrame(gentity_t *ent);
 void ClientUserinfoChanged(gentity_t *ent, const char *userinfo);
-void Match_Ghost_Assign(gentity_t *ent);
-void Match_Ghost_DoAssign(gentity_t *ent);
 void P_AssignClientSkinnum(gentity_t *ent);
 void P_ForceFogTransition(gentity_t *ent, bool instant);
 void P_SendLevelPOI(gentity_t *ent);
@@ -3155,8 +3148,6 @@ int GT_ScoreLimit();
 const char *GT_ScoreLimitString();
 void ExitLevel();
 void Teams_CalcRankings(std::array<uint32_t, MAX_CLIENTS> &player_ranks); // [Paril-KEX]
-void ReadyAll();
-void UnReadyAll();
 void QueueIntermission(const char *msg, bool boo, bool reset);
 gentity_t *CreateTargetChangeLevel(const char *map);
 bool InAMatch();
