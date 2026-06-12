@@ -3,6 +3,7 @@
 #include "g_local.h"
 #include "muffmode/mm_captain.h"
 #include "muffmode/mm_menu.h"
+#include "muffmode/mm_team.h"
 #include "muffmode/mm_vote_menu.h"
 #include "monsters/m_player.h"
 

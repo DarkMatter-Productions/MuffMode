@@ -5,6 +5,7 @@
 #include "g_debug_log.h"
 #include "muffmode/mm_captain.h"
 #include "muffmode/mm_gametype.h"
+#include "muffmode/mm_team.h"
 #include "muffmode/mm_vote.h"
 #include "muffmode/mm_vote_menu.h"
 #include <cerrno>

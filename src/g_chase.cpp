@@ -3,6 +3,7 @@
 #include "g_local.h"
 // [MuffMode] Join menu lives in muffmode/mm_menu
 #include "muffmode/mm_menu.h"
+#include "muffmode/mm_team.h"
 
 void FreeFollower(gentity_t *ent) {
 	if (!ent)

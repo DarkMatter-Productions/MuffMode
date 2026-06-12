@@ -3,6 +3,7 @@
 
 #include "g_local.h"
 #include "muffmode/mm_duel.h"
+#include "muffmode/mm_team.h"
 
 bool MM_Duel_AddPlayer()
 {

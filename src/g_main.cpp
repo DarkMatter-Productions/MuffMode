@@ -10,6 +10,7 @@
 #include "muffmode/mm_horde.h"
 #include "muffmode/mm_maps.h"
 #include "muffmode/mm_motd.h"
+#include "muffmode/mm_team.h"
 #include "muffmode/mm_vote.h"
 #include "bots/bot_includes.h"
 #include "monsters/m_player.h"	// match starts

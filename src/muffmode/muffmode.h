@@ -22,5 +22,6 @@
 #include "mm_spawn_filter.h"
 #include "mm_spawn_loadout.h"
 #include "mm_statusbar.h"
+#include "mm_team.h"
 #include "mm_vote.h"
 #include "mm_vote_menu.h"

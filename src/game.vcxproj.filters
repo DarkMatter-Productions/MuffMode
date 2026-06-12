@@ -153,6 +153,9 @@
     <ClInclude Include="muffmode\mm_motd.h">
       <Filter>muffmode</Filter>
     </ClInclude>
+    <ClInclude Include="muffmode\mm_team.h">
+      <Filter>muffmode</Filter>
+    </ClInclude>
     <ClInclude Include="muffmode\mm_vote.h">
       <Filter>muffmode</Filter>
     </ClInclude>
@@ -331,6 +334,9 @@
       <Filter>muffmode</Filter>
     </ClCompile>
     <ClCompile Include="muffmode\mm_motd.cpp">
+      <Filter>muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="muffmode\mm_team.cpp">
       <Filter>muffmode</Filter>
     </ClCompile>
     <ClCompile Include="muffmode\mm_vote.cpp">

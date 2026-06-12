@@ -11,7 +11,7 @@
 constexpr const char *GAMEVERSION = "baseq2";
 
 constexpr const char *GAMEMOD_TITLE = "Muff Mode";
-constexpr const char *GAMEMOD_VERSION = "0.33.6 BETA";
+constexpr const char *GAMEMOD_VERSION = "0.33.7 BETA";
 
 //==================================================================
 
@@ -2541,14 +2541,8 @@ void Cmd_Score_f(gentity_t *ent);
 
 void G_AssignPlayerSkin(gentity_t *ent, const char *s);
 
-team_t PickTeam(int ignoreClientNum);
-void BroadcastTeamChange(gentity_t *ent, int old_team, bool inactive, bool silent);
-bool AllowClientTeamSwitch(gentity_t *ent);
-int TeamBalance(bool force);
-
 void TransitionVoteState(VoteState new_state);
 void ClearVote();
-bool TeamShuffle();
 void TimeoutEnd();
 
 //
@@ -2664,7 +2658,6 @@ void G_SetTeamScore(team_t team, int32_t value);
 const char *G_PlaceString(int rank);
 bool ItemSpawnsEnabled();
 bool loc_CanSee(gentity_t *targ, gentity_t *inflictor);
-bool SetTeam(gentity_t *ent, team_t desired_team, bool inactive, bool force, bool silent);
 const char *G_TimeString(const int msec, bool state);
 const char *G_TimeStringMs(const int msec, bool state);
 void BroadcastFriendlyMessage(team_t team, const char *msg);

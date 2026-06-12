@@ -373,6 +373,12 @@ Validated against vanilla Q2RE source (`q2re-src/`): every Phase 7 target is Muf
    - Command bodies became `MM_Cmd*()` (`captain`, `lockteam`, `unlockteam`, `ready`, `notready`, `readyup`, `readyall`, `unreadyall`, `readyteam`); wrappers stay in the command table. `Use_Compass` in `g_items.cpp` calls `MM_CmdReadyUp()`.
    - Internal helpers (`FindNewCaptain`, `IsCaptainOrAdmin`, `ReadyConditions`, `BroadcastReadyStatus`) are file-local to the module. `level.captain[]` / `level.locked[]` stay in `g_local.h`.
 
+5. **R5 — Team management core extracted (complete)**
+   - Added `mm_team.h` / `mm_team.cpp` (~600 lines from `g_cmds.cpp`): `PickTeam`, `BroadcastTeamChange`, `AllowTeamSwitch` (file-local), `AllowClientTeamSwitch`, `TeamBalance`, `TeamShuffle`, `SetTeam`, and `PlayerSortByJoinTime` (shared comparator, also used by `Cmd_PlayersJoinTime_f`).
+   - Vanilla adapter names retained (`SetTeam` has callers across 9 files); declarations moved from `g_local.h` to `mm_team.h`.
+   - Command bodies became `MM_CmdTeam()`, `MM_CmdSetTeam()`, `MM_CmdShuffle()`, `MM_CmdBalanceTeams()`; wrappers stay in the command table.
+   - `StopFollowing` intentionally stays in `g_cmds.cpp` (chase/spectator glue, not team logic).
+
 ## MuffMode module map
 
 | Module | Responsibility |
@@ -394,6 +400,7 @@ Validated against vanilla Q2RE source (`q2re-src/`): every Phase 7 target is Muf
 | `mm_spawn_filter` | Entity classname remap and spawn-key filtering |
 | `mm_spawn_loadout` | Deathmatch spawn health/armor and weapon loadout |
 | `mm_statusbar` | Statusbar layout string builder |
+| `mm_team` | Team assignment, balance, shuffle, switch validation |
 | `mm_vote` | Vote registry, validation, lifecycle |
 | `mm_vote_menu` | Callvote menu UI |
 | `mm_vote_types` | Vote type definitions and tables |

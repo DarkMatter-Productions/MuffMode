@@ -4,6 +4,8 @@
 
 #include "g_local.h"
 #include "g_debug_log.h"
+// [MuffMode] Team management lives in muffmode/mm_team
+#include "muffmode/mm_team.h"
 #include <cerrno>
 #include <ctime>
 

@@ -9,6 +9,7 @@
 #include "muffmode/mm_pconfig.h"
 #include "muffmode/mm_ruleset.h"
 #include "muffmode/mm_spawn_loadout.h"
+#include "muffmode/mm_team.h"
 #include "muffmode/mm_vote.h"
 
 void SP_misc_teleporter_dest(gentity_t *ent);
