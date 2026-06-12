@@ -4,9 +4,12 @@ namespace MuffMode.Updater;
 
 internal sealed class MainForm : Form
 {
+    private const string OtherInstallLocationText = "Other location - choose or paste a folder";
+
     private readonly AppSettings _settings;
     private readonly GitHubReleaseClient _releaseClient = new();
 
+    private readonly ComboBox _installSourceComboBox;
     private readonly TextBox _installPathTextBox;
     private readonly Button _browseButton;
     private readonly Label _statusLabel;
@@ -17,21 +20,32 @@ internal sealed class MainForm : Form
     private readonly ProgressBar _progressBar;
     private readonly Button _updateButton;
     private readonly Button _refreshButton;
+    private readonly Button _shortcutsButton;
     private readonly Button _launchButton;
     private readonly Button _quitButton;
 
     private ReleaseInfo? _latestRelease;
     private LocalInstallVersion _localVersion = new(null, "Unknown", "Not checked");
+    private CancellationTokenSource? _operationCancellation;
+    private bool _updatingInstallSource;
+    private bool _cancelAllowed = true;
+    private bool _closeAfterOperation;
     private bool _busy;
 
     public MainForm()
     {
         _settings = InstallationManager.LoadSettings();
 
-        Text = "MuffMode Updater";
+        Text = "Muff Mode Updater & Launcher";
+        var appIcon = LoadApplicationIcon();
+        if (appIcon is not null)
+        {
+            Icon = appIcon;
+        }
+
         StartPosition = FormStartPosition.CenterScreen;
-        MinimumSize = new Size(820, 610);
-        ClientSize = new Size(900, 660);
+        MinimumSize = new Size(840, 650);
+        ClientSize = new Size(920, 700);
         BackColor = Color.FromArgb(26, 29, 30);
         ForeColor = Color.FromArgb(235, 238, 232);
         Font = new Font("Segoe UI", 10F);
@@ -40,7 +54,7 @@ internal sealed class MainForm : Form
         {
             AutoSize = false,
             Dock = DockStyle.Fill,
-            Text = "MuffMode Updater",
+            Text = "Muff Mode Updater & Launcher",
             Font = new Font("Segoe UI Semibold", 21F),
             ForeColor = Color.FromArgb(238, 189, 87)
         };
@@ -53,6 +67,16 @@ internal sealed class MainForm : Form
             ForeColor = Color.FromArgb(198, 211, 196)
         };
 
+        _installSourceComboBox = new ComboBox
+        {
+            Anchor = AnchorStyles.Left | AnchorStyles.Right,
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            BackColor = Color.FromArgb(42, 47, 49),
+            ForeColor = Color.White,
+            FlatStyle = FlatStyle.Flat
+        };
+        _installSourceComboBox.SelectedIndexChanged += (_, _) => ApplySelectedInstallSource();
+
         _installPathTextBox = new TextBox
         {
             Anchor = AnchorStyles.Left | AnchorStyles.Right,
@@ -62,6 +86,7 @@ internal sealed class MainForm : Form
         };
         _installPathTextBox.TextChanged += (_, _) =>
         {
+            SelectInstallSourceForPath(_installPathTextBox.Text);
             UpdateLocalInstallState();
             UpdateButtonStates();
         };
@@ -108,18 +133,23 @@ internal sealed class MainForm : Form
         _refreshButton = CreateButton("Refresh", Color.FromArgb(72, 88, 96));
         _refreshButton.Click += async (_, _) => await RefreshReleaseAsync();
 
+        _shortcutsButton = CreateButton("Shortcuts", Color.FromArgb(84, 88, 105));
+        _shortcutsButton.Click += (_, _) => OfferShortcutCreation();
+
         _launchButton = CreateButton("Launch", Color.FromArgb(140, 94, 57));
         _launchButton.Click += (_, _) => LaunchGame();
 
         _quitButton = CreateButton("Quit", Color.FromArgb(66, 69, 70));
-        _quitButton.Click += (_, _) => Close();
+        _quitButton.Click += (_, _) => RequestCancelOrClose();
 
         BuildLayout(titleLabel);
 
+        PopulateInstallSources();
         var initialInstallPath = InstallationManager.ResolveInitialInstallPath(_settings.InstallPath)
             ?? _settings.InstallPath
             ?? "";
         _installPathTextBox.Text = initialInstallPath;
+        SelectInstallSourceForPath(initialInstallPath);
         UpdateLocalInstallState();
         UpdateButtonStates();
 
@@ -128,7 +158,16 @@ internal sealed class MainForm : Form
 
     protected override void OnClosing(CancelEventArgs e)
     {
+        if (_busy)
+        {
+            e.Cancel = true;
+            _closeAfterOperation = true;
+            RequestCancelCurrentOperation();
+            return;
+        }
+
         SaveCurrentSettings();
+        _operationCancellation?.Dispose();
         _releaseClient.Dispose();
         base.OnClosing(e);
     }
@@ -144,7 +183,7 @@ internal sealed class MainForm : Form
         };
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 52));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 72));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 106));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 44));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
@@ -167,20 +206,23 @@ internal sealed class MainForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 3,
-            RowCount = 2
+            RowCount = 3
         };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 138));
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 104));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 26));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
 
-        var label = CreateInfoLabel("Quake 2 folder");
+        var label = CreateInfoLabel("Install location");
         layout.Controls.Add(label, 0, 0);
         layout.SetColumnSpan(label, 3);
-        layout.Controls.Add(_installPathTextBox, 0, 1);
+        layout.Controls.Add(_installSourceComboBox, 0, 1);
+        layout.SetColumnSpan(_installSourceComboBox, 3);
+        layout.Controls.Add(_installPathTextBox, 0, 2);
         layout.SetColumnSpan(_installPathTextBox, 2);
-        layout.Controls.Add(_browseButton, 2, 1);
+        layout.Controls.Add(_browseButton, 2, 2);
         return layout;
     }
 
@@ -225,6 +267,7 @@ internal sealed class MainForm : Form
 
         layout.Controls.Add(_quitButton);
         layout.Controls.Add(_launchButton);
+        layout.Controls.Add(_shortcutsButton);
         layout.Controls.Add(_refreshButton);
         layout.Controls.Add(_updateButton);
         return layout;
@@ -244,13 +287,192 @@ internal sealed class MainForm : Form
     private static Button CreateButton(string text, Color backColor) => new()
     {
         Text = text,
-        Width = 96,
+        Width = 108,
         Height = 34,
         Margin = new Padding(8, 6, 0, 6),
         FlatStyle = FlatStyle.Flat,
         BackColor = backColor,
         ForeColor = Color.White,
         UseVisualStyleBackColor = false
+    };
+
+    private static Icon? LoadApplicationIcon()
+    {
+        try
+        {
+            return Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private void PopulateInstallSources()
+    {
+        _updatingInstallSource = true;
+        try
+        {
+            _installSourceComboBox.Items.Clear();
+            foreach (var candidate in InstallationManager.GetInstallCandidates(_settings.InstallPath))
+            {
+                _installSourceComboBox.Items.Add(candidate);
+            }
+
+            _installSourceComboBox.Items.Add(OtherInstallLocationText);
+            _installSourceComboBox.SelectedItem = _installSourceComboBox.Items.Count > 1
+                ? _installSourceComboBox.Items[0]
+                : OtherInstallLocationText;
+        }
+        finally
+        {
+            _updatingInstallSource = false;
+        }
+    }
+
+    private void ApplySelectedInstallSource()
+    {
+        if (_updatingInstallSource)
+        {
+            return;
+        }
+
+        if (_installSourceComboBox.SelectedItem is InstallCandidate candidate)
+        {
+            _installPathTextBox.Text = candidate.Path;
+            SaveCurrentSettings();
+            SetStatus($"{candidate.Source} install selected.");
+        }
+    }
+
+    private void SelectInstallSourceForPath(string? path)
+    {
+        if (_updatingInstallSource)
+        {
+            return;
+        }
+
+        _updatingInstallSource = true;
+        try
+        {
+            var normalizedPath = InstallationManager.ResolveInstallRoot(path) ?? path;
+            foreach (var item in _installSourceComboBox.Items)
+            {
+                if (item is InstallCandidate candidate && PathsEqual(candidate.Path, normalizedPath))
+                {
+                    _installSourceComboBox.SelectedItem = candidate;
+                    return;
+                }
+            }
+
+            _installSourceComboBox.SelectedItem = OtherInstallLocationText;
+        }
+        finally
+        {
+            _updatingInstallSource = false;
+        }
+    }
+
+    private static bool PathsEqual(string? left, string? right)
+    {
+        if (string.IsNullOrWhiteSpace(left) || string.IsNullOrWhiteSpace(right))
+        {
+            return false;
+        }
+
+        try
+        {
+            var normalizedLeft = Path.GetFullPath(left).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            var normalizedRight = Path.GetFullPath(right).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            return string.Equals(normalizedLeft, normalizedRight, StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return string.Equals(left.Trim(), right.Trim(), StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    private void OfferShortcutCreation()
+    {
+        using var dialog = new Form
+        {
+            Text = "Create Updater & Launcher Shortcuts",
+            StartPosition = FormStartPosition.CenterParent,
+            FormBorderStyle = FormBorderStyle.FixedDialog,
+            MinimizeBox = false,
+            MaximizeBox = false,
+            ClientSize = new Size(420, 170),
+            BackColor = BackColor,
+            ForeColor = ForeColor,
+            Font = Font,
+            Icon = this.Icon
+        };
+
+        var root = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            Padding = new Padding(18),
+            ColumnCount = 1,
+            RowCount = 4
+        };
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
+        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+
+        var heading = CreateInfoLabel("Create shortcuts to this updater and launcher.");
+        var desktopShortcut = CreateShortcutCheckBox("Desktop shortcut", !ShortcutManager.DesktopShortcutExists);
+        var startMenuShortcut = CreateShortcutCheckBox("Start menu shortcut", !ShortcutManager.StartMenuShortcutExists);
+        var buttons = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            FlowDirection = FlowDirection.RightToLeft,
+            WrapContents = false
+        };
+        var createButton = CreateButton("Create", Color.FromArgb(80, 132, 88));
+        createButton.DialogResult = DialogResult.OK;
+        var cancelButton = CreateButton("Cancel");
+        cancelButton.DialogResult = DialogResult.Cancel;
+        buttons.Controls.Add(cancelButton);
+        buttons.Controls.Add(createButton);
+
+        root.Controls.Add(heading, 0, 0);
+        root.Controls.Add(desktopShortcut, 0, 1);
+        root.Controls.Add(startMenuShortcut, 0, 2);
+        root.Controls.Add(buttons, 0, 3);
+        dialog.Controls.Add(root);
+        dialog.AcceptButton = createButton;
+        dialog.CancelButton = cancelButton;
+
+        if (dialog.ShowDialog(this) != DialogResult.OK)
+        {
+            return;
+        }
+
+        if (!desktopShortcut.Checked && !startMenuShortcut.Checked)
+        {
+            SetStatus("No shortcuts selected.");
+            return;
+        }
+
+        try
+        {
+            ShortcutManager.CreateShortcuts(desktopShortcut.Checked, startMenuShortcut.Checked);
+            SetStatus("Updater and launcher shortcuts created.");
+        }
+        catch (Exception ex)
+        {
+            SetStatus("Could not create shortcuts.");
+            MessageBox.Show(this, ex.Message, "Shortcut creation failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    private CheckBox CreateShortcutCheckBox(string text, bool isChecked) => new()
+    {
+        AutoSize = true,
+        Text = text,
+        Checked = isChecked,
+        ForeColor = ForeColor
     };
 
     private async Task RefreshReleaseAsync()
@@ -260,16 +482,23 @@ internal sealed class MainForm : Form
             return;
         }
 
-        SetBusy(true, "Checking GitHub for the latest MuffMode release...");
+        _operationCancellation?.Dispose();
+        _operationCancellation = new CancellationTokenSource();
+        var cancellationToken = _operationCancellation.Token;
+        SetBusy(true, "Checking GitHub for the latest Muff Mode release...");
         _progressBar.Value = 0;
 
         try
         {
-            _latestRelease = await _releaseClient.GetLatestReleaseAsync(CancellationToken.None);
+            _latestRelease = await _releaseClient.GetLatestReleaseAsync(cancellationToken);
             _changelogTextBox.Text = BuildChangelogText(_latestRelease);
             UpdateLocalInstallState();
             UpdateVersionLabels();
             SetStatus(GetReleaseStatusText());
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            SetStatus("Release check cancelled.");
         }
         catch (Exception ex)
         {
@@ -280,6 +509,9 @@ internal sealed class MainForm : Form
         finally
         {
             SetBusy(false);
+            _operationCancellation.Dispose();
+            _operationCancellation = null;
+            CloseIfRequested();
         }
     }
 
@@ -293,12 +525,15 @@ internal sealed class MainForm : Form
         var installPath = _installPathTextBox.Text.Trim();
         if (!InstallationManager.IsValidInstallPath(installPath))
         {
-            MessageBox.Show(this, "Select the Quake 2 installation folder, or its rerelease folder. It must contain baseq2.", "Install path required", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            MessageBox.Show(this, "Select the Quake 2 installation folder, its rerelease folder, or its baseq2 folder.", "Install path required", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
 
         SaveCurrentSettings();
-        SetBusy(true, $"Preparing to install MuffMode {_latestRelease.Version}...");
+        _operationCancellation?.Dispose();
+        _operationCancellation = new CancellationTokenSource();
+        var cancellationToken = _operationCancellation.Token;
+        SetBusy(true, $"Preparing to install Muff Mode {_latestRelease.Version}...");
         _progressBar.Value = 0;
 
         var downloadDirectory = Path.Combine(Path.GetTempPath(), "MuffModeUpdater", "downloads");
@@ -307,27 +542,34 @@ internal sealed class MainForm : Form
         try
         {
             var progress = new Progress<UpdaterProgress>(ReportProgress);
-            downloadedZip = await _releaseClient.DownloadReleaseAssetAsync(_latestRelease, downloadDirectory, progress, CancellationToken.None);
-            await InstallationManager.SyncReleaseToInstallAsync(_latestRelease, downloadedZip, installPath, progress, CancellationToken.None);
+            downloadedZip = await _releaseClient.DownloadReleaseAssetAsync(_latestRelease, downloadDirectory, progress, cancellationToken);
+            await InstallationManager.SyncReleaseToInstallAsync(_latestRelease, downloadedZip, installPath, progress, cancellationToken);
 
             UpdateLocalInstallState();
             UpdateVersionLabels();
-            SetStatus($"Updated MuffMode to {_latestRelease.Version}.");
+            SetStatus($"Updated Muff Mode to {_latestRelease.Version}.");
 
-            if (_autoLaunchCheckBox.Checked)
+            if (_autoLaunchCheckBox.Checked && !_closeAfterOperation)
             {
                 LaunchGame();
             }
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            SetStatus("Update cancelled before completion.");
+        }
         catch (Exception ex)
         {
             SetStatus("Update failed.");
-            MessageBox.Show(this, ex.Message, "MuffMode update failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            MessageBox.Show(this, ex.Message, "Muff Mode update failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
         finally
         {
             TryDeleteFile(downloadedZip);
             SetBusy(false);
+            _operationCancellation.Dispose();
+            _operationCancellation = null;
+            CloseIfRequested();
         }
     }
 
@@ -335,7 +577,7 @@ internal sealed class MainForm : Form
     {
         using var dialog = new FolderBrowserDialog
         {
-            Description = "Select the Quake 2 folder, or its rerelease folder. It should contain baseq2.",
+            Description = "Select the Quake 2 folder, its rerelease folder, or its baseq2 folder.",
             InitialDirectory = Directory.Exists(_installPathTextBox.Text) ? _installPathTextBox.Text : Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
             UseDescriptionForTitle = true
         };
@@ -390,12 +632,12 @@ internal sealed class MainForm : Form
 
         if (!InstallationManager.IsValidInstallPath(_installPathTextBox.Text.Trim()))
         {
-            return "Choose your Quake 2 install folder, then update or launch.";
+            return "Choose a detected or custom Quake II install folder, then update or launch.";
         }
 
         if (_localVersion.Version is null)
         {
-            return $"MuffMode {_latestRelease.Version} is available. Local version is unknown, so update is recommended.";
+            return $"Muff Mode {_latestRelease.Version} is available. Local version is unknown, so update is recommended.";
         }
 
         var compare = _latestRelease.Version.CompareTo(_localVersion.Version.Value);
@@ -406,10 +648,10 @@ internal sealed class MainForm : Form
 
         if (compare == 0)
         {
-            return $"MuffMode {_latestRelease.Version} is already installed.";
+            return $"Muff Mode {_latestRelease.Version} is already installed.";
         }
 
-        return $"Local MuffMode {_localVersion.Version} is newer than GitHub release {_latestRelease.Version}.";
+        return $"Local Muff Mode {_localVersion.Version} is newer than GitHub release {_latestRelease.Version}.";
     }
 
     private bool IsUpdateRequired()
@@ -426,6 +668,12 @@ internal sealed class MainForm : Form
     private void SetBusy(bool busy, string? status = null)
     {
         _busy = busy;
+        if (busy)
+        {
+            _cancelAllowed = true;
+            _closeAfterOperation = false;
+        }
+
         if (!string.IsNullOrWhiteSpace(status))
         {
             SetStatus(status);
@@ -434,6 +682,7 @@ internal sealed class MainForm : Form
         _installPathTextBox.Enabled = !busy;
         _browseButton.Enabled = !busy;
         _autoLaunchCheckBox.Enabled = !busy;
+        UseWaitCursor = busy;
         UpdateButtonStates();
     }
 
@@ -442,12 +691,25 @@ internal sealed class MainForm : Form
         var validInstallPath = InstallationManager.IsValidInstallPath(_installPathTextBox.Text.Trim());
         _updateButton.Enabled = !_busy && validInstallPath && IsUpdateRequired();
         _refreshButton.Enabled = !_busy;
+        _shortcutsButton.Enabled = !_busy;
         _launchButton.Enabled = !_busy && validInstallPath;
-        _quitButton.Enabled = true;
+        if (_busy)
+        {
+            var cancellationRequested = _operationCancellation?.IsCancellationRequested ?? false;
+            _quitButton.Text = _cancelAllowed ? "Cancel" : "Installing";
+            _quitButton.Enabled = _cancelAllowed && !cancellationRequested;
+        }
+        else
+        {
+            _quitButton.Text = "Quit";
+            _quitButton.Enabled = true;
+        }
     }
 
     private void ReportProgress(UpdaterProgress progress)
     {
+        _cancelAllowed = progress.CanCancel;
+        UpdateButtonStates();
         SetStatus(progress.Message);
         if (progress.Percentage is { } percentage)
         {
@@ -459,10 +721,61 @@ internal sealed class MainForm : Form
 
     private void SaveCurrentSettings()
     {
-        _settings.InstallPath = InstallationManager.ResolveInstallRoot(_installPathTextBox.Text.Trim())
-            ?? _installPathTextBox.Text.Trim();
-        _settings.AutoLaunchAfterUpdate = _autoLaunchCheckBox.Checked;
-        InstallationManager.SaveSettings(_settings);
+        try
+        {
+            _settings.InstallPath = InstallationManager.ResolveInstallRoot(_installPathTextBox.Text.Trim())
+                ?? _installPathTextBox.Text.Trim();
+            _settings.AutoLaunchAfterUpdate = _autoLaunchCheckBox.Checked;
+            InstallationManager.SaveSettings(_settings);
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"Could not save settings: {ex.Message}");
+        }
+    }
+
+    private void RequestCancelOrClose()
+    {
+        if (_busy)
+        {
+            RequestCancelCurrentOperation();
+            return;
+        }
+
+        Close();
+    }
+
+    private void RequestCancelCurrentOperation()
+    {
+        if (_operationCancellation is null || _operationCancellation.IsCancellationRequested)
+        {
+            return;
+        }
+
+        if (!_cancelAllowed)
+        {
+            SetStatus(_closeAfterOperation
+                ? "Finishing installation; the updater will close when done."
+                : "Finishing installation. This step cannot be cancelled safely.");
+            UpdateButtonStates();
+            return;
+        }
+
+        _operationCancellation.Cancel();
+        _quitButton.Enabled = false;
+        _quitButton.Text = "Cancelling";
+        SetStatus("Cancelling current operation...");
+    }
+
+    private void CloseIfRequested()
+    {
+        if (!_closeAfterOperation)
+        {
+            return;
+        }
+
+        _closeAfterOperation = false;
+        Close();
     }
 
     private static string BuildChangelogText(ReleaseInfo release)

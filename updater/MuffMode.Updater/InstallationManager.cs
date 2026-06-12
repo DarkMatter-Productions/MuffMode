@@ -11,6 +11,18 @@ internal static partial class InstallationManager
     private const string SettingsFileName = "updater-settings.json";
     private const string MarkerJsonFileName = "muffmode-version.json";
     private const string MarkerTextFileName = "muffmode.version";
+    private const int MaxPackageFileCount = 20_000;
+    private const long MaxPackageUncompressedBytes = 1024L * 1024L * 1024L;
+
+    private static readonly HashSet<string> AllowedRootPackageFiles = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "CHANGELOG.md",
+        "MuffMode.version",
+        "MuffModeUpdater.exe",
+        "README.html",
+        "README.md",
+        "VERSION"
+    };
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -44,18 +56,36 @@ internal static partial class InstallationManager
     public static void SaveSettings(AppSettings settings)
     {
         Directory.CreateDirectory(SettingsDirectory);
-        File.WriteAllText(SettingsPath, JsonSerializer.Serialize(settings, JsonOptions));
+        WriteAllTextAtomic(SettingsPath, JsonSerializer.Serialize(settings, JsonOptions));
     }
 
     public static string? ResolveInitialInstallPath(string? savedPath)
     {
-        var savedRoot = ResolveInstallRoot(savedPath);
-        if (savedRoot is not null)
+        return GetInstallCandidates(savedPath).FirstOrDefault()?.Path;
+    }
+
+    public static IReadOnlyList<InstallCandidate> GetInstallCandidates(string? savedPath)
+    {
+        var candidates = new List<InstallCandidate>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        AddInstallCandidate(candidates, seen, "Saved location", savedPath);
+        foreach (var steamPath in EnumerateSteamInstallCandidates())
         {
-            return savedRoot;
+            AddInstallCandidate(candidates, seen, "Steam", steamPath);
         }
 
-        return EnumerateInstallCandidates().FirstOrDefault(IsValidInstallPath);
+        foreach (var epicPath in EnumerateEpicInstallCandidates())
+        {
+            AddInstallCandidate(candidates, seen, "Epic Online Store", epicPath);
+        }
+
+        foreach (var gogPath in EnumerateGogInstallCandidates())
+        {
+            AddInstallCandidate(candidates, seen, "GOG", gogPath);
+        }
+
+        return candidates;
     }
 
     public static string? ResolveInstallRoot(string? installPath)
@@ -77,6 +107,18 @@ internal static partial class InstallationManager
             if (string.Equals(folderName, "rerelease", StringComparison.OrdinalIgnoreCase))
             {
                 return Directory.GetParent(normalized)?.FullName ?? normalized;
+            }
+        }
+
+        if (Directory.Exists(normalized))
+        {
+            var folderName = Path.GetFileName(normalized.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+            var parent = Directory.GetParent(normalized);
+            if (string.Equals(folderName, "baseq2", StringComparison.OrdinalIgnoreCase)
+                && parent is not null
+                && string.Equals(parent.Name, "rerelease", StringComparison.OrdinalIgnoreCase))
+            {
+                return parent.Parent?.FullName;
             }
         }
 
@@ -138,7 +180,7 @@ internal static partial class InstallationManager
     {
         if (!IsValidInstallPath(installPath))
         {
-            throw new InvalidOperationException("Select the Quake 2 installation folder, or its rerelease folder. It must contain baseq2.");
+            throw new InvalidOperationException("Select the Quake 2 installation folder, its rerelease folder, or its baseq2 folder.");
         }
 
         var normalizedInstallPath = ResolveInstallRoot(installPath)!;
@@ -148,55 +190,43 @@ internal static partial class InstallationManager
         try
         {
             progress?.Report(new UpdaterProgress("Extracting release package...", 46));
-            await Task.Run(() => ZipFile.ExtractToDirectory(zipPath, extractRoot, overwriteFiles: true), cancellationToken);
+            await ExtractReleasePackageAsync(zipPath, extractRoot, cancellationToken);
 
             var packageRoot = ResolvePackageRoot(extractRoot);
-            var releaseFiles = Directory.EnumerateFiles(packageRoot, "*", SearchOption.AllDirectories).ToList();
+            ValidateReleasePackage(packageRoot, release);
+
+            var releaseFiles = Directory.EnumerateFiles(packageRoot, "*", SearchOption.AllDirectories)
+                .Order(StringComparer.OrdinalIgnoreCase)
+                .ToList();
             if (releaseFiles.Count == 0)
             {
                 throw new InvalidOperationException("The downloaded release package did not contain any files to install.");
             }
 
             var runningUpdaterPath = GetRunningUpdaterPath();
+            cancellationToken.ThrowIfCancellationRequested();
+            progress?.Report(new UpdaterProgress("Applying release package...", 49, CanCancel: false));
             BackupCurrentGameDll(normalizedInstallPath, progress);
 
             for (var index = 0; index < releaseFiles.Count; index++)
             {
-                cancellationToken.ThrowIfCancellationRequested();
-
                 var sourcePath = releaseFiles[index];
                 var relativePath = Path.GetRelativePath(packageRoot, sourcePath);
                 var destinationPath = ResolveDestinationPath(normalizedInstallPath, relativePath);
                 if (IsRunningUpdaterDestination(destinationPath, runningUpdaterPath))
                 {
-                    progress?.Report(new UpdaterProgress($"Skipping running updater executable: {relativePath}.", null));
+                    progress?.Report(new UpdaterProgress($"Skipping running updater executable: {relativePath}.", null, CanCancel: false));
                     continue;
                 }
 
-                var destinationDirectory = Path.GetDirectoryName(destinationPath);
-                if (!string.IsNullOrWhiteSpace(destinationDirectory))
-                {
-                    Directory.CreateDirectory(destinationDirectory);
-                }
-
-                if (File.Exists(destinationPath))
-                {
-                    var attributes = File.GetAttributes(destinationPath);
-                    if ((attributes & FileAttributes.ReadOnly) != 0)
-                    {
-                        File.SetAttributes(destinationPath, attributes & ~FileAttributes.ReadOnly);
-                    }
-                }
-
-                File.Copy(sourcePath, destinationPath, overwrite: true);
-                File.SetLastWriteTimeUtc(destinationPath, File.GetLastWriteTimeUtc(sourcePath));
+                CopyFileAtomically(sourcePath, destinationPath);
 
                 var percentage = 50 + (int)Math.Round((double)(index + 1) / releaseFiles.Count * 45);
-                progress?.Report(new UpdaterProgress($"Syncing {relativePath}...", Math.Clamp(percentage, 50, 95)));
+                progress?.Report(new UpdaterProgress($"Syncing {relativePath}...", Math.Clamp(percentage, 50, 95), CanCancel: false));
             }
 
             WriteInstalledMarker(normalizedInstallPath, release);
-            progress?.Report(new UpdaterProgress($"MuffMode {release.Version} installed.", 100));
+            progress?.Report(new UpdaterProgress($"MuffMode {release.Version} installed.", 100, CanCancel: false));
         }
         finally
         {
@@ -293,7 +323,26 @@ internal static partial class InstallationManager
         }
     }
 
-    private static IEnumerable<string> EnumerateInstallCandidates()
+    private static void AddInstallCandidate(
+        ICollection<InstallCandidate> candidates,
+        ISet<string> seenPaths,
+        string source,
+        string? path)
+    {
+        var root = ResolveInstallRoot(path);
+        if (root is null)
+        {
+            return;
+        }
+
+        var key = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        if (seenPaths.Add(key))
+        {
+            candidates.Add(new InstallCandidate(source, key));
+        }
+    }
+
+    private static IEnumerable<string> EnumerateSteamInstallCandidates()
     {
         foreach (var libraryPath in EnumerateSteamLibraryRoots().Distinct(StringComparer.OrdinalIgnoreCase))
         {
@@ -302,16 +351,6 @@ internal static partial class InstallationManager
 
         yield return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Steam", "steamapps", "common", "Quake 2");
         yield return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Steam", "steamapps", "common", "Quake 2");
-
-        foreach (var epicPath in EnumerateEpicInstallCandidates())
-        {
-            yield return epicPath;
-        }
-
-        foreach (var gogPath in EnumerateGogInstallCandidates())
-        {
-            yield return gogPath;
-        }
     }
 
     private static IEnumerable<string> EnumerateSteamLibraryRoots()
@@ -531,16 +570,198 @@ internal static partial class InstallationManager
         return packageDirectories.Count == 1 ? packageDirectories[0] : extractRoot;
     }
 
+    private static async Task ExtractReleasePackageAsync(string zipPath, string extractRoot, CancellationToken cancellationToken)
+    {
+        using var archive = ZipFile.OpenRead(zipPath);
+        var extractedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        long totalUncompressedBytes = 0;
+        var fileCount = 0;
+
+        foreach (var entry in archive.Entries)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var relativePath = NormalizeArchiveEntryPath(entry.FullName);
+            var destinationPath = ResolvePathUnderRoot(
+                extractRoot,
+                relativePath,
+                $"Archive entry would extract outside the temporary folder: {entry.FullName}");
+
+            if (string.IsNullOrEmpty(entry.Name))
+            {
+                Directory.CreateDirectory(destinationPath);
+                continue;
+            }
+
+            fileCount++;
+            if (fileCount > MaxPackageFileCount)
+            {
+                throw new InvalidOperationException($"The release package contains more than the supported limit of {MaxPackageFileCount:N0} files.");
+            }
+
+            totalUncompressedBytes += entry.Length;
+            if (totalUncompressedBytes > MaxPackageUncompressedBytes)
+            {
+                throw new InvalidOperationException($"The release package expands beyond the supported limit of {MaxPackageUncompressedBytes / 1024 / 1024} MB.");
+            }
+
+            if (!extractedPaths.Add(destinationPath))
+            {
+                throw new InvalidOperationException($"The release package contains duplicate entries for: {relativePath}");
+            }
+
+            var destinationDirectory = Path.GetDirectoryName(destinationPath);
+            if (!string.IsNullOrWhiteSpace(destinationDirectory))
+            {
+                Directory.CreateDirectory(destinationDirectory);
+            }
+
+            await using (var source = entry.Open())
+            await using (var destination = new FileStream(
+                destinationPath,
+                FileMode.CreateNew,
+                FileAccess.Write,
+                FileShare.None,
+                128 * 1024,
+                FileOptions.Asynchronous | FileOptions.SequentialScan))
+            {
+                await source.CopyToAsync(destination, cancellationToken);
+            }
+
+            File.SetLastWriteTimeUtc(destinationPath, entry.LastWriteTime.UtcDateTime);
+        }
+    }
+
+    private static string NormalizeArchiveEntryPath(string entryPath)
+    {
+        if (string.IsNullOrWhiteSpace(entryPath))
+        {
+            throw new InvalidOperationException("The release package contains an empty archive entry.");
+        }
+
+        var normalized = entryPath.Replace('\\', '/');
+        if (Path.IsPathRooted(normalized))
+        {
+            throw new InvalidOperationException($"The release package contains a rooted archive entry: {entryPath}");
+        }
+
+        var segments = normalized.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (segments.Length == 0)
+        {
+            throw new InvalidOperationException($"The release package contains an invalid archive entry: {entryPath}");
+        }
+
+        foreach (var segment in segments)
+        {
+            if (segment is "." or ".." || segment.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+            {
+                throw new InvalidOperationException($"The release package contains an unsafe archive entry: {entryPath}");
+            }
+        }
+
+        return Path.Combine(segments);
+    }
+
+    private static void ValidateReleasePackage(string packageRoot, ReleaseInfo release)
+    {
+        var packageBaseq2 = Path.Combine(packageRoot, "rerelease", "baseq2");
+        var packageDll = Path.Combine(packageBaseq2, "game_x64.dll");
+        if (!File.Exists(packageDll))
+        {
+            throw new InvalidOperationException("The release package is missing rerelease\\baseq2\\game_x64.dll.");
+        }
+
+        if (!TryReadVersionMarker(Path.Combine(packageBaseq2, MarkerJsonFileName), out var packageVersion)
+            && !TryReadVersionTextFile(Path.Combine(packageBaseq2, MarkerTextFileName), out packageVersion))
+        {
+            throw new InvalidOperationException("The release package is missing a readable MuffMode version marker.");
+        }
+
+        if (packageVersion.CompareTo(release.Version) != 0)
+        {
+            throw new InvalidOperationException($"The release package version ({packageVersion}) does not match the GitHub release version ({release.Version}).");
+        }
+
+        foreach (var filePath in Directory.EnumerateFiles(packageRoot, "*", SearchOption.AllDirectories))
+        {
+            var relativePath = Path.GetRelativePath(packageRoot, filePath);
+            if (!IsAllowedPackagePath(relativePath))
+            {
+                throw new InvalidOperationException($"The release package contains an unexpected file path: {relativePath}");
+            }
+        }
+    }
+
+    private static bool IsAllowedPackagePath(string relativePath)
+    {
+        var segments = relativePath.Split(
+            new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar },
+            StringSplitOptions.RemoveEmptyEntries);
+        if (segments.Length == 0)
+        {
+            return false;
+        }
+
+        if (segments.Length == 1)
+        {
+            return AllowedRootPackageFiles.Contains(segments[0]);
+        }
+
+        if (!string.Equals(segments[0], "rerelease", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var normalized = string.Join(Path.DirectorySeparatorChar, segments);
+        var extension = Path.GetExtension(normalized);
+        if (IsBlockedPackageExtension(extension))
+        {
+            return string.Equals(
+                normalized,
+                Path.Combine("rerelease", "baseq2", "game_x64.dll"),
+                StringComparison.OrdinalIgnoreCase);
+        }
+
+        return true;
+    }
+
+    private static bool IsBlockedPackageExtension(string extension)
+    {
+        return extension.Equals(".bat", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".cmd", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".com", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".hta", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".jar", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".dll", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".exe", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".js", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".lnk", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".msi", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".pif", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".ps1", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".scr", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".vbs", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".wsf", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static string ResolveDestinationPath(string installPath, string relativePath)
     {
-        var installRoot = Path.GetFullPath(installPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        var destinationPath = Path.GetFullPath(Path.Combine(installRoot, relativePath));
-        var installRootPrefix = installRoot + Path.DirectorySeparatorChar;
+        return ResolvePathUnderRoot(
+            installPath,
+            relativePath,
+            $"Package entry would write outside the selected Quake 2 folder: {relativePath}");
+    }
 
-        if (!destinationPath.StartsWith(installRootPrefix, StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(destinationPath, installRoot, StringComparison.OrdinalIgnoreCase))
+    private static string ResolvePathUnderRoot(string rootPath, string relativePath, string failureMessage)
+    {
+        var root = Path.GetFullPath(rootPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var destinationPath = Path.GetFullPath(Path.Combine(root, relativePath));
+        var rootPrefix = root + Path.DirectorySeparatorChar;
+
+        if (!destinationPath.StartsWith(rootPrefix, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(destinationPath, root, StringComparison.OrdinalIgnoreCase))
         {
-            throw new InvalidOperationException($"Package entry would write outside the selected Quake 2 folder: {relativePath}");
+            throw new InvalidOperationException(failureMessage);
         }
 
         return destinationPath;
@@ -570,6 +791,72 @@ internal static partial class InstallationManager
         return string.Equals(destinationFullPath, runningFullPath, StringComparison.OrdinalIgnoreCase);
     }
 
+    private static void CopyFileAtomically(string sourcePath, string destinationPath)
+    {
+        var destinationDirectory = Path.GetDirectoryName(destinationPath);
+        if (!string.IsNullOrWhiteSpace(destinationDirectory))
+        {
+            Directory.CreateDirectory(destinationDirectory);
+        }
+
+        var temporaryPath = Path.Combine(
+            destinationDirectory ?? Path.GetTempPath(),
+            $".{Path.GetFileName(destinationPath)}.{Guid.NewGuid():N}.tmp");
+
+        try
+        {
+            if (File.Exists(destinationPath))
+            {
+                var attributes = File.GetAttributes(destinationPath);
+                if ((attributes & FileAttributes.ReadOnly) != 0)
+                {
+                    File.SetAttributes(destinationPath, attributes & ~FileAttributes.ReadOnly);
+                }
+            }
+
+            File.Copy(sourcePath, temporaryPath, overwrite: false);
+            File.SetLastWriteTimeUtc(temporaryPath, File.GetLastWriteTimeUtc(sourcePath));
+
+            if (File.Exists(destinationPath))
+            {
+                File.Replace(temporaryPath, destinationPath, destinationBackupFileName: null, ignoreMetadataErrors: true);
+            }
+            else
+            {
+                File.Move(temporaryPath, destinationPath);
+            }
+        }
+        catch
+        {
+            TryDeleteFile(temporaryPath);
+            throw;
+        }
+    }
+
+    private static void WriteAllTextAtomic(string path, string contents)
+    {
+        var directory = Path.GetDirectoryName(path);
+        if (!string.IsNullOrWhiteSpace(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        var temporaryPath = Path.Combine(
+            directory ?? Path.GetTempPath(),
+            $".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
+
+        try
+        {
+            File.WriteAllText(temporaryPath, contents);
+            File.Move(temporaryPath, path, overwrite: true);
+        }
+        catch
+        {
+            TryDeleteFile(temporaryPath);
+            throw;
+        }
+    }
+
     private static void BackupCurrentGameDll(string installPath, IProgress<UpdaterProgress>? progress)
     {
         var baseq2 = GetBaseq2Path(installPath);
@@ -583,9 +870,29 @@ internal static partial class InstallationManager
         Directory.CreateDirectory(backupDirectory);
 
         var timestamp = DateTimeOffset.Now.ToString("yyyyMMdd-HHmmss");
-        var backupPath = Path.Combine(backupDirectory, $"game_x64.before-muffmode-{timestamp}.dll");
+        var backupPath = GetUniqueBackupPath(backupDirectory, timestamp);
         File.Copy(dllPath, backupPath, overwrite: false);
-        progress?.Report(new UpdaterProgress($"Backed up existing game_x64.dll to {Path.GetFileName(backupPath)}.", 49));
+        progress?.Report(new UpdaterProgress($"Backed up existing game_x64.dll to {Path.GetFileName(backupPath)}.", 49, CanCancel: false));
+    }
+
+    private static string GetUniqueBackupPath(string backupDirectory, string timestamp)
+    {
+        var backupPath = Path.Combine(backupDirectory, $"game_x64.before-muffmode-{timestamp}.dll");
+        if (!File.Exists(backupPath))
+        {
+            return backupPath;
+        }
+
+        for (var index = 2; index < 100; index++)
+        {
+            var indexedBackupPath = Path.Combine(backupDirectory, $"game_x64.before-muffmode-{timestamp}-{index}.dll");
+            if (!File.Exists(indexedBackupPath))
+            {
+                return indexedBackupPath;
+            }
+        }
+
+        return Path.Combine(backupDirectory, $"game_x64.before-muffmode-{timestamp}-{Guid.NewGuid():N}.dll");
     }
 
     private static void WriteInstalledMarker(string installPath, ReleaseInfo release)
@@ -602,8 +909,8 @@ internal static partial class InstallationManager
             InstalledAtUtc = DateTimeOffset.UtcNow
         };
 
-        File.WriteAllText(Path.Combine(baseq2, MarkerJsonFileName), JsonSerializer.Serialize(marker, JsonOptions));
-        File.WriteAllText(Path.Combine(baseq2, MarkerTextFileName), release.Version.ToString());
+        WriteAllTextAtomic(Path.Combine(baseq2, MarkerJsonFileName), JsonSerializer.Serialize(marker, JsonOptions));
+        WriteAllTextAtomic(Path.Combine(baseq2, MarkerTextFileName), release.Version.ToString());
     }
 
     private static IEnumerable<string> EnumerateLaunchCandidates(string installPath)
@@ -630,6 +937,21 @@ internal static partial class InstallationManager
             if (Directory.Exists(path))
             {
                 Directory.Delete(path, recursive: true);
+            }
+        }
+        catch
+        {
+            // Temp cleanup failure is non-fatal.
+        }
+    }
+
+    private static void TryDeleteFile(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
             }
         }
         catch

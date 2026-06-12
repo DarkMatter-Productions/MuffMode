@@ -27,8 +27,8 @@ muffmode-<version>-beta-windows-installer.exe
 ```
 
 The script prefers [GitHub Copilot CLI](https://docs.github.com/copilot/how-tos/set-up/install-copilot-cli) for both `CHANGELOG.md` and `README.html` in non-interactive mode. If Copilot is not installed or authenticated, it falls back to deterministic release notes and a styled end-user HTML README so packaging can still complete. Pass `-RequireCopilot` when you intentionally want the release to fail unless Copilot generation succeeds.
-It also writes `rerelease/baseq2/muffmode-version.json` and `rerelease/baseq2/muffmode.version` so the Windows updater can compare the installed version with GitHub releases.
-The package also includes the published Windows updater executable at the package root.
+It also writes `rerelease/baseq2/muffmode-version.json` and `rerelease/baseq2/muffmode.version` so the Windows updater and launcher can compare the installed version with GitHub releases.
+The package also includes the published Windows updater and launcher executable at the package root.
 
 The Windows installer is built with [Inno Setup 6](https://jrsoftware.org/isinfo.php). The release script looks for `ISCC.exe` on `PATH`, then in the normal Inno Setup install folders. You can pass `-InnoSetupCompiler "C:\Path\To\ISCC.exe"` to override detection or `-SkipInstaller` for a zip-only local package.
 
@@ -109,11 +109,11 @@ Installer behavior:
 | GOG | `C:\GOG Games\Quake II` |
 | Custom or another library | User-selected folder |
 
-Steam is selected by default. The installer lets users browse after choosing a preset, warns if `rerelease\baseq2` is not found, corrects accidental `rerelease` folder selection back to the outer Quake II folder, and backs up an existing `rerelease\baseq2\game_x64.dll` under `rerelease\baseq2\MuffModeBackups` before replacing it.
+The installer shows whether Steam, Epic Online Store, or GOG was detected and displays the selected path before the folder page. It still offers an **Other location** choice for custom libraries. The installer lets users browse after choosing a preset, warns if `rerelease\baseq2` is not found, corrects accidental `rerelease` or `baseq2` folder selection back to the outer Quake II folder, offers Desktop and Start menu shortcuts for the updater and launcher, and backs up an existing `rerelease\baseq2\game_x64.dll` under `rerelease\baseq2\MuffModeBackups` before replacing it.
 
-## Updater
+## Updater And Launcher
 
-The release script publishes the Windows updater automatically and includes `MuffModeUpdater.exe` in every release package. To publish a self-contained updater executable manually:
+The release script publishes the Windows updater and launcher automatically and includes `MuffModeUpdater.exe` in every release package. To publish a self-contained executable manually:
 
 ```powershell
 dotnet publish updater\MuffMode.Updater\MuffMode.Updater.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
@@ -140,7 +140,9 @@ Optional repository variables:
 
 | Variable | Purpose |
 | --- | --- |
-| `DISCORD_RELEASE_MENTIONS` | Text appended to the Discord announcement headline. Defaults to `@quake2 @playtester`. Use Discord role mention IDs such as `<@&123456789>` if you want actual role notifications. |
+| `DISCORD_RELEASE_EMOJI` | Emoji prepended to the Discord announcement headline. Defaults to `<:quake2:1174744083403657316>`. |
+| `DISCORD_RELEASE_MENTIONS` | Text appended to the Discord announcement headline. Defaults to `<@&1424165484491964667> <@&1390287267276525628>` for the `@quake2` and `@playtester` roles. Use Discord role mention IDs such as `<@&123456789>` if you want actual role notifications. |
+| `DISCORD_FEEDBACK_CHANNEL` | Channel link used in the feedback line. Defaults to `<#1509926054175834133>` for `#muffmode`. |
 
 `RELEASE_BOT_TOKEN` is accepted as a legacy fallback for Copilot authentication, but the built-in `GITHUB_TOKEN` now handles version-file commits and `gh release create`. If no Copilot token is present, the workflow warns and uses the deterministic documentation generator unless `require_copilot` is enabled. Because releases created with `GITHUB_TOKEN` do not trigger other workflows, this release workflow posts the Discord announcement itself after the GitHub release is published. The separate **Broadcast Release To Discord** workflow remains useful for releases published manually through GitHub.
 

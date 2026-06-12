@@ -33,6 +33,7 @@
 | Install, join games, vote, bind the hook, or learn player commands | [Player Guide](docs/player-guide.md) |
 | Run a public server, private lobby, pickup, or scrim server | [Server Host Guide](docs/server-host-guide.md) |
 | Compare gametypes, game modifications, maps, and rulesets | [Gameplay Reference](docs/gameplay-reference.md) |
+| Browse included `mm-*` map remasters, ports, original readmes/BSPs, source maps, item registers, and history | [Muff Mode Map Guide](docs/maps/index.md) |
 | Look up commands, cvars, voting flags, and config files | [Configuration Reference](docs/configuration-reference.md) |
 | Build maps or entity overrides for Muff Mode | [Level Design Guide](docs/level-design-guide.md) |
 | Build or publish the Windows updater | [Updater Guide](docs/updater-guide.md) |

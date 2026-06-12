@@ -329,7 +329,9 @@ jobs:
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}
           RELEASE_TAG: ${{ needs.version.outputs.release_tag }}
-          DISCORD_RELEASE_MENTIONS: ${{ vars.DISCORD_RELEASE_MENTIONS || '@quake2 @playtester' }}
+          DISCORD_RELEASE_EMOJI: ${{ vars.DISCORD_RELEASE_EMOJI || '<:quake2:1174744083403657316>' }}
+          DISCORD_RELEASE_MENTIONS: ${{ vars.DISCORD_RELEASE_MENTIONS || '<@&1424165484491964667> <@&1390287267276525628>' }}
+          DISCORD_FEEDBACK_CHANNEL: ${{ vars.DISCORD_FEEDBACK_CHANNEL || '<#1509926054175834133>' }}
         with:
           script: |
             const { owner, repo } = context.repo;
@@ -348,7 +350,9 @@ jobs:
 
             const notes = (data.body || "").replace(/\r/g, "").trim();
             const isBeta = data.prerelease;
-            const mentions = (process.env.DISCORD_RELEASE_MENTIONS || "@quake2 @playtester").trim();
+            const releaseEmoji = (process.env.DISCORD_RELEASE_EMOJI || "<:quake2:1174744083403657316>").trim();
+            const mentions = (process.env.DISCORD_RELEASE_MENTIONS || "<@&1424165484491964667> <@&1390287267276525628>").trim();
+            const feedbackChannel = (process.env.DISCORD_FEEDBACK_CHANNEL || "<#1509926054175834133>").trim();
 
             function buildPlayerIntro(body) {
               const lower = body.toLowerCase();
@@ -369,18 +373,26 @@ jobs:
               return `Fresh ${mode} on deck: grab the new build, jump into a few rounds, and let us know how it feels in play.`;
             }
 
-            function stripReleasePreamble(body) {
+            function extractHighlights(body) {
               if (!body) {
                 return "";
               }
 
               const lines = body.split("\n");
-              const firstSection = lines.findIndex(line => /^#{2,3}\s+\S/.test(line));
-              const changelogLines = firstSection >= 0
-                ? lines.slice(firstSection)
-                : lines.filter(line => !/^#\s+/.test(line));
+              const highlightsStart = lines.findIndex(line => /^#{2,3}\s+Highlights\s*$/i.test(line.trim()));
+              if (highlightsStart < 0) {
+                return "";
+              }
 
-              return changelogLines
+              const highlightsLines = [];
+              for (const line of lines.slice(highlightsStart + 1)) {
+                if (/^#{2,3}\s+\S/.test(line)) {
+                  break;
+                }
+                highlightsLines.push(line);
+              }
+
+              return highlightsLines
                 .join("\n")
                 .replace(/\n{3,}/g, "\n\n")
                 .trim();
@@ -415,11 +427,19 @@ jobs:
               return links;
             }
 
-            const changelog = stripReleasePreamble(notes);
+            const detailsLink = `[See more details](${data.html_url})`;
+            const highlights = extractHighlights(notes);
+            const intro = buildPlayerIntro(notes);
+            const feedback = `**Please provide any feedback in ${feedbackChannel}**`;
+            const reservedDescriptionLength = intro.length + feedback.length + detailsLink.length + 8;
+            const highlightsSection = highlights
+              ? limitText(`## Highlights\n\n${highlights}`, Math.max(200, 2200 - reservedDescriptionLength))
+              : "Release notes and downloads are available on GitHub.";
             const description = limitText([
-              buildPlayerIntro(notes),
-              "**Please provide any feedback in #muffmode**",
-              changelog ? `## Changelog\n\n${changelog}` : `[Open the full changelog](${data.html_url})`
+              intro,
+              feedback,
+              highlightsSection,
+              detailsLink
             ].join("\n\n"), 2200);
 
             const assetLinks = buildDownloadLinks();
@@ -428,7 +448,7 @@ jobs:
               username: "Muff Mode Releases",
               avatar_url: "https://raw.githubusercontent.com/DarkMatter-Productions/MuffMode/main/assets/img/discord-avatar.png",
               allowed_mentions: { parse: ["roles"] },
-              content: `:quake2: ${cleanReleaseName} release published!${mentions ? ` ${mentions}` : ""}`,
+              content: `${releaseEmoji} ${cleanReleaseName} release published!${mentions ? ` ${mentions}` : ""}`.trim(),
               embeds: [
                 {
                   title: cleanReleaseName,

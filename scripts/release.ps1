@@ -48,11 +48,45 @@ function Resolve-RepoPath {
     return (Join-Path $RepoRoot $Path)
 }
 
+function Resolve-FullPath {
+    param([string]$Path)
+    return [System.IO.Path]::GetFullPath((Resolve-RepoPath $Path))
+}
+
+function Assert-PathUnderDirectory {
+    param(
+        [string]$Path,
+        [string]$ParentPath,
+        [string]$Description
+    )
+
+    $fullPath = [System.IO.Path]::GetFullPath($Path)
+    $fullParent = [System.IO.Path]::GetFullPath($ParentPath)
+    $separator = [System.IO.Path]::DirectorySeparatorChar.ToString()
+    $parentPrefix = if ($fullParent.EndsWith($separator)) {
+        $fullParent
+    }
+    else {
+        "$fullParent$separator"
+    }
+
+    if (-not $fullPath.StartsWith($parentPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "$Description must stay under '$fullParent', but resolved to '$fullPath'."
+    }
+}
+
 function Assert-Command {
     param([string]$Name)
     if (-not (Get-Command $Name -ErrorAction SilentlyContinue)) {
         throw "Required command '$Name' was not found on PATH."
     }
+}
+
+function Test-GitRevisionExists {
+    param([string]$Revision)
+
+    git -C $RepoRoot rev-parse "$Revision^{commit}" *> $null
+    return $LASTEXITCODE -eq 0
 }
 
 function Remove-AnsiSequences {
@@ -410,7 +444,7 @@ function New-DeterministicHtmlReadme {
       <div class="grid">
         <article class="card">
           <h3>Windows Installer</h3>
-          <p>Use the installer for the cleanest setup. It defaults to Steam's Quake II Remastered folder and also offers Epic Online Store / Epic Games Store, GOG, and custom library choices.</p>
+          <p>Use the installer for the cleanest setup. It shows detected Steam, Epic Online Store, and GOG installs, keeps an other-location option available, and can create updater and launcher shortcuts.</p>
         </article>
         <article class="card">
           <h3>Zip Package</h3>
@@ -418,7 +452,7 @@ function New-DeterministicHtmlReadme {
         </article>
         <article class="card">
           <h3>Included Files</h3>
-          <p>The release contains <code>game_x64.dll</code>, <code>MuffModeUpdater.exe</code>, version marker files, this README, and the release changelog.</p>
+          <p>The installable package contains <code>game_x64.dll</code>, the <code>MuffModeUpdater.exe</code> updater and launcher, version marker files, this README, the release changelog, and preserved original map readmes under <code>rerelease/baseq2/docs/muffmode/maps/original-readmes</code>.</p>
         </article>
       </div>
     </section>
@@ -446,6 +480,40 @@ function New-DeterministicHtmlReadme {
         <article class="card"><strong>Common gametypes:</strong> FFA, Duel, TDM, CTF, Clan Arena, Freeze Tag, CaptureStrike, Red Rover, LMS, Horde, ProBall, Instagib, and NadeFest.</article>
         <article class="card"><strong>Rulesets:</strong> Quake II Rerelease, Muff Mode, Quake III Arena style, Q2RE Balanced, Quake style, and Quake Champions style.</article>
       </div>
+    </section>
+    <section>
+      <h2>Included Custom Maps</h2>
+      <p>The source-side <a href="https://github.com/DarkMatter-Productions/MuffMode/blob/main/docs/maps/index.md">Muff Mode Map Guide</a> tracks the current final <code>mm-*</code> remaster and port set, with original-map history, original release dates where found, preserved original readmes/BSPs, separate source-map links, recommended gametypes, and item registers. The GitHub release also publishes separate map-source and original-map archives for players and map authors who want the historical material.</p>
+      <table>
+        <thead>
+          <tr><th>Map</th><th>File</th><th>Status</th><th>Good fits</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Aerowalk</td><td><code>mm-aerow</code></td><td>Final</td><td>Duel, small FFA, 2v2, Clan Arena</td></tr>
+          <tr><td>Bio Rust</td><td><code>mm-biorust</code></td><td>Final</td><td>Duel, small FFA, 2v2</td></tr>
+          <tr><td>Conventional</td><td><code>mm-conven</code></td><td>Final</td><td>FFA, 2v2, TDM, Quad Hog</td></tr>
+          <tr><td>The Crucible</td><td><code>mm-crucible</code></td><td>Final</td><td>Duel, FFA, 2v2</td></tr>
+          <tr><td>Cold Zero</td><td><code>mm-czero</code></td><td>Final</td><td>FFA, 2v2, TDM, Instagib</td></tr>
+          <tr><td>Degeneration</td><td><code>mm-degen</code></td><td>Final</td><td>FFA, 2v2, TDM</td></tr>
+          <tr><td>The Flesh Refinery</td><td><code>mm-fleshref</code></td><td>Final</td><td>Duel, small FFA, Power Screen experiment</td></tr>
+          <tr><td>Grind</td><td><code>mm-grind</code></td><td>Final</td><td>Duel, 2v2, FFA</td></tr>
+          <tr><td>Iron Oxide</td><td><code>mm-ironox</code></td><td>Final</td><td>Duel, small FFA, 2v2</td></tr>
+          <tr><td>The Killing Machine</td><td><code>mm-kmach</code></td><td>Final</td><td>FFA, 2v2, casual Duel</td></tr>
+          <tr><td>Lava Lamp</td><td><code>mm-llamp</code></td><td>Final</td><td>FFA, TDM, party server</td></tr>
+          <tr><td>The Longest Yard</td><td><code>mm-longyd</code></td><td>Final</td><td>FFA, Instagib, Clan Arena, jump-pad chaos</td></tr>
+          <tr><td>Mortal Coil</td><td><code>mm-mcoil</code></td><td>Final</td><td>Duel, small FFA, 2v2</td></tr>
+          <tr><td>Negative Impulse</td><td><code>mm-negimp</code></td><td>Final</td><td>FFA, 2v2, TDM</td></tr>
+          <tr><td>The Oppressor</td><td><code>mm-oppress</code></td><td>Final</td><td>FFA, TDM, 2v2</td></tr>
+          <tr><td>Painkiller</td><td><code>mm-pkill</code></td><td>Final</td><td>Duel, small FFA, Clan Arena</td></tr>
+          <tr><td>The Rage</td><td><code>mm-rage</code></td><td>Final</td><td>Duel, FFA, 2v2</td></tr>
+          <tr><td>Railgun 101</td><td><code>mm-rail101</code></td><td>Final</td><td>Instagib, rail practice, aim warmups</td></tr>
+          <tr><td>Reclamation</td><td><code>mm-reclam</code></td><td>Final</td><td>Duel, small FFA</td></tr>
+          <tr><td>Thunderstruck</td><td><code>mm-thunders</code></td><td>Final</td><td>Duel, Clan Arena, Instagib, rail/rocket practice</td></tr>
+          <tr><td>Unknown Domain</td><td><code>mm-undom</code></td><td>Final</td><td>FFA, TDM, large public play</td></tr>
+          <tr><td>Wicked</td><td><code>mm-wicked</code></td><td>Final</td><td>Duel, Clan Arena, small FFA</td></tr>
+          <tr><td>Window Pain</td><td><code>mm-winpain</code></td><td>Final</td><td>Clan Arena, Instagib, FFA warmups</td></tr>
+        </tbody>
+      </table>
     </section>
     <section>
       <h2>Changelog</h2>
@@ -571,19 +639,27 @@ function Get-CurrentSourceVersion {
 }
 
 function Get-LatestReleaseTag {
-    Assert-Command "gh"
-    try {
-        $json = gh release list --repo $ReleaseRepo --limit 50 --json tagName,isLatest,publishedAt 2>$null
-        $releases = $json | ConvertFrom-Json
-        if ($releases.Count -gt 0) {
-            $latest = $releases | Sort-Object publishedAt -Descending | Select-Object -First 1
-            if ($latest.tagName) {
-                return $latest.tagName
+    if (Get-Command "gh" -ErrorAction SilentlyContinue) {
+        try {
+            $json = gh release list --repo $ReleaseRepo --limit 50 --json tagName,isLatest,publishedAt 2>$null
+            $releases = $json | ConvertFrom-Json
+            if ($releases.Count -gt 0) {
+                $latest = $releases | Sort-Object publishedAt -Descending | Select-Object -First 1
+                if ($latest.tagName) {
+                    if (Test-GitRevisionExists $latest.tagName) {
+                        return $latest.tagName
+                    }
+
+                    Write-Warning "Latest GitHub release tag '$($latest.tagName)' is not available locally; falling back to local git tags."
+                }
             }
         }
+        catch {
+            Write-Warning "Could not query GitHub releases through gh; falling back to local git tags."
+        }
     }
-    catch {
-        Write-Warning "Could not query GitHub releases through gh; falling back to local git tags."
+    else {
+        Write-Warning "GitHub CLI was not found; falling back to local git tags for version resolution."
     }
 
     $tag = git -C $RepoRoot tag --list "v*" --sort=-version:refname | Select-Object -First 1
@@ -666,8 +742,7 @@ function Resolve-PreviousTag {
     param([string]$TargetVersion, [string]$FallbackLatestTag)
 
     if ($PreviousTag) {
-        git -C $RepoRoot rev-parse "$PreviousTag^{commit}" *> $null
-        if ($LASTEXITCODE -ne 0) {
+        if (-not (Test-GitRevisionExists $PreviousTag)) {
             throw "Previous tag '$PreviousTag' does not exist locally. Fetch tags or pass a valid tag."
         }
         return $PreviousTag
@@ -995,6 +1070,7 @@ function Get-ReadmeSourceMarkdown {
         "docs/player-guide.md",
         "docs/server-host-guide.md",
         "docs/gameplay-reference.md",
+        "docs/maps/index.md",
         "docs/configuration-reference.md",
         "docs/level-design-guide.md"
     )
@@ -1049,8 +1125,6 @@ function New-CopilotHtmlReadme {
         [string]$OutputPath
     )
 
-    Assert-Command "gh"
-
     $docs = Get-ReadmeSourceMarkdown
     $changelog = Get-Content -Raw -LiteralPath $ChangelogPath
     $channelName = Get-ChannelDisplayName -Channel $Channel
@@ -1065,7 +1139,9 @@ Audience and scope:
 - Primary audience: Quake II Remastered players and server hosts installing this release.
 - This project is currently in $Channel channel. Make that release state visible but not alarming.
 - Include installation, first-use guidance, player usage, voting, common host setup, gametype overview, ruleset overview, offhand hook bind, debugging pointer, package contents, and the changelog.
-- Explain that most Windows users can use the installer, which defaults to Steam and offers Epic Online Store / Epic Games Store, GOG, and custom folder choices. Also include the zip/manual extraction path for users who prefer it.
+- Include a compact "Included Custom Maps" section using the source map guide. Show map title, filename, release status, and good gametype fits, and link to the full Muff Mode Map Guide for history, original release dates, preserved original readmes/BSPs, separate remaster source-map links, and item registers.
+- Explain that original map readmes are included in the main installer/manual zip under rerelease/baseq2/docs/muffmode/maps/original-readmes, while source maps and original BSPs are published as separate supplemental release archives.
+- Explain that most Windows users can use the installer, which presents detected Steam, Epic Online Store, and GOG installs, keeps an other-location choice available, and offers Desktop/Start menu shortcuts for the updater and launcher. Also include the zip/manual extraction path for users who prefer it.
 - Do not include build instructions, source compilation steps, contributor notes, GitHub badges, or repository development workflow.
 - Keep it polished, friendly, and practical. Avoid marketing fluff.
 
@@ -1116,6 +1192,83 @@ $changelog
         -OutputPath $OutputPath
 }
 
+function Test-AllowedPackageRelativePath {
+    param([string]$RelativePath)
+
+    $normalized = $RelativePath.Replace('/', '\')
+    if ([string]::IsNullOrWhiteSpace($normalized) -or [System.IO.Path]::IsPathRooted($normalized)) {
+        return $false
+    }
+
+    if (($normalized -split '\\') -contains '..') {
+        return $false
+    }
+
+    foreach ($topLevelFile in @("README.html", "README.md", "CHANGELOG.md", "MuffModeUpdater.exe", "MuffMode.version", "VERSION")) {
+        if ([string]::Equals($normalized, $topLevelFile, [System.StringComparison]::OrdinalIgnoreCase)) {
+            return $true
+        }
+    }
+
+    if (-not $normalized.StartsWith("rerelease\", [System.StringComparison]::OrdinalIgnoreCase)) {
+        return $false
+    }
+
+    $expectedDll = "rerelease\baseq2\game_x64.dll"
+    $extension = [System.IO.Path]::GetExtension($normalized).ToLowerInvariant()
+    $blockedExecutableExtensions = @(".bat", ".cmd", ".com", ".dll", ".exe", ".hta", ".jar", ".js", ".lnk", ".msi", ".pif", ".ps1", ".scr", ".vbs", ".wsf")
+    if ($blockedExecutableExtensions -contains $extension) {
+        return [string]::Equals($normalized, $expectedDll, [System.StringComparison]::OrdinalIgnoreCase)
+    }
+
+    return $true
+}
+
+function Assert-ReleasePackageContents {
+    param([string]$PackageRoot)
+
+    if (-not (Test-Path -LiteralPath $PackageRoot -PathType Container)) {
+        throw "Release package root does not exist: $PackageRoot"
+    }
+
+    foreach ($requiredFile in @(
+        "README.html",
+        "CHANGELOG.md",
+        "MuffModeUpdater.exe",
+        "rerelease\baseq2\game_x64.dll",
+        "rerelease\baseq2\muffmode-version.json",
+        "rerelease\baseq2\muffmode.version",
+        "rerelease\baseq2\docs\muffmode\maps\original-readmes\README.md"
+    )) {
+        $path = Join-Path $PackageRoot $requiredFile
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+            throw "Release package is missing required file: $requiredFile"
+        }
+    }
+
+    $fullPackageRoot = [System.IO.Path]::GetFullPath($PackageRoot)
+    $separator = [System.IO.Path]::DirectorySeparatorChar.ToString()
+    $packageRootPrefix = if ($fullPackageRoot.EndsWith($separator)) {
+        $fullPackageRoot
+    }
+    else {
+        "$fullPackageRoot$separator"
+    }
+
+    $files = @(Get-ChildItem -LiteralPath $PackageRoot -File -Recurse)
+    if ($files.Count -eq 0) {
+        throw "Release package does not contain any files."
+    }
+
+    foreach ($file in $files) {
+        Assert-PathUnderDirectory -Path $file.FullName -ParentPath $PackageRoot -Description "Release package file"
+        $relativePath = $file.FullName.Substring($packageRootPrefix.Length)
+        if (-not (Test-AllowedPackageRelativePath $relativePath)) {
+            throw "Release package contains an unexpected or unsafe file path: $relativePath"
+        }
+    }
+}
+
 function Copy-ReleaseAssets {
     param([string]$AssetRoot, [string]$PackageRoot)
 
@@ -1133,6 +1286,134 @@ function Copy-ReleaseAssets {
     }
 }
 
+function Copy-DirectoryContents {
+    param(
+        [string]$SourcePath,
+        [string]$DestinationPath
+    )
+
+    if (-not (Test-Path -LiteralPath $SourcePath -PathType Container)) {
+        throw "Required directory was not found: $SourcePath"
+    }
+
+    New-Item -ItemType Directory -Force -Path $DestinationPath | Out-Null
+    $items = @(Get-ChildItem -LiteralPath $SourcePath -Force)
+    if ($items.Count -eq 0) {
+        throw "Required directory is empty: $SourcePath"
+    }
+
+    foreach ($item in $items) {
+        Copy-Item -LiteralPath $item.FullName -Destination $DestinationPath -Recurse -Force
+    }
+}
+
+function Copy-OriginalMapReadmesToPackage {
+    param([string]$PackageRoot)
+
+    $readmeSource = Resolve-RepoPath "docs/maps/original-readmes"
+    $readmeDestination = Join-Path $PackageRoot "rerelease/baseq2/docs/muffmode/maps/original-readmes"
+
+    Copy-DirectoryContents -SourcePath $readmeSource -DestinationPath $readmeDestination
+
+    $txtReadmes = @(Get-ChildItem -LiteralPath $readmeDestination -File -Filter "*.txt")
+    if ($txtReadmes.Count -eq 0) {
+        throw "No original map readme text files were copied to the release package."
+    }
+}
+
+function Compress-StagedDirectory {
+    param(
+        [string]$SourceRoot,
+        [string]$ZipPath
+    )
+
+    if (Test-Path -LiteralPath $ZipPath) {
+        Remove-Item -LiteralPath $ZipPath -Force
+    }
+
+    Compress-Archive -LiteralPath $SourceRoot -DestinationPath $ZipPath -CompressionLevel Optimal
+}
+
+function New-MapSupplementArchives {
+    param(
+        [string]$TargetVersion,
+        [string]$Channel,
+        [string]$OutputRoot
+    )
+
+    $packageName = Get-ReleasePackageName -TargetVersion $TargetVersion -Channel $Channel
+    $outputRootAbs = Resolve-FullPath $OutputRoot
+    $stagingRoot = Join-Path $outputRootAbs "staging"
+    $mapDocsRoot = Resolve-RepoPath "docs/maps"
+
+    $sourceMapsRoot = Join-Path $mapDocsRoot "source-maps"
+    $devSourceMapsRoot = Join-Path $mapDocsRoot "dev-source-maps"
+    $originalBspsRoot = Join-Path $mapDocsRoot "original-bsps"
+    $originalReadmesRoot = Join-Path $mapDocsRoot "original-readmes"
+
+    foreach ($requiredPath in @($sourceMapsRoot, $devSourceMapsRoot, $originalBspsRoot, $originalReadmesRoot)) {
+        if (-not (Test-Path -LiteralPath $requiredPath -PathType Container)) {
+            throw "Required map documentation asset directory was not found: $requiredPath"
+        }
+    }
+
+    $sourceArchiveRoot = Join-Path $stagingRoot "$packageName-map-sources"
+    $originalArchiveRoot = Join-Path $stagingRoot "$packageName-original-maps"
+    foreach ($archiveRoot in @($sourceArchiveRoot, $originalArchiveRoot)) {
+        Assert-PathUnderDirectory -Path $archiveRoot -ParentPath $stagingRoot -Description "Map archive staging directory"
+        if (Test-Path -LiteralPath $archiveRoot) {
+            Remove-Item -LiteralPath $archiveRoot -Recurse -Force
+        }
+        New-Item -ItemType Directory -Force -Path $archiveRoot | Out-Null
+    }
+
+    Copy-DirectoryContents -SourcePath $sourceMapsRoot -DestinationPath (Join-Path $sourceArchiveRoot "final-source-maps")
+    Copy-DirectoryContents -SourcePath $devSourceMapsRoot -DestinationPath (Join-Path $sourceArchiveRoot "development-source-maps")
+    Copy-DirectoryContents -SourcePath $originalReadmesRoot -DestinationPath (Join-Path $sourceArchiveRoot "original-readmes")
+    Copy-Item -LiteralPath (Join-Path $mapDocsRoot "index.md") -Destination (Join-Path $sourceArchiveRoot "MAP_GUIDE.md") -Force
+    Set-Content -LiteralPath (Join-Path $sourceArchiveRoot "README.md") -Encoding utf8 -Value @"
+# Muff Mode Map Sources
+
+This archive is a supplemental release asset for Muff Mode v$TargetVersion.
+
+- `final-source-maps` contains final Muff Mode remaster/port `.map` sources.
+- `development-source-maps` contains selected in-development `.map` sources.
+- `original-readmes` preserves original map readmes where they were located.
+- `MAP_GUIDE.md` is a snapshot of the source-side map guide.
+
+These files are for reference and map authors. They are intentionally not installed into the playable `rerelease/maps` folder.
+"@
+
+    Copy-DirectoryContents -SourcePath $originalBspsRoot -DestinationPath (Join-Path $originalArchiveRoot "original-bsps")
+    Copy-DirectoryContents -SourcePath $originalReadmesRoot -DestinationPath (Join-Path $originalArchiveRoot "original-readmes")
+    Copy-Item -LiteralPath (Join-Path $mapDocsRoot "index.md") -Destination (Join-Path $originalArchiveRoot "MAP_GUIDE.md") -Force
+    Set-Content -LiteralPath (Join-Path $originalArchiveRoot "README.md") -Encoding utf8 -Value @"
+# Muff Mode Original Maps
+
+This archive is a supplemental release asset for Muff Mode v$TargetVersion.
+
+- `original-bsps` contains preserved original community BSPs used for comparison and historical research.
+- `original-readmes` contains matching original map readmes where they were located.
+- `MAP_GUIDE.md` is a snapshot of the source-side map guide.
+
+These are historical originals, not the Muff Mode remaster BSPs. They are intentionally zipped separately from the installable Muff Mode package and from the source-map archive.
+"@
+
+    $sourceZipPath = Join-Path $outputRootAbs "$packageName-map-sources.zip"
+    $originalZipPath = Join-Path $outputRootAbs "$packageName-original-maps.zip"
+
+    Write-Step "Creating map source archive $sourceZipPath"
+    Compress-StagedDirectory -SourceRoot $sourceArchiveRoot -ZipPath $sourceZipPath
+
+    Write-Step "Creating original map archive $originalZipPath"
+    Compress-StagedDirectory -SourceRoot $originalArchiveRoot -ZipPath $originalZipPath
+
+    return [pscustomobject]@{
+        SourceMapsZipPath = $sourceZipPath
+        OriginalMapsZipPath = $originalZipPath
+    }
+}
+
 function New-ReleasePackage {
     param(
         [string]$TargetVersion,
@@ -1146,9 +1427,10 @@ function New-ReleasePackage {
     )
 
     $packageName = Get-ReleasePackageName -TargetVersion $TargetVersion -Channel $Channel
-    $outputRootAbs = Resolve-RepoPath $OutputRoot
+    $outputRootAbs = Resolve-FullPath $OutputRoot
     $stagingRoot = Join-Path $outputRootAbs "staging"
     $packageRoot = Join-Path $stagingRoot $packageName
+    Assert-PathUnderDirectory -Path $packageRoot -ParentPath $stagingRoot -Description "Package staging directory"
 
     if (Test-Path -LiteralPath $packageRoot) {
         Remove-Item -LiteralPath $packageRoot -Recurse -Force
@@ -1164,6 +1446,7 @@ function New-ReleasePackage {
     Copy-Item -LiteralPath $UpdaterPath -Destination (Join-Path $packageRoot "MuffModeUpdater.exe") -Force
     Copy-Item -LiteralPath $ReadmeHtmlPath -Destination (Join-Path $packageRoot "README.html") -Force
     Copy-Item -LiteralPath $ChangelogPath -Destination (Join-Path $packageRoot "CHANGELOG.md") -Force
+    Copy-OriginalMapReadmesToPackage -PackageRoot $packageRoot
 
     $versionManifest = [ordered]@{
         Version = $TargetVersion
@@ -1176,6 +1459,8 @@ function New-ReleasePackage {
     }
     Set-Content -LiteralPath (Join-Path $baseq2 "muffmode-version.json") -Value ($versionManifest | ConvertTo-Json) -Encoding utf8
     Set-Content -LiteralPath (Join-Path $baseq2 "muffmode.version") -Value $TargetVersion -Encoding utf8
+
+    Assert-ReleasePackageContents -PackageRoot $packageRoot
 
     $zipPath = Join-Path $outputRootAbs "$packageName.zip"
     if (Test-Path -LiteralPath $zipPath) {
@@ -1205,10 +1490,15 @@ function New-WindowsInstaller {
     if (-not (Test-Path -LiteralPath $scriptPath)) {
         throw "Installer script was not found: $scriptPath"
     }
+    Assert-ReleasePackageContents -PackageRoot $PackageRoot
 
     $packageName = Get-ReleasePackageName -TargetVersion $TargetVersion -Channel $Channel
-    $outputRootAbs = Resolve-RepoPath $OutputRoot
+    $outputRootAbs = Resolve-FullPath $OutputRoot
     $compiler = Resolve-InnoSetupCompiler -CompilerPath $InnoSetupCompiler
+    $launcherIconFile = Resolve-FullPath "updater/MuffMode.Updater/Assets/MuffModeLauncher.ico"
+    if (-not (Test-Path -LiteralPath $launcherIconFile -PathType Leaf)) {
+        throw "Launcher icon file was not found: $launcherIconFile"
+    }
     $channelName = Get-ChannelDisplayName -Channel $Channel
     $releaseLabel = if ($channelName) { "Muff Mode v$TargetVersion $channelName" } else { "Muff Mode v$TargetVersion" }
     $installerBaseName = "$packageName-windows-installer"
@@ -1226,6 +1516,7 @@ function New-WindowsInstaller {
         "/DPackageRoot=$PackageRoot" `
         "/DOutputDir=$outputRootAbs" `
         "/DInstallerBaseName=$installerBaseName" `
+        "/DLauncherIconFile=$launcherIconFile" `
         $scriptPath 2>&1
 
     $installerExitCode = $LASTEXITCODE
@@ -1284,7 +1575,6 @@ function Publish-GitHubRelease {
 Push-Location $RepoRoot
 try {
     Assert-Command "git"
-    Assert-Command "gh"
 
     $dirty = Get-GitStatus
     if ($dirty -and -not $AllowDirtyPackage -and -not $UpdateVersionFiles) {
@@ -1362,6 +1652,13 @@ try {
     $releaseAssetPaths = New-Object System.Collections.Generic.List[string]
     $releaseAssetPaths.Add($package.ZipPath)
 
+    $mapArchives = New-MapSupplementArchives `
+        -TargetVersion $targetVersion `
+        -Channel $Channel `
+        -OutputRoot $OutputRoot
+    $releaseAssetPaths.Add($mapArchives.SourceMapsZipPath)
+    $releaseAssetPaths.Add($mapArchives.OriginalMapsZipPath)
+
     $installerPath = $null
     if ($SkipInstaller) {
         Write-Host "Windows installer not created because -SkipInstaller was supplied."
@@ -1378,9 +1675,15 @@ try {
     }
 
     $hash = Get-FileHash -Algorithm SHA256 -LiteralPath $package.ZipPath
+    $sourceMapsHash = Get-FileHash -Algorithm SHA256 -LiteralPath $mapArchives.SourceMapsZipPath
+    $originalMapsHash = Get-FileHash -Algorithm SHA256 -LiteralPath $mapArchives.OriginalMapsZipPath
     Write-Step "Package ready"
     Write-Host "Package: $($package.ZipPath)"
     Write-Host "SHA256:  $($hash.Hash.ToLowerInvariant())"
+    Write-Host "Map sources: $($mapArchives.SourceMapsZipPath)"
+    Write-Host "SHA256:      $($sourceMapsHash.Hash.ToLowerInvariant())"
+    Write-Host "Original maps: $($mapArchives.OriginalMapsZipPath)"
+    Write-Host "SHA256:        $($originalMapsHash.Hash.ToLowerInvariant())"
     if ($installerPath) {
         $installerHash = Get-FileHash -Algorithm SHA256 -LiteralPath $installerPath
         Write-Host "Installer: $installerPath"

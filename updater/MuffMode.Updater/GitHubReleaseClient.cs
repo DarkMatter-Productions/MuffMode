@@ -8,6 +8,7 @@ internal sealed class GitHubReleaseClient : IDisposable
     public const string Repository = "DarkMatter-Productions/MuffMode";
 
     private const string ReleasesEndpoint = $"https://api.github.com/repos/{Repository}/releases?per_page=30";
+    private const long MaxDownloadBytes = 1024L * 1024L * 1024L;
     private readonly HttpClient _httpClient;
 
     public GitHubReleaseClient()
@@ -31,33 +32,14 @@ internal sealed class GitHubReleaseClient : IDisposable
 
         var release = releases
             .Where(candidate => !candidate.Draft)
+            .Select(TryCreateReleaseInfo)
+            .OfType<ReleaseInfo>()
             .OrderByDescending(candidate => candidate.PublishedAt ?? DateTimeOffset.MinValue)
+            .ThenByDescending(candidate => candidate.Version)
             .FirstOrDefault()
-            ?? throw new InvalidOperationException("No published MuffMode releases were found on GitHub.");
+            ?? throw new InvalidOperationException("No published MuffMode releases with a downloadable muffmode-<version>[-channel].zip package were found on GitHub.");
 
-        var versionText = string.Join(" ", new[] { release.TagName, release.Name }.Where(text => !string.IsNullOrWhiteSpace(text)));
-        if (!SemanticVersion.TryParse(versionText, out var version))
-        {
-            throw new InvalidOperationException($"The latest release does not contain a semantic version: {versionText}");
-        }
-
-        var asset = release.Assets
-            .Where(IsReleasePackageZip)
-            .OrderByDescending(asset => AssetNameMatchesRelease(asset.Name!, version, release.Prerelease))
-            .ThenBy(asset => asset.Name, StringComparer.OrdinalIgnoreCase)
-            .FirstOrDefault()
-            ?? throw new InvalidOperationException("The latest MuffMode release does not include a downloadable muffmode-<version>[-channel].zip package asset.");
-
-        return new ReleaseInfo(
-            version,
-            release.TagName ?? version.ToString(),
-            string.IsNullOrWhiteSpace(release.Name) ? $"MuffMode v{version}" : release.Name!,
-            release.Body ?? "",
-            release.HtmlUrl ?? $"https://github.com/{Repository}/releases",
-            release.Prerelease,
-            release.PublishedAt,
-            asset.Name!,
-            asset.BrowserDownloadUrl!);
+        return release;
     }
 
     public async Task<string> DownloadReleaseAssetAsync(
@@ -67,38 +49,77 @@ internal sealed class GitHubReleaseClient : IDisposable
         CancellationToken cancellationToken)
     {
         Directory.CreateDirectory(destinationDirectory);
-        var destinationPath = Path.Combine(destinationDirectory, Path.GetFileName(release.AssetName));
-
-        progress?.Report(new UpdaterProgress($"Downloading {release.AssetName}...", 0));
-        using var response = await _httpClient.GetAsync(release.AssetDownloadUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-        response.EnsureSuccessStatusCode();
-
-        var totalBytes = response.Content.Headers.ContentLength;
-        await using var source = await response.Content.ReadAsStreamAsync(cancellationToken);
-        await using var destination = File.Create(destinationPath);
-
-        var buffer = new byte[128 * 1024];
-        long totalRead = 0;
-        while (true)
+        var destinationFileName = Path.GetFileName(release.AssetName);
+        if (string.IsNullOrWhiteSpace(destinationFileName))
         {
-            var bytesRead = await source.ReadAsync(buffer, cancellationToken);
-            if (bytesRead == 0)
-            {
-                break;
-            }
-
-            await destination.WriteAsync(buffer.AsMemory(0, bytesRead), cancellationToken);
-            totalRead += bytesRead;
-
-            if (totalBytes is > 0)
-            {
-                var percentage = Math.Clamp((int)((double)totalRead / totalBytes.Value * 45), 0, 45);
-                progress?.Report(new UpdaterProgress($"Downloading {release.AssetName}...", percentage));
-            }
+            throw new InvalidOperationException("The selected release asset does not have a valid file name.");
         }
 
-        progress?.Report(new UpdaterProgress("Download complete.", 45));
-        return destinationPath;
+        var destinationPath = Path.Combine(destinationDirectory, destinationFileName);
+        var temporaryPath = Path.Combine(destinationDirectory, $".{destinationFileName}.{Guid.NewGuid():N}.download");
+        var downloadUri = CreateDownloadUri(release.AssetDownloadUrl);
+
+        progress?.Report(new UpdaterProgress($"Downloading {release.AssetName}...", 0));
+
+        try
+        {
+            using var response = await _httpClient.GetAsync(downloadUri, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            response.EnsureSuccessStatusCode();
+
+            var totalBytes = response.Content.Headers.ContentLength;
+            if (totalBytes is > MaxDownloadBytes)
+            {
+                throw new InvalidOperationException($"The release package is larger than the supported limit of {MaxDownloadBytes / 1024 / 1024} MB.");
+            }
+
+            long totalRead = 0;
+            await using (var source = await response.Content.ReadAsStreamAsync(cancellationToken))
+            await using (var destination = new FileStream(
+                temporaryPath,
+                FileMode.CreateNew,
+                FileAccess.Write,
+                FileShare.None,
+                128 * 1024,
+                FileOptions.Asynchronous | FileOptions.SequentialScan))
+            {
+                var buffer = new byte[128 * 1024];
+                while (true)
+                {
+                    var bytesRead = await source.ReadAsync(buffer, cancellationToken);
+                    if (bytesRead == 0)
+                    {
+                        break;
+                    }
+
+                    await destination.WriteAsync(buffer.AsMemory(0, bytesRead), cancellationToken);
+                    totalRead += bytesRead;
+                    if (totalRead > MaxDownloadBytes)
+                    {
+                        throw new InvalidOperationException($"The release package is larger than the supported limit of {MaxDownloadBytes / 1024 / 1024} MB.");
+                    }
+
+                    if (totalBytes is > 0)
+                    {
+                        var percentage = Math.Clamp((int)((double)totalRead / totalBytes.Value * 45), 0, 45);
+                        progress?.Report(new UpdaterProgress($"Downloading {release.AssetName}...", percentage));
+                    }
+                }
+            }
+
+            if (totalBytes is > 0 && totalRead != totalBytes.Value)
+            {
+                throw new IOException($"The release package download was incomplete: expected {totalBytes.Value:N0} bytes, received {totalRead:N0} bytes.");
+            }
+
+            File.Move(temporaryPath, destinationPath, overwrite: true);
+            progress?.Report(new UpdaterProgress("Download complete.", 45));
+            return destinationPath;
+        }
+        catch
+        {
+            TryDeleteFile(temporaryPath);
+            throw;
+        }
     }
 
     public void Dispose() => _httpClient.Dispose();
@@ -118,6 +139,53 @@ internal sealed class GitHubReleaseClient : IDisposable
             && SemanticVersion.TryParse(name, out _);
     }
 
+    private static ReleaseInfo? TryCreateReleaseInfo(GitHubReleaseDto release)
+    {
+        var versionText = string.Join(" ", new[] { release.TagName, release.Name }.Where(text => !string.IsNullOrWhiteSpace(text)));
+        if (!SemanticVersion.TryParse(versionText, out var version))
+        {
+            return null;
+        }
+
+        var asset = release.Assets
+            .Where(IsReleasePackageZip)
+            .OrderByDescending(asset => AssetNameMatchesRelease(asset.Name!, version, release.Prerelease))
+            .ThenBy(asset => asset.Name, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault();
+        if (asset is null)
+        {
+            return null;
+        }
+
+        return new ReleaseInfo(
+            version,
+            release.TagName ?? version.ToString(),
+            string.IsNullOrWhiteSpace(release.Name) ? $"MuffMode v{version}" : release.Name!,
+            release.Body ?? "",
+            release.HtmlUrl ?? $"https://github.com/{Repository}/releases",
+            release.Prerelease,
+            release.PublishedAt,
+            asset.Name!,
+            asset.BrowserDownloadUrl!);
+    }
+
+    private static Uri CreateDownloadUri(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps)
+        {
+            throw new InvalidOperationException("The selected release asset did not provide a trusted HTTPS download URL.");
+        }
+
+        if (!string.Equals(uri.Host, "github.com", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(uri.Host, "objects.githubusercontent.com", StringComparison.OrdinalIgnoreCase)
+            && !uri.Host.EndsWith(".githubusercontent.com", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"The selected release asset points at an unexpected host: {uri.Host}");
+        }
+
+        return uri;
+    }
+
     private static bool AssetNameMatchesRelease(string assetName, SemanticVersion version, bool prerelease)
     {
         var expectedVersion = version.ToString();
@@ -133,5 +201,20 @@ internal sealed class GitHubReleaseClient : IDisposable
             : !assetName.Contains("beta", StringComparison.OrdinalIgnoreCase)
                 && !assetName.Contains("alpha", StringComparison.OrdinalIgnoreCase)
                 && !assetName.Contains("rc", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static void TryDeleteFile(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch
+        {
+            // Temp cleanup failure is non-fatal.
+        }
     }
 }

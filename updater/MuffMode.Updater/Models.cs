@@ -22,7 +22,12 @@ internal sealed record ReleaseInfo(
 
 internal sealed record LocalInstallVersion(SemanticVersion? Version, string DisplayText, string Source);
 
-internal sealed record UpdaterProgress(string Message, int? Percentage = null);
+internal sealed record InstallCandidate(string Source, string Path)
+{
+    public override string ToString() => $"{Source} detected - {Path}";
+}
+
+internal sealed record UpdaterProgress(string Message, int? Percentage = null, bool CanCancel = true);
 
 internal sealed class InstalledVersionMarker
 {

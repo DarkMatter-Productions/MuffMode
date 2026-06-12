@@ -8,6 +8,7 @@
     <AssemblyName>MuffModeUpdater</AssemblyName>
     <RootNamespace>MuffMode.Updater</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\MuffModeLauncher.ico</ApplicationIcon>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <Version>0.1.0</Version>
   </PropertyGroup>

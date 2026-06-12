@@ -28,14 +28,33 @@ This reference helps players and hosts choose what to play. Casual players can u
 
 ## Muff Maps
 
-| Map | File | Status | Notes |
+Muff Mode maintains a curated set of final `mm-*` remasters and ports, plus a separate work-in-progress source appendix. The full [Muff Mode Map Guide](maps/index.md) includes per-map history, original release dates where found, preserved original readmes/BSPs, source-map links, recommended gametypes, and item registers taken from the final BSP entity data.
+
+| Map | File | Status | Good fits |
 | --- | --- | --- | --- |
-| Almost Lost | `mm-almostlost-a1` | Alpha v1 | A Quake III Arena layout later released as `pro-q3tourney7`, revised for fast FFA and Duel play. |
-| Arena of Death | `mm-arena-a3` | Alpha v3 | A small and simple Quake III Arena arena. |
-| Hidden Fortress | `mm-fortress-a4` | Alpha v4 | Small-to-medium map connected by two teleporters, based on the revised Quake Live layout. |
-| Longest Yard | `mm-longestyard-b2` | Beta v2 | The classic Quake III Arena space map. |
-| Proving Grounds | `mm-proving-a4` | Alpha v4 | A small Duel map from Quake III Arena. |
-| Vertical Vengeance | `mm-vengeance-a2` | Alpha v2 | A small Duel map from Quake III Arena. |
+| Aerowalk | `mm-aerow` | Final release | Duel, small FFA, 2v2, Clan Arena |
+| Bio Rust | `mm-biorust` | Final release | Duel, small FFA, 2v2 |
+| Conventional | `mm-conven` | Final release | FFA, 2v2, TDM, Quad Hog |
+| The Crucible | `mm-crucible` | Final release | Duel, FFA, 2v2 |
+| Cold Zero | `mm-czero` | Final release | FFA, 2v2, TDM, Instagib |
+| Degeneration | `mm-degen` | Final release | FFA, 2v2, TDM |
+| The Flesh Refinery | `mm-fleshref` | Final release | Duel, small FFA, Power Screen experiment |
+| Grind | `mm-grind` | Final release | Duel, 2v2, FFA |
+| Iron Oxide | `mm-ironox` | Final release | Duel, small FFA, 2v2 |
+| The Killing Machine | `mm-kmach` | Final release | FFA, 2v2, casual Duel |
+| Lava Lamp | `mm-llamp` | Final release | FFA, TDM, party server |
+| The Longest Yard | `mm-longyd` | Final release | FFA, Instagib, Clan Arena, jump-pad chaos |
+| Mortal Coil | `mm-mcoil` | Final release | Duel, small FFA, 2v2 |
+| Negative Impulse | `mm-negimp` | Final release | FFA, 2v2, TDM |
+| The Oppressor | `mm-oppress` | Final release | FFA, TDM, 2v2 |
+| Painkiller | `mm-pkill` | Final release | Duel, small FFA, Clan Arena |
+| The Rage | `mm-rage` | Final release | Duel, FFA, 2v2 |
+| Railgun 101 | `mm-rail101` | Final release | Instagib, rail practice, aim warmups |
+| Reclamation | `mm-reclam` | Final release | Duel, small FFA |
+| Thunderstruck | `mm-thunders` | Final release | Duel, Clan Arena, Instagib, rail/rocket practice |
+| Unknown Domain | `mm-undom` | Final release | FFA, TDM, large public play |
+| Wicked | `mm-wicked` | Final release | Duel, Clan Arena, small FFA |
+| Window Pain | `mm-winpain` | Final release | Clan Arena, Instagib, FFA warmups |
 
 ## Gametypes
 
