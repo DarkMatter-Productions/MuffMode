@@ -391,7 +391,7 @@ void SP_monster_gladiator(gentity_t *self) {
 		if (!st.was_key_specified("power_armor_type"))
 			self->monsterinfo.power_armor_type = IT_POWER_SHIELD;
 		if (!st.was_key_specified("power_armor_power"))
-			self->monsterinfo.power_armor_power = 250;
+			self->monsterinfo.power_armor_power = deathmatch->integer ? 125 : 250; // [muff] horde gladb less tanky; SP unchanged
 
 		self->s.skinnum = 2;
 
