@@ -7,7 +7,7 @@ operable program or batch file.
 [BUILD] VsDevCmd  : C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\VsDevCmd.bat
 
 MSBuild version 17.14.40+3e7442088 for .NET Framework
-Build started 13/06/2026 11:14:56.
+Build started 13/06/2026 11:58:53.
 
      1>Project "E:\Projects\muffmode\MuffMode\src\MuffMode.sln" on node 1 (default targets).
      1>ValidateSolutionConfiguration:
@@ -19,12 +19,8 @@ Build started 13/06/2026 11:14:56.
          Creating "game\x64\Debug\game.tlog\unsuccessfulbuild" because "AlwaysCreate" was specified.
          Touching "game\x64\Debug\game.tlog\unsuccessfulbuild".
        ClCompile:
-         C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\bin\HostX64\x64\CL.exe /c /IE:\Projects\muffmode\MuffMode\src\ /ZI /JMC /nologo /W3 /WX- /diagnostics:column /sdl /MP /Od /D KEX_Q2_GAME /D KEX_Q2GAME_EXPORTS /D KEX_Q2GAME_DYNAMIC /D _CRT_SECURE_NO_WARNINGS /D _DEBUG /D _CONSOLE /D NO_FMT_SOURCE /D FMT_HEADER_ONLY /D _WINDLL /D _UNICODE /D UNICODE /Gm- /EHsc /RTC1 /MTd /GS /fp:precise /Zc:wchar_t /Zc:forScope /Zc:inline /std:c++17 /permissive- /Fo"game\x64\Debug\\" /Fd"game\x64\Debug\vc143.pdb" /external:W3 /Gd /TP /wd4267 /wd4244 /FC /errorReport:queue muffmode\mm_ghost.cpp muffmode\mm_motd.cpp muffmode\mm_pconfig.cpp muffmode\mm_vote.cpp muffmode\mm_vote_menu.cpp
-         mm_ghost.cpp
-         mm_motd.cpp
-         mm_pconfig.cpp
-         mm_vote.cpp
-         mm_vote_menu.cpp
+         C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\bin\HostX64\x64\CL.exe /c /IE:\Projects\muffmode\MuffMode\src\ /ZI /JMC /nologo /W3 /WX- /diagnostics:column /sdl /MP /Od /D KEX_Q2_GAME /D KEX_Q2GAME_EXPORTS /D KEX_Q2GAME_DYNAMIC /D _CRT_SECURE_NO_WARNINGS /D _DEBUG /D _CONSOLE /D NO_FMT_SOURCE /D FMT_HEADER_ONLY /D _WINDLL /D _UNICODE /D UNICODE /Gm- /EHsc /RTC1 /MTd /GS /fp:precise /Zc:wchar_t /Zc:forScope /Zc:inline /std:c++17 /permissive- /Fo"game\x64\Debug\\" /Fd"game\x64\Debug\vc143.pdb" /external:W3 /Gd /TP /wd4267 /wd4244 /FC /errorReport:queue muffmode\mm_duel.cpp
+         mm_duel.cpp
        Link:
          C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\bin\HostX64\x64\link.exe /ERRORREPORT:QUEUE /OUT:"../game_x64.dll" /INCREMENTAL /ILK:"game\x64\Debug\game_x64.ilk" /NOLOGO /LIBPATH:"E:\Projects\muffmode\MuffMode\src\vcpkg_installed\x64-windows-static\debug\lib" /LIBPATH:"E:\Projects\muffmode\MuffMode\src\vcpkg_installed\x64-windows-static\lib" jsoncpp.lib kernel32.lib user32.lib gdi32.lib winspool.lib comdlg32.lib advapi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib odbc32.lib odbccp32.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /DEBUG /PDB:"../game_x64.pdb" /MAP /TLBID:1 /DYNAMICBASE /NXCOMPAT /IMPLIB:"../game_x64.lib" /MACHINE:X64 /DLL game\x64\Debug\bot_debug.obj
          game\x64\Debug\bot_exports.obj
@@ -128,4 +124,4 @@ Build succeeded.
     0 Warning(s)
     0 Error(s)
 
-Time Elapsed 00:00:03.56
+Time Elapsed 00:00:02.87

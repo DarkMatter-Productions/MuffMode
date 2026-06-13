@@ -81,7 +81,10 @@ void MM_Duel_QueueSpectatorBots()
 		if (ec->client->sess.duel_queued)
 			continue;
 
-		SetTeam(ec, TEAM_SPECTATOR, false, true, false);
+		// TEAM_NONE (not TEAM_SPECTATOR) is the signal SetTeam's force path turns into
+		// "spectator + duel_queued"; TEAM_SPECTATOR would re-spectate without queuing,
+		// so MM_Duel_AddPlayer (which only pulls queued spectators) never picks the bot up.
+		SetTeam(ec, TEAM_NONE, false, true, false);
 	}
 }
 
