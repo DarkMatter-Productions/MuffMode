@@ -1073,7 +1073,10 @@ static void Cmd_Where_f(gentity_t *ent) {
 	std::string location;
 	fmt::format_to(std::back_inserter(location), FMT_STRING("{:.1f} {:.1f} {:.1f} {:.1f} {:.1f} {:.1f}\n"), origin[0], origin[1], origin[2], ent->client->ps.viewangles[PITCH], ent->client->ps.viewangles[YAW], ent->client->ps.viewangles[ROLL]);
 	gi.LocClient_Print(ent, PRINT_HIGH, "Location: {}\n", location.c_str());
-	gi.SendToClipBoard(location.c_str());
+	// only write the listen-server host's own clipboard (entity 1); otherwise any
+	// remote client running "where" would clobber the host's clipboard.
+	if (ent == &g_entities[1])
+		gi.SendToClipBoard(location.c_str());
 }
 
 /*
@@ -2219,7 +2222,7 @@ void ClientCommand(gentity_t *ent) {
 
 	if (!cc) {
 		// always allow replace_/disable_ item cvars
-		if (gi.argc() > 1 && strstr(cmd, "replace_") || strstr(cmd, "disable_")) {
+		if (gi.argc() > 1 && (strstr(cmd, "replace_") || strstr(cmd, "disable_"))) {
 			gi.cvar_forceset(cmd, gi.argv(1));
 		} else
 			gi.LocClient_Print(ent, PRINT_HIGH, "Invalid client command: \"{}\"\n", cmd);

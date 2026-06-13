@@ -68,6 +68,10 @@ void MM_CmdGhost(gentity_t *ent) {
 		return;
 	}
 
+	// throttle code guesses to the flood rate to deter brute-forcing
+	if (CheckFlood(ent))
+		return;
+
 	if (ClientIsPlaying(ent->client)) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "You are already in the game.\n");
 		return;

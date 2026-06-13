@@ -114,6 +114,9 @@ bool MM_PickupArmor(gentity_t *ent, gentity_t *other)
 		else
 			oldinfo = &bodyarmor_info;
 
+		if (!newinfo)
+			return false;
+
 		if (newinfo->normal_protection > oldinfo->normal_protection) {
 			salvage = oldinfo->normal_protection / newinfo->normal_protection;
 			salvagecount = (int)(salvage * other->client->pers.inventory[old_armor_index]);

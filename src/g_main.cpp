@@ -851,11 +851,11 @@ void SetIntermissionPoint(void) {
 	}
 	
 	// ugly hax!
-	if (!Q_strncasecmp(level.mapname, "campgrounds", 11)) {
+	if (ent && !Q_strncasecmp(level.mapname, "campgrounds", 11)) {
 		gvec3_t v = { -320, -96, 503 };
 		if (ent->s.origin == v)
 			level.intermission_angle[PITCH] = -30;
-	} else if (!Q_strncasecmp(level.mapname, "rdm10", 5)) {
+	} else if (ent && !Q_strncasecmp(level.mapname, "rdm10", 5)) {
 		gvec3_t v = { -1256, -1672, -136 };
 		if (ent->s.origin == v)
 			level.intermission_angle = { 15, 135, 0 };

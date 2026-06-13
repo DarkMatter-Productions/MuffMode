@@ -54,6 +54,9 @@ void G_Menu_Admin_UpdateSettings(gentity_t *ent, menu_hnd_t *setmenu);
 void G_Menu_Admin(gentity_t *ent, menu_hnd_t *p);
 
 static void G_Menu_Admin_SettingsApply(gentity_t *ent, menu_hnd_t *p) {
+	if (!ent->client || !ent->client->sess.admin)
+		return;
+
 	admin_settings_t *settings = (admin_settings_t *)p->arg;
 
 	if (settings->timelimit != timelimit->integer) {
@@ -206,6 +209,9 @@ const menu_t def_setmenu[] = {
 };
 
 static void G_Menu_Admin_Settings(gentity_t *ent, menu_hnd_t *p) {
+	if (!ent->client || !ent->client->sess.admin)
+		return;
+
 	admin_settings_t *settings;
 	menu_hnd_t *menu;
 
@@ -225,6 +231,9 @@ static void G_Menu_Admin_Settings(gentity_t *ent, menu_hnd_t *p) {
 }
 
 static void G_Menu_Admin_MatchSet(gentity_t *ent, menu_hnd_t *p) {
+	if (!ent->client || !ent->client->sess.admin)
+		return;
+
 	P_Menu_Close(ent);
 
 	if (level.match_state <= matchst_t::MATCH_COUNTDOWN) {
@@ -262,6 +271,9 @@ menu_t adminmenu[] = {
 };
 
 void G_Menu_Admin(gentity_t *ent, menu_hnd_t *p) {
+	if (!ent->client || !ent->client->sess.admin)
+		return;
+
 	adminmenu[3].text[0] = '\0';
 	adminmenu[3].SelectFunc = nullptr;
 	adminmenu[4].text[0] = '\0';
