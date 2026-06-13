@@ -423,6 +423,7 @@ extern cvar_t *g_horde_points_max;
 extern cvar_t *g_horde_spawn_interval_min;
 extern cvar_t *g_horde_spawn_interval_max;
 extern cvar_t *g_horde_warmup_cap;
+extern cvar_t *g_horde_max_alive;
 extern cvar_t *g_horde_wave_spawn_delay_ms;
 extern cvar_t *g_horde_player_scale;
 extern cvar_t *g_horde_player_scale_factor;
@@ -1143,6 +1144,15 @@ void MM_Horde_RunSpawning()
 
 	const int warmup_cap = max(1, g_horde_warmup_cap->integer);
 	if (warmup && (level.total_monsters - level.killed_monsters >= warmup_cap))
+		return;
+
+	// Cap concurrently-alive monsters during live waves. Without this, a high-budget
+	// swarm wave (many cheap monsters) can pile up hundreds of homing entities on a
+	// single player and overflow that client's network message buffer (SZ_GetSpace).
+	// Spawning pauses while at the cap and resumes as monsters die, so the wave still
+	// spawns its full budget over time - only peak concurrency is bounded. 0 disables.
+	const int alive_cap = g_horde_max_alive->integer;
+	if (!warmup && alive_cap > 0 && (level.total_monsters - level.killed_monsters >= alive_cap))
 		return;
 
 	if (level.horde_all_spawned)
