@@ -289,7 +289,7 @@ bool CTF_PickupFlag(gentity_t *ent, gentity_t *other) {
 
 				level.ctf_last_flag_capture = level.time;
 				level.ctf_last_capture_team = team;
-				G_AdjustTeamScore(team, GT(GT_STRIKE) ? 2 : 1);
+				G_AdjustTeamScore(team, 1);
 
 				gi.sound(ent, CHAN_RELIABLE | CHAN_NO_PHS_ADD | CHAN_AUX, gi.soundindex("ctf/flagcap.wav"), 1, ATTN_NONE, 0);
 
@@ -321,6 +321,7 @@ bool CTF_PickupFlag(gentity_t *ent, gentity_t *other) {
 
 				if (GT(GT_STRIKE)) {
 					gi.LocBroadcast_Print(PRINT_CENTER, "Flag captured!\n{} wins the round!\n", Teams_TeamName(team));
+					AnnouncerSound(world, team == TEAM_RED ? "red_wins_round" : "blue_wins_round", nullptr, team == TEAM_BLUE);
 					Round_End();
 				}
 
@@ -355,10 +356,9 @@ bool CTF_PickupFlag(gentity_t *ent, gentity_t *other) {
 	gi.LocBroadcast_Print(PRINT_HIGH, "$g_got_flag",
 		other->client->resp.netname, Teams_TeamName(team));
 	G_AdjustPlayerScore(other->client, CTF_FLAG_BONUS, false, 0);
-	if (!level.strike_flag_touch) {
-		G_AdjustTeamScore(other->client->sess.team, 1);
+	// strike: remember the attackers reached the flag (no score for the touch itself)
+	if (GT(GT_STRIKE))
 		level.strike_flag_touch = true;
-	}
 
 	other->client->pers.inventory[flag_item] = 1;
 	other->client->resp.ctf_flagsince = level.time;

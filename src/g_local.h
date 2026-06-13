@@ -11,7 +11,7 @@
 constexpr const char *GAMEVERSION = "baseq2";
 
 constexpr const char *GAMEMOD_TITLE = "Muff Mode";
-constexpr const char *GAMEMOD_VERSION = "0.33.31 BETA";
+constexpr const char *GAMEMOD_VERSION = "0.33.32 BETA";
 
 //==================================================================
 
@@ -1677,10 +1677,9 @@ struct level_locals_t {
 
 	std::string	entstring;
 
-	bool		strike_red_attacks;
-	bool		strike_flag_touch;
-	bool		strike_turn_red;
-	bool		strike_turn_blue;
+	bool		strike_red_attacks;		// team currently on offense this turn
+	bool		strike_flag_touch;		// attackers reached/held the flag this turn (messaging only)
+	int8_t		strike_turn;			// which turn of the current round-pair: 0 = first attacker, 1 = roles swapped
 
 	gtime_t		horde_monster_spawn_time;
 	int32_t		horde_spawn_points_remaining;

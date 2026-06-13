@@ -28,7 +28,7 @@ constexpr gametype_avail_t k_gametype_availability[GT_NUM_GAMETYPES] = {
 	/* GT_CTF */ gametype_avail_t::Enabled,
 	/* GT_CA */ gametype_avail_t::Enabled,
 	/* GT_FREEZE */ gametype_avail_t::Removed,
-	/* GT_STRIKE */ gametype_avail_t::Disabled,
+	/* GT_STRIKE */ gametype_avail_t::Enabled,
 	/* GT_RR */ gametype_avail_t::Disabled,
 	/* GT_LMS */ gametype_avail_t::Removed,
 	/* GT_HORDE */ gametype_avail_t::Enabled,

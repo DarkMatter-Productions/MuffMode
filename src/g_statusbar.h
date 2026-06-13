@@ -16,6 +16,8 @@ struct statusbar_t
 	inline auto &xv(int32_t offset) { sb << "xv " << offset << ' '; return *this; }
 
 	inline auto &ifstat(player_stat_t stat) { sb << "if " << stat << ' '; return *this; }
+	// render the enclosed block only if (stats[stat] & mask) is set
+	inline auto &ifbit(player_stat_t stat, uint16_t mask) { sb << "ifbit " << stat << ' ' << mask << ' '; return *this; }
 	inline auto &endifstat() { sb << "endif "; return *this; }
 
 	inline auto &pic(player_stat_t stat) { sb << "pic " << stat << ' '; return *this; }

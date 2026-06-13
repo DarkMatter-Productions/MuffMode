@@ -79,6 +79,16 @@ void MM_InitStatusbar()
 			sb.ifstat(STAT_TEAMPLAY_INFO).xl(0).yb(-88).stat_string(STAT_TEAMPLAY_INFO).endifstat();
 		}
 
+		// CaptureStrike: show the current round number (top-right, like Horde's wave counter)
+		// plus this player's attack/defend role, unpacked from STAT_MONSTER_COUNT via ifbit.
+		if (GT(GT_STRIKE)) {
+			int num = level.round_number;
+			int chars = num > 99 ? 3 : num > 9 ? 2 : 1;
+			sb.ifstat(STAT_ROUND_NUMBER).xr(-32 - (16 * chars)).yt(2).num(3, STAT_ROUND_NUMBER).xr(0).yt(2 + 26).loc_rstring("Round").endifstat();
+			sb.ifbit(STAT_MONSTER_COUNT, STRIKE_HUD_ATTACKING).xr(0).yt(2 + 48).loc_rstring("ATTACK").endifstat();
+			sb.ifbit(STAT_MONSTER_COUNT, STRIKE_HUD_DEFENDING).xr(0).yt(2 + 48).loc_rstring("DEFEND").endifstat();
+		}
+
 		sb.ifstat(STAT_COUNTDOWN).yb(-256).num(3, STAT_COUNTDOWN).endifstat();
 		sb.ifstat(STAT_MATCH_STATE).xv(0).yb(-78).stat_string(STAT_MATCH_STATE).endifstat();
 		sb.ifstat(STAT_CHASE).xv(0).yb(-68).string("FOLLOWING").xv(80).stat_string(STAT_CHASE).endifstat();

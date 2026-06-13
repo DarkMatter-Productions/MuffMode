@@ -265,3 +265,12 @@ enum player_stat_t {
 };
 
 static_assert(STAT_LAST <= MAX_STATS + 1, "stats list overflow");
+
+// CaptureStrike packs its per-player HUD role into the STAT_MONSTER_COUNT slot,
+// which is hard-set to 0 in every non-Horde mode (see G_SetCoopStats). Stored as
+// bit flags rather than a value so future strike HUD state can share the same
+// stat without spending a new STAT_ index. Rendered via the "ifbit" statusbar op.
+enum strike_hud_flags_t : uint16_t {
+	STRIKE_HUD_ATTACKING = bit_v<0>,	// local player's team is on offense this turn
+	STRIKE_HUD_DEFENDING = bit_v<1>,	// local player's team is on defense this turn
+};

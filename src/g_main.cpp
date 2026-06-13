@@ -1659,13 +1659,21 @@ void CheckDMExitRules() {
 	if (!scorelimit) return;
 
 	if (teams) {
-		if (level.team_scores[TEAM_RED] >= scorelimit) {
-			QueueIntermission(G_Fmt("{} WINS! (hit the {} limit)", Teams_TeamName(TEAM_RED), GT_ScoreLimitString()).data(), false, false);
-			return;
-		}
-		if (level.team_scores[TEAM_BLUE] >= scorelimit) {
-			QueueIntermission(G_Fmt("{} WINS! (hit the {} limit)", Teams_TeamName(TEAM_BLUE), GT_ScoreLimitString()).data(), false, false);
-			return;
+		// Strike: only decide the match between rounds, after both teams have had an
+		// equal number of attacking turns (end of turn 1 of the round-pair). Otherwise a
+		// team could clinch the limit before the other gets its turn. Ties fall through to
+		// overtime via the ScoreIsTied() check above.
+		bool strike_end_ok = !GT(GT_STRIKE) ||
+			(level.strike_turn == 1 && level.round_state == roundst_t::ROUND_ENDED);
+		if (strike_end_ok) {
+			if (level.team_scores[TEAM_RED] >= scorelimit) {
+				QueueIntermission(G_Fmt("{} WINS! (hit the {} limit)", Teams_TeamName(TEAM_RED), GT_ScoreLimitString()).data(), false, false);
+				return;
+			}
+			if (level.team_scores[TEAM_BLUE] >= scorelimit) {
+				QueueIntermission(G_Fmt("{} WINS! (hit the {} limit)", Teams_TeamName(TEAM_BLUE), GT_ScoreLimitString()).data(), false, false);
+				return;
+			}
 		}
 	} else {
 		for (auto ec : active_clients()) {
