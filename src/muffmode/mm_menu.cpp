@@ -656,23 +656,27 @@ static void G_Menu_ServerInfo_Update(gentity_t *ent) {
 	i++;
 
 	if (scorelimit) {
+		if (i >= 16) return;
 		Q_strlcpy(entries[i].text, G_Fmt("{} limit: {}", GT_ScoreLimitString(), scorelimit).data(), sizeof(entries[i].text));
 		i++;
 		limits = true;
 	}
 
 	if (timelimit->value > 0) {
+		if (i >= 16) return;
 		Q_strlcpy(entries[i].text, G_Fmt("time limit: {}", G_TimeString(timelimit->value * 60000, false)).data(), sizeof(entries[i].text));
 		i++;
 		limits = true;
 	}
 
 	if (limits) {
+		if (i >= 16) return;
 		Q_strlcpy(entries[i].text, BREAKER, sizeof(entries[i].text));
 		i++;
 	}
 
 	if (g_instagib->integer || GT(GT_INSTAGIB)) {
+		if (i >= 16) return;
 		if (g_instagib_splash->integer) {
 			Q_strlcpy(entries[i].text, "InstaGib + Rail Splash", sizeof(entries[i].text));
 		} else {
@@ -681,31 +685,38 @@ static void G_Menu_ServerInfo_Update(gentity_t *ent) {
 		i++;
 	}
 	if (g_vampiric_damage->integer) {
+		if (i >= 16) return;
 		Q_strlcpy(entries[i].text, "Vampiric Damage", sizeof(entries[i].text));
 		i++;
 	}
 	if (g_frenzy->integer) {
+		if (i >= 16) return;
 		Q_strlcpy(entries[i].text, "Weapons Frenzy", sizeof(entries[i].text));
 		i++;
 	}
 	if (g_nadefest->integer || GT(GT_NADEFEST)) {
+		if (i >= 16) return;
 		Q_strlcpy(entries[i].text, "Nade Fest", sizeof(entries[i].text));
 		i++;
 	}
 	if (g_quadhog->integer) {
+		if (i >= 16) return;
 		Q_strlcpy(entries[i].text, "Quad Hog", sizeof(entries[i].text));
 		i++;
 	}
 
+	if (i >= 16) return;
 	Q_strlcpy(entries[i].text, BREAKER, sizeof(entries[i].text));
 	i++;
 
 	if (items) {
 		if (g_dm_weapons_stay->integer) {
+			if (i >= 16) return;
 			Q_strlcpy(entries[i].text, "weapons stay", sizeof(entries[i].text));
 			i++;
 		} else {
 			if (g_weapon_respawn_time->integer != 30) {
+				if (i >= 16) return;
 				Q_strlcpy(entries[i].text, G_Fmt("weapon respawn delay: {}", g_weapon_respawn_time->integer).data(), sizeof(entries[i].text));
 				i++;
 			}
@@ -713,10 +724,12 @@ static void G_Menu_ServerInfo_Update(gentity_t *ent) {
 	}
 
 	if (g_infinite_ammo->integer && !infiniteammo) {
+		if (i >= 16) return;
 		Q_strlcpy(entries[i].text, "infinite ammo", sizeof(entries[i].text));
 		i++;
 	}
 	if (Teams() && g_friendly_fire->integer) {
+		if (i >= 16) return;
 		Q_strlcpy(entries[i].text, "friendly fire", sizeof(entries[i].text));
 		i++;
 	}

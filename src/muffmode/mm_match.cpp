@@ -26,9 +26,10 @@ static void Entities_ItemTeams_Reset() {
 	gentity_t	*ent;
 	size_t		i;
 
-	gentity_t	*master;
-	int			count, choice;
-
+	// Mirror item-team spawn setup (SpawnItem in g_items.cpp): hide every team
+	// member, then let each team master re-run RespawnItem to reveal one. A single
+	// iterator is used; the old code reused `ent` for inner chain walks, which
+	// desynced it from `i` and walked out of bounds on every match reset.
 	for (ent = g_entities + 1, i = 1; i < globals.num_entities; i++, ent++) {
 		if (!ent->inuse)
 			continue;
@@ -39,21 +40,16 @@ static void Entities_ItemTeams_Reset() {
 		if (!ent->team)
 			continue;
 
-		if (!ent->teammaster)
-			continue;
-
-		master = ent->teammaster;
-
 		ent->svflags |= SVF_NOCLIENT;
 		ent->solid = SOLID_NOT;
 		gi.linkentity(ent);
 
-		for (count = 0, ent = master; ent; ent = ent->chain, count++)
-			;
-
-		choice = irandom(count);
-		for (count = 0, ent = master; count < choice; ent = ent->chain, count++)
-			;
+		if (ent == ent->teammaster) {
+			ent->nextthink = level.time + 10_hz;
+			ent->think = RespawnItem;
+		} else {
+			ent->nextthink = 0_sec;
+		}
 	}
 	/*
 	for (ent = g_entities + 1, i = 1; i < globals.num_entities; i++, ent++) {
