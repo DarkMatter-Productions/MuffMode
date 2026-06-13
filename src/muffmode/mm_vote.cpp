@@ -352,8 +352,8 @@ void MM_VotePassGametype()
 	}
 
 	// Re-check votability at execution time in case g_votable_gametypes changed
-	// during the 3-second PASSED->EXECUTING window, or the vote arrived via the
-	// menu path which does not run val_func.
+	// during the 3-second PASSED->EXECUTING window (the value is validated at
+	// callvote time, but could have changed by the time the vote executes).
 	if (!MM_IsGametypeVotable(gt))
 	{
 		gi.LocBroadcast_Print(PRINT_HIGH, "Gametype vote rejected: gametype is no longer votable.\n");
@@ -519,8 +519,8 @@ void MM_VotePassRuleset()
 		return;
 
 	// Re-check votability at execution time in case g_votable_rulesets changed
-	// during the 3-second PASSED->EXECUTING window, or the vote arrived via the
-	// menu path which does not run val_func.
+	// during the 3-second PASSED->EXECUTING window (the value is validated at
+	// callvote time, but could have changed by the time the vote executes).
 	if (!MM_IsRulesetVotable(rs))
 	{
 		gi.LocBroadcast_Print(PRINT_HIGH, "Ruleset vote rejected: ruleset is no longer votable.\n");

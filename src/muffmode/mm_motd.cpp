@@ -46,6 +46,10 @@ void MM_LoadMOTD()
 		} else {
 			gi.Com_PrintFmt("{}: MotD file load error for \"{}\", discarding.\n", __FUNCTION__, name);
 		}
+
+		// game.motd is a std::string and copied the contents above; free the scratch buffer.
+		if (buffer)
+			gi.TagFree(buffer);
 	}
 }
 

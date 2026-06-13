@@ -851,7 +851,7 @@ const menu_t votemenu[] = {
 
 void G_Menu_Vote_Update(gentity_t *ent)
 {
-	int ci = ent->client ? (int)(ent->client - game.clients) : -1;
+	int ci = (int)(ent->client - game.clients);
 	MuffModeLog("DEBUG", "G_Menu_Vote_Update: enter for client %d, menu=%p", ci, (void *)ent->client->menu);
 
 	if (!Vote_Menu_Active(ent))
