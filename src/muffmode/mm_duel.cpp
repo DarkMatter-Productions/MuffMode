@@ -59,11 +59,11 @@ void MM_Duel_MatchEnd_AdjustScores()
 		return;
 
 	int client_num = level.sorted_clients[0];
-	if (game.clients[client_num].pers.connected)
+	if (client_num >= 0 && game.clients[client_num].pers.connected)
 		game.clients[client_num].sess.wins++;
 
 	client_num = level.sorted_clients[1];
-	if (game.clients[client_num].pers.connected) {
+	if (client_num >= 0 && game.clients[client_num].pers.connected) {
 		// handled in SetTeam
 	}
 }
@@ -195,6 +195,9 @@ void MM_Duel_ScoreboardMessage(gentity_t *ent, gentity_t *killer) {
 		k = n = 0;
 		if (string.size() < MAX_STRING_CHARS - 50) {
 			for (i = 0; i < MAX_CLIENTS_KEX; i++) {
+				if (level.sorted_clients[i] < 0)
+					continue;
+
 				cl = &game.clients[level.sorted_clients[i]];
 				cl_ent = g_entities + 1 + level.sorted_clients[i];
 
@@ -248,6 +251,9 @@ void MM_Duel_ScoreboardMessage(gentity_t *ent, gentity_t *killer) {
 		k = n = 0;
 		if (string.size() < MAX_STRING_CHARS - 50) {
 			for (i = 0; i < MAX_CLIENTS_KEX; i++) {
+				if (level.sorted_clients[i] < 0)
+					continue;
+
 				cl = &game.clients[level.sorted_clients[i]];
 				cl_ent = g_entities + 1 + level.sorted_clients[i];
 

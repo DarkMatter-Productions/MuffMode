@@ -747,9 +747,13 @@ bool MM_Horde_CheckMatchEnd()
 	if (roundlimit->integer <= 0 || level.round_number < roundlimit->integer)
 		return false;
 
-	QueueIntermission(G_Fmt("{} WINS with a final score of {}.", game.clients[level.sorted_clients[0]].resp.netname,
-		game.clients[level.sorted_clients[0]].resp.score).data(),
-		false, false);
+	const int winner = level.sorted_clients[0];
+	if (winner < 0)
+		QueueIntermission("MATCH ENDED", false, false);
+	else
+		QueueIntermission(G_Fmt("{} WINS with a final score of {}.", game.clients[winner].resp.netname,
+			game.clients[winner].resp.score).data(),
+			false, false);
 	return true;
 }
 

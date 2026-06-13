@@ -992,7 +992,7 @@ countdown:
 
 				// announce it
 				if ((GT(GT_DUEL) || (level.num_playing_clients == 2 && g_match_lock->integer)) &&
-						&game.clients[level.sorted_clients[0]] && &game.clients[level.sorted_clients[1]])
+						level.sorted_clients[0] >= 0 && level.sorted_clients[1] >= 0)
 					gi.LocBroadcast_Print(PRINT_CENTER, "{} vs {}\nBegins in...", game.clients[level.sorted_clients[0]].resp.netname, game.clients[level.sorted_clients[1]].resp.netname);
 				else
 					gi.LocBroadcast_Print(PRINT_CENTER, "{}\nBegins in...", level.gametype_name);
