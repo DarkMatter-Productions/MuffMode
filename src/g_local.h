@@ -11,7 +11,7 @@
 constexpr const char *GAMEVERSION = "baseq2";
 
 constexpr const char *GAMEMOD_TITLE = "Muff Mode";
-constexpr const char *GAMEMOD_VERSION = "0.33.10 BETA";
+constexpr const char *GAMEMOD_VERSION = "0.33.14 BETA";
 
 //==================================================================
 
@@ -2330,7 +2330,6 @@ extern cvar_t *password;
 extern cvar_t *spectator_password;
 extern cvar_t *admin_password;
 extern cvar_t *needpass;
-extern cvar_t *filterban;
 
 extern cvar_t *maxplayers;
 extern cvar_t *minplayers;
@@ -3039,7 +3038,6 @@ void player_die(gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int 
 // g_svcmds.cpp
 //
 void ServerCommand();
-bool G_FilterPacket(const char *from);
 
 //
 // p_view.cpp

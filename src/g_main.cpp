@@ -66,7 +66,6 @@ cvar_t *password;
 cvar_t *spectator_password;
 cvar_t *admin_password;
 cvar_t *needpass;
-cvar_t *filterban;
 
 static cvar_t *maxclients;
 static cvar_t *maxentities;
@@ -516,7 +515,6 @@ static void InitGame() {
 	spectator_password = gi.cvar("spectator_password", "", CVAR_USERINFO);
 	admin_password = gi.cvar("admin_password", "", CVAR_NOFLAGS);
 	needpass = gi.cvar("needpass", "0", CVAR_SERVERINFO);
-	filterban = gi.cvar("filterban", "1", CVAR_NOFLAGS);
 
 	run_pitch = gi.cvar("run_pitch", "0.002", CVAR_NOFLAGS);
 	run_roll = gi.cvar("run_roll", "0.005", CVAR_NOFLAGS);

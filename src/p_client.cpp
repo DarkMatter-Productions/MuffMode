@@ -3343,105 +3343,6 @@ gentity_t *ClientChooseSlot(const char *userinfo, const char *social_id, bool is
 	return ClientChooseSlot_Any(ignore, num_ignore);
 }
 
-static inline bool CheckBanned(gentity_t *ent, char *userinfo, const char *social_id) {
-	// currently all bans are in Steamworks, don't bother if not from there
-	if (social_id[0] != 'S')
-		return false;
-
-	// Israel
-	if (!Q_strcasecmp(social_id, "Steamworks-76561198026297488")) {
-		gi.Info_SetValueForKey(userinfo, "rejmsg", "Antisemite detected!\n");
-
-		gentity_t *host = &g_entities[1];
-		if (host && host->client) {
-			if (level.time > host->client->last_banned_message_time + 10_sec) {
-
-				char name[MAX_INFO_VALUE] = { 0 };
-				gi.Info_ValueForKey(userinfo, "name", name, sizeof(name));
-
-				gi.LocClient_Print(host, PRINT_TTS, "ANTISEMITE DETECTED ({})!\n", name);
-				host->client->last_banned_message_time = level.time;
-				gi.LocBroadcast_Print(PRINT_CHAT, "{}: God Bless Palestine\n", name);
-			}
-		}
-
-		gi.local_sound(ent, CHAN_AUTO, gi.soundindex("world/klaxon3.wav"), 1, ATTN_NONE, 0);
-		gi.AddCommandString(G_Fmt("kick {}\n", ent - g_entities - 1).data());
-		return true;
-	}
-
-	// Kirlomax
-	if (!Q_strcasecmp(social_id, "Steamworks-76561198001774610")) {
-		gi.Info_SetValueForKey(userinfo, "rejmsg", "WARNING! KNOWN CHEATER DETECTED\n");
-
-		gentity_t *host = &g_entities[1];
-		if (host && host->client) {
-			if (level.time > host->client->last_banned_message_time + 10_sec) {
-
-				char name[MAX_INFO_VALUE] = { 0 };
-				gi.Info_ValueForKey(userinfo, "name", name, sizeof(name));
-
-				gi.LocClient_Print(host, PRINT_TTS, "WARNING! KNOWN CHEATER DETECTED ({})!\n", name);
-				host->client->last_banned_message_time = level.time;
-				gi.LocBroadcast_Print(PRINT_CHAT, "{}: I am a known cheater, banned from all servers.\n", name);
-			}
-		}
-
-		gi.local_sound(ent, CHAN_AUTO, gi.soundindex("world/klaxon3.wav"), 1, ATTN_NONE, 0);
-		gi.AddCommandString(G_Fmt("kick {}\n", ent - g_entities - 1).data());
-		G_StuffCmd(ent, "disconnect\n");
-		return true;
-	}
-
-	// Model192
-	if (!Q_strcasecmp(social_id, "Steamworks-76561197972296343")) {
-		gi.Info_SetValueForKey(userinfo, "rejmsg", "WARNING! MOANERTONE DETECTED\n");
-
-		gentity_t *host = &g_entities[1];
-		if (host && host->client) {
-			if (level.time > host->client->last_banned_message_time + 10_sec) {
-
-				char name[MAX_INFO_VALUE] = { 0 };
-				gi.Info_ValueForKey(userinfo, "name", name, sizeof(name));
-
-				gi.LocClient_Print(host, PRINT_TTS, "WARNING! MOANERTONE DETECTED ({})!\n", name);
-				host->client->last_banned_message_time = level.time;
-				gi.LocBroadcast_Print(PRINT_CHAT, "{}: Listen up, I have something to moan about.\n", name);
-			}
-		}
-
-		gi.local_sound(ent, CHAN_AUTO, gi.soundindex("world/klaxon3.wav"), 1, ATTN_NONE, 0);
-		gi.AddCommandString(G_Fmt("kick {}\n", ent - g_entities - 1).data());
-		G_StuffCmd(ent, "disconnect\n");
-		return true;
-	}
-
-	// Dalude
-	if (!Q_strcasecmp(social_id, "Steamworks-76561199001991246") || !Q_strcasecmp(social_id, "EOS-07e230c273be4248bbf26c89033923c1")) {
-		ent->client->sess.is_888 = true;
-		gi.Info_SetValueForKey(userinfo, "rejmsg", "Fake 888 Agent detected!\n");
-		gi.Info_SetValueForKey(userinfo, "name", "Fake 888 Agent");
-
-		gentity_t *host = &g_entities[1];
-		if (host && host->client) {
-			if (level.time > host->client->last_banned_message_time + 10_sec) {
-
-				char name[MAX_INFO_VALUE] = { 0 };
-				gi.Info_ValueForKey(userinfo, "name", name, sizeof(name));
-
-				gi.LocClient_Print(host, PRINT_TTS, "FAKE 888 AGENT DETECTED ({})!\n", name);
-				host->client->last_banned_message_time = level.time;
-				gi.LocBroadcast_Print(PRINT_CHAT, "{}: bejesus, what a lovely lobby! certainly better than 888's!\n", name);
-			}
-		}
-		gi.local_sound(ent, CHAN_AUTO, gi.soundindex("world/klaxon3.wav"), 1, ATTN_NONE, 0);
-		gi.AddCommandString(G_Fmt("kick {}\n", ent - g_entities - 1).data());
-		G_StuffCmd(ent, "disconnect\n");
-		return true;
-	}
-	return false;
-}
-
 /*
 ===========
 ClientConnect
@@ -3455,21 +3356,6 @@ loadgames will.
 ============
 */
 bool ClientConnect(gentity_t *ent, char *userinfo, const char *social_id, bool is_bot) {
-#if 0
-	// check to see if they are on the banned IP list
-	char value[MAX_INFO_VALUE] = { 0 };
-	gi.Info_ValueForKey(userinfo, "ip", value, sizeof(value));
-	if (G_FilterPacket(value)) {
-		gi.Info_SetValueForKey(userinfo, "rejmsg", "Banned.");
-		return false;
-	}
-#endif
-	
-#if 0
-	if (!is_bot && CheckBanned(ent, userinfo, social_id))
-		return false;
-#endif
-
 	ent->client->sess.team = deathmatch->integer ? TEAM_NONE : TEAM_FREE;
 
 	// they can connect
