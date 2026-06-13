@@ -135,10 +135,28 @@
     <ClInclude Include="muffmode\mm_gametype.h">
       <Filter>muffmode</Filter>
     </ClInclude>
+    <ClInclude Include="muffmode\mm_captain.h">
+      <Filter>muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="muffmode\mm_ghost.h">
+      <Filter>muffmode</Filter>
+    </ClInclude>
     <ClInclude Include="muffmode\mm_maps.h">
       <Filter>muffmode</Filter>
     </ClInclude>
+    <ClInclude Include="muffmode\mm_match.h">
+      <Filter>muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="muffmode\mm_menu.h">
+      <Filter>muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="muffmode\mm_pconfig.h">
+      <Filter>muffmode</Filter>
+    </ClInclude>
     <ClInclude Include="muffmode\mm_motd.h">
+      <Filter>muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="muffmode\mm_team.h">
       <Filter>muffmode</Filter>
     </ClInclude>
     <ClInclude Include="muffmode\mm_vote.h">
@@ -299,15 +317,32 @@
       <Filter>monsters</Filter>
     </ClCompile>
     <ClCompile Include="p_menu.cpp" />
-    <ClCompile Include="g_menu.cpp" />
     <ClCompile Include="g_ctf.cpp" />
     <ClCompile Include="muffmode\mm_debug.cpp">
+      <Filter>muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="muffmode\mm_captain.cpp">
+      <Filter>muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="muffmode\mm_ghost.cpp">
       <Filter>muffmode</Filter>
     </ClCompile>
     <ClCompile Include="muffmode\mm_maps.cpp">
       <Filter>muffmode</Filter>
     </ClCompile>
+    <ClCompile Include="muffmode\mm_match.cpp">
+      <Filter>muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="muffmode\mm_menu.cpp">
+      <Filter>muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="muffmode\mm_pconfig.cpp">
+      <Filter>muffmode</Filter>
+    </ClCompile>
     <ClCompile Include="muffmode\mm_motd.cpp">
+      <Filter>muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="muffmode\mm_team.cpp">
       <Filter>muffmode</Filter>
     </ClCompile>
     <ClCompile Include="muffmode\mm_vote.cpp">

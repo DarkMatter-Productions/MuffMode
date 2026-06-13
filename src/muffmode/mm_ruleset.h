@@ -16,3 +16,8 @@ bool MM_RulesetHealthArmorCap();
 void MM_ClampClientPersistHealthArmor(gclient_t *client);
 void MM_ClampEntityHealthArmor(gentity_t *ent);
 void MM_RulesetQ3AHealthArmorDecay(gentity_t *ent);
+
+// [MuffMode] Ruleset-specific falling damage tuning.
+int MM_RulesetFallDamageMedMin();
+int MM_RulesetFallDamageFarMin();
+int MM_RulesetFallDamage(bool far_fall, float delta);

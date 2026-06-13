@@ -3,6 +3,7 @@
 
 #include "g_local.h"
 #include "g_debug_log.h"
+// [MuffMode] Spawn filtering, statusbar and gametype hooks
 #include "muffmode/mm_gametype.h"
 #include "muffmode/mm_horde.h"
 #include "muffmode/mm_spawn_filter.h"
