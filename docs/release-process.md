@@ -12,6 +12,7 @@ The release script is [scripts/release.ps1](../scripts/release.ps1). It builds a
 muffmode-<version>-beta/
   README.html
   CHANGELOG.md
+  LICENSE
   MuffModeUpdater.exe
   rerelease/
     baseq2/
@@ -105,11 +106,13 @@ Installer behavior:
 | Choice | Default path |
 | --- | --- |
 | Steam | `C:\Program Files (x86)\Steam\steamapps\common\Quake 2` |
-| Epic Online Store / Epic Games Store | `C:\Program Files\Epic Games\Quake 2` |
+| Epic Games Store | `C:\Program Files\Epic Games\Quake 2` |
 | GOG | `C:\GOG Games\Quake II` |
 | Custom or another library | User-selected folder |
 
-The installer shows whether Steam, Epic Online Store, or GOG was detected and displays the selected path before the folder page. It still offers an **Other location** choice for custom libraries. The installer lets users browse after choosing a preset, warns if `rerelease\baseq2` is not found, corrects accidental `rerelease` or `baseq2` folder selection back to the outer Quake II folder, offers Desktop and Start menu shortcuts for the updater and launcher, and backs up an existing `rerelease\baseq2\game_x64.dll` under `rerelease\baseq2\MuffModeBackups` before replacing it.
+The installer checks Steam's install registry and `libraryfolders.vdf`, Epic Games Store manifest files, and GOG registry/common install locations before showing the store choices. It displays whether Steam, Epic Games Store, or GOG was detected and shows the selected path before the folder page. It still offers an **Other location** choice for custom libraries. The installer shows the project license, lets users browse after choosing a preset, warns if `rerelease\baseq2` is not found, corrects accidental `rerelease` or `baseq2` folder selection back to the outer Quake II folder, prompts users to close applications holding files open, offers Desktop and Start menu shortcuts for the updater and launcher, and backs up an existing `rerelease\baseq2\game_x64.dll` under `rerelease\baseq2\MuffModeBackups` before replacing it.
+
+Silent installer runs should pass `/DIR="C:\Path\To\Quake 2"` explicitly. In silent mode the installer preserves the supplied destination and refuses to continue unless it points at an outer Quake II folder containing `rerelease\baseq2`.
 
 ## Updater And Launcher
 

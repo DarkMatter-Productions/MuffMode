@@ -43,7 +43,7 @@
 <h2 align="center">Quick Install</h2>
 
 1. Download the [latest Muff Mode release](https://github.com/DarkMatter-Productions/MuffMode/releases/latest).
-2. Use the **Windows installer** when available. It defaults to the **Steam** Quake II Remastered path and also supports **Epic Online Store / Epic Games Store**, **GOG**, and custom library locations.
+2. Use the **Windows installer** when available. It detects **Steam**, **Epic Games Store**, and **GOG** installs, and also offers an **Other location** option for custom library folders.
 3. If you use the zip instead, extract it into the outer **`Quake 2`** folder and allow file replacements.
 4. Launch the game normally. Server hosts can execute the bundled server config with **`exec muff-sv.cfg`** when it is included in the release package.
 

@@ -1204,7 +1204,7 @@ function Test-AllowedPackageRelativePath {
         return $false
     }
 
-    foreach ($topLevelFile in @("README.html", "README.md", "CHANGELOG.md", "MuffModeUpdater.exe", "MuffMode.version", "VERSION")) {
+    foreach ($topLevelFile in @("README.html", "README.md", "CHANGELOG.md", "LICENSE", "MuffModeUpdater.exe", "MuffMode.version", "VERSION")) {
         if ([string]::Equals($normalized, $topLevelFile, [System.StringComparison]::OrdinalIgnoreCase)) {
             return $true
         }
@@ -1234,6 +1234,7 @@ function Assert-ReleasePackageContents {
     foreach ($requiredFile in @(
         "README.html",
         "CHANGELOG.md",
+        "LICENSE",
         "MuffModeUpdater.exe",
         "rerelease\baseq2\game_x64.dll",
         "rerelease\baseq2\muffmode-version.json",
@@ -1443,6 +1444,7 @@ function New-ReleasePackage {
     New-Item -ItemType Directory -Force -Path $baseq2 | Out-Null
 
     Copy-Item -LiteralPath $DllPath -Destination (Join-Path $baseq2 "game_x64.dll") -Force
+    Copy-Item -LiteralPath (Resolve-RepoPath "LICENSE") -Destination (Join-Path $packageRoot "LICENSE") -Force
     Copy-Item -LiteralPath $UpdaterPath -Destination (Join-Path $packageRoot "MuffModeUpdater.exe") -Force
     Copy-Item -LiteralPath $ReadmeHtmlPath -Destination (Join-Path $packageRoot "README.html") -Force
     Copy-Item -LiteralPath $ChangelogPath -Destination (Join-Path $packageRoot "CHANGELOG.md") -Force
