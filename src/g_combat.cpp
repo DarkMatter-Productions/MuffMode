@@ -905,6 +905,11 @@ void T_RadiusDamage(gentity_t *inflictor, gentity_t *attacker, float damage, gen
 				float kb = points;
 				if (mod.id == MOD_HYPERBLASTER)
 					kb *= 5;
+				// [MuffMode] self rocket-jump: use the ruleset's dedicated knockback base
+				// (RS_Q2RE-equivalent) so RJ height matches q2re while self damage stays lower.
+				else if (ent == attacker && inflictor->splash_knockback > 0 &&
+						 inflictor->owner && inflictor->owner->client)
+					kb = ((float)inflictor->splash_knockback - 0.5f * v.length()) * 0.5f;
 
 				T_Damage(ent, inflictor, attacker, dir, closest_point_to_box(inflictor_center, ent->absmin, ent->absmax), dir, (int)points, (int)kb, dflags | DAMAGE_RADIUS, mod);
 			}

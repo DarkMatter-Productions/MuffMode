@@ -2924,7 +2924,7 @@ void fire_handgrenade(gentity_t *self, const vec3_t &start, const vec3_t &aimdir
 	float damage_radius, bool held);
 void rocket_touch(gentity_t *ent, gentity_t *other, const trace_t &tr, bool other_touching_self);
 gentity_t *fire_rocket(gentity_t *self, const vec3_t &start, const vec3_t &dir, int damage, int speed, float damage_radius,
-	int radius_damage);
+	int radius_damage, int splash_knockback = 0);
 void fire_rail(gentity_t *self, const vec3_t &start, const vec3_t &aimdir, int damage, int kick);
 void fire_bfg(gentity_t *self, const vec3_t &start, const vec3_t &dir, int damage, int speed, float damage_radius);
 void fire_ionripper(gentity_t *self, const vec3_t &start, const vec3_t &aimdir, int damage, int speed, effects_t effect);
@@ -3830,6 +3830,7 @@ struct gentity_t {
 	bool	takedamage;
 	int32_t dmg;
 	int32_t splash_damage;
+	int32_t splash_knockback; // [MuffMode] 0 = use splash_damage for knockback (default)
 	float	splash_radius;
 	int32_t sounds; // make this a spawntemp var?
 	int32_t count;

@@ -57,8 +57,13 @@ int MM_Ruleset_ChaingunDamage(gentity_t *ent)
 	return deathmatch->integer ? 6 : 8;
 }
 
-void MM_Ruleset_RocketLauncherDefaults(int &damage, int &splash_damage, float &splash_radius, int &speed)
+// [MuffMode] RS_VANILLA_PLUS keeps splash_damage at 100 (lower self/enemy damage) but
+// uses the RS_Q2RE splash base for self rocket-jump knockback so RJ height matches q2re.
+constexpr int k_q2re_rl_splash_knockback = 120;
+
+void MM_Ruleset_RocketLauncherDefaults(int &damage, int &splash_damage, float &splash_radius, int &speed, int &splash_knockback)
 {
+	splash_knockback = 0; // default: knockback derived from splash_damage
 	switch (game.ruleset) {
 	case RS_MM:
 		damage = 100;
@@ -77,6 +82,7 @@ void MM_Ruleset_RocketLauncherDefaults(int &damage, int &splash_damage, float &s
 		splash_radius = 120;
 		splash_damage = damage;
 		speed = (deathmatch->integer ? 750 : 650);
+		splash_knockback = k_q2re_rl_splash_knockback;
 		break;
 	case RS_Q3A:
 		damage = 100;
@@ -99,8 +105,9 @@ void MM_Ruleset_RocketLauncherDefaults(int &damage, int &splash_damage, float &s
 	}
 }
 
-void MM_Ruleset_RocketLauncherDefaultsForCustomDamage(int damage, int &splash_damage, float &splash_radius, int &speed)
+void MM_Ruleset_RocketLauncherDefaultsForCustomDamage(int damage, int &splash_damage, float &splash_radius, int &speed, int &splash_knockback)
 {
+	splash_knockback = 0; // default: knockback derived from splash_damage
 	switch (game.ruleset) {
 	case RS_MM:
 		splash_radius = 120;
@@ -116,6 +123,7 @@ void MM_Ruleset_RocketLauncherDefaultsForCustomDamage(int damage, int &splash_da
 		splash_radius = 120;
 		splash_damage = damage;
 		speed = (deathmatch->integer ? 750 : 650);
+		splash_knockback = k_q2re_rl_splash_knockback;
 		break;
 	case RS_Q3A:
 		splash_radius = 120;
