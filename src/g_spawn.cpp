@@ -2037,6 +2037,10 @@ void SP_worldspawn(gentity_t *ent) {
 	if (!(g_instagib->integer || GT(GT_INSTAGIB)) && !(g_nadefest->integer || GT(GT_NADEFEST)))
 		PrecacheItem(GetItemByIndex(IT_WEAPON_BLASTER));
 
+	// Horde can start players on the chainfist; precache it so the vwep model/sounds exist.
+	if (GT(GT_HORDE) && g_horde_start_chainsaw->integer)
+		PrecacheItem(GetItemByIndex(IT_WEAPON_CHAINFIST));
+
 	if ((!strcmp(g_allow_grapple->string, "auto")) ?
 		(GTF(GTF_CTF) ? !level.no_grapple : 0) :
 		g_allow_grapple->integer) {
