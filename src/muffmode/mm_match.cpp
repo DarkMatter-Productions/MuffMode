@@ -10,6 +10,10 @@
 #include "muffmode/mm_team.h"
 #include "monsters/m_player.h"	// corpse frames on match reset
 
+extern cvar_t *g_horde_champions;
+extern cvar_t *g_horde_champion_max_per_run;
+extern cvar_t *g_horde_champion_chance;
+
 static void Monsters_KillAll() {
 	for (size_t i = 0; i < globals.max_entities; i++) {
 		if (!g_entities[i].inuse)
@@ -395,6 +399,16 @@ void Match_Start() {
 	level.team_scores[TEAM_RED] = level.team_scores[TEAM_BLUE] = 0;
 
 	level.total_player_deaths = 0;
+
+	// Horde: roll this run's champion budget (none/one/two) from independent slot rolls.
+	level.horde_champions_remaining = 0;
+	if (GT(GT_HORDE) && g_horde_champions->integer) {
+		int n = 0;
+		for (int i = 0; i < g_horde_champion_max_per_run->integer; i++)
+			if (frandom() < g_horde_champion_chance->value)
+				n++;
+		level.horde_champions_remaining = static_cast<int8_t>(n);
+	}
 
 	memset(level.ghosts, 0, sizeof(level.ghosts));
 

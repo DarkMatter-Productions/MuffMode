@@ -11,7 +11,7 @@
 constexpr const char *GAMEVERSION = "baseq2";
 
 constexpr const char *GAMEMOD_TITLE = "Muff Mode";
-constexpr const char *GAMEMOD_VERSION = "0.33.21 BETA";
+constexpr const char *GAMEMOD_VERSION = "0.33.30 BETA";
 
 //==================================================================
 
@@ -1689,6 +1689,10 @@ struct level_locals_t {
 	gtime_t		horde_mark_time;
 	int16_t		horde_mark_living;
 	float		horde_map_scale_mult; // cached map-size multiplier, 0 = not yet computed
+	int8_t		horde_champions_remaining; // champions left to place this match (per-run roll)
+	bool		horde_champion_pending;    // current wave owes its champion to the next valid spawn
+	int8_t		horde_wave_theme;          // horde_theme_t of the current wave (0 = none)
+	uint32_t	horde_wave_roster;         // bitmask over monsters[] indices, 0 = unrestricted
 
 	char		author[MAX_QPATH];
 	char		author2[MAX_QPATH];
