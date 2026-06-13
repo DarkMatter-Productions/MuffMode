@@ -155,7 +155,7 @@ Use `callvote <command> [arg]` or `cv <command> [arg]`.
 | `g_ruleset` | `1` | Current ruleset index. |
 | `timelimit` | `0` | Match time limit in minutes. |
 | `fraglimit` | `0` | Frag limit where applicable. |
-| `roundlimit` | `8` | Round wins needed in round-based gametypes. |
+| `roundlimit` | `8` | Round wins needed in round-based gametypes. In Horde, this caps the number of waves; set to `0` for endless Horde (see [Horde Late-Wave & Endless](#horde-late-wave--endless)). |
 | `roundtimelimit` | `2` | Round time limit in minutes. |
 | `mercylimit` | `0` | Score gap to end match; `0` disables. |
 | `noplayerstime` | `10` | Minutes with no players before forcing a map change; `0` disables. |
@@ -298,6 +298,29 @@ When `g_gametype_cfg` is enabled, MuffMode executes a config named for the activ
 | NadeFest | `gt-NADEFEST.cfg` |
 
 These files can contain any server commands, cvar settings, map lists, or other gametype-specific setup. For examples, see the [MuffMode Server Configs repository](https://github.com/ozy24/muffmode-server-configs).
+
+An optional `gt-HORDE-endless.cfg` preset ships alongside `gt-HORDE.cfg`; `exec` it (or set `roundlimit 0`) to run endless Horde. See [Horde Late-Wave & Endless](#horde-late-wave--endless).
+
+## Horde Late-Wave & Endless
+
+Horde waves 1-12 are tuned content. Past wave 12 — reached either by setting `roundlimit 0` (endless)
+or by a high finite `roundlimit` such as `20` or `25` — late-wave systems engage so themes stay
+truthful and budgets stay playable: a theme banner only shows when the theme can field on-category
+bodies, every spawn in a themed wave stays on-category, and the per-wave point budget tapers instead
+of growing linearly forever. Waves up to the peak are unchanged.
+
+Champions also keep coming: up to the peak they spend the per-run budget (`g_horde_champion_max_per_run`
+× `g_horde_champion_chance`) as usual, and past the peak they switch to a steady per-wave rate derived
+from those same two cvars — so an endless run never runs out of champions. Raise either cvar to make
+champions more frequent (early and late alike).
+
+| Cvar | Default | Purpose |
+| --- | --- | --- |
+| `g_horde_content_peak_wave` | `12` | Wave where the tuned curve ends; late-wave logic fires above it. |
+| `g_horde_late_wave_factor` | `0.35` | Post-peak point-budget growth multiplier (lower = flatter late curve). |
+| `g_horde_weight_floor` | `0.12` | Minimum monster spawn weight past the peak; keeps cheap chaff spendable. |
+| `g_horde_theme_min_monsters` | `2` | Minimum on-theme monsters required at a wave for that theme to roll. |
+| `g_horde_points_max` | `0` | Optional hard ceiling on the per-wave point budget; `0` disables (the taper handles growth). |
 
 ## Debug-Only Weapon Balance Cvars
 

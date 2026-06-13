@@ -6,6 +6,12 @@
 
 #include <climits>
 
+// Late-wave tuning cvars are referenced by helpers defined before the main extern block below.
+extern cvar_t *g_horde_content_peak_wave;
+extern cvar_t *g_horde_late_wave_factor;
+extern cvar_t *g_horde_weight_floor;
+extern cvar_t *g_horde_theme_min_monsters;
+
 namespace {
 // Themed-wave categories. A monster row may carry several (bitwise OR); 0 = no theme.
 enum : uint32_t {
@@ -72,13 +78,16 @@ constexpr weighted_item_t monsters[] = {
 	{ "monster_flyer", 3, -1, 1.10f, 0.02f, { IT_AMMO_CELLS_SMALL }, 2, HCAT_AERIAL },
 	// mid-tier
 	{ "monster_gunner", 4, -1, 1.05f, 0.15f, { IT_AMMO_GRENADES, IT_AMMO_BULLETS_SMALL }, 3 },
-	{ "monster_berserk", 4, 14, 1.05f, 0.05f, { IT_ARMOR_SHARD }, 3, HCAT_MELEE },
-	{ "monster_parasite", 4, 14, 1.00f, -0.05f, {}, 3, HCAT_INFEST },
-	{ "monster_gladb", 5, 14, 1.00f, 0.05f, { IT_AMMO_CELLS_SMALL }, 3, HCAT_HEAVY },
-	{ "monster_stalker", 5, 14, 0.95f, 0.05f, { IT_AMMO_CELLS_SMALL }, 3, HCAT_INFEST },
-	{ "monster_brain", 6, 14, 0.95f, 0, { IT_AMMO_CELLS_SMALL }, 3, HCAT_MELEE | HCAT_INFEST },
-	{ "monster_mutant", 6, 14, 0.90f, 0, {}, 3, HCAT_MELEE },
-	{ "monster_floater", 6, 14, 0.90f, 0, {}, 3, HCAT_AERIAL },
+	// max_level was 14 (capped at the finale); uncapped to -1 so Melee/Infestation/Heavy/Aerial
+	// themes keep on-category bodies past wave 14. Active through wave 14 already, so waves 1-14
+	// are unchanged - this only adds them at wave 15+.
+	{ "monster_berserk", 4, -1, 1.05f, 0.05f, { IT_ARMOR_SHARD }, 3, HCAT_MELEE },
+	{ "monster_parasite", 4, -1, 1.00f, -0.05f, {}, 3, HCAT_INFEST },
+	{ "monster_gladb", 5, -1, 1.00f, 0.05f, { IT_AMMO_CELLS_SMALL }, 3, HCAT_HEAVY },
+	{ "monster_stalker", 5, -1, 0.95f, 0.05f, { IT_AMMO_CELLS_SMALL }, 3, HCAT_INFEST },
+	{ "monster_brain", 6, -1, 0.95f, 0, { IT_AMMO_CELLS_SMALL }, 3, HCAT_MELEE | HCAT_INFEST },
+	{ "monster_mutant", 6, -1, 0.90f, 0, {}, 3, HCAT_MELEE },
+	{ "monster_floater", 6, -1, 0.90f, 0, {}, 3, HCAT_AERIAL },
 	{ "monster_gladiator", 7, -1, 1.00f, 0.10f, { IT_AMMO_SLUGS }, 4, HCAT_HEAVY },
 	// heavies
 	{ "monster_hover", 8, -1, 0.85f, 0, {}, 4, HCAT_AERIAL },
@@ -97,6 +106,42 @@ constexpr weighted_item_t monsters[] = {
 // level.horde_wave_roster is a per-wave bitmask over indices into monsters[].
 static_assert(q_countof(monsters) <= 32, "horde_wave_roster bitmask supports at most 32 monster rows");
 
+// True once a wave runs past the tuned content curve (default wave 12), whether that's reached via
+// an endless run (roundlimit 0) or a high finite roundlimit. Drives the budget taper, weight floor,
+// and item clamp; never alters level.round_number (HUD/scoring keep the true wave number).
+static bool Horde_IsLateWave()
+{
+	return GT(GT_HORDE) && level.round_number > g_horde_content_peak_wave->integer;
+}
+
+// Count monsters[] rows a theme could actually spawn at `wave`: matching category, valid level
+// range, and positive effective weight (with the late-wave floor, matching Horde_PickMonster). Used
+// to keep a theme banner from showing when the theme has no real bodies at this wave.
+static int Horde_CountThemeCandidates(uint32_t category, int wave)
+{
+	const bool late_wave = GT(GT_HORDE) && wave > g_horde_content_peak_wave->integer;
+	int        count = 0;
+
+	for (auto &monster : monsters) {
+		if (monster.min_level != -1 && wave < monster.min_level)
+			continue;
+		if (monster.max_level != -1 && wave > monster.max_level)
+			continue;
+		if (!(monster.categories & category))
+			continue;
+
+		float weight = monster.weight + ((wave - max(1, monster.min_level)) * monster.lvl_w_adjust);
+		if (late_wave)
+			weight = max(weight, g_horde_weight_floor->value);
+		if (weight <= 0)
+			continue;
+
+		count++;
+	}
+
+	return count;
+}
+
 // Themed-wave definitions. A themed wave filters the monster pool to one category, scales the
 // spawn budget, and shows a banner. min_wave keeps a theme out of waves where its monsters
 // don't exist yet; the per-monster min_level still applies on top.
@@ -111,7 +156,7 @@ struct horde_theme_def_t {
 };
 
 constexpr horde_theme_def_t horde_themes[] = {
-	{ horde_theme_t::SWARM,       HCAT_SWARM,  3, 1.40f, "THE SWARM APPROACHES!" },
+	{ horde_theme_t::SWARM,       HCAT_SWARM,  3, 1.30f, "THE SWARM APPROACHES!" },
 	{ horde_theme_t::AERIAL,      HCAT_AERIAL, 4, 1.00f, "AERIAL ASSAULT!" },
 	{ horde_theme_t::HEAVY,       HCAT_HEAVY,  7, 0.80f, "HEAVY ASSAULT!" },
 	{ horde_theme_t::MELEE,       HCAT_MELEE,  4, 1.10f, "THEY'RE CLOSING IN!" },
@@ -166,14 +211,18 @@ gitem_t *Horde_PickItem()
 	size_t                                              num_picked_items = 0;
 	float                                               total_weight = 0;
 
+	// Past the content peak, freeze the loot curve at the peak so late waves keep dropping the
+	// early/mid weapons instead of only top-tier gear. Waves <= peak use the true wave number.
+	const int loot_wave = Horde_IsLateWave() ? g_horde_content_peak_wave->integer : level.round_number;
+
 	for (auto &item : items) {
-		if (item.min_level != -1 && level.round_number < item.min_level)
+		if (item.min_level != -1 && loot_wave < item.min_level)
 			continue;
-		if (item.max_level != -1 && level.round_number > item.max_level)
+		if (item.max_level != -1 && loot_wave > item.max_level)
 			continue;
 
 		// clamp so "-1 = always available" rows ramp from wave 1, not wave -1
-		float weight = item.weight + ((level.round_number - max(1, item.min_level)) * item.lvl_w_adjust);
+		float weight = item.weight + ((loot_wave - max(1, item.min_level)) * item.lvl_w_adjust);
 
 		if (weight <= 0)
 			continue;
@@ -229,6 +278,7 @@ static const char *Horde_PickMonster(weighted_item_t const **out_row, int remain
 	static std::array<picked_item_t, q_countof(monsters)> picked_monsters;
 	size_t                                                num_picked_monsters = 0;
 	float                                                 total_weight = 0;
+	const bool                                            late_wave = Horde_IsLateWave();
 
 	if (out_row)
 		*out_row = nullptr;
@@ -247,6 +297,11 @@ static const char *Horde_PickMonster(weighted_item_t const **out_row, int remain
 
 		// clamp so "-1 = always available" rows ramp from wave 1, not wave -1
 		float weight = monster.weight + ((level.round_number - max(1, monster.min_level)) * monster.lvl_w_adjust);
+
+		// Past the content peak, decayed weights would cull chaff and starve themes; hold a floor
+		// so every still-eligible row stays spendable in late waves.
+		if (late_wave)
+			weight = max(weight, g_horde_weight_floor->value);
 
 		if (weight <= 0)
 			continue;
@@ -271,8 +326,9 @@ static const char *Horde_PickMonster(weighted_item_t const **out_row, int remain
 	return nullptr;
 }
 
-// When weighted pick finds nothing (e.g. all weights zero), use the highest-tier affordable row still valid for this wave.
-static const char *Horde_PickMonsterFallback(weighted_item_t const **out_row, int remaining_points)
+// When weighted pick finds nothing (e.g. all weights zero), use the highest-tier affordable row still
+// valid for this wave. theme_category (0 = any) keeps a themed wave's fallback on-category.
+static const char *Horde_PickMonsterFallback(weighted_item_t const **out_row, int remaining_points, uint32_t theme_category = 0)
 {
 	const weighted_item_t *choice = nullptr;
 
@@ -284,6 +340,8 @@ static const char *Horde_PickMonsterFallback(weighted_item_t const **out_row, in
 		if (monster.min_level != -1 && level.round_number < monster.min_level)
 			continue;
 		if (monster.spawn_points > remaining_points)
+			continue;
+		if (theme_category && !(monster.categories & theme_category))
 			continue;
 
 		const int32_t cap = monster.max_level == -1 ? INT32_MAX : monster.max_level;
@@ -303,6 +361,8 @@ static const char *Horde_PickMonsterFallback(weighted_item_t const **out_row, in
 				continue;
 			if (monster.spawn_points > remaining_points)
 				continue;
+			if (theme_category && !(monster.categories & theme_category))
+				continue;
 
 			const int32_t cap = monster.max_level == -1 ? INT32_MAX : monster.max_level;
 			if (cap > best_cap) {
@@ -320,12 +380,24 @@ static const char *Horde_PickMonsterFallback(weighted_item_t const **out_row, in
 
 static const char *Horde_PickMonsterForWave(weighted_item_t const **out_row, int remaining_points)
 {
-	// Themed waves bias by category, normal waves by this wave's roster (only one is ever set).
-	// If nothing restricted is affordable, fall through to the unrestricted pool and then the
-	// fallback picker so a wave can never stall.
+	// Themed waves and roster waves are mutually exclusive (BeginWave only builds a roster when the
+	// theme is NONE).
 	const uint32_t theme_category = Horde_ActiveThemeCategory();
-	if (theme_category || level.horde_wave_roster)
-		if (const char *pick = Horde_PickMonster(out_row, remaining_points, theme_category, level.horde_wave_roster))
+
+	// Themed waves are strict: a category banner means every spawn must be on-category. Try the
+	// weighted pick, then a category-respecting fallback; never fall through to the unrestricted
+	// pool. Returning null ends the wave cleanly (leftover budget forfeited) instead of spawning an
+	// off-theme body under a themed banner.
+	if (theme_category) {
+		if (const char *pick = Horde_PickMonster(out_row, remaining_points, theme_category, 0))
+			return pick;
+		return Horde_PickMonsterFallback(out_row, remaining_points, theme_category);
+	}
+
+	// Non-themed waves bias by this wave's roster, then fall through to the unrestricted pool and the
+	// fallback picker so a wave can never stall.
+	if (level.horde_wave_roster)
+		if (const char *pick = Horde_PickMonster(out_row, remaining_points, 0, level.horde_wave_roster))
 			return pick;
 
 	if (const char *pick = Horde_PickMonster(out_row, remaining_points, 0, 0))
@@ -633,7 +705,17 @@ int MM_Horde_WavePointBudget()
 	const int   per_wave = g_horde_points_per_wave->integer;
 	const int   min_pts  = g_horde_points_min->integer;
 	const int   max_pts  = g_horde_points_max->integer;
-	int         budget   = base + level.round_number * per_wave;
+	const int   peak     = g_horde_content_peak_wave->integer;
+
+	// Linear up to the tuned content peak (wave 12). Beyond it - reached via endless (roundlimit 0)
+	// or a high finite roundlimit - growth tapers by g_horde_late_wave_factor so late waves stay
+	// playable instead of piling up 190+ points of commanders. Continuous at the peak.
+	int budget;
+	if (level.round_number <= peak)
+		budget = base + level.round_number * per_wave;
+	else
+		budget = base + peak * per_wave +
+			static_cast<int>((level.round_number - peak) * per_wave * g_horde_late_wave_factor->value);
 
 	if (min_pts > 0)
 		budget = max(budget, min_pts);
@@ -912,6 +994,10 @@ void MM_Horde_BeginWave()
 			for (auto &def : horde_themes) {
 				if (level.round_number < def.min_wave || def.theme == prev)
 					continue;
+				// Skip themes that can't field enough on-category bodies at this wave, so a banner
+				// never shows for a theme that would spawn off-category fillers (or nothing).
+				if (Horde_CountThemeCandidates(def.category, level.round_number) < g_horde_theme_min_monsters->integer)
+					continue;
 				eligible[num_eligible++] = &def;
 			}
 
@@ -975,17 +1061,32 @@ void MM_Horde_BeginWave()
 		}
 	}
 
-	// Decide whether this wave hosts one of the run's champions; spread across eligible waves.
+	// Decide whether this wave hosts a champion.
+	// Up to the content peak: spend the per-run budget (mm_match seeds 0-2), spread across the waves
+	// remaining until the peak. Past the peak the budget is gone, so switch to a steady per-wave rate
+	// derived from the same knobs (max_per_run * champion_chance champions per peak-length span) so
+	// champions keep appearing at the tuned cadence for any wave count.
 	level.horde_champion_pending = false;
-	if (g_horde_champions->integer && level.horde_champions_remaining > 0 &&
+	if (g_horde_champions->integer &&
 		level.round_number >= g_horde_champion_min_wave->integer) {
-		const int waves_left = roundlimit->integer > 0
-			? max(1, roundlimit->integer - level.round_number + 1)
-			: 8;	// endless (roundlimit<=0): rolling ~8-wave window
+		if (Horde_IsLateWave()) {
+			const int   span = max(1, g_horde_content_peak_wave->integer - g_horde_champion_min_wave->integer + 1);
+			const float rate = g_horde_champion_max_per_run->value * g_horde_champion_chance->value / span;
 
-		if (frandom() < static_cast<float>(level.horde_champions_remaining) / waves_left) {
-			level.horde_champion_pending = true;
-			level.horde_champions_remaining--;
+			if (frandom() < min(rate, 1.0f))
+				level.horde_champion_pending = true;
+		} else if (level.horde_champions_remaining > 0) {
+			// Spread the run's budget across the waves left until the peak (== roundlimit for the
+			// standard 12-wave run, so that case is unchanged).
+			const int last_budget_wave = roundlimit->integer > 0
+				? min(roundlimit->integer, g_horde_content_peak_wave->integer)
+				: g_horde_content_peak_wave->integer;
+			const int waves_left = max(1, last_budget_wave - level.round_number + 1);
+
+			if (frandom() < static_cast<float>(level.horde_champions_remaining) / waves_left) {
+				level.horde_champion_pending = true;
+				level.horde_champions_remaining--;
+			}
 		}
 	}
 

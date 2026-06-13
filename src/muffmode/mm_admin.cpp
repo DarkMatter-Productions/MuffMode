@@ -124,9 +124,18 @@ void MM_CmdDoctor(gentity_t *ent)
 	{
 		if (roundlimit->integer <= 0)
 		{
-			report("WARN",
-				"roundlimit is <= 0 in a round-based gametype.",
-				"set roundlimit 8");
+			if (GT(GT_HORDE))
+			{
+				report("INFO",
+					"roundlimit <= 0 in Horde runs endless waves.",
+					"Intentional for endless Horde; set a positive roundlimit to cap the run.");
+			}
+			else
+			{
+				report("WARN",
+					"roundlimit is <= 0 in a round-based gametype.",
+					"set roundlimit 8");
+			}
 		}
 
 		if (roundtimelimit->value <= 0.f)

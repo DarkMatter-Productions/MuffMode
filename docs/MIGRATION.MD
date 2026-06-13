@@ -547,6 +547,22 @@ Manual sign-off for `GT_HORDE` after spawn/orchestration changes:
 | Last monsters | At ≤3 living (default), `loc_ping` POIs (team ping style) for fighters and eliminated spectators; clear after wave |
 | Wave rejoin | Die out mid-wave → spectator until next wave; respawn with fresh lives and kept weapons when "Wave N Begins in..." countdown starts |
 
+### Horde late-wave / endless checklist
+
+Run with both `roundlimit 0` (endless) **and** a high finite `roundlimit 25` — both reach the
+late-wave path past `g_horde_content_peak_wave` (default 12):
+
+| Step | What to verify |
+|------|----------------|
+| Waves 1-12 | Identical to `gt-HORDE.cfg` except Swarm-themed waves are ~7% lighter (1.30× vs 1.40×); no new monsters appear at waves 10-12 |
+| Strict themes | `g_horde_theme_chance 1` from wave 15: every spawn matches the banner; console shows no off-theme fallback on themed waves |
+| Viability gate | Late waves never show a theme banner with < `g_horde_theme_min_monsters` on-theme bodies (silently plays a normal wave instead) |
+| Budget taper | Waves 25 and 35 stay bounded (watch clear time / `g_horde_spawn_points_remaining`); no multi-minute spawn tail |
+| Finite parity | `roundlimit 25`: waves 13-25 get the same truthful themes + capped budget as endless, then the match ends cleanly at 25 |
+| Champions | Past the peak champions keep appearing at the tuned cadence (~1 per ~8 waves with defaults), not just the first ~2; raising `g_horde_champion_chance` increases both early and late frequency |
+| Loot | Late waves still drop early/mid weapons, not exclusively top-tier gear |
+| Doctor | `mm_admin` doctor shows INFO (not WARN) for Horde + `roundlimit 0`; still WARNs for other round-based gametypes |
+
 ### Horde cvar rename (spawn points)
 
 | Old | New |

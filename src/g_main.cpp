@@ -192,6 +192,10 @@ cvar_t *g_horde_theme_chance;
 cvar_t *g_horde_theme_min_wave;
 cvar_t *g_horde_wave_variety;
 cvar_t *g_horde_wave_min_types;
+cvar_t *g_horde_content_peak_wave;
+cvar_t *g_horde_late_wave_factor;
+cvar_t *g_horde_weight_floor;
+cvar_t *g_horde_theme_min_monsters;
 cvar_t *g_horde_start_chainsaw;
 cvar_t *g_huntercam;
 cvar_t *g_inactivity;
@@ -465,6 +469,10 @@ static void InitGame() {
 	g_horde_theme_min_wave = gi.cvar("g_horde_theme_min_wave", "4", CVAR_NOFLAGS);
 	g_horde_wave_variety = gi.cvar("g_horde_wave_variety", "1", CVAR_NOFLAGS);
 	g_horde_wave_min_types = gi.cvar("g_horde_wave_min_types", "3", CVAR_NOFLAGS);
+	g_horde_content_peak_wave = gi.cvar("g_horde_content_peak_wave", "12", CVAR_NOFLAGS);
+	g_horde_late_wave_factor = gi.cvar("g_horde_late_wave_factor", "0.35", CVAR_NOFLAGS);
+	g_horde_weight_floor = gi.cvar("g_horde_weight_floor", "0.12", CVAR_NOFLAGS);
+	g_horde_theme_min_monsters = gi.cvar("g_horde_theme_min_monsters", "2", CVAR_NOFLAGS);
 	g_horde_start_chainsaw = gi.cvar("g_horde_start_chainsaw", "1", CVAR_NOFLAGS);
 
 	g_huntercam = gi.cvar("g_huntercam", "1", CVAR_SERVERINFO | CVAR_LATCH);
