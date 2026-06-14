@@ -316,7 +316,7 @@ bool TeamShuffle() {
 	memset(index, -1, sizeof(index));
 
 	// determine max team size based from active players
-	int maxteam = ceil(level.num_playing_clients / 2);
+	int maxteam = (level.num_playing_clients + 1) / 2;
 	int count_red = 0, count_blue = 0;
 	team_t setteam = join_red ? TEAM_RED : TEAM_BLUE;
 	
@@ -340,7 +340,8 @@ bool TeamShuffle() {
 
 	// set teams
 	for (size_t i = 1; i <= MAX_CLIENTS_KEX; i++) {
-		ent = &g_entities[index[i-1]];
+		// index[] holds client numbers (0..MAX_CLIENTS_KEX-1); client N is entity N+1.
+		ent = &g_entities[index[i-1] + 1];
 		if (!ent)
 			continue;
 		if (!ent->inuse)
@@ -557,7 +558,7 @@ void MM_CmdSetTeam(gentity_t *ent) {
 	}
 
 	if (gi.argc() == 2) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "{} is on {} team.\n", targ->client->resp.netname, gi.argv(0));
+		gi.LocClient_Print(ent, PRINT_HIGH, "{} is on {} team.\n", targ->client->resp.netname, Teams_TeamName(targ->client->sess.team));
 		return;
 	}
 

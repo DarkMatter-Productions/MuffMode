@@ -632,7 +632,7 @@ void MM_VotePassCointoss()
 
 void MM_VotePassRandom()
 {
-	gi.LocBroadcast_Print(PRINT_HIGH, "The random number is: {}\n", irandom(2, atoi(level.vote_state.arg.data())));
+	gi.LocBroadcast_Print(PRINT_HIGH, "The random number is: {}\n", irandom(2, atoi(level.vote_state.arg.data()) + 1));
 }
 
 void MM_VotePassUnlagged()
