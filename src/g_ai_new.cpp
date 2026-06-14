@@ -1213,7 +1213,7 @@ MONSTERINFO_DODGE(M_MonsterDodge) (gentity_t *self, gentity_t *attacker, gtime_t
 		if ((!ducker || !tr || tr->endpos[2] <= height) || (self->monsterinfo.aiflags & AI_DUCKED)) {
 			// on Easy & Normal, don't sidestep as often (25% on Easy, 50% on Normal)
 			if (!G_SkillCheck({ 0.25f, 0.50f, 1.0f, 1.0f, 1.0f })) {
-				gtime_t delay = skill->integer > 3 ? random_time(400_ms, 500_ms) : random_time(0.8_sec, 1.4_sec);
+				gtime_t delay = (skill->integer > 3 || self->monsterinfo.champion_damage_scale > 1.25f) ? random_time(400_ms, 500_ms) : random_time(0.8_sec, 1.4_sec);
 				self->monsterinfo.dodge_time = level.time + delay;
 				return;
 			} else {
@@ -1239,7 +1239,7 @@ MONSTERINFO_DODGE(M_MonsterDodge) (gentity_t *self, gentity_t *attacker, gtime_t
 					self->monsterinfo.aiflags |= AI_DODGING;
 					self->monsterinfo.attack_state = AS_SLIDING;
 
-					gtime_t delay = skill->integer > 3 ? random_time(400_ms, 500_ms) : random_time(0.4_sec, 2.0_sec);
+					gtime_t delay = (skill->integer > 3 || self->monsterinfo.champion_damage_scale > 1.25f) ? random_time(400_ms, 500_ms) : random_time(0.4_sec, 2.0_sec);
 					self->monsterinfo.dodge_time = level.time + delay;
 				}
 				return;

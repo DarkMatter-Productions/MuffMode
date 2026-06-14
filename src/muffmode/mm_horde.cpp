@@ -439,6 +439,12 @@ extern cvar_t *g_horde_champion_max_per_run;
 extern cvar_t *g_horde_champion_chance;
 extern cvar_t *g_horde_champion_min_wave;
 extern cvar_t *g_horde_champion_health_mult;
+extern cvar_t *g_horde_champion_health_floor;
+extern cvar_t *g_horde_champion_health_per_wave;
+extern cvar_t *g_horde_champion_damage_mult;
+extern cvar_t *g_horde_champion_speed_mult;
+extern cvar_t *g_horde_champion_strong_ratio;
+extern cvar_t *g_horde_champion_force; // DEBUG/TEST: force a champion every wave
 extern cvar_t *g_horde_themed_waves;
 extern cvar_t *g_horde_theme_chance;
 extern cvar_t *g_horde_theme_min_wave;
@@ -1091,6 +1097,10 @@ void MM_Horde_BeginWave()
 		}
 	}
 
+	// DEBUG/TEST: force a champion every wave (overrides the roll above), regardless of min_wave.
+	if (g_horde_champion_force->integer)
+		level.horde_champion_pending = true;
+
 	const int fighters = MM_Horde_CountFighters();
 	level.horde_fighters_snapshotted = static_cast<int8_t>(fighters);
 	level.horde_spawn_points_remaining = MM_Horde_WavePointBudget();
@@ -1210,9 +1220,12 @@ void MM_Horde_RunSpawning()
 			e->s.origin = spawn_origin;
 			e->s.angles = result.spot->s.angles;
 
-			// The first valid spawn of a champion-pending wave becomes the champion: 3x health
-			// (via st before spawn) plus double damage + EF_DOUBLE shell (applied after spawn,
-			// since monster_start zeroes the powerup timers).
+			// The first valid spawn of a champion-pending wave becomes the champion. Base health is
+			// scaled 3x via st before spawn; after spawn we apply a health floor + wave scaling so even
+			// a weak monster (e.g. light soldier) becomes a real threat, plus tapered damage/speed buffs
+			// and the EF_DOUBLE shell (applied after spawn, since monster_start zeroes the powerup timers).
+			// The buffs taper by base strength: weak monsters get the full punch, heavy ones (tank etc.)
+			// stay beefy bullet-sponges without becoming one-shot deleters.
 			const bool is_champion = level.horde_champion_pending && !warmup;
 
 			e->item = is_champion ? Horde_PickChampionDrop() : Horde_PickDropItem(monster_row);
@@ -1228,6 +1241,37 @@ void MM_Horde_RunSpawning()
 			}
 
 			if (is_champion) {
+				// natural = full health after spawn (already includes the 3x mult and any co-op scaling).
+				const int natural = e->health;
+
+				// Put the floor on the same footing as the (possibly co-op-scaled) natural health by
+				// mirroring whatever multiplier co-op applied. base_health is the pre-co-op health set by
+				// G_Monster_ScaleCoopHealth; it stays 0 when no co-op scaling happened (pure DM/horde).
+				const float coop_mult = (e->monsterinfo.base_health > 0)
+					? (float)natural / (float)e->monsterinfo.base_health
+					: 1.0f;
+
+				const float floor_base = g_horde_champion_health_floor->value +
+					g_horde_champion_health_per_wave->value * (float)level.round_number;
+				const float floor_hp = floor_base * coop_mult;
+
+				// Weakness signal drives the taper: 1.0 for a sub-floor monster (full help), 0.0 once its
+				// natural health reaches strong_ratio x floor.
+				const float strong_hp = floor_hp * g_horde_champion_strong_ratio->value;
+				const float denom = max(1.0f, strong_hp - floor_hp);
+				const float weakness = clamp((strong_hp - (float)natural) / denom, 0.0f, 1.0f);
+
+				// Health: lift weak monsters to the floor; leave naturally-tough ones at their 3x. Co-op
+				// re-scaling on later joins only adds health, so the floor is never undercut.
+				const int champ_hp = max(natural, (int)floor_hp);
+				e->health = e->max_health = champ_hp;
+
+				// Tapered offensive buffs. Damage scale is stored for T_Damage; speed folds into the
+				// frame-distance multiplier (already = MODEL_SCALE * s.scale at this point).
+				e->monsterinfo.champion_damage_scale = lerp(1.0f, g_horde_champion_damage_mult->value, weakness);
+				e->monsterinfo.scale *= lerp(1.0f, g_horde_champion_speed_mult->value, weakness);
+
+				// EF_DOUBLE shell marks every champion regardless of tier.
 				e->monsterinfo.double_time = HOLD_FOREVER;
 				level.horde_champion_pending = false;
 			}

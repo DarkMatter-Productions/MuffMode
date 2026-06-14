@@ -11,7 +11,7 @@
 constexpr const char *GAMEVERSION = "baseq2";
 
 constexpr const char *GAMEMOD_TITLE = "Muff Mode";
-constexpr const char *GAMEMOD_VERSION = "0.34.00 BETA";
+constexpr const char *GAMEMOD_VERSION = "0.35.00 BETA";
 
 //==================================================================
 
@@ -2132,6 +2132,7 @@ struct monsterinfo_t {
 	gtime_t	  strafe_check_time; // time until we should reconsider strafing
 	int32_t	  base_health; // health that we had on spawn, before any co-op adjustments
 	int32_t   health_scaling; // number of players we've been scaled up to
+	float	  champion_damage_scale; // horde: tapered outgoing-damage multiplier for champions (<= 1 means no buff / not a champion)
 	gtime_t   next_move_time; // high tick rate
 	gtime_t	  bad_move_time; // don't try straight moves until this is over
 	gtime_t	  bump_time; // don't slide against walls for a bit

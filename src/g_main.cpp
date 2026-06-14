@@ -188,6 +188,12 @@ cvar_t *g_horde_champion_max_per_run;
 cvar_t *g_horde_champion_chance;
 cvar_t *g_horde_champion_min_wave;
 cvar_t *g_horde_champion_health_mult;
+cvar_t *g_horde_champion_health_floor;
+cvar_t *g_horde_champion_health_per_wave;
+cvar_t *g_horde_champion_damage_mult;
+cvar_t *g_horde_champion_speed_mult;
+cvar_t *g_horde_champion_strong_ratio;
+cvar_t *g_horde_champion_force; // DEBUG/TEST: force a champion every wave
 cvar_t *g_horde_themed_waves;
 cvar_t *g_horde_theme_chance;
 cvar_t *g_horde_theme_min_wave;
@@ -466,6 +472,12 @@ static void InitGame() {
 	g_horde_champion_chance = gi.cvar("g_horde_champion_chance", "0.6", CVAR_NOFLAGS);
 	g_horde_champion_min_wave = gi.cvar("g_horde_champion_min_wave", "3", CVAR_NOFLAGS);
 	g_horde_champion_health_mult = gi.cvar("g_horde_champion_health_mult", "3.0", CVAR_NOFLAGS);
+	g_horde_champion_health_floor = gi.cvar("g_horde_champion_health_floor", "400", CVAR_NOFLAGS);
+	g_horde_champion_health_per_wave = gi.cvar("g_horde_champion_health_per_wave", "25", CVAR_NOFLAGS);
+	g_horde_champion_damage_mult = gi.cvar("g_horde_champion_damage_mult", "2.0", CVAR_NOFLAGS);
+	g_horde_champion_speed_mult = gi.cvar("g_horde_champion_speed_mult", "1.25", CVAR_NOFLAGS);
+	g_horde_champion_strong_ratio = gi.cvar("g_horde_champion_strong_ratio", "4.0", CVAR_NOFLAGS);
+	g_horde_champion_force = gi.cvar("g_horde_champion_force", "0", CVAR_NOFLAGS); // DEBUG/TEST: 1 = champion every wave
 	g_horde_themed_waves = gi.cvar("g_horde_themed_waves", "1", CVAR_NOFLAGS);
 	g_horde_theme_chance = gi.cvar("g_horde_theme_chance", "0.20", CVAR_NOFLAGS);
 	g_horde_theme_min_wave = gi.cvar("g_horde_theme_min_wave", "4", CVAR_NOFLAGS);
