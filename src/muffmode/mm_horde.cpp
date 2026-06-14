@@ -190,7 +190,7 @@ gentity_t *FindClosestPlayerToPoint(vec3_t point)
 	gentity_t *closest = nullptr;
 
 	for (auto ec : active_clients()) {
-		if (ec->health <= 0 || ec->client->eliminated)
+		if (!ClientIsPlaying(ec->client) || ec->health <= 0 || ec->client->eliminated)
 			continue;
 
 		vec3_t v = point - ec->s.origin;
@@ -688,7 +688,7 @@ int MM_Horde_CountFighters()
 	int fighters = 0;
 
 	for (auto ec : active_clients()) {
-		if (ec->health <= 0 || ec->client->eliminated)
+		if (!ClientIsPlaying(ec->client) || ec->health <= 0 || ec->client->eliminated)
 			continue;
 		fighters++;
 	}

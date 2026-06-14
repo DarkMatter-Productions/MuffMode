@@ -129,7 +129,7 @@ void MM_UpdateActiveVote()
 		AnnouncerSound(world, "vote_passed", nullptr, false);
 		MM_TransitionVoteState(VoteState::PASSED);
 	}
-	else if (level.vote_state.no_votes >= halfpoint)
+	else if (level.vote_state.no_votes >= level.vote_state.num_eligible - halfpoint)
 	{
 		gi.LocBroadcast_Print(PRINT_HIGH, "Vote failed.\n");
 		AnnouncerSound(world, "vote_failed", nullptr, false);
