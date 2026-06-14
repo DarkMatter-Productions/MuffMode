@@ -11,7 +11,7 @@
 constexpr const char *GAMEVERSION = "baseq2";
 
 constexpr const char *GAMEMOD_TITLE = "Muff Mode";
-constexpr const char *GAMEMOD_VERSION = "0.33.71 BETA";
+constexpr const char *GAMEMOD_VERSION = "0.34.00 BETA";
 
 //==================================================================
 
@@ -2555,6 +2555,7 @@ void		QuadHog_DoSpawn(gentity_t *ent);
 void		QuadHog_DoReset(gentity_t *ent);
 void		QuadHog_SetupSpawn(gtime_t delay);
 void		QuadHog_Spawn(gitem_t *item, gentity_t *spot, bool reset);
+bool		AllowTechs();
 void		Tech_DeadDrop(gentity_t *ent);
 void		Tech_Reset();
 void		Tech_SetupSpawn();

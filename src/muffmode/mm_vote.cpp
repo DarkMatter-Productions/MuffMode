@@ -760,6 +760,46 @@ bool MM_VoteValPowerups(gentity_t *ent)
 	return true;
 }
 
+void MM_VotePassTechs()
+{
+	int argi = strtoul(level.vote_state.arg.data(), nullptr, 10);
+
+	gi.LocBroadcast_Print(PRINT_HIGH, "Techs have been {}.\n", argi ? "ENABLED" : "DISABLED");
+
+	gi.cvar_forceset("g_allow_techs", argi ? "1" : "0");
+
+	// Restart the map so tech changes take effect immediately.
+	gi.AddCommandString(G_Fmt("gamemap {}\n", level.mapname).data());
+}
+
+bool MM_VoteValTechs(gentity_t *ent)
+{
+	if (notGT(GT_FFA) && notGT(GT_TDM) && notGT(GT_CTF))
+	{
+		gi.LocClient_Print(ent, PRINT_HIGH, "Techs can only be changed in FFA, TDM or CTF gametypes.\n");
+		return false;
+	}
+
+	int arg = 0;
+
+	if (!MM_ParseVoteNonNegativeInt(MM_VoteArgv(2), arg) || (arg != 0 && arg != 1))
+	{
+		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid argument. Use 0 to disable or 1 to enable techs.\n");
+		return false;
+	}
+
+	bool currently_enabled = AllowTechs();
+	bool will_be_enabled = (arg == 1);
+
+	if (currently_enabled == will_be_enabled)
+	{
+		gi.LocClient_Print(ent, PRINT_HIGH, "Techs are already {}.\n", will_be_enabled ? "ENABLED" : "DISABLED");
+		return false;
+	}
+
+	return true;
+}
+
 void MM_VotePassFriendlyFire()
 {
 	int argi = strtoul(level.vote_state.arg.data(), nullptr, 10);
@@ -771,9 +811,9 @@ void MM_VotePassFriendlyFire()
 
 bool MM_VoteValFriendlyFire(gentity_t *ent)
 {
-	if (notGT(GT_TDM) && notGT(GT_CTF))
+	if (!Teams())
 	{
-		gi.LocClient_Print(ent, PRINT_HIGH, "Friendly fire can only be changed in TDM or CTF gametypes.\n");
+		gi.LocClient_Print(ent, PRINT_HIGH, "Friendly fire can only be changed in team gametypes.\n");
 		return false;
 	}
 
@@ -1178,6 +1218,7 @@ vcmds_t vote_cmds[] = {
 	{"ruleset",				MM_VoteValRuleset,			MM_VotePassRuleset,			2048,	2,	"<q2re|mm|q3a|q2reb|qc>",			"changes the current ruleset"},
 	{"powerups",			MM_VoteValPowerups,			MM_VotePassPowerups,		4096,	2,	"<0/1>",							"enables or disables powerups"},
 	{"friendlyfire",		MM_VoteValFriendlyFire,		MM_VotePassFriendlyFire,	8192,	2,	"<0/1>",							"enables or disables friendly fire (team modes only)"},
+	{"techs",				MM_VoteValTechs,			MM_VotePassTechs,			65536,	2,	"<0/1>",							"enables or disables techs (FFA/TDM/CTF only)"},
 	{"readyall",			MM_VoteValReadyAll,			MM_VotePassReadyAll,		32768,	1,	"",									"ready all players (during ready-up warmup)"},
 	{nullptr,				nullptr,					nullptr,					0,		0,	nullptr,								nullptr},
 };

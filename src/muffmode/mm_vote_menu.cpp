@@ -37,6 +37,9 @@ void G_Menu_CallVote_BalanceTeams(gentity_t *ent, menu_hnd_t *p);
 void G_Menu_CallVote_Powerups(gentity_t *ent, menu_hnd_t *p);
 void G_Menu_CallVote_Powerups_Update(gentity_t *ent);
 void G_Menu_CallVote_Powerups_Selection(gentity_t *ent, menu_hnd_t *p);
+void G_Menu_CallVote_Techs(gentity_t *ent, menu_hnd_t *p);
+void G_Menu_CallVote_Techs_Update(gentity_t *ent);
+void G_Menu_CallVote_Techs_Selection(gentity_t *ent, menu_hnd_t *p);
 void G_Menu_CallVote_FriendlyFire(gentity_t *ent, menu_hnd_t *p);
 void G_Menu_CallVote_FriendlyFire_Update(gentity_t *ent);
 void G_Menu_CallVote_FriendlyFire_Selection(gentity_t *ent, menu_hnd_t *p);
@@ -134,6 +137,27 @@ const menu_t pmcallvotemenu_powerups[] = {
 	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "ON",  MENU_ALIGN_LEFT, G_Menu_CallVote_Powerups_Selection },
 	{ "OFF", MENU_ALIGN_LEFT, G_Menu_CallVote_Powerups_Selection },
+	{ "", MENU_ALIGN_LEFT, nullptr },
+	{ "", MENU_ALIGN_LEFT, nullptr },
+	{ "", MENU_ALIGN_LEFT, nullptr },
+	{ "", MENU_ALIGN_LEFT, nullptr },
+	{ "", MENU_ALIGN_LEFT, nullptr },
+	{ "", MENU_ALIGN_LEFT, nullptr },
+	{ "", MENU_ALIGN_LEFT, nullptr },
+	{ "", MENU_ALIGN_LEFT, nullptr },
+	{ "", MENU_ALIGN_LEFT, nullptr },
+	{ "", MENU_ALIGN_LEFT, nullptr },
+	{ "", MENU_ALIGN_LEFT, nullptr },
+	{ "", MENU_ALIGN_LEFT, nullptr },
+	{ "", MENU_ALIGN_LEFT, nullptr },
+	{ "$g_pc_return", MENU_ALIGN_LEFT, G_Menu_ReturnToCallVote }
+};
+
+const menu_t pmcallvotemenu_techs[] = {
+	{ "", MENU_ALIGN_CENTER, nullptr },
+	{ "", MENU_ALIGN_CENTER, nullptr },
+	{ "ON",  MENU_ALIGN_LEFT, G_Menu_CallVote_Techs_Selection },
+	{ "OFF", MENU_ALIGN_LEFT, G_Menu_CallVote_Techs_Selection },
 	{ "", MENU_ALIGN_LEFT, nullptr },
 	{ "", MENU_ALIGN_LEFT, nullptr },
 	{ "", MENU_ALIGN_LEFT, nullptr },
@@ -678,8 +702,20 @@ void G_Menu_CallVote_Update(gentity_t *ent)
 	bool powerups_enabled = g_no_powerups->integer == 0;
 	Q_strlcpy(entries[powerups_index].text, G_Fmt("Powerups: {}", powerups_enabled ? "ON" : "OFF").data(), sizeof(entries[powerups_index].text));
 
-	int friendlyfire_index = powerups_index + 1;
-	if (GT(GT_TDM) || GT(GT_CTF))
+	int techs_index = powerups_index + 1;
+	if (GT(GT_FFA) || GT(GT_TDM) || GT(GT_CTF))
+	{
+		entries[techs_index].SelectFunc = G_Menu_CallVote_Techs;
+		Q_strlcpy(entries[techs_index].text, G_Fmt("Techs: {}", AllowTechs() ? "ON" : "OFF").data(), sizeof(entries[techs_index].text));
+	}
+	else
+	{
+		entries[techs_index].SelectFunc = nullptr;
+		Q_strlcpy(entries[techs_index].text, "Techs: N/A", sizeof(entries[techs_index].text));
+	}
+
+	int friendlyfire_index = techs_index + 1;
+	if (Teams())
 	{
 		entries[friendlyfire_index].SelectFunc = G_Menu_CallVote_FriendlyFire;
 		bool ff_enabled = g_friendly_fire->integer != 0;
@@ -747,6 +783,39 @@ void G_Menu_CallVote_Powerups_Selection(gentity_t *ent, menu_hnd_t *p)
 	}
 
 	MenuVote_Initiate(ent, "powerups", value);
+}
+
+void G_Menu_CallVote_Techs_Update(gentity_t *ent)
+{
+	menu_t *entries = ent->client->menu->entries;
+	Q_strlcpy(entries[0].text, "Techs", sizeof(entries[0].text));
+	Q_strlcpy(entries[2].text, "ON", sizeof(entries[2].text));
+	Q_strlcpy(entries[2].text_arg1, "1", sizeof(entries[2].text_arg1));
+	Q_strlcpy(entries[3].text, "OFF", sizeof(entries[3].text));
+	Q_strlcpy(entries[3].text_arg1, "0", sizeof(entries[3].text_arg1));
+}
+
+void G_Menu_CallVote_Techs_Selection(gentity_t *ent, menu_hnd_t *p)
+{
+	char value[64];
+	if (!MenuVote_ReadSelection(ent, p, value, sizeof(value)))
+		return;
+
+	int v = strtoul(value, nullptr, 10);
+	bool currently_enabled = AllowTechs();
+	if (currently_enabled == (v == 1))
+	{
+		gi.LocClient_Print(ent, PRINT_HIGH, "Techs are already {}.\n", v ? "ENABLED" : "DISABLED");
+		return;
+	}
+
+	MenuVote_Initiate(ent, "techs", value);
+}
+
+void G_Menu_CallVote_Techs(gentity_t *ent, menu_hnd_t *p)
+{
+	P_Menu_Close(ent);
+	P_Menu_Open(ent, pmcallvotemenu_techs, -1, sizeof(pmcallvotemenu_techs) / sizeof(menu_t), nullptr, G_Menu_CallVote_Techs_Update);
 }
 
 void G_Menu_CallVote_Powerups(gentity_t *ent, menu_hnd_t *p)

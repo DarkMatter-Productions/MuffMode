@@ -72,6 +72,7 @@ Use `callvote <command> [arg]` or `cv <command> [arg]`.
 | `ruleset` | `<q2re|mm|q3a|q2reb|q|qc>` | Change ruleset. |
 | `powerups` | `<0|1>` | Disable or enable powerups. |
 | `friendlyfire` | `<0|1>` | Disable or enable friendly fire in team modes. |
+| `techs` | `<0|1>` | Disable or enable techs (FFA/TDM/CTF only). |
 | `handicap` | `<player> <weapon> <on|off>` | Restrict duel weapons for a player. Weapons: `railgun`, `chaingun`, `rlauncher`, or `all`. |
 | `readyall` | none | Ready all players during ready-up warmup. |
 
@@ -97,6 +98,7 @@ Use `callvote <command> [arg]` or `cv <command> [arg]`.
 | `8192` | `friendlyfire` |
 | `16384` | `handicap` |
 | `32768` | `readyall` |
+| `65536` | `techs` |
 
 ## Gametype Values
 
