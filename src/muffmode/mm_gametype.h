@@ -21,7 +21,7 @@ void             MM_SanitizeCurrentGametype();
 std::string      MM_GetEnabledGametypesList();
 
 void MM_CheckRuleset();
-void MM_ChangeGametype(gametype_t gt);
+void MM_ChangeGametype(gametype_t gt, bool force_cfg = false);
 void MM_GTChanges();
 void MM_SyncGametypeTracking();
 void MM_GTSetLongName();

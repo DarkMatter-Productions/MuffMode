@@ -204,7 +204,11 @@ void MM_CmdGametype(gentity_t *ent)
 	if (g_votable_gametypes->string[0] && !MM_IsGametypeVotable(gt))
 		gi.LocClient_Print(ent, PRINT_HIGH, "Warning: This gametype is not in the votable list, but setting it anyway (admin override).\n");
 
-	ChangeGametype(gt);
+	// force_cfg = true: admin gametype changes always (re-)exec the gt-cfg, even
+	// when selecting the gametype that's already active, so admins get a reliable
+	// "apply this preset" command. (Player votes go through ChangeGametype() with
+	// force_cfg = false and never re-exec on a same-gametype vote.)
+	MM_ChangeGametype(gt, true);
 	gi.AddCommandString("sv gt_changemap_first\n");
 }
 
