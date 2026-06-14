@@ -103,6 +103,7 @@ void MM_Duel_ScoreboardMessage(gentity_t *ent, gentity_t *killer) {
 	int			x, y;
 
 	string.clear();
+	entry.clear();
 
 	fmt::format_to(std::back_inserter(string), FMT_STRING("xv 0 yv -40 cstring2 \"{} on {}\" "), level.gametype_name, level.level_name);
 	fmt::format_to(std::back_inserter(string), FMT_STRING("xv 0 yv -30 cstring2 \"Score Limit: {}\" "), GT_ScoreLimit());
@@ -326,7 +327,7 @@ void MM_Duel_CmdForfeit(gentity_t *ent) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "Forfeit is not available during warmup.\n");
 		return;
 	}
-	if (ent->client != &game.clients[level.sorted_clients[1]]) {
+	if (level.sorted_clients[1] < 0 || ent->client != &game.clients[level.sorted_clients[1]]) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "Forfeit is only available to the losing player.\n");
 		return;
 	}

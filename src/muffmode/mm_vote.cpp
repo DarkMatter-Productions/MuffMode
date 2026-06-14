@@ -946,23 +946,9 @@ void MM_VoteCommandStore(gentity_t *ent)
 	level.vote_state.no_votes = 0;
 
 	// Count eligible voters (non-bot humans who can vote).
-	// Diagnostic: iterate ALL client slots to reveal why clients may be invisible.
 	level.vote_state.num_eligible = 0;
-	MuffModeLog("DEBUG", "VoteEligibility: maxclients=%d, scanning all slots...", (int)game.maxclients);
-	for (uint32_t ve_i = 0; ve_i < (uint32_t)game.maxclients; ve_i++)
+	for (auto ec : active_clients())
 	{
-		gentity_t *ec = &g_entities[1 + ve_i];
-		bool has_client = ec->client != nullptr;
-		MuffModeLog("DEBUG", "VoteEligibility: slot %d, inuse=%d, client=%p, connected=%d, is_bot=%d, svflags_bot=%d, team=%d, duel_queued=%d, name='%s'",
-			(int)ve_i, (int)ec->inuse, (void *)ec->client,
-			has_client ? (int)ec->client->pers.connected : -1,
-			has_client ? (int)ec->client->sess.is_a_bot : -1,
-			(int)((ec->svflags & SVF_BOT) != 0),
-			has_client ? (int)ec->client->sess.team : -1,
-			has_client ? (int)ec->client->sess.duel_queued : -1,
-			has_client ? ec->client->resp.netname : "(no client)");
-		if (!ec->inuse || !has_client || !ec->client->pers.connected)
-			continue;
 		if (ec->client->sess.is_a_bot)
 			continue;
 		if (!ClientCanVote(ec->client))

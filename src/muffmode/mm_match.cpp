@@ -21,9 +21,9 @@ static void Monsters_KillAll() {
 		if (g_entities[i].svflags & SVF_MONSTER)
 			//if (g_entities[i].health <= 0 || g_entities[i].deadflag || (g_entities[i].svflags & SVF_DEADMONSTER))
 			G_FreeEntity(&g_entities[i]);
-		level.total_monsters = 0;
-		level.killed_monsters = 0;
 	}
+	level.total_monsters = 0;
+	level.killed_monsters = 0;
 }
 
 static void Entities_ItemTeams_Reset() {
@@ -378,7 +378,6 @@ static void SetMatchID() {
 	//level.match_id = gt_short_name_upper[g_gametype->integer];
 	//level.match_id += "-";
 	level.match_id = stime();
-	level.match_id = stime();
 }
 
 /*
@@ -652,8 +651,6 @@ static void CheckDMRoundState(void) {
 
 		case GT_RR:
 			if (!level.num_playing_red || !level.num_playing_blue) {
-				gclient_t *cl = &game.clients[level.sorted_clients[0]];
-
 				gi.Broadcast_Print(PRINT_CENTER, "Round Ends!\n");
 
 				gi.positioned_sound(world->s.origin, world, CHAN_AUTO | CHAN_RELIABLE, gi.soundindex("ctf/flagcap.wav"), 1, ATTN_NONE, 0);

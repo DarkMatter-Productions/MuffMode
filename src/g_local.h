@@ -168,7 +168,7 @@ enum ruleset_t : uint8_t {
 	RS_QC,
 	RS_NUM_RULESETS
 };
-#define RS( x ) game.ruleset == (x)
+#define RS( x ) (game.ruleset == (x))
 
 constexpr const char *rs_short_name[RS_NUM_RULESETS] = {
 	"",
@@ -229,9 +229,9 @@ enum gtf_t {
 
 extern int _gt[GT_NUM_GAMETYPES];
 
-#define GTF( x ) _gt[g_gametype->integer] & (x)
+#define GTF( x ) (_gt[g_gametype->integer] & (x))
 #define GT( x ) (g_gametype->integer == (int)(x))
-#define notGT( x ) g_gametype->integer != (int)(x)
+#define notGT( x ) (g_gametype->integer != (int)(x))
 
 constexpr const char *gt_short_name[GT_NUM_GAMETYPES] = {
 	"cmp",
