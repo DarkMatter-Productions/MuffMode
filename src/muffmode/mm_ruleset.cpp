@@ -9,6 +9,13 @@ bool MM_RulesetHealthArmorCap()
 	return game.ruleset == RS_VANILLA_PLUS || game.ruleset == RS_QC;
 }
 
+// [MuffMode] q2re's DualFire powerup is fire-rate only; the +movement-speed buff is a
+// MuffMode/arcade addition. Keep it off for the q2re-faithful rulesets.
+bool MM_RulesetHasteBoostsMovement()
+{
+	return !(game.ruleset == RS_Q2RE || game.ruleset == RS_VANILLA_PLUS);
+}
+
 void MM_ClampClientPersistHealthArmor(gclient_t *client)
 {
 	if (!client || !MM_RulesetHealthArmorCap())

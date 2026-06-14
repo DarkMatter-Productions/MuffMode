@@ -4019,8 +4019,8 @@ void ClientThink(gentity_t *ent, usercmd_t *ucmd) {
 		else
 			client->ps.pmove.pm_flags &= ~PMF_IGNORE_PLAYER_COLLISION;
 
-		// haste support
-		client->ps.pmove.haste = client->pu_time_haste > level.time;
+		// haste support — q2re's DualFire is fire-rate only; movement boost is ruleset-gated
+		client->ps.pmove.haste = (client->pu_time_haste > level.time) && MM_RulesetHasteBoostsMovement();
 
 		// trigger_gravity support
 		client->ps.pmove.gravity = (short)(level.gravity * ent->gravity);
