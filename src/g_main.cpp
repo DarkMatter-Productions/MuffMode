@@ -1210,7 +1210,10 @@ void CalculateRanks() {
 			//gi.Com_PrintFmt("new={} old={}\n", game.clients[level.sorted_clients[0]].resp.score, old_first_score);
 			if (fraglimit->integer > 3) {
 				int score_diff = fraglimit->integer - game.clients[level.sorted_clients[0]].resp.score;
-				if (score_diff <= 3 && !level.frag_warning[score_diff - 1]) {
+				// frag_warning has 3 entries (1/2/3 frags to go). Once the leader reaches
+				// the limit score_diff is <= 0, so guard the lower bound or score_diff-1
+				// indexes frag_warning[-1] and corrupts the adjacent field (crash on match end).
+				if (score_diff >= 1 && score_diff <= 3 && !level.frag_warning[score_diff - 1]) {
 					AnnouncerSound(world, G_Fmt("{}_frag{}", score_diff, score_diff > 1 ? "s" : "").data(), nullptr, false);
 					level.frag_warning[score_diff - 1] = true;
 					CheckDMExitRules();
