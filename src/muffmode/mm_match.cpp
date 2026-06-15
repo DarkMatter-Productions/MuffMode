@@ -333,10 +333,7 @@ static bool Round_StartNew() {
 		const int round_num = GT(GT_HORDE) ? MM_Horde_CountdownWaveNumber() : (level.round_number + 1);
 		const char *round_label = GT(GT_HORDE) ? "Wave" : "Round";
 
-		if (GT(GT_RR) && roundlimit->integer) {
-			gi.LocBroadcast_Print(PRINT_CENTER, "{} {} of {}\nBegins in...", round_label, round_num, roundlimit->integer);
-		} else
-			gi.LocBroadcast_Print(PRINT_CENTER, "{} {}\nBegins in...", round_label, round_num);
+		gi.LocBroadcast_Print(PRINT_CENTER, "{} {}\nBegins in...", round_label, round_num);
 	}
 
 	AnnouncerSound(world, "round_begins_in", nullptr, false);
@@ -548,10 +545,6 @@ static void CheckDMRoundState(void) {
 		if (level.round_state_timer > level.time)
 			return;
 
-		if (GT(GT_RR) && level.round_state == roundst_t::ROUND_ENDED) {
-			TeamShuffle();
-		}
-
 		Round_StartNew();
 		return;
 	}
@@ -648,20 +641,6 @@ static void CheckDMRoundState(void) {
 			if (MM_Horde_UpdateRoundInProgress())
 				Round_End();
 			return;
-
-		case GT_RR:
-			if (!level.num_playing_red || !level.num_playing_blue) {
-				gi.Broadcast_Print(PRINT_CENTER, "Round Ends!\n");
-
-				gi.positioned_sound(world->s.origin, world, CHAN_AUTO | CHAN_RELIABLE, gi.soundindex("ctf/flagcap.wav"), 1, ATTN_NONE, 0);
-
-				if (level.round_number + 1 >= roundlimit->integer) {
-					QueueIntermission("MATCH ENDED", false, false);
-				} else
-					Round_End();
-				return;
-			}
-			break;
 
 		}
 

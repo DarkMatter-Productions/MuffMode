@@ -722,7 +722,8 @@ void T_Damage(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, const 
 			stat_take = targ->health;
 
 		// arena player scoring: 1 point per 100 damage dealt to opponents, capped to 0 health
-		if (GTF(GTF_ARENA) && !OnSameTeam(targ, attacker)) {
+		// (Red Rover scores by frags only, so it opts out of arena damage-scoring)
+		if (GTF(GTF_ARENA) && notGT(GT_RR) && !OnSameTeam(targ, attacker)) {
 			attacker->client->pers.dmg_scorer += stat_take + psave + asave;
 
 			if (attacker->client->pers.dmg_scorer >= 100) {

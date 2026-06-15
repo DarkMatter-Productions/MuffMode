@@ -330,7 +330,7 @@ int _gt[] = {
 	/* GT_CA */ GTF_TEAMS | GTF_ARENA | GTF_ROUNDS | GTF_ELIMINATION,
 	/* GT_FREEZE */ 0, // removed
 	/* GT_STRIKE */ GTF_TEAMS | GTF_ARENA | GTF_ROUNDS | GTF_CTF | GTF_ELIMINATION,
-	/* GT_RR */ GTF_TEAMS | GTF_ROUNDS | GTF_ARENA,
+	/* GT_RR */ GTF_TEAMS | GTF_ARENA | GTF_FRAGS,
 	/* GT_LMS */ 0, // removed
 	/* GT_HORDE */ GTF_ROUNDS,
 	/* GT_BALL */ 0, // removed
@@ -1218,8 +1218,9 @@ void CalculateRanks() {
 				}
 			}
 		}
-		if (!Teams() && game.clients[level.sorted_clients[0]].resp.score > 0) {
+		if ((!Teams() || GT(GT_RR)) && game.clients[level.sorted_clients[0]].resp.score > 0) {
 			// check changes in rank to trigger sounds
+			// (RR is a team mode but scores individually, so it uses the FFA lead announcer)
 			int new_rank = 0, old_rank = 0;
 			bool new_tied = false, old_tied = false;
 			for (auto ec : active_players()) {
@@ -1262,7 +1263,7 @@ void CalculateRanks() {
 					AnnouncerSound(ec, "lead_lost", nullptr, false);
 				}
 			}
-		} else if (Teams() && GTF(GTF_FRAGS)) {
+		} else if (Teams() && notGT(GT_RR) && GTF(GTF_FRAGS)) {
 			int new_rank, old_rank;
 
 			if (level.team_old_scores[TEAM_RED] == level.team_old_scores[TEAM_BLUE]) {

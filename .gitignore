@@ -426,3 +426,4 @@ src/vcpkg_installed/
 
 # Local security audit (not for the repo)
 docs/AUDIT.md
+docs/BUG_AUDIT.md

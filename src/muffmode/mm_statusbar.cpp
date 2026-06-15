@@ -76,6 +76,11 @@ void MM_InitStatusbar()
 			if (GTF(GTF_CTF))
 				sb.ifstat(STAT_CTF_FLAG_PIC).xr(-24).yt(26).pic(STAT_CTF_FLAG_PIC).endifstat();
 
+			// Red Rover: teams flip on death, so show the current team's logo prominently
+			// at top-centre. Reuses the (CTF-only) flag pic slot, fed by G_SetStats.
+			if (GT(GT_RR))
+				sb.ifstat(STAT_CTF_FLAG_PIC).xv(144).yt(2).pic(STAT_CTF_FLAG_PIC).endifstat();
+
 			sb.ifstat(STAT_TEAMPLAY_INFO).xl(0).yb(-88).stat_string(STAT_TEAMPLAY_INFO).endifstat();
 		}
 

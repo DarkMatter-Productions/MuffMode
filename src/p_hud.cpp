@@ -1291,6 +1291,18 @@ void G_SetStats(gentity_t *ent) {
 	// Set team_id for client-side team border display
 	ent->client->ps.team_id = (uint8_t)ent->client->sess.team;
 
+	// Red Rover: persistent team logo on the HUD (rendered top-centre by the
+	// statusbar) so the player always knows which side they're on after a defect.
+	// Works on any client since it rides the normal statusbar/stats protocol.
+	if (GT(GT_RR)) {
+		if (ent->client->sess.team == TEAM_RED)
+			ent->client->ps.stats[STAT_CTF_FLAG_PIC] = ii_teams_red_default;
+		else if (ent->client->sess.team == TEAM_BLUE)
+			ent->client->ps.stats[STAT_CTF_FLAG_PIC] = ii_teams_blue_default;
+		else
+			ent->client->ps.stats[STAT_CTF_FLAG_PIC] = 0;
+	}
+
 	//ent->client->ps.stats[STAT_SHOW_STATUSBAR] = ent->client->showscores ? 0 : ent->client->follow_target ? 1 : 0;
 	if (!minhud) {
 		//

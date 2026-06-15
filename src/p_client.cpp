@@ -2211,13 +2211,34 @@ void ClientRespawn(gentity_t *ent) {
 			CopyToBodyQue(ent);
 		ent->svflags &= ~SVF_NOCLIENT;
 
+		bool rr_defected = false;
 		if (GT(GT_RR) && level.match_state == matchst_t::MATCH_IN_PROGRESS) {
-			ent->client->sess.team = Teams_OtherTeam(ent->client->sess.team);
-			G_AssignPlayerSkin(ent, ent->client->pers.skin);
+			// Red Rover: defect to the opposing team on death. Only switch while a
+			// teammate remains behind, so the swap never empties a team (which would
+			// stall play, e.g. collapse a 1v1 onto a single team).
+			team_t cur = ent->client->sess.team;
+			int teammates_left = 0;
+
+			for (auto ec : active_clients()) {
+				if (ec == ent || !ClientIsPlaying(ec->client))
+					continue;
+				if (ec->client->sess.team == cur)
+					teammates_left++;
+			}
+
+			if (teammates_left > 0) {
+				ent->client->sess.team = Teams_OtherTeam(cur);
+				G_AssignPlayerSkin(ent, ent->client->pers.skin);
+				rr_defected = true;
+			}
 		}
 
 		ClientSpawn(ent);
 		G_PostRespawn(ent);
+
+		// announce the new team right after spawning so the player knows where they landed
+		if (rr_defected)
+			gi.LocClient_Print(ent, PRINT_CENTER, "You are now on the {} team!", Teams_TeamName(ent->client->sess.team));
 		return;
 	}
 
