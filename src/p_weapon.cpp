@@ -1279,17 +1279,18 @@ static void Weapon_RocketLauncher_Fire(gentity_t *ent) {
 	int	  damage, splash_damage;
 	float splash_radius;
 	int	  speed;
+	int	  splash_knockback;
 
 	// Use dev cvar if enabled, otherwise use ruleset-based defaults
 #ifdef _DEBUG
 	if (g_weapon_balance_dev && g_weapon_balance_dev->integer && g_rocketlauncher_damage && g_rocketlauncher_damage->integer > 0) {
 		damage = g_rocketlauncher_damage->integer;
-		MM_Ruleset_RocketLauncherDefaultsForCustomDamage(damage, splash_damage, splash_radius, speed);
+		MM_Ruleset_RocketLauncherDefaultsForCustomDamage(damage, splash_damage, splash_radius, speed, splash_knockback);
 	} else {
 #else
 	{
 #endif
-		MM_Ruleset_RocketLauncherDefaults(damage, splash_damage, splash_radius, speed);
+		MM_Ruleset_RocketLauncherDefaults(damage, splash_damage, splash_radius, speed, splash_knockback);
 	}
 	// Use dev cvar for rocket launcher speed if enabled, otherwise use ruleset-based defaults
 #ifdef _DEBUG
@@ -1307,7 +1308,7 @@ static void Weapon_RocketLauncher_Fire(gentity_t *ent) {
 
 	vec3_t start, dir;
 	P_ProjectSource(ent, ent->client->v_angle, { 8, 8, -8 }, start, dir);
-	fire_rocket(ent, start, dir, damage, speed, splash_radius, splash_damage);
+	fire_rocket(ent, start, dir, damage, speed, splash_radius, splash_damage, splash_knockback);
 
 	P_AddWeaponKick(ent, ent->client->v_forward * -2, { -1.f, 0.f, 0.f });
 

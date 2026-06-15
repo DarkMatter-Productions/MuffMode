@@ -10,8 +10,8 @@ This reference helps players and hosts choose what to play. Casual players can u
 | --- | --- |
 | A quick public game | Deathmatch, Instagib, NadeFest, or Horde Mode. |
 | A competitive head-to-head match | Duel with a known ruleset and a focused map list. |
-| Organized team play | Team Deathmatch, Capture the Flag, Clan Arena, CaptureStrike, or Red Rover. |
-| A different pace for a community night | Vampiric Damage, Weapons Frenzy, Quad Hog, or custom ruleset/map combinations. |
+| Organized team play | Team Deathmatch, Capture the Flag, Clan Arena, or CaptureStrike. |
+| A different pace for a community night | Red Rover, Vampiric Damage, Weapons Frenzy, Quad Hog, or custom ruleset/map combinations. |
 
 ## Feature Overview
 
@@ -67,7 +67,7 @@ Muff Mode maintains a curated set of final `mm-*` remasters and ports, plus a se
 | `ca` | Clan Arena | Round-based team elimination with no item spawns, no self-damage, and a full arsenal. Good for fast team matches. |
 | `ft` | Freeze Tag | Team elimination where teammates thaw frozen players. Work in progress. |
 | `strike` | CaptureStrike | Threewave-inspired attack/defend mode combining Clan Arena, CTF, and Counter-Strike style rounds. |
-| `rr` | Red Rover | Clan Arena style mode where players change teams on death. The round ends when one team is eliminated. |
+| `rr` | Red Rover | Two teams with the Clan Arena loadout; on death you defect to the opposing team and respawn instantly. Continuous play scored by individual frags to the frag/time limit. |
 | `lms` | Last Man Standing | Survival-focused elimination mode. |
 | `horde` | Horde Mode | Fight monster waves and stay on top of the scoreboard through up to 16 waves. Good for casual groups. Limited lives are not currently handled. |
 | `ball` | ProBall | Sports-style mode where players carry a ball into the enemy goal. Work in progress. |

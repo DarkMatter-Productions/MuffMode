@@ -1215,6 +1215,24 @@ static void CG_ExecuteLayoutString(const char *s, vrect_t hud_vrect, vrect_t hud
 			continue;
 		}
 
+		if (!strcmp(token, "ifbit")) {
+			// if (stats[stat] & mask) stmt
+			token = COM_Parse(&s);
+			index = atoi(token);
+			token = COM_Parse(&s);
+			int mask = atoi(token);
+
+			if_depth++;
+
+			// skip to endif if the bit isn't set
+			if (!skip_depth && (index < 0 || index >= MAX_STATS || !(ps->stats[index] & mask))) {
+				skip_depth = true;
+				endif_depth = if_depth;
+			}
+
+			continue;
+		}
+
 		if (!strcmp(token, "ifgef")) {
 			// if stmt
 			token = COM_Parse(&s);

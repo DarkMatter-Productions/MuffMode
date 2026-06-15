@@ -28,8 +28,8 @@ constexpr gametype_avail_t k_gametype_availability[GT_NUM_GAMETYPES] = {
 	/* GT_CTF */ gametype_avail_t::Enabled,
 	/* GT_CA */ gametype_avail_t::Enabled,
 	/* GT_FREEZE */ gametype_avail_t::Removed,
-	/* GT_STRIKE */ gametype_avail_t::Disabled,
-	/* GT_RR */ gametype_avail_t::Disabled,
+	/* GT_STRIKE */ gametype_avail_t::Enabled,
+	/* GT_RR */ gametype_avail_t::Enabled,
 	/* GT_LMS */ gametype_avail_t::Removed,
 	/* GT_HORDE */ gametype_avail_t::Enabled,
 	/* GT_BALL */ gametype_avail_t::Removed,
@@ -234,7 +234,7 @@ void MM_CheckRuleset()
 	gi.LocBroadcast_Print(PRINT_HIGH, "Ruleset: {}\n", rs_long_name[(int)game.ruleset]);
 }
 
-void MM_ChangeGametype(gametype_t gt)
+void MM_ChangeGametype(gametype_t gt, bool force_cfg)
 {
 	if (!MM_IsGametypeEnabled(gt)) {
 		const gametype_avail_t avail = MM_GetGametypeAvailability(gt);
@@ -329,6 +329,15 @@ void MM_ChangeGametype(gametype_t gt)
 		s_gt_check = (gametype_t)g_gametype->integer;
 		s_gt_teamplay = teamplay->modified_count;
 		s_gt_ctf = ctf->modified_count;
+	}
+	else if (force_cfg && g_gametype_cfg->integer && deathmatch->integer)
+	{
+		// Admin re-selected the gametype that's already active: re-exec its cfg to
+		// reapply the preset in place (no mode switch, so none of the change-only
+		// side effects above run). Player votes pass force_cfg = false and never
+		// reach here, so a same-gametype vote can't clobber settings players have
+		// voted on.
+		MM_ExecGametypeCfg(gt);
 	}
 }
 

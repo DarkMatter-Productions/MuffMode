@@ -66,7 +66,6 @@ cvar_t *password;
 cvar_t *spectator_password;
 cvar_t *admin_password;
 cvar_t *needpass;
-cvar_t *filterban;
 
 static cvar_t *maxclients;
 static cvar_t *maxentities;
@@ -173,6 +172,7 @@ cvar_t *g_horde_points_max;
 cvar_t *g_horde_spawn_interval_min;
 cvar_t *g_horde_spawn_interval_max;
 cvar_t *g_horde_warmup_cap;
+cvar_t *g_horde_max_alive;
 cvar_t *g_horde_wave_spawn_delay_ms;
 cvar_t *g_horde_player_scale;
 cvar_t *g_horde_player_scale_factor;
@@ -183,6 +183,27 @@ cvar_t *g_horde_mark_monsters_max;
 cvar_t *g_horde_map_scale;
 cvar_t *g_horde_map_scale_ref;
 cvar_t *g_horde_map_scale_factor;
+cvar_t *g_horde_champions;
+cvar_t *g_horde_champion_max_per_run;
+cvar_t *g_horde_champion_chance;
+cvar_t *g_horde_champion_min_wave;
+cvar_t *g_horde_champion_health_mult;
+cvar_t *g_horde_champion_health_floor;
+cvar_t *g_horde_champion_health_per_wave;
+cvar_t *g_horde_champion_damage_mult;
+cvar_t *g_horde_champion_speed_mult;
+cvar_t *g_horde_champion_strong_ratio;
+cvar_t *g_horde_champion_force; // DEBUG/TEST: force a champion every wave
+cvar_t *g_horde_themed_waves;
+cvar_t *g_horde_theme_chance;
+cvar_t *g_horde_theme_min_wave;
+cvar_t *g_horde_wave_variety;
+cvar_t *g_horde_wave_min_types;
+cvar_t *g_horde_content_peak_wave;
+cvar_t *g_horde_late_wave_factor;
+cvar_t *g_horde_weight_floor;
+cvar_t *g_horde_theme_min_monsters;
+cvar_t *g_horde_start_chainsaw;
 cvar_t *g_huntercam;
 cvar_t *g_inactivity;
 cvar_t *g_infinite_ammo;
@@ -309,7 +330,7 @@ int _gt[] = {
 	/* GT_CA */ GTF_TEAMS | GTF_ARENA | GTF_ROUNDS | GTF_ELIMINATION,
 	/* GT_FREEZE */ 0, // removed
 	/* GT_STRIKE */ GTF_TEAMS | GTF_ARENA | GTF_ROUNDS | GTF_CTF | GTF_ELIMINATION,
-	/* GT_RR */ GTF_TEAMS | GTF_ROUNDS | GTF_ARENA,
+	/* GT_RR */ GTF_TEAMS | GTF_ARENA | GTF_FRAGS,
 	/* GT_LMS */ 0, // removed
 	/* GT_HORDE */ GTF_ROUNDS,
 	/* GT_BALL */ 0, // removed
@@ -435,6 +456,7 @@ static void InitGame() {
 	g_horde_spawn_interval_min = gi.cvar("g_horde_spawn_interval_min", "0.3", CVAR_NOFLAGS);
 	g_horde_spawn_interval_max = gi.cvar("g_horde_spawn_interval_max", "0.5", CVAR_NOFLAGS);
 	g_horde_warmup_cap = gi.cvar("g_horde_warmup_cap", "30", CVAR_NOFLAGS);
+	g_horde_max_alive = gi.cvar("g_horde_max_alive", "60", CVAR_NOFLAGS);
 	g_horde_wave_spawn_delay_ms = gi.cvar("g_horde_wave_spawn_delay_ms", "500", CVAR_NOFLAGS);
 	g_horde_player_scale = gi.cvar("g_horde_player_scale", "1", CVAR_NOFLAGS);
 	g_horde_player_scale_factor = gi.cvar("g_horde_player_scale_factor", "0.4", CVAR_NOFLAGS);
@@ -445,6 +467,27 @@ static void InitGame() {
 	g_horde_map_scale = gi.cvar("g_horde_map_scale", "1", CVAR_NOFLAGS);
 	g_horde_map_scale_ref = gi.cvar("g_horde_map_scale_ref", "4000", CVAR_NOFLAGS);
 	g_horde_map_scale_factor = gi.cvar("g_horde_map_scale_factor", "0.5", CVAR_NOFLAGS);
+	g_horde_champions = gi.cvar("g_horde_champions", "1", CVAR_NOFLAGS);
+	g_horde_champion_max_per_run = gi.cvar("g_horde_champion_max_per_run", "2", CVAR_NOFLAGS);
+	g_horde_champion_chance = gi.cvar("g_horde_champion_chance", "0.6", CVAR_NOFLAGS);
+	g_horde_champion_min_wave = gi.cvar("g_horde_champion_min_wave", "3", CVAR_NOFLAGS);
+	g_horde_champion_health_mult = gi.cvar("g_horde_champion_health_mult", "3.0", CVAR_NOFLAGS);
+	g_horde_champion_health_floor = gi.cvar("g_horde_champion_health_floor", "400", CVAR_NOFLAGS);
+	g_horde_champion_health_per_wave = gi.cvar("g_horde_champion_health_per_wave", "25", CVAR_NOFLAGS);
+	g_horde_champion_damage_mult = gi.cvar("g_horde_champion_damage_mult", "2.0", CVAR_NOFLAGS);
+	g_horde_champion_speed_mult = gi.cvar("g_horde_champion_speed_mult", "1.25", CVAR_NOFLAGS);
+	g_horde_champion_strong_ratio = gi.cvar("g_horde_champion_strong_ratio", "4.0", CVAR_NOFLAGS);
+	g_horde_champion_force = gi.cvar("g_horde_champion_force", "0", CVAR_NOFLAGS); // DEBUG/TEST: 1 = champion every wave
+	g_horde_themed_waves = gi.cvar("g_horde_themed_waves", "1", CVAR_NOFLAGS);
+	g_horde_theme_chance = gi.cvar("g_horde_theme_chance", "0.20", CVAR_NOFLAGS);
+	g_horde_theme_min_wave = gi.cvar("g_horde_theme_min_wave", "4", CVAR_NOFLAGS);
+	g_horde_wave_variety = gi.cvar("g_horde_wave_variety", "1", CVAR_NOFLAGS);
+	g_horde_wave_min_types = gi.cvar("g_horde_wave_min_types", "3", CVAR_NOFLAGS);
+	g_horde_content_peak_wave = gi.cvar("g_horde_content_peak_wave", "12", CVAR_NOFLAGS);
+	g_horde_late_wave_factor = gi.cvar("g_horde_late_wave_factor", "0.35", CVAR_NOFLAGS);
+	g_horde_weight_floor = gi.cvar("g_horde_weight_floor", "0.12", CVAR_NOFLAGS);
+	g_horde_theme_min_monsters = gi.cvar("g_horde_theme_min_monsters", "2", CVAR_NOFLAGS);
+	g_horde_start_chainsaw = gi.cvar("g_horde_start_chainsaw", "1", CVAR_NOFLAGS);
 
 	g_huntercam = gi.cvar("g_huntercam", "1", CVAR_SERVERINFO | CVAR_LATCH);
 	g_dm_strong_mines = gi.cvar("g_dm_strong_mines", "0", CVAR_NOFLAGS);
@@ -516,7 +559,6 @@ static void InitGame() {
 	spectator_password = gi.cvar("spectator_password", "", CVAR_USERINFO);
 	admin_password = gi.cvar("admin_password", "", CVAR_NOFLAGS);
 	needpass = gi.cvar("needpass", "0", CVAR_SERVERINFO);
-	filterban = gi.cvar("filterban", "1", CVAR_NOFLAGS);
 
 	run_pitch = gi.cvar("run_pitch", "0.002", CVAR_NOFLAGS);
 	run_roll = gi.cvar("run_roll", "0.005", CVAR_NOFLAGS);
@@ -853,11 +895,11 @@ void SetIntermissionPoint(void) {
 	}
 	
 	// ugly hax!
-	if (!Q_strncasecmp(level.mapname, "campgrounds", 11)) {
+	if (ent && !Q_strncasecmp(level.mapname, "campgrounds", 11)) {
 		gvec3_t v = { -320, -96, 503 };
 		if (ent->s.origin == v)
 			level.intermission_angle[PITCH] = -30;
-	} else if (!Q_strncasecmp(level.mapname, "rdm10", 5)) {
+	} else if (ent && !Q_strncasecmp(level.mapname, "rdm10", 5)) {
 		gvec3_t v = { -1256, -1672, -136 };
 		if (ent->s.origin == v)
 			level.intermission_angle = { 15, 135, 0 };
@@ -1176,8 +1218,9 @@ void CalculateRanks() {
 				}
 			}
 		}
-		if (!Teams() && game.clients[level.sorted_clients[0]].resp.score > 0) {
+		if ((!Teams() || GT(GT_RR)) && game.clients[level.sorted_clients[0]].resp.score > 0) {
 			// check changes in rank to trigger sounds
+			// (RR is a team mode but scores individually, so it uses the FFA lead announcer)
 			int new_rank = 0, old_rank = 0;
 			bool new_tied = false, old_tied = false;
 			for (auto ec : active_players()) {
@@ -1220,7 +1263,7 @@ void CalculateRanks() {
 					AnnouncerSound(ec, "lead_lost", nullptr, false);
 				}
 			}
-		} else if (Teams() && GTF(GTF_FRAGS)) {
+		} else if (Teams() && notGT(GT_RR) && GTF(GTF_FRAGS)) {
 			int new_rank, old_rank;
 
 			if (level.team_old_scores[TEAM_RED] == level.team_old_scores[TEAM_BLUE]) {
@@ -1639,17 +1682,28 @@ void CheckDMExitRules() {
 	if (!scorelimit) return;
 
 	if (teams) {
-		if (level.team_scores[TEAM_RED] >= scorelimit) {
-			QueueIntermission(G_Fmt("{} WINS! (hit the {} limit)", Teams_TeamName(TEAM_RED), GT_ScoreLimitString()).data(), false, false);
-			return;
-		}
-		if (level.team_scores[TEAM_BLUE] >= scorelimit) {
-			QueueIntermission(G_Fmt("{} WINS! (hit the {} limit)", Teams_TeamName(TEAM_BLUE), GT_ScoreLimitString()).data(), false, false);
-			return;
+		// Strike: only decide the match between rounds, after both teams have had an
+		// equal number of attacking turns (end of turn 1 of the round-pair). Otherwise a
+		// team could clinch the limit before the other gets its turn. Ties fall through to
+		// overtime via the ScoreIsTied() check above.
+		bool strike_end_ok = !GT(GT_STRIKE) ||
+			(level.strike_turn == 1 && level.round_state == roundst_t::ROUND_ENDED);
+		if (strike_end_ok) {
+			if (level.team_scores[TEAM_RED] >= scorelimit) {
+				QueueIntermission(G_Fmt("{} WINS! (hit the {} limit)", Teams_TeamName(TEAM_RED), GT_ScoreLimitString()).data(), false, false);
+				return;
+			}
+			if (level.team_scores[TEAM_BLUE] >= scorelimit) {
+				QueueIntermission(G_Fmt("{} WINS! (hit the {} limit)", Teams_TeamName(TEAM_BLUE), GT_ScoreLimitString()).data(), false, false);
+				return;
+			}
 		}
 	} else {
 		for (auto ec : active_clients()) {
-			if (ec->client->sess.team != TEAM_FREE)
+			// FFA players are TEAM_FREE; Red Rover scores individually but its players
+			// are on TEAM_RED/TEAM_BLUE, so gate on "is playing" rather than TEAM_FREE
+			// or the score/frag limit would never end an RR match.
+			if (!ClientIsPlaying(ec->client))
 				continue;
 
 			if (ec->client->resp.score >= scorelimit) {
@@ -1982,9 +2036,6 @@ void ExitLevel() {
 	// for N64 mainly, but if we're directly changing to "victorXXX.pcx" then
 	// end game
 	size_t start_offset = (level.changemap[0] == '*' ? 1 : 0);
-
-	if (GT(GT_RR) && level.num_playing_clients > 1 && (!level.num_playing_red || !level.num_playing_blue))
-		TeamShuffle();
 
 	MuffModeLog("DEBUG", "ExitLevel: issuing gamemap command for '%s'", level.changemap);
 	if (map_len > (6 + start_offset) &&

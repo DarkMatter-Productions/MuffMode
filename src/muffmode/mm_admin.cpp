@@ -124,9 +124,18 @@ void MM_CmdDoctor(gentity_t *ent)
 	{
 		if (roundlimit->integer <= 0)
 		{
-			report("WARN",
-				"roundlimit is <= 0 in a round-based gametype.",
-				"set roundlimit 8");
+			if (GT(GT_HORDE))
+			{
+				report("INFO",
+					"roundlimit <= 0 in Horde runs endless waves.",
+					"Intentional for endless Horde; set a positive roundlimit to cap the run.");
+			}
+			else
+			{
+				report("WARN",
+					"roundlimit is <= 0 in a round-based gametype.",
+					"set roundlimit 8");
+			}
 		}
 
 		if (roundtimelimit->value <= 0.f)
@@ -195,7 +204,11 @@ void MM_CmdGametype(gentity_t *ent)
 	if (g_votable_gametypes->string[0] && !MM_IsGametypeVotable(gt))
 		gi.LocClient_Print(ent, PRINT_HIGH, "Warning: This gametype is not in the votable list, but setting it anyway (admin override).\n");
 
-	ChangeGametype(gt);
+	// force_cfg = true: admin gametype changes always (re-)exec the gt-cfg, even
+	// when selecting the gametype that's already active, so admins get a reliable
+	// "apply this preset" command. (Player votes go through ChangeGametype() with
+	// force_cfg = false and never re-exec on a same-gametype vote.)
+	MM_ChangeGametype(gt, true);
 	gi.AddCommandString("sv gt_changemap_first\n");
 }
 

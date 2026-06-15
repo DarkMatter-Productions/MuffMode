@@ -423,3 +423,7 @@ src/vcpkg_installed/
 
 # Local Q2RE source copy
 /q2re-src/
+
+# Local security audit (not for the repo)
+docs/AUDIT.md
+docs/BUG_AUDIT.md

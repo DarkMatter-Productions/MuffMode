@@ -129,7 +129,7 @@ void MM_UpdateActiveVote()
 		AnnouncerSound(world, "vote_passed", nullptr, false);
 		MM_TransitionVoteState(VoteState::PASSED);
 	}
-	else if (level.vote_state.no_votes >= halfpoint)
+	else if (level.vote_state.no_votes >= level.vote_state.num_eligible - halfpoint)
 	{
 		gi.LocBroadcast_Print(PRINT_HIGH, "Vote failed.\n");
 		AnnouncerSound(world, "vote_failed", nullptr, false);
@@ -352,8 +352,8 @@ void MM_VotePassGametype()
 	}
 
 	// Re-check votability at execution time in case g_votable_gametypes changed
-	// during the 3-second PASSED->EXECUTING window, or the vote arrived via the
-	// menu path which does not run val_func.
+	// during the 3-second PASSED->EXECUTING window (the value is validated at
+	// callvote time, but could have changed by the time the vote executes).
 	if (!MM_IsGametypeVotable(gt))
 	{
 		gi.LocBroadcast_Print(PRINT_HIGH, "Gametype vote rejected: gametype is no longer votable.\n");
@@ -519,8 +519,8 @@ void MM_VotePassRuleset()
 		return;
 
 	// Re-check votability at execution time in case g_votable_rulesets changed
-	// during the 3-second PASSED->EXECUTING window, or the vote arrived via the
-	// menu path which does not run val_func.
+	// during the 3-second PASSED->EXECUTING window (the value is validated at
+	// callvote time, but could have changed by the time the vote executes).
 	if (!MM_IsRulesetVotable(rs))
 	{
 		gi.LocBroadcast_Print(PRINT_HIGH, "Ruleset vote rejected: ruleset is no longer votable.\n");
@@ -632,7 +632,7 @@ void MM_VotePassCointoss()
 
 void MM_VotePassRandom()
 {
-	gi.LocBroadcast_Print(PRINT_HIGH, "The random number is: {}\n", irandom(2, atoi(level.vote_state.arg.data())));
+	gi.LocBroadcast_Print(PRINT_HIGH, "The random number is: {}\n", irandom(2, atoi(level.vote_state.arg.data()) + 1));
 }
 
 void MM_VotePassUnlagged()
@@ -760,6 +760,46 @@ bool MM_VoteValPowerups(gentity_t *ent)
 	return true;
 }
 
+void MM_VotePassTechs()
+{
+	int argi = strtoul(level.vote_state.arg.data(), nullptr, 10);
+
+	gi.LocBroadcast_Print(PRINT_HIGH, "Techs have been {}.\n", argi ? "ENABLED" : "DISABLED");
+
+	gi.cvar_forceset("g_allow_techs", argi ? "1" : "0");
+
+	// Restart the map so tech changes take effect immediately.
+	gi.AddCommandString(G_Fmt("gamemap {}\n", level.mapname).data());
+}
+
+bool MM_VoteValTechs(gentity_t *ent)
+{
+	if (notGT(GT_FFA) && notGT(GT_TDM) && notGT(GT_CTF))
+	{
+		gi.LocClient_Print(ent, PRINT_HIGH, "Techs can only be changed in FFA, TDM or CTF gametypes.\n");
+		return false;
+	}
+
+	int arg = 0;
+
+	if (!MM_ParseVoteNonNegativeInt(MM_VoteArgv(2), arg) || (arg != 0 && arg != 1))
+	{
+		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid argument. Use 0 to disable or 1 to enable techs.\n");
+		return false;
+	}
+
+	bool currently_enabled = AllowTechs();
+	bool will_be_enabled = (arg == 1);
+
+	if (currently_enabled == will_be_enabled)
+	{
+		gi.LocClient_Print(ent, PRINT_HIGH, "Techs are already {}.\n", will_be_enabled ? "ENABLED" : "DISABLED");
+		return false;
+	}
+
+	return true;
+}
+
 void MM_VotePassFriendlyFire()
 {
 	int argi = strtoul(level.vote_state.arg.data(), nullptr, 10);
@@ -771,9 +811,9 @@ void MM_VotePassFriendlyFire()
 
 bool MM_VoteValFriendlyFire(gentity_t *ent)
 {
-	if (notGT(GT_TDM) && notGT(GT_CTF))
+	if (!Teams())
 	{
-		gi.LocClient_Print(ent, PRINT_HIGH, "Friendly fire can only be changed in TDM or CTF gametypes.\n");
+		gi.LocClient_Print(ent, PRINT_HIGH, "Friendly fire can only be changed in team gametypes.\n");
 		return false;
 	}
 
@@ -946,23 +986,9 @@ void MM_VoteCommandStore(gentity_t *ent)
 	level.vote_state.no_votes = 0;
 
 	// Count eligible voters (non-bot humans who can vote).
-	// Diagnostic: iterate ALL client slots to reveal why clients may be invisible.
 	level.vote_state.num_eligible = 0;
-	MuffModeLog("DEBUG", "VoteEligibility: maxclients=%d, scanning all slots...", (int)game.maxclients);
-	for (uint32_t ve_i = 0; ve_i < (uint32_t)game.maxclients; ve_i++)
+	for (auto ec : active_clients())
 	{
-		gentity_t *ec = &g_entities[1 + ve_i];
-		bool has_client = ec->client != nullptr;
-		MuffModeLog("DEBUG", "VoteEligibility: slot %d, inuse=%d, client=%p, connected=%d, is_bot=%d, svflags_bot=%d, team=%d, duel_queued=%d, name='%s'",
-			(int)ve_i, (int)ec->inuse, (void *)ec->client,
-			has_client ? (int)ec->client->pers.connected : -1,
-			has_client ? (int)ec->client->sess.is_a_bot : -1,
-			(int)((ec->svflags & SVF_BOT) != 0),
-			has_client ? (int)ec->client->sess.team : -1,
-			has_client ? (int)ec->client->sess.duel_queued : -1,
-			has_client ? ec->client->resp.netname : "(no client)");
-		if (!ec->inuse || !has_client || !ec->client->pers.connected)
-			continue;
 		if (ec->client->sess.is_a_bot)
 			continue;
 		if (!ClientCanVote(ec->client))
@@ -1192,6 +1218,7 @@ vcmds_t vote_cmds[] = {
 	{"ruleset",				MM_VoteValRuleset,			MM_VotePassRuleset,			2048,	2,	"<q2re|mm|q3a|q2reb|qc>",			"changes the current ruleset"},
 	{"powerups",			MM_VoteValPowerups,			MM_VotePassPowerups,		4096,	2,	"<0/1>",							"enables or disables powerups"},
 	{"friendlyfire",		MM_VoteValFriendlyFire,		MM_VotePassFriendlyFire,	8192,	2,	"<0/1>",							"enables or disables friendly fire (team modes only)"},
+	{"techs",				MM_VoteValTechs,			MM_VotePassTechs,			65536,	2,	"<0/1>",							"enables or disables techs (FFA/TDM/CTF only)"},
 	{"readyall",			MM_VoteValReadyAll,			MM_VotePassReadyAll,		32768,	1,	"",									"ready all players (during ready-up warmup)"},
 	{nullptr,				nullptr,					nullptr,					0,		0,	nullptr,								nullptr},
 };

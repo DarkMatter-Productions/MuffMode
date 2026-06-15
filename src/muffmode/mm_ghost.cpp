@@ -15,19 +15,19 @@ score with the "ghost" command if they lose connection mid-match.
 void MM_Ghost_Assign(gentity_t *ent) {
 	int ghost, i;
 
-	for (ghost = 0; ghost < MAX_CLIENTS; ghost++)
+	for (ghost = 0; ghost < MAX_CLIENTS_KEX; ghost++)
 		if (!level.ghosts[ghost].code)
 			break;
-	if (ghost == MAX_CLIENTS)
+	if (ghost == MAX_CLIENTS_KEX)
 		return;
 	level.ghosts[ghost].team = ent->client->sess.team;
 	level.ghosts[ghost].score = 0;
 	for (;;) {
 		level.ghosts[ghost].code = irandom(10000, 100000);
-		for (i = 0; i < MAX_CLIENTS; i++)
+		for (i = 0; i < MAX_CLIENTS_KEX; i++)
 			if (i != ghost && level.ghosts[i].code == level.ghosts[ghost].code)
 				break;
-		if (i == MAX_CLIENTS)
+		if (i == MAX_CLIENTS_KEX)
 			break;
 	}
 	level.ghosts[ghost].ent = ent;
@@ -67,6 +67,10 @@ void MM_CmdGhost(gentity_t *ent) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "Usage: {} <code>\n", gi.argv(0));
 		return;
 	}
+
+	// throttle code guesses to the flood rate to deter brute-forcing
+	if (CheckFlood(ent))
+		return;
 
 	if (ClientIsPlaying(ent->client)) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "You are already in the game.\n");

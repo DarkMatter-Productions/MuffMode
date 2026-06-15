@@ -184,8 +184,11 @@ float pm_laddermod = 0.5f;
 
 */
 
+// DualFire/haste powerup movement multiplier (gated to non-faithful rulesets server-side)
+constexpr float HASTE_MOVESPEED_SCALE = 1.3f;
+
 static float MaxSpeed(pmove_state_t *ps) {
-	return ps->haste ? pm_maxspeed * 1.3 : pm_maxspeed;
+	return ps->haste ? pm_maxspeed * HASTE_MOVESPEED_SCALE : pm_maxspeed;
 }
 
 /*

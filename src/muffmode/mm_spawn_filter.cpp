@@ -21,6 +21,27 @@ constexpr const char *k_gt_spawn_string[GT_NUM_GAMETYPES] = {
 	"ball"
 };
 
+// Whole-token membership test for the spawn-filter fields, which may be space- or
+// comma-separated (see level-design-guide). Avoids substring collisions (e.g. the GT_CA
+// token "ca" matching inside a "campaign"-tagged entity).
+bool MM_TokenInList(const char *list, const char *token)
+{
+	if (!list || !token || !*token)
+		return false;
+
+	auto is_delim = [](char c) { return c == '\0' || c == ' ' || c == ','; };
+
+	const size_t tlen = strlen(token);
+	for (const char *p = list; (p = strstr(p, token)) != nullptr; p += 1)
+	{
+		const bool at_start = (p == list) || p[-1] == ' ' || p[-1] == ',';
+		const bool at_end = is_delim(p[tlen]);
+		if (at_start && at_end)
+			return true;
+	}
+	return false;
+}
+
 } // namespace
 
 void MM_RemapSpawnClassname(gentity_t *ent)
@@ -69,13 +90,11 @@ bool MM_ShouldInhibitSpawnEntity(gentity_t *ent)
 		return false;
 
 	if (ent->gametype) {
-		const char *s = strstr(ent->gametype, k_gt_spawn_string[g_gametype->integer]);
-		if (!s)
+		if (!MM_TokenInList(ent->gametype, k_gt_spawn_string[g_gametype->integer]))
 			return true;
 	}
 	if (ent->not_gametype) {
-		const char *s = strstr(ent->not_gametype, k_gt_spawn_string[g_gametype->integer]);
-		if (s)
+		if (MM_TokenInList(ent->not_gametype, k_gt_spawn_string[g_gametype->integer]))
 			return true;
 	}
 
@@ -87,13 +106,11 @@ bool MM_ShouldInhibitSpawnEntity(gentity_t *ent)
 		return true;
 
 	if (ent->ruleset) {
-		const char *s = strstr(ent->ruleset, rs_short_name[game.ruleset]);
-		if (!s)
+		if (!MM_TokenInList(ent->ruleset, rs_short_name[game.ruleset]))
 			return true;
 	}
 	if (ent->not_ruleset) {
-		const char *s = strstr(ent->not_ruleset, rs_short_name[game.ruleset]);
-		if (s)
+		if (MM_TokenInList(ent->not_ruleset, rs_short_name[game.ruleset]))
 			return true;
 	}
 

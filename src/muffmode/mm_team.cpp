@@ -164,12 +164,13 @@ AllowTeamSwitch
 =================
 */
 static bool AllowTeamSwitch(gentity_t *ent, team_t desired_team) {
-	/*
-	if (desired_team != ent->client->sess.team && GT(GT_RR) && level.match_state == matchst_t::MATCH_IN_PROGRESS) {
+	// Red Rover: death is the only way to switch teams during a match, so block
+	// manual switches that would let a player dodge the defect mechanic. Leaving to
+	// spectator is still allowed - that's quitting the game, not dodging a defect.
+	if (desired_team != TEAM_SPECTATOR && desired_team != ent->client->sess.team && GT(GT_RR) && level.match_state == matchst_t::MATCH_IN_PROGRESS) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "You cannot change teams during a Red Rover match.\n");
 		return false;
 	}
-	*/
 	if (desired_team != TEAM_SPECTATOR && maxplayers->integer && level.num_playing_human_clients >= maxplayers->integer) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "Maximum player count has been reached.\n");
 		return false; // ignore the request
@@ -243,14 +244,18 @@ int TeamBalance(bool force) {
 	team_t stack_team = level.num_playing_red > level.num_playing_blue ? TEAM_RED : TEAM_BLUE;
 
 	size_t	count = 0;
-	int		index[MAX_CLIENTS_KEX/2];
+	int		index[MAX_CLIENTS_KEX];
 	memset(index, 0, sizeof(index));
 
 	// assemble list of client nums of everyone on stacked team
 	for (auto ec : active_clients()) {
+		if (count >= q_countof(index))
+			break;
 		if (ec->client->sess.team != stack_team)
 			continue;
-		index[count] = ec - g_entities;
+		// store the client number (not the entity number); PlayerSortByJoinTime and
+		// the switch loop below index game.clients[] with this directly.
+		index[count] = ec - g_entities - 1;
 		count++;
 	}
 
@@ -262,11 +267,9 @@ int TeamBalance(bool force) {
 		size_t	i;
 		int switched = 0;
 		gclient_t *cl = nullptr;
-		for (i = 0; i < count, delta > 1; i++) {
+		const team_t new_team = stack_team == TEAM_RED ? TEAM_BLUE : TEAM_RED;
+		for (i = 0; i < count && delta > 1; i++) {
 			cl = &game.clients[index[i]];
-
-			if (!cl)
-				continue;
 
 			if (!cl->pers.connected)
 				continue;
@@ -274,11 +277,12 @@ int TeamBalance(bool force) {
 			if (cl->sess.team != stack_team)
 				continue;
 
-			cl->sess.team = stack_team == TEAM_RED ? TEAM_BLUE : TEAM_RED;
-
-			//TODO: queue this change in round-based games
-			ClientRespawn(&g_entities[cl - game.clients + 1]);
-			gi.LocClient_Print(&g_entities[cl - game.clients + 1], PRINT_CENTER, "You have changed teams to rebalance the game.\n");
+			// Route the switch through SetTeam (force) so CTF flag/skin/follower/captain
+			// state is cleaned up; the old raw `sess.team = ...; ClientRespawn()` left that
+			// state dangling and could crash on a CTF rebalance.
+			gentity_t *sw_ent = &g_entities[index[i] + 1];
+			SetTeam(sw_ent, new_team, false, true, false);
+			gi.LocClient_Print(sw_ent, PRINT_CENTER, "You have changed teams to rebalance the game.\n");
 
 			delta--;
 			switched++;
@@ -313,7 +317,7 @@ bool TeamShuffle() {
 	memset(index, -1, sizeof(index));
 
 	// determine max team size based from active players
-	int maxteam = ceil(level.num_playing_clients / 2);
+	int maxteam = (level.num_playing_clients + 1) / 2;
 	int count_red = 0, count_blue = 0;
 	team_t setteam = join_red ? TEAM_RED : TEAM_BLUE;
 	
@@ -337,7 +341,8 @@ bool TeamShuffle() {
 
 	// set teams
 	for (size_t i = 1; i <= MAX_CLIENTS_KEX; i++) {
-		ent = &g_entities[index[i-1]];
+		// index[] holds client numbers (0..MAX_CLIENTS_KEX-1); client N is entity N+1.
+		ent = &g_entities[index[i-1] + 1];
 		if (!ent)
 			continue;
 		if (!ent->inuse)
@@ -554,7 +559,7 @@ void MM_CmdSetTeam(gentity_t *ent) {
 	}
 
 	if (gi.argc() == 2) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "{} is on {} team.\n", targ->client->resp.netname, gi.argv(0));
+		gi.LocClient_Print(ent, PRINT_HIGH, "{} is on {} team.\n", targ->client->resp.netname, Teams_TeamName(targ->client->sess.team));
 		return;
 	}
 

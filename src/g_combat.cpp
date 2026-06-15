@@ -533,6 +533,10 @@ void T_Damage(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, const 
 		damage *= g_damage_scale->integer;
 	} // mal: just for debugging...
 
+	// horde champion: tapered outgoing-damage buff (weak champions hit hard, heavy ones store <= 1 = no buff)
+	if ((attacker->svflags & SVF_MONSTER) && attacker->monsterinfo.champion_damage_scale > 1.0f)
+		damage = (int)ceil(damage * attacker->monsterinfo.champion_damage_scale);
+
 	client = targ->client;
 
 	// PMM - defender sphere takes half damage
@@ -718,7 +722,8 @@ void T_Damage(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, const 
 			stat_take = targ->health;
 
 		// arena player scoring: 1 point per 100 damage dealt to opponents, capped to 0 health
-		if (GTF(GTF_ARENA) && !OnSameTeam(targ, attacker)) {
+		// (Red Rover scores by frags only, so it opts out of arena damage-scoring)
+		if (GTF(GTF_ARENA) && notGT(GT_RR) && !OnSameTeam(targ, attacker)) {
 			attacker->client->pers.dmg_scorer += stat_take + psave + asave;
 
 			if (attacker->client->pers.dmg_scorer >= 100) {
@@ -905,6 +910,11 @@ void T_RadiusDamage(gentity_t *inflictor, gentity_t *attacker, float damage, gen
 				float kb = points;
 				if (mod.id == MOD_HYPERBLASTER)
 					kb *= 5;
+				// [MuffMode] self rocket-jump: use the ruleset's dedicated knockback base
+				// (RS_Q2RE-equivalent) so RJ height matches q2re while self damage stays lower.
+				else if (ent == attacker && inflictor->splash_knockback > 0 &&
+						 inflictor->owner && inflictor->owner->client)
+					kb = ((float)inflictor->splash_knockback - 0.5f * v.length()) * 0.5f;
 
 				T_Damage(ent, inflictor, attacker, dir, closest_point_to_box(inflictor_center, ent->absmin, ent->absmax), dir, (int)points, (int)kb, dflags | DAMAGE_RADIUS, mod);
 			}

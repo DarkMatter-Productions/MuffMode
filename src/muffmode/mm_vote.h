@@ -38,6 +38,8 @@ void MM_VotePassScorelimit();
 bool MM_VoteValScorelimit(gentity_t *ent);
 void MM_VotePassPowerups();
 bool MM_VoteValPowerups(gentity_t *ent);
+void MM_VotePassTechs();
+bool MM_VoteValTechs(gentity_t *ent);
 void MM_VotePassFriendlyFire();
 bool MM_VoteValFriendlyFire(gentity_t *ent);
 void MM_VotePassShuffleTeams();

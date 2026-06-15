@@ -11,7 +11,7 @@
 constexpr const char *GAMEVERSION = "baseq2";
 
 constexpr const char *GAMEMOD_TITLE = "Muff Mode";
-constexpr const char *GAMEMOD_VERSION = "0.33.10 BETA";
+constexpr const char *GAMEMOD_VERSION = "0.36.02 BETA";
 
 //==================================================================
 
@@ -168,7 +168,7 @@ enum ruleset_t : uint8_t {
 	RS_QC,
 	RS_NUM_RULESETS
 };
-#define RS( x ) game.ruleset == (x)
+#define RS( x ) (game.ruleset == (x))
 
 constexpr const char *rs_short_name[RS_NUM_RULESETS] = {
 	"",
@@ -229,9 +229,9 @@ enum gtf_t {
 
 extern int _gt[GT_NUM_GAMETYPES];
 
-#define GTF( x ) _gt[g_gametype->integer] & (x)
+#define GTF( x ) (_gt[g_gametype->integer] & (x))
 #define GT( x ) (g_gametype->integer == (int)(x))
-#define notGT( x ) g_gametype->integer != (int)(x)
+#define notGT( x ) (g_gametype->integer != (int)(x))
 
 constexpr const char *gt_short_name[GT_NUM_GAMETYPES] = {
 	"cmp",
@@ -1677,10 +1677,9 @@ struct level_locals_t {
 
 	std::string	entstring;
 
-	bool		strike_red_attacks;
-	bool		strike_flag_touch;
-	bool		strike_turn_red;
-	bool		strike_turn_blue;
+	bool		strike_red_attacks;		// team currently on offense this turn
+	bool		strike_flag_touch;		// attackers reached/held the flag this turn (messaging only)
+	int8_t		strike_turn;			// which turn of the current round-pair: 0 = first attacker, 1 = roles swapped
 
 	gtime_t		horde_monster_spawn_time;
 	int32_t		horde_spawn_points_remaining;
@@ -1689,6 +1688,10 @@ struct level_locals_t {
 	gtime_t		horde_mark_time;
 	int16_t		horde_mark_living;
 	float		horde_map_scale_mult; // cached map-size multiplier, 0 = not yet computed
+	int8_t		horde_champions_remaining; // champions left to place this match (per-run roll)
+	bool		horde_champion_pending;    // current wave owes its champion to the next valid spawn
+	int8_t		horde_wave_theme;          // horde_theme_t of the current wave (0 = none)
+	uint32_t	horde_wave_roster;         // bitmask over monsters[] indices, 0 = unrestricted
 
 	char		author[MAX_QPATH];
 	char		author2[MAX_QPATH];
@@ -2129,6 +2132,7 @@ struct monsterinfo_t {
 	gtime_t	  strafe_check_time; // time until we should reconsider strafing
 	int32_t	  base_health; // health that we had on spawn, before any co-op adjustments
 	int32_t   health_scaling; // number of players we've been scaled up to
+	float	  champion_damage_scale; // horde: tapered outgoing-damage multiplier for champions (<= 1 means no buff / not a champion)
 	gtime_t   next_move_time; // high tick rate
 	gtime_t	  bad_move_time; // don't try straight moves until this is over
 	gtime_t	  bump_time; // don't slide against walls for a bit
@@ -2330,7 +2334,6 @@ extern cvar_t *password;
 extern cvar_t *spectator_password;
 extern cvar_t *admin_password;
 extern cvar_t *needpass;
-extern cvar_t *filterban;
 
 extern cvar_t *maxplayers;
 extern cvar_t *minplayers;
@@ -2377,6 +2380,7 @@ extern cvar_t *g_coop_health_scaling;
 extern cvar_t *g_coop_instanced_items;
 extern cvar_t *g_coop_num_lives;
 extern cvar_t *g_horde_lives;
+extern cvar_t *g_horde_start_chainsaw;
 extern cvar_t *g_coop_player_collision;
 extern cvar_t *g_coop_squad_respawn;
 extern cvar_t *g_corpse_sink_time;
@@ -2552,6 +2556,7 @@ void		QuadHog_DoSpawn(gentity_t *ent);
 void		QuadHog_DoReset(gentity_t *ent);
 void		QuadHog_SetupSpawn(gtime_t delay);
 void		QuadHog_Spawn(gitem_t *item, gentity_t *spot, bool reset);
+bool		AllowTechs();
 void		Tech_DeadDrop(gentity_t *ent);
 void		Tech_Reset();
 void		Tech_SetupSpawn();
@@ -2921,7 +2926,7 @@ void fire_handgrenade(gentity_t *self, const vec3_t &start, const vec3_t &aimdir
 	float damage_radius, bool held);
 void rocket_touch(gentity_t *ent, gentity_t *other, const trace_t &tr, bool other_touching_self);
 gentity_t *fire_rocket(gentity_t *self, const vec3_t &start, const vec3_t &dir, int damage, int speed, float damage_radius,
-	int radius_damage);
+	int radius_damage, int splash_knockback = 0);
 void fire_rail(gentity_t *self, const vec3_t &start, const vec3_t &aimdir, int damage, int kick);
 void fire_bfg(gentity_t *self, const vec3_t &start, const vec3_t &dir, int damage, int speed, float damage_radius);
 void fire_ionripper(gentity_t *self, const vec3_t &start, const vec3_t &aimdir, int damage, int speed, effects_t effect);
@@ -3039,7 +3044,6 @@ void player_die(gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int 
 // g_svcmds.cpp
 //
 void ServerCommand();
-bool G_FilterPacket(const char *from);
 
 //
 // p_view.cpp
@@ -3828,6 +3832,7 @@ struct gentity_t {
 	bool	takedamage;
 	int32_t dmg;
 	int32_t splash_damage;
+	int32_t splash_knockback; // [MuffMode] 0 = use splash_damage for knockback (default)
 	float	splash_radius;
 	int32_t sounds; // make this a spawntemp var?
 	int32_t count;

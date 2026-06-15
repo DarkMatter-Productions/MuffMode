@@ -59,11 +59,11 @@ void MM_Duel_MatchEnd_AdjustScores()
 		return;
 
 	int client_num = level.sorted_clients[0];
-	if (game.clients[client_num].pers.connected)
+	if (client_num >= 0 && game.clients[client_num].pers.connected)
 		game.clients[client_num].sess.wins++;
 
 	client_num = level.sorted_clients[1];
-	if (game.clients[client_num].pers.connected) {
+	if (client_num >= 0 && game.clients[client_num].pers.connected) {
 		// handled in SetTeam
 	}
 }
@@ -81,7 +81,10 @@ void MM_Duel_QueueSpectatorBots()
 		if (ec->client->sess.duel_queued)
 			continue;
 
-		SetTeam(ec, TEAM_SPECTATOR, false, true, false);
+		// TEAM_NONE (not TEAM_SPECTATOR) is the signal SetTeam's force path turns into
+		// "spectator + duel_queued"; TEAM_SPECTATOR would re-spectate without queuing,
+		// so MM_Duel_AddPlayer (which only pulls queued spectators) never picks the bot up.
+		SetTeam(ec, TEAM_NONE, false, true, false);
 	}
 }
 
@@ -100,6 +103,7 @@ void MM_Duel_ScoreboardMessage(gentity_t *ent, gentity_t *killer) {
 	int			x, y;
 
 	string.clear();
+	entry.clear();
 
 	fmt::format_to(std::back_inserter(string), FMT_STRING("xv 0 yv -40 cstring2 \"{} on {}\" "), level.gametype_name, level.level_name);
 	fmt::format_to(std::back_inserter(string), FMT_STRING("xv 0 yv -30 cstring2 \"Score Limit: {}\" "), GT_ScoreLimit());
@@ -195,6 +199,9 @@ void MM_Duel_ScoreboardMessage(gentity_t *ent, gentity_t *killer) {
 		k = n = 0;
 		if (string.size() < MAX_STRING_CHARS - 50) {
 			for (i = 0; i < MAX_CLIENTS_KEX; i++) {
+				if (level.sorted_clients[i] < 0)
+					continue;
+
 				cl = &game.clients[level.sorted_clients[i]];
 				cl_ent = g_entities + 1 + level.sorted_clients[i];
 
@@ -248,6 +255,9 @@ void MM_Duel_ScoreboardMessage(gentity_t *ent, gentity_t *killer) {
 		k = n = 0;
 		if (string.size() < MAX_STRING_CHARS - 50) {
 			for (i = 0; i < MAX_CLIENTS_KEX; i++) {
+				if (level.sorted_clients[i] < 0)
+					continue;
+
 				cl = &game.clients[level.sorted_clients[i]];
 				cl_ent = g_entities + 1 + level.sorted_clients[i];
 
@@ -317,7 +327,7 @@ void MM_Duel_CmdForfeit(gentity_t *ent) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "Forfeit is not available during warmup.\n");
 		return;
 	}
-	if (ent->client != &game.clients[level.sorted_clients[1]]) {
+	if (level.sorted_clients[1] < 0 || ent->client != &game.clients[level.sorted_clients[1]]) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "Forfeit is only available to the losing player.\n");
 		return;
 	}

@@ -114,6 +114,9 @@ bool MM_PickupArmor(gentity_t *ent, gentity_t *other)
 		else
 			oldinfo = &bodyarmor_info;
 
+		if (!newinfo)
+			return false;
+
 		if (newinfo->normal_protection > oldinfo->normal_protection) {
 			salvage = oldinfo->normal_protection / newinfo->normal_protection;
 			salvagecount = (int)(salvage * other->client->pers.inventory[old_armor_index]);
@@ -284,7 +287,7 @@ void Tech_ApplyAutoDoc(gentity_t *ent) {
 	float		volume = 1.0;
 	bool		mod = (g_instagib->integer || GT(GT_INSTAGIB)) || (g_nadefest->integer || GT(GT_NADEFEST));
 	bool		no_health = mod || GTF(GTF_ARENA) || g_no_health->integer;
-	int			max = g_vampiric_damage->integer ? ceil(g_vampiric_health_max->integer/2) : mod ? 100 : 150;
+	int			max = g_vampiric_damage->integer ? (g_vampiric_health_max->integer + 1) / 2 : mod ? 100 : 150;
 
 	cl = ent->client;
 	if (!cl)

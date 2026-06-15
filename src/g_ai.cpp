@@ -436,8 +436,9 @@ void FoundTarget(gentity_t *self) {
 	if (!self->monsterinfo.trail_time)
 		self->monsterinfo.attack_finished = level.time + 600_ms;
 
-	// give easy/medium a little more reaction time
-	self->monsterinfo.attack_finished += skill->integer == 0 ? 400_ms : skill->integer == 1 ? 200_ms : 0_ms;
+	// give easy/medium a little more reaction time (aggressive horde champions stay sharp regardless of skill)
+	if (self->monsterinfo.champion_damage_scale <= 1.25f)
+		self->monsterinfo.attack_finished += skill->integer == 0 ? 400_ms : skill->integer == 1 ? 200_ms : 0_ms;
 
 	self->monsterinfo.last_sighting = self->monsterinfo.saved_goal = self->enemy->s.origin;
 	self->monsterinfo.trail_time = level.time;

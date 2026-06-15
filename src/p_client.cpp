@@ -2211,13 +2211,34 @@ void ClientRespawn(gentity_t *ent) {
 			CopyToBodyQue(ent);
 		ent->svflags &= ~SVF_NOCLIENT;
 
+		bool rr_defected = false;
 		if (GT(GT_RR) && level.match_state == matchst_t::MATCH_IN_PROGRESS) {
-			ent->client->sess.team = Teams_OtherTeam(ent->client->sess.team);
-			G_AssignPlayerSkin(ent, ent->client->pers.skin);
+			// Red Rover: defect to the opposing team on death. Only switch while a
+			// teammate remains behind, so the swap never empties a team (which would
+			// stall play, e.g. collapse a 1v1 onto a single team).
+			team_t cur = ent->client->sess.team;
+			int teammates_left = 0;
+
+			for (auto ec : active_clients()) {
+				if (ec == ent || !ClientIsPlaying(ec->client))
+					continue;
+				if (ec->client->sess.team == cur)
+					teammates_left++;
+			}
+
+			if (teammates_left > 0) {
+				ent->client->sess.team = Teams_OtherTeam(cur);
+				G_AssignPlayerSkin(ent, ent->client->pers.skin);
+				rr_defected = true;
+			}
 		}
 
 		ClientSpawn(ent);
 		G_PostRespawn(ent);
+
+		// announce the new team right after spawning so the player knows where they landed
+		if (rr_defected)
+			gi.LocClient_Print(ent, PRINT_CENTER, "You are now on the {} team!", Teams_TeamName(ent->client->sess.team));
 		return;
 	}
 
@@ -3114,12 +3135,28 @@ ClientUserInfoChanged
 called whenever the player updates a userinfo variable.
 ============
 */
+// [MuffMode] Defence-in-depth for names that flow into structured sinks: drop control
+// chars (the engine's layout/format delimiters), quotes and fmt braces so a crafted name
+// can't break out of quoted layout fields or be mistaken for a localization format.
+static void MM_StripUnsafeNameChars(char *s) {
+	char *w = s;
+	for (const char *r = s; *r; r++) {
+		const unsigned char c = (unsigned char)*r;
+		if (c < 0x20 || c == '"' || c == '{' || c == '}')
+			continue;
+		*w++ = (char)c;
+	}
+	*w = '\0';
+}
+
 void ClientUserinfoChanged(gentity_t *ent, const char *userinfo) {
 	char val[MAX_INFO_VALUE] = { 0 };
 
 	// set name
 	if (!gi.Info_ValueForKey(userinfo, "name", ent->client->pers.netname, sizeof(ent->client->pers.netname)))
 		Q_strlcpy(ent->client->pers.netname, "badinfo", sizeof(ent->client->pers.netname));
+
+	MM_StripUnsafeNameChars(ent->client->pers.netname);
 
 	Q_strlcpy(ent->client->resp.netname, ent->client->pers.netname, sizeof(ent->client->resp.netname));
 
@@ -3327,105 +3364,6 @@ gentity_t *ClientChooseSlot(const char *userinfo, const char *social_id, bool is
 	return ClientChooseSlot_Any(ignore, num_ignore);
 }
 
-static inline bool CheckBanned(gentity_t *ent, char *userinfo, const char *social_id) {
-	// currently all bans are in Steamworks, don't bother if not from there
-	if (social_id[0] != 'S')
-		return false;
-
-	// Israel
-	if (!Q_strcasecmp(social_id, "Steamworks-76561198026297488")) {
-		gi.Info_SetValueForKey(userinfo, "rejmsg", "Antisemite detected!\n");
-
-		gentity_t *host = &g_entities[1];
-		if (host && host->client) {
-			if (level.time > host->client->last_banned_message_time + 10_sec) {
-
-				char name[MAX_INFO_VALUE] = { 0 };
-				gi.Info_ValueForKey(userinfo, "name", name, sizeof(name));
-
-				gi.LocClient_Print(host, PRINT_TTS, "ANTISEMITE DETECTED ({})!\n", name);
-				host->client->last_banned_message_time = level.time;
-				gi.LocBroadcast_Print(PRINT_CHAT, "{}: God Bless Palestine\n", name);
-			}
-		}
-
-		gi.local_sound(ent, CHAN_AUTO, gi.soundindex("world/klaxon3.wav"), 1, ATTN_NONE, 0);
-		gi.AddCommandString(G_Fmt("kick {}\n", ent - g_entities - 1).data());
-		return true;
-	}
-
-	// Kirlomax
-	if (!Q_strcasecmp(social_id, "Steamworks-76561198001774610")) {
-		gi.Info_SetValueForKey(userinfo, "rejmsg", "WARNING! KNOWN CHEATER DETECTED\n");
-
-		gentity_t *host = &g_entities[1];
-		if (host && host->client) {
-			if (level.time > host->client->last_banned_message_time + 10_sec) {
-
-				char name[MAX_INFO_VALUE] = { 0 };
-				gi.Info_ValueForKey(userinfo, "name", name, sizeof(name));
-
-				gi.LocClient_Print(host, PRINT_TTS, "WARNING! KNOWN CHEATER DETECTED ({})!\n", name);
-				host->client->last_banned_message_time = level.time;
-				gi.LocBroadcast_Print(PRINT_CHAT, "{}: I am a known cheater, banned from all servers.\n", name);
-			}
-		}
-
-		gi.local_sound(ent, CHAN_AUTO, gi.soundindex("world/klaxon3.wav"), 1, ATTN_NONE, 0);
-		gi.AddCommandString(G_Fmt("kick {}\n", ent - g_entities - 1).data());
-		G_StuffCmd(ent, "disconnect\n");
-		return true;
-	}
-
-	// Model192
-	if (!Q_strcasecmp(social_id, "Steamworks-76561197972296343")) {
-		gi.Info_SetValueForKey(userinfo, "rejmsg", "WARNING! MOANERTONE DETECTED\n");
-
-		gentity_t *host = &g_entities[1];
-		if (host && host->client) {
-			if (level.time > host->client->last_banned_message_time + 10_sec) {
-
-				char name[MAX_INFO_VALUE] = { 0 };
-				gi.Info_ValueForKey(userinfo, "name", name, sizeof(name));
-
-				gi.LocClient_Print(host, PRINT_TTS, "WARNING! MOANERTONE DETECTED ({})!\n", name);
-				host->client->last_banned_message_time = level.time;
-				gi.LocBroadcast_Print(PRINT_CHAT, "{}: Listen up, I have something to moan about.\n", name);
-			}
-		}
-
-		gi.local_sound(ent, CHAN_AUTO, gi.soundindex("world/klaxon3.wav"), 1, ATTN_NONE, 0);
-		gi.AddCommandString(G_Fmt("kick {}\n", ent - g_entities - 1).data());
-		G_StuffCmd(ent, "disconnect\n");
-		return true;
-	}
-
-	// Dalude
-	if (!Q_strcasecmp(social_id, "Steamworks-76561199001991246") || !Q_strcasecmp(social_id, "EOS-07e230c273be4248bbf26c89033923c1")) {
-		ent->client->sess.is_888 = true;
-		gi.Info_SetValueForKey(userinfo, "rejmsg", "Fake 888 Agent detected!\n");
-		gi.Info_SetValueForKey(userinfo, "name", "Fake 888 Agent");
-
-		gentity_t *host = &g_entities[1];
-		if (host && host->client) {
-			if (level.time > host->client->last_banned_message_time + 10_sec) {
-
-				char name[MAX_INFO_VALUE] = { 0 };
-				gi.Info_ValueForKey(userinfo, "name", name, sizeof(name));
-
-				gi.LocClient_Print(host, PRINT_TTS, "FAKE 888 AGENT DETECTED ({})!\n", name);
-				host->client->last_banned_message_time = level.time;
-				gi.LocBroadcast_Print(PRINT_CHAT, "{}: bejesus, what a lovely lobby! certainly better than 888's!\n", name);
-			}
-		}
-		gi.local_sound(ent, CHAN_AUTO, gi.soundindex("world/klaxon3.wav"), 1, ATTN_NONE, 0);
-		gi.AddCommandString(G_Fmt("kick {}\n", ent - g_entities - 1).data());
-		G_StuffCmd(ent, "disconnect\n");
-		return true;
-	}
-	return false;
-}
-
 /*
 ===========
 ClientConnect
@@ -3439,21 +3377,6 @@ loadgames will.
 ============
 */
 bool ClientConnect(gentity_t *ent, char *userinfo, const char *social_id, bool is_bot) {
-#if 0
-	// check to see if they are on the banned IP list
-	char value[MAX_INFO_VALUE] = { 0 };
-	gi.Info_ValueForKey(userinfo, "ip", value, sizeof(value));
-	if (G_FilterPacket(value)) {
-		gi.Info_SetValueForKey(userinfo, "rejmsg", "Banned.");
-		return false;
-	}
-#endif
-	
-#if 0
-	if (!is_bot && CheckBanned(ent, userinfo, social_id))
-		return false;
-#endif
-
 	ent->client->sess.team = deathmatch->integer ? TEAM_NONE : TEAM_FREE;
 
 	// they can connect
@@ -4117,8 +4040,8 @@ void ClientThink(gentity_t *ent, usercmd_t *ucmd) {
 		else
 			client->ps.pmove.pm_flags &= ~PMF_IGNORE_PLAYER_COLLISION;
 
-		// haste support
-		client->ps.pmove.haste = client->pu_time_haste > level.time;
+		// haste support — q2re's DualFire is fire-rate only; movement boost is ruleset-gated
+		client->ps.pmove.haste = (client->pu_time_haste > level.time) && MM_RulesetHasteBoostsMovement();
 
 		// trigger_gravity support
 		client->ps.pmove.gravity = (short)(level.gravity * ent->gravity);

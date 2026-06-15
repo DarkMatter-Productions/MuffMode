@@ -819,7 +819,7 @@ TOUCH(rocket_touch) (gentity_t *ent, gentity_t *other, const trace_t &tr, bool o
 	G_FreeEntity(ent);
 }
 
-gentity_t *fire_rocket(gentity_t *self, const vec3_t &start, const vec3_t &dir, int damage, int speed, float damage_radius, int radius_damage) {
+gentity_t *fire_rocket(gentity_t *self, const vec3_t &start, const vec3_t &dir, int damage, int speed, float damage_radius, int radius_damage, int splash_knockback) {
 	gentity_t *rocket;
 
 	rocket = G_Spawn();
@@ -842,6 +842,7 @@ gentity_t *fire_rocket(gentity_t *self, const vec3_t &start, const vec3_t &dir, 
 	rocket->think = G_FreeEntity;
 	rocket->dmg = damage;
 	rocket->splash_damage = radius_damage;
+	rocket->splash_knockback = splash_knockback;
 	rocket->splash_radius = damage_radius;
 	rocket->s.sound = gi.soundindex("weapons/rockfly.wav");
 	rocket->classname = "rocket";

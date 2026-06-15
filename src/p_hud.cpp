@@ -878,6 +878,10 @@ void G_SetCoopStats(gentity_t *ent) {
 	if (level.match_state == MATCH_IN_PROGRESS) {
 		if (GT(GT_HORDE))
 			ent->client->ps.stats[STAT_MONSTER_COUNT] = level.total_monsters - level.killed_monsters;
+		else if (GT(GT_STRIKE) && ClientIsPlaying(ent->client) && !ent->client->eliminated)
+			// pack this player's attack/defend role into the idle monster-count slot
+			ent->client->ps.stats[STAT_MONSTER_COUNT] =
+				(ent->client->sess.team == (level.strike_red_attacks ? TEAM_RED : TEAM_BLUE)) ? STRIKE_HUD_ATTACKING : STRIKE_HUD_DEFENDING;
 		else
 			ent->client->ps.stats[STAT_MONSTER_COUNT] = 0;
 
@@ -1286,6 +1290,18 @@ void G_SetStats(gentity_t *ent) {
 
 	// Set team_id for client-side team border display
 	ent->client->ps.team_id = (uint8_t)ent->client->sess.team;
+
+	// Red Rover: persistent team logo on the HUD (rendered top-centre by the
+	// statusbar) so the player always knows which side they're on after a defect.
+	// Works on any client since it rides the normal statusbar/stats protocol.
+	if (GT(GT_RR)) {
+		if (ent->client->sess.team == TEAM_RED)
+			ent->client->ps.stats[STAT_CTF_FLAG_PIC] = ii_teams_red_default;
+		else if (ent->client->sess.team == TEAM_BLUE)
+			ent->client->ps.stats[STAT_CTF_FLAG_PIC] = ii_teams_blue_default;
+		else
+			ent->client->ps.stats[STAT_CTF_FLAG_PIC] = 0;
+	}
 
 	//ent->client->ps.stats[STAT_SHOW_STATUSBAR] = ent->client->showscores ? 0 : ent->client->follow_target ? 1 : 0;
 	if (!minhud) {

@@ -13,6 +13,9 @@ constexpr int32_t MM_RULESET_ARMOR_CAP = 150;
 
 // [MuffMode] RS_VANILLA_PLUS and RS_QC health/armor limits.
 bool MM_RulesetHealthArmorCap();
+
+// [MuffMode] Whether the DualFire/haste powerup also boosts movement speed (off for q2re-faithful rulesets).
+bool MM_RulesetHasteBoostsMovement();
 void MM_ClampClientPersistHealthArmor(gclient_t *client);
 void MM_ClampEntityHealthArmor(gentity_t *ent);
 void MM_RulesetQ3AHealthArmorDecay(gentity_t *ent);

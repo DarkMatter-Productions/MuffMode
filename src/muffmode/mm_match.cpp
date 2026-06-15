@@ -10,6 +10,10 @@
 #include "muffmode/mm_team.h"
 #include "monsters/m_player.h"	// corpse frames on match reset
 
+extern cvar_t *g_horde_champions;
+extern cvar_t *g_horde_champion_max_per_run;
+extern cvar_t *g_horde_champion_chance;
+
 static void Monsters_KillAll() {
 	for (size_t i = 0; i < globals.max_entities; i++) {
 		if (!g_entities[i].inuse)
@@ -17,18 +21,19 @@ static void Monsters_KillAll() {
 		if (g_entities[i].svflags & SVF_MONSTER)
 			//if (g_entities[i].health <= 0 || g_entities[i].deadflag || (g_entities[i].svflags & SVF_DEADMONSTER))
 			G_FreeEntity(&g_entities[i]);
-		level.total_monsters = 0;
-		level.killed_monsters = 0;
 	}
+	level.total_monsters = 0;
+	level.killed_monsters = 0;
 }
 
 static void Entities_ItemTeams_Reset() {
 	gentity_t	*ent;
 	size_t		i;
 
-	gentity_t	*master;
-	int			count, choice;
-
+	// Mirror item-team spawn setup (SpawnItem in g_items.cpp): hide every team
+	// member, then let each team master re-run RespawnItem to reveal one. A single
+	// iterator is used; the old code reused `ent` for inner chain walks, which
+	// desynced it from `i` and walked out of bounds on every match reset.
 	for (ent = g_entities + 1, i = 1; i < globals.num_entities; i++, ent++) {
 		if (!ent->inuse)
 			continue;
@@ -39,21 +44,16 @@ static void Entities_ItemTeams_Reset() {
 		if (!ent->team)
 			continue;
 
-		if (!ent->teammaster)
-			continue;
-
-		master = ent->teammaster;
-
 		ent->svflags |= SVF_NOCLIENT;
 		ent->solid = SOLID_NOT;
 		gi.linkentity(ent);
 
-		for (count = 0, ent = master; ent; ent = ent->chain, count++)
-			;
-
-		choice = irandom(count);
-		for (count = 0, ent = master; count < choice; ent = ent->chain, count++)
-			;
+		if (ent == ent->teammaster) {
+			ent->nextthink = level.time + 10_hz;
+			ent->think = RespawnItem;
+		} else {
+			ent->nextthink = 0_sec;
+		}
 	}
 	/*
 	for (ent = g_entities + 1, i = 1; i < globals.num_entities; i++, ent++) {
@@ -308,26 +308,32 @@ static bool Round_StartNew() {
 		Entities_Reset(true, false, false);
 
 	if (GT(GT_STRIKE)) {
-		level.strike_red_attacks ^= true;
+		// A "round" is a pair of turns: each team attacks once. strike_turn tracks which
+		// turn of the pair we're starting (0 = first attacker, 1 = roles swapped). The
+		// match-end gate only fires after turn 1 so both teams get equal attacking turns.
+		if (level.round_number == 0) {
+			// first turn of the match; strike_red_attacks already chosen in Match_Start()
+			level.round_number = 1;
+			level.strike_turn = 0;
+		} else if (level.strike_turn == 0) {
+			// second turn of the same round: swap who attacks
+			level.strike_turn = 1;
+			level.strike_red_attacks ^= true;
+		} else {
+			// both teams have attacked; begin a new round, swap back to first attacker
+			level.round_number++;
+			level.strike_turn = 0;
+			level.strike_red_attacks ^= true;
+		}
 		level.strike_flag_touch = false;
 
-		int round_num;
-		if (level.round_number && (!level.strike_turn_red && level.strike_turn_blue ||
-			level.strike_turn_red && !level.strike_turn_blue))
-			round_num = level.round_number;
-		else {
-			round_num = level.round_number + 1;
-		}
-		BroadcastTeamMessage(TEAM_RED, PRINT_CENTER, G_Fmt("Your team is on {}!\nRound {} - Begins in...", level.strike_red_attacks ? "OFFENSE" : "DEFENSE", round_num).data());
-		BroadcastTeamMessage(TEAM_BLUE, PRINT_CENTER, G_Fmt("Your team is on {}!\nRound {} - Begins in...", !level.strike_red_attacks ? "OFFENSE" : "DEFENSE", round_num).data());
+		BroadcastTeamMessage(TEAM_RED, PRINT_CENTER, G_Fmt("Your team is on {}!\nRound {} - Begins in...", level.strike_red_attacks ? "OFFENSE" : "DEFENSE", level.round_number).data());
+		BroadcastTeamMessage(TEAM_BLUE, PRINT_CENTER, G_Fmt("Your team is on {}!\nRound {} - Begins in...", !level.strike_red_attacks ? "OFFENSE" : "DEFENSE", level.round_number).data());
 	} else {
 		const int round_num = GT(GT_HORDE) ? MM_Horde_CountdownWaveNumber() : (level.round_number + 1);
 		const char *round_label = GT(GT_HORDE) ? "Wave" : "Round";
 
-		if (GT(GT_RR) && roundlimit->integer) {
-			gi.LocBroadcast_Print(PRINT_CENTER, "{} {} of {}\nBegins in...", round_label, round_num, roundlimit->integer);
-		} else
-			gi.LocBroadcast_Print(PRINT_CENTER, "{} {}\nBegins in...", round_label, round_num);
+		gi.LocBroadcast_Print(PRINT_CENTER, "{} {}\nBegins in...", round_label, round_num);
 	}
 
 	AnnouncerSound(world, "round_begins_in", nullptr, false);
@@ -369,7 +375,6 @@ static void SetMatchID() {
 	//level.match_id = gt_short_name_upper[g_gametype->integer];
 	//level.match_id += "-";
 	level.match_id = stime();
-	level.match_id = stime();
 }
 
 /*
@@ -400,6 +405,16 @@ void Match_Start() {
 
 	level.total_player_deaths = 0;
 
+	// Horde: roll this run's champion budget (none/one/two) from independent slot rolls.
+	level.horde_champions_remaining = 0;
+	if (GT(GT_HORDE) && g_horde_champions->integer) {
+		int n = 0;
+		for (int i = 0; i < g_horde_champion_max_per_run->integer; i++)
+			if (frandom() < g_horde_champion_chance->value)
+				n++;
+		level.horde_champions_remaining = static_cast<int8_t>(n);
+	}
+
 	memset(level.ghosts, 0, sizeof(level.ghosts));
 
 	Entities_Reset(true, true, true);
@@ -418,8 +433,11 @@ void Match_Start() {
 
 	gi.LocBroadcast_Print(PRINT_TTS, "Match ID: {}\n", level.match_id.c_str());
 
-	if (GT(GT_STRIKE))
+	if (GT(GT_STRIKE)) {
 		level.strike_red_attacks = brandom();
+		level.strike_turn = 0;
+		level.round_number = 0;
+	}
 
 	if (Round_StartNew())
 		return;
@@ -527,10 +545,6 @@ static void CheckDMRoundState(void) {
 		if (level.round_state_timer > level.time)
 			return;
 
-		if (GT(GT_RR) && level.round_state == roundst_t::ROUND_ENDED) {
-			TeamShuffle();
-		}
-
 		Round_StartNew();
 		return;
 	}
@@ -544,33 +558,18 @@ static void CheckDMRoundState(void) {
 			level.round_state = roundst_t::ROUND_IN_PROGRESS;
 			level.round_state_timer = level.time + gtime_t::from_min(roundtimelimit->value);
 
-			bool turn = false;
-			if (GT(GT_STRIKE)) {
-				if (!level.strike_turn_red && !level.strike_turn_blue) {
-					level.strike_turn_red = level.strike_red_attacks;
-					level.strike_turn_blue = !level.strike_red_attacks;
-				} else if (!level.strike_turn_red && level.strike_red_attacks) {
-					level.strike_turn_red = true;
-					turn = true;
-				} else if (!level.strike_turn_blue && !level.strike_red_attacks) {
-					level.strike_turn_blue = true;
-					turn = true;
-				} else {
-					level.strike_turn_red = level.strike_red_attacks;
-					level.strike_turn_blue = !level.strike_red_attacks;
-				}
-			}
-			if (!turn) {
-				if (GT(GT_HORDE))
-					MM_Horde_AdvanceRoundNumber();
-				else
-					level.round_number++;
-			}
+			// Strike manages round_number/turn in Round_StartNew(); others advance it here.
+			if (GT(GT_HORDE))
+				MM_Horde_AdvanceRoundNumber();
+			else if (!GT(GT_STRIKE))
+				level.round_number++;
+
 			if (GT(GT_STRIKE)) {
 				gi.LocBroadcast_Print(PRINT_CHAT, "Round {}: {} is attacking!\n", level.round_number, Teams_TeamName(level.strike_red_attacks ? TEAM_RED : TEAM_BLUE));
 				const char *msg[2] = { "DEFEND", "CAPTURE" };
 				BroadcastTeamMessage(TEAM_RED, PRINT_CENTER, G_Fmt("Round {} has begun!\n{} THE FLAG!", level.round_number, msg[level.strike_red_attacks]).data());
 				BroadcastTeamMessage(TEAM_BLUE, PRINT_CENTER, G_Fmt("Round {} has begun!\n{} THE FLAG!", level.round_number, msg[!level.strike_red_attacks]).data());
+				AnnouncerSound(world, "fight", nullptr, false);
 			} else if (GT(GT_HORDE)) {
 				MM_Horde_OnRoundStarted();
 			} else {
@@ -610,28 +609,29 @@ static void CheckDMRoundState(void) {
 
 			// check eliminated first
 			if (!count_living_red && count_living_blue) {
-				int points = GT(GT_STRIKE) ? (level.strike_red_attacks ? 0 : 2) : 1;
-				G_AdjustTeamScore(TEAM_BLUE, points);
-				if (GT(GT_STRIKE))
-					gi.LocBroadcast_Print(PRINT_CENTER, "Turn has ended.\n{} successfully {}!\n", Teams_TeamName(TEAM_BLUE), points ? "attacked" : "defended");
-				else {
+				// blue is the last team standing: +1 regardless of role
+				G_AdjustTeamScore(TEAM_BLUE, 1);
+				if (GT(GT_STRIKE)) {
+					// blue attacks when red is not attacking
+					gi.LocBroadcast_Print(PRINT_CENTER, "Turn over!\n{} {}!\n", Teams_TeamName(TEAM_BLUE),
+						!level.strike_red_attacks ? "wiped out the defenders" : "eliminated the attackers");
+				} else {
 					gi.LocBroadcast_Print(PRINT_CENTER, "{} wins the round!\n(eliminated {})\n", Teams_TeamName(TEAM_BLUE), Teams_TeamName(TEAM_RED));
-					AnnouncerSound(world, "blue_wins_round", "ctf/flagcap.wav", true);
 				}
-				//gi.positioned_sound(world->s.origin, world, CHAN_AUTO | CHAN_RELIABLE, gi.soundindex("ctf/flagcap.wav"), 1, ATTN_NONE, 0);
+				AnnouncerSound(world, "blue_wins_round", "ctf/flagcap.wav", true);
 				Round_End();
 				return;
 			}
 			if (!count_living_blue && count_living_red) {
-				int points = GT(GT_STRIKE) ? (!level.strike_red_attacks ? 0 : 2) : 1;
-				G_AdjustTeamScore(TEAM_RED, points);
+				// red is the last team standing: +1 regardless of role
+				G_AdjustTeamScore(TEAM_RED, 1);
 				if (GT(GT_STRIKE)) {
-					gi.LocBroadcast_Print(PRINT_CENTER, "Turn has ended.\n{} successfully {}!\n", Teams_TeamName(TEAM_RED), points ? "attacked" : "defended");
+					gi.LocBroadcast_Print(PRINT_CENTER, "Turn over!\n{} {}!\n", Teams_TeamName(TEAM_RED),
+						level.strike_red_attacks ? "wiped out the defenders" : "eliminated the attackers");
 				} else {
 					gi.LocBroadcast_Print(PRINT_CENTER, "{} wins the round!\n(eliminated {})\n", Teams_TeamName(TEAM_RED), Teams_TeamName(TEAM_BLUE));
-					AnnouncerSound(world, "red_wins_round", "ctf/flagcap.wav", false);
 				}
-				//gi.positioned_sound(world->s.origin, world, CHAN_AUTO | CHAN_RELIABLE, gi.soundindex("ctf/flagcap.wav"), 1, ATTN_NONE, 0);
+				AnnouncerSound(world, "red_wins_round", "ctf/flagcap.wav", false);
 				Round_End();
 				return;
 			}
@@ -641,22 +641,6 @@ static void CheckDMRoundState(void) {
 			if (MM_Horde_UpdateRoundInProgress())
 				Round_End();
 			return;
-
-		case GT_RR:
-			if (!level.num_playing_red || !level.num_playing_blue) {
-				gclient_t *cl = &game.clients[level.sorted_clients[0]];
-
-				gi.Broadcast_Print(PRINT_CENTER, "Round Ends!\n");
-
-				gi.positioned_sound(world->s.origin, world, CHAN_AUTO | CHAN_RELIABLE, gi.soundindex("ctf/flagcap.wav"), 1, ATTN_NONE, 0);
-
-				if (level.round_number + 1 >= roundlimit->integer) {
-					QueueIntermission("MATCH ENDED", false, false);
-				} else
-					Round_End();
-				return;
-			}
-			break;
 
 		}
 
@@ -722,10 +706,11 @@ static void CheckDMRoundState(void) {
 				}
 			} else {
 				if (GT(GT_STRIKE)) {
-					if (level.strike_flag_touch)
-						gi.LocBroadcast_Print(PRINT_CENTER, "Turn has ended.\n{} scored a point!\n", Teams_TeamName(level.strike_red_attacks ? TEAM_RED : TEAM_BLUE));
-					else
-						gi.LocBroadcast_Print(PRINT_CENTER, "Turn has ended.\n{} successfully defended!", Teams_TeamName(!level.strike_red_attacks ? TEAM_RED : TEAM_BLUE));
+					// time expired with the flag uncaptured: the defending team wins the turn
+					team_t defender = level.strike_red_attacks ? TEAM_BLUE : TEAM_RED;
+					G_AdjustTeamScore(defender, 1);
+					gi.LocBroadcast_Print(PRINT_CENTER, "Turn over!\n{} successfully defended!\n", Teams_TeamName(defender));
+					AnnouncerSound(world, defender == TEAM_RED ? "red_wins_round" : "blue_wins_round", "ctf/flagcap.wav", defender == TEAM_BLUE);
 				}
 			}
 			//gi.LocBroadcast_Print(PRINT_CENTER, "{} wins the round!\n", Teams_TeamName(TEAM_BLUE));
@@ -862,6 +847,14 @@ static void CheckDMWarmupState(void) {
 	bool not_enough = false;
 	bool teams_imba = false;
 
+	// Red Rover: a disconnect (or any swap) can collapse everyone onto one team.
+	// Friendly fire is off, so no kills/defects can rebalance it — reshuffle live so
+	// play continues instead of stalemating until the timelimit.
+	if (GT(GT_RR) && level.match_state == matchst_t::MATCH_IN_PROGRESS &&
+		level.num_playing_clients > 1 && (!level.num_playing_red || !level.num_playing_blue)) {
+		TeamShuffle();
+	}
+
 	if (Teams()) {
 		if (g_teamplay_force_balance->integer && abs(level.num_playing_red - level.num_playing_blue) > 1) {
 			teams_imba = true;
@@ -992,7 +985,7 @@ countdown:
 
 				// announce it
 				if ((GT(GT_DUEL) || (level.num_playing_clients == 2 && g_match_lock->integer)) &&
-						&game.clients[level.sorted_clients[0]] && &game.clients[level.sorted_clients[1]])
+						level.sorted_clients[0] >= 0 && level.sorted_clients[1] >= 0)
 					gi.LocBroadcast_Print(PRINT_CENTER, "{} vs {}\nBegins in...", game.clients[level.sorted_clients[0]].resp.netname, game.clients[level.sorted_clients[1]].resp.netname);
 				else
 					gi.LocBroadcast_Print(PRINT_CENTER, "{}\nBegins in...", level.gametype_name);

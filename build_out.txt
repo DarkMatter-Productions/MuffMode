@@ -1,0 +1,127 @@
+'vswhere.exe' is not recognized as an internal or external command,
+operable program or batch file.
+[BUILD] Solution  : src\MuffMode.sln
+[BUILD] Config    : Debug
+[BUILD] Platform  : x64
+[BUILD] Toolset   : v143
+[BUILD] VsDevCmd  : C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\VsDevCmd.bat
+
+MSBuild version 17.14.40+3e7442088 for .NET Framework
+Build started 13/06/2026 11:58:53.
+
+     1>Project "E:\Projects\muffmode\MuffMode\src\MuffMode.sln" on node 1 (default targets).
+     1>ValidateSolutionConfiguration:
+         Building solution configuration "Debug|x64".
+     1>Project "E:\Projects\muffmode\MuffMode\src\MuffMode.sln" (1) is building "E:\Projects\muffmode\MuffMode\src\game.vcxproj" (2) on node 1 (default targets).
+     2>PrepareForBuild:
+         Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
+       InitializeBuildStatus:
+         Creating "game\x64\Debug\game.tlog\unsuccessfulbuild" because "AlwaysCreate" was specified.
+         Touching "game\x64\Debug\game.tlog\unsuccessfulbuild".
+       ClCompile:
+         C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\bin\HostX64\x64\CL.exe /c /IE:\Projects\muffmode\MuffMode\src\ /ZI /JMC /nologo /W3 /WX- /diagnostics:column /sdl /MP /Od /D KEX_Q2_GAME /D KEX_Q2GAME_EXPORTS /D KEX_Q2GAME_DYNAMIC /D _CRT_SECURE_NO_WARNINGS /D _DEBUG /D _CONSOLE /D NO_FMT_SOURCE /D FMT_HEADER_ONLY /D _WINDLL /D _UNICODE /D UNICODE /Gm- /EHsc /RTC1 /MTd /GS /fp:precise /Zc:wchar_t /Zc:forScope /Zc:inline /std:c++17 /permissive- /Fo"game\x64\Debug\\" /Fd"game\x64\Debug\vc143.pdb" /external:W3 /Gd /TP /wd4267 /wd4244 /FC /errorReport:queue muffmode\mm_duel.cpp
+         mm_duel.cpp
+       Link:
+         C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\bin\HostX64\x64\link.exe /ERRORREPORT:QUEUE /OUT:"../game_x64.dll" /INCREMENTAL /ILK:"game\x64\Debug\game_x64.ilk" /NOLOGO /LIBPATH:"E:\Projects\muffmode\MuffMode\src\vcpkg_installed\x64-windows-static\debug\lib" /LIBPATH:"E:\Projects\muffmode\MuffMode\src\vcpkg_installed\x64-windows-static\lib" jsoncpp.lib kernel32.lib user32.lib gdi32.lib winspool.lib comdlg32.lib advapi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib odbc32.lib odbccp32.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /DEBUG /PDB:"../game_x64.pdb" /MAP /TLBID:1 /DYNAMICBASE /NXCOMPAT /IMPLIB:"../game_x64.lib" /MACHINE:X64 /DLL game\x64\Debug\bot_debug.obj
+         game\x64\Debug\bot_exports.obj
+         game\x64\Debug\bot_think.obj
+         game\x64\Debug\bot_utils.obj
+         game\x64\Debug\cg_main.obj
+         game\x64\Debug\cg_screen.obj
+         game\x64\Debug\g_ai.obj
+         game\x64\Debug\g_ai_new.obj
+         game\x64\Debug\g_chase.obj
+         game\x64\Debug\g_cmds.obj
+         game\x64\Debug\g_combat.obj
+         game\x64\Debug\g_ctf.obj
+         game\x64\Debug\g_func.obj
+         game\x64\Debug\g_items.obj
+         game\x64\Debug\g_main.obj
+         game\x64\Debug\g_misc.obj
+         game\x64\Debug\g_monster.obj
+         game\x64\Debug\g_monster_spawn.obj
+         game\x64\Debug\g_phys.obj
+         game\x64\Debug\g_save.obj
+         game\x64\Debug\g_spawn.obj
+         game\x64\Debug\g_svcmds.obj
+         game\x64\Debug\g_target.obj
+         game\x64\Debug\g_trigger.obj
+         game\x64\Debug\g_turret.obj
+         game\x64\Debug\g_utils.obj
+         game\x64\Debug\g_weapon.obj
+         game\x64\Debug\m_actor.obj
+         game\x64\Debug\m_arachnid.obj
+         game\x64\Debug\m_berserk.obj
+         game\x64\Debug\m_boss2.obj
+         game\x64\Debug\m_boss3.obj
+         game\x64\Debug\m_boss31.obj
+         game\x64\Debug\m_boss32.obj
+         game\x64\Debug\m_brain.obj
+         game\x64\Debug\m_carrier.obj
+         game\x64\Debug\m_chick.obj
+         game\x64\Debug\m_fixbot.obj
+         game\x64\Debug\m_flipper.obj
+         game\x64\Debug\m_float.obj
+         game\x64\Debug\m_flyer.obj
+         game\x64\Debug\m_gekk.obj
+         game\x64\Debug\m_gladiator.obj
+         game\x64\Debug\m_guardian.obj
+         game\x64\Debug\m_guncmdr.obj
+         game\x64\Debug\m_gunner.obj
+         game\x64\Debug\m_hover.obj
+         game\x64\Debug\m_infantry.obj
+         game\x64\Debug\m_insane.obj
+         game\x64\Debug\m_medic.obj
+         game\x64\Debug\m_move.obj
+         game\x64\Debug\m_mutant.obj
+         game\x64\Debug\m_parasite.obj
+         game\x64\Debug\m_shambler.obj
+         game\x64\Debug\m_soldier.obj
+         game\x64\Debug\m_stalker.obj
+         game\x64\Debug\m_supertank.obj
+         game\x64\Debug\m_tank.obj
+         game\x64\Debug\m_turret.obj
+         game\x64\Debug\m_widow.obj
+         game\x64\Debug\m_widow2.obj
+         game\x64\Debug\mm_admin.obj
+         game\x64\Debug\mm_captain.obj
+         game\x64\Debug\mm_debug.obj
+         game\x64\Debug\mm_duel.obj
+         game\x64\Debug\mm_gametype.obj
+         game\x64\Debug\mm_ghost.obj
+         game\x64\Debug\mm_horde.obj
+         game\x64\Debug\mm_items_rules.obj
+         game\x64\Debug\mm_maps.obj
+         game\x64\Debug\mm_match.obj
+         game\x64\Debug\mm_menu.obj
+         game\x64\Debug\mm_motd.obj
+         game\x64\Debug\mm_pconfig.obj
+         game\x64\Debug\mm_ruleset.obj
+         game\x64\Debug\mm_ruleset_weapons.obj
+         game\x64\Debug\mm_spawn_filter.obj
+         game\x64\Debug\mm_spawn_loadout.obj
+         game\x64\Debug\mm_statusbar.obj
+         game\x64\Debug\mm_team.obj
+         game\x64\Debug\mm_vote.obj
+         game\x64\Debug\mm_vote_menu.obj
+         game\x64\Debug\p_client.obj
+         game\x64\Debug\p_hud.obj
+         game\x64\Debug\p_menu.obj
+         game\x64\Debug\p_move.obj
+         game\x64\Debug\p_trail.obj
+         game\x64\Debug\p_view.obj
+         game\x64\Debug\p_weapon.obj
+         game\x64\Debug\q_std.obj
+            Creating library ../game_x64.lib and object ../game_x64.exp
+         game.vcxproj -> E:\Projects\muffmode\MuffMode\game_x64.dll
+       FinalizeBuildStatus:
+         Deleting file "game\x64\Debug\game.tlog\unsuccessfulbuild".
+         Touching "game\x64\Debug\game.tlog\game.lastbuildstate".
+     2>Done Building Project "E:\Projects\muffmode\MuffMode\src\game.vcxproj" (default targets).
+     1>Done Building Project "E:\Projects\muffmode\MuffMode\src\MuffMode.sln" (default targets).
+
+Build succeeded.
+    0 Warning(s)
+    0 Error(s)
+
+Time Elapsed 00:00:02.87

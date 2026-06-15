@@ -145,7 +145,11 @@ void MM_ApplySpawnLoadout(gentity_t *ent, gclient_t *client, bool taken_loadout)
 				client->pers.max_ammo[AMMO_DISRUPTOR] = 12;
 				client->pers.max_ammo[AMMO_TESLA] = 5;
 
-				client->pers.inventory[IT_WEAPON_BLASTER] = 1;
+				// Horde can start players on the chainfist instead of the blaster.
+				if (GT(GT_HORDE) && g_horde_start_chainsaw->integer)
+					client->pers.inventory[IT_WEAPON_CHAINFIST] = 1;
+				else
+					client->pers.inventory[IT_WEAPON_BLASTER] = 1;
 			}
 
 			if (deathmatch->integer && game.ruleset != RS_QC) {
