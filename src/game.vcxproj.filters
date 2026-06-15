@@ -141,6 +141,9 @@
     <ClInclude Include="muffmode\mm_ghost.h">
       <Filter>muffmode</Filter>
     </ClInclude>
+    <ClInclude Include="muffmode\mm_command_contracts.h">
+      <Filter>muffmode</Filter>
+    </ClInclude>
     <ClInclude Include="muffmode\mm_maps.h">
       <Filter>muffmode</Filter>
     </ClInclude>
@@ -154,6 +157,15 @@
       <Filter>muffmode</Filter>
     </ClInclude>
     <ClInclude Include="muffmode\mm_motd.h">
+      <Filter>muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="muffmode\mm_parse.h">
+      <Filter>muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="muffmode\mm_profile.h">
+      <Filter>muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="muffmode\mm_red_rover_rules.h">
       <Filter>muffmode</Filter>
     </ClInclude>
     <ClInclude Include="muffmode\mm_team.h">

@@ -3,6 +3,7 @@
 
 #include "g_local.h"
 #include "muffmode/mm_ghost.h"
+#include "muffmode/mm_parse.h"
 
 /*
 ================
@@ -81,7 +82,12 @@ void MM_CmdGhost(gentity_t *ent) {
 		return;
 	}
 
-	n = atoi(gi.argv(1));
+	const auto code = MM_ParseIntArg(gi.argv(1));
+	if (!code) {
+		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid ghost code.\n");
+		return;
+	}
+	n = *code;
 
 	for (i = 0; i < MAX_CLIENTS_KEX; i++) {
 		if (level.ghosts[i].code && level.ghosts[i].code == n) {

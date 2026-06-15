@@ -5,6 +5,7 @@
 #include "muffmode/mm_debug.h"
 #include "muffmode/mm_gametype.h"
 #include "muffmode/mm_maps.h"
+#include "muffmode/mm_parse.h"
 #include "muffmode/mm_team.h"
 
 #include <cstdio>
@@ -52,15 +53,9 @@ bool MM_IsCommentOrEmptyCfgLine(const char *line)
 	return !*line || *line == '#' || (line[0] == '/' && line[1] == '/');
 }
 
-int MM_ParseCfgIntValue(const char *p)
+std::optional<int32_t> MM_ParseCfgIntValue(const char *p)
 {
-	while (*p == ' ' || *p == '\t')
-		p++;
-
-	if (*p == '"')
-		return atoi(p + 1);
-
-	return atoi(p);
+	return MM_ParseCfgIntArg(p);
 }
 
 bool MM_TryParseMaxclientsTarget(const char *line, int *out_target)
@@ -93,7 +88,11 @@ bool MM_TryParseMaxclientsTarget(const char *line, int *out_target)
 		return false;
 
 	p += 10;
-	*out_target = MM_ParseCfgIntValue(p);
+	const auto target = MM_ParseCfgIntValue(p);
+	if (!target)
+		return false;
+
+	*out_target = *target;
 	return true;
 }
 

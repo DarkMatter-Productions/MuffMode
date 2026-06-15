@@ -3,6 +3,7 @@
 #include "g_local.h"
 #include "g_statusbar.h"
 #include "muffmode/mm_duel.h"
+#include "muffmode/mm_red_rover_rules.h"
 #include "muffmode/mm_vote_menu.h"
 
 /*
@@ -604,7 +605,7 @@ void DeathmatchScoreboardMessage(gentity_t *ent, gentity_t *killer) {
 	// rejects with "if with no matching endif" (a fatal C++ throw -> crash to desktop).
 	// Reserve room so the footer always survives. Red Rover makes this easy to hit because
 	// it draws a team-colour tag for every player row (see below), not just the local one.
-	const size_t footer_reserve = level.intermission_time ? 320 : 96;
+	const bool intermission = level.intermission_time != 0_sec;
 
 	for (size_t i = 0; i < total; i++) {
 		cl = &game.clients[level.sorted_clients[i]];
@@ -635,7 +636,7 @@ void DeathmatchScoreboardMessage(gentity_t *ent, gentity_t *killer) {
 			fmt::format_to(std::back_inserter(entry), FMT_STRING("xv {} yv {} picn {} "), x + 16, y + 16, "wheel/p_compass_selected");
 		}
 
-		if (string.length() + entry.length() > MAX_STRING_CHARS - footer_reserve)
+		if (!MM_ScoreboardCanAppend(string.length(), entry.length(), MAX_STRING_CHARS, intermission))
 			break;
 
 		string += entry;
@@ -646,7 +647,7 @@ void DeathmatchScoreboardMessage(gentity_t *ent, gentity_t *killer) {
 			FMT_STRING("client {} {} {} {} {} {} "),
 			x, y, level.sorted_clients[i], cl->resp.score, cl->ping, (int32_t)(level.time - cl->resp.entertime).minutes());
 
-		if (string.length() + entry.length() > MAX_STRING_CHARS - footer_reserve)
+		if (!MM_ScoreboardCanAppend(string.length(), entry.length(), MAX_STRING_CHARS, intermission))
 			break;
 
 		string += entry;

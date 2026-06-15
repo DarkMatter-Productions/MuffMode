@@ -5,6 +5,7 @@
 #include "g_local.h"
 #include "g_debug_log.h"
 // [MuffMode] Team management lives in muffmode/mm_team
+#include "muffmode/mm_profile.h"
 #include "muffmode/mm_team.h"
 #include <cerrno>
 #include <ctime>
@@ -453,6 +454,9 @@ G_TouchTriggers
 ============
 */
 void G_TouchTriggers(gentity_t *ent) {
+	MM_PROFILE_ZONE("G_TouchTriggers");
+	MM_PROFILE_INC(trigger_touch_calls);
+
 	int				num;
 	static gentity_t	*touch[MAX_ENTITIES];
 	gentity_t			*hit;
@@ -463,6 +467,7 @@ void G_TouchTriggers(gentity_t *ent) {
 		return;
 
 	num = gi.BoxEntities(ent->absmin, ent->absmax, touch, MAX_ENTITIES, AREA_TRIGGERS, G_TouchTriggers_BoxFilter, nullptr);
+	MM_PROFILE_ADD(trigger_box_entities, num);
 
 	// be careful, it is possible to have an entity in this
 	// list removed before we get to it (killtriggered)
@@ -476,6 +481,7 @@ void G_TouchTriggers(gentity_t *ent) {
 			if (!strstr(hit->classname, "teleport"))
 				continue;
 
+		MM_PROFILE_INC(trigger_touch_dispatches);
 		hit->touch(hit, ent, null_trace, true);
 	}
 }
@@ -483,14 +489,18 @@ void G_TouchTriggers(gentity_t *ent) {
 // [Paril-KEX] scan for projectiles between our movement positions
 // to see if we need to collide against them
 void G_TouchProjectiles(gentity_t *ent, vec3_t previous_origin) {
+	MM_PROFILE_ZONE("G_TouchProjectiles");
+	MM_PROFILE_INC(projectile_touch_calls);
+
 	struct skipped_projectile {
 		gentity_t *projectile;
 		int32_t		spawn_count;
 	};
-	// a bit ugly, but we'll store projectiles we are ignoring here.
-	static std::vector<skipped_projectile> skipped;
+	static skipped_projectile skipped[MAX_ENTITIES];
+	size_t skipped_count = 0;
 
 	while (true) {
+		MM_PROFILE_INC(projectile_traces);
 		trace_t tr = gi.trace(previous_origin, ent->mins, ent->maxs, ent->s.origin, ent, ent->clipmask | CONTENTS_PROJECTILE);
 
 		if (tr.fraction == 1.0f)
@@ -500,21 +510,28 @@ void G_TouchProjectiles(gentity_t *ent, vec3_t previous_origin) {
 
 		// always skip this projectile since certain conditions may cause the projectile
 		// to not disappear immediately
+		if (skipped_count == ARRAY_LEN(skipped)) {
+			MM_PROFILE_INC(projectile_skip_overflows);
+			break;
+		}
+
 		tr.ent->svflags &= ~SVF_PROJECTILE;
-		skipped.push_back({ tr.ent, tr.ent->spawn_count });
+		skipped[skipped_count++] = { tr.ent, tr.ent->spawn_count };
+		MM_PROFILE_INC(projectile_skipped);
 
 		// if we're both players and it's coop, allow the projectile to "pass" through
 		if (ent->client && tr.ent->owner && tr.ent->owner->client && !G_ShouldPlayersCollide(true))
 			continue;
 
+		MM_PROFILE_INC(projectile_impacts);
 		G_Impact(ent, tr);
 	}
 
-	for (auto &skip : skipped)
-		if (skip.projectile->inuse && skip.projectile->spawn_count == skip.spawn_count)
-			skip.projectile->svflags |= SVF_PROJECTILE;
+	MM_PROFILE_MAX(projectile_max_skipped_per_call, skipped_count);
 
-	skipped.clear();
+	for (size_t i = 0; i < skipped_count; i++)
+		if (skipped[i].projectile->inuse && skipped[i].projectile->spawn_count == skipped[i].spawn_count)
+			skipped[i].projectile->svflags |= SVF_PROJECTILE;
 }
 
 /*
@@ -542,6 +559,9 @@ BoxEntitiesResult_t KillBox_BoxFilter(gentity_t *hit, void *) {
 }
 
 bool KillBox(gentity_t *ent, bool from_spawning, mod_id_t mod, bool bsp_clipping) {
+	MM_PROFILE_ZONE("KillBox");
+	MM_PROFILE_INC(killbox_calls);
+
 	// don't telefrag as spectator or noclip player...
 	if (ent->movetype == MOVETYPE_NOCLIP || ent->movetype == MOVETYPE_FREECAM)
 		return true;
@@ -557,6 +577,7 @@ bool KillBox(gentity_t *ent, bool from_spawning, mod_id_t mod, bool bsp_clipping
 	gentity_t *hit;
 
 	num = gi.BoxEntities(ent->absmin, ent->absmax, touch, MAX_ENTITIES, AREA_SOLID, KillBox_BoxFilter, nullptr);
+	MM_PROFILE_ADD(killbox_box_entities, num);
 
 	if (num > 0)
 		MuffModeLog("TELEFRAG", "KillBox: %d entities in box (spawner=%s, from_spawning=%d, mod=%d)",
@@ -596,6 +617,7 @@ bool KillBox(gentity_t *ent, bool from_spawning, mod_id_t mod, bool bsp_clipping
 				hit->client->pers.netname,
 				(int)mod, (int)from_spawning);
 
+		MM_PROFILE_INC(killbox_damage_events);
 		T_Damage(hit, ent, ent, vec3_origin, ent->s.origin, vec3_origin, 100000, 0, DAMAGE_NO_PROTECTION, mod);
 	}
 

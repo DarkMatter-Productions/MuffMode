@@ -6,11 +6,10 @@
 #include "muffmode/mm_captain.h"
 #include "muffmode/mm_gametype.h"
 #include "muffmode/mm_match.h"
+#include "muffmode/mm_parse.h"
 #include "muffmode/mm_team.h"
 #include "muffmode/mm_vote.h"
 #include "muffmode/mm_vote_menu.h"
-#include <cerrno>
-#include <climits>
 
 namespace {
 bool s_vote_validation_context_active = false;
@@ -65,16 +64,11 @@ const char *MM_VoteArgv(int index)
 
 bool MM_ParseVoteNonNegativeInt(const char *text, int &out)
 {
-	if (!text || text[0] < '0' || text[0] > '9')
+	const auto value = MM_ParseNonNegativeIntArg(text);
+	if (!value)
 		return false;
 
-	errno = 0;
-	char *end = nullptr;
-	unsigned long value = strtoul(text, &end, 10);
-	if (errno == ERANGE || !end || *end != '\0' || value > INT_MAX)
-		return false;
-
-	out = (int)value;
+	out = *value;
 	return true;
 }
 
@@ -632,7 +626,11 @@ void MM_VotePassCointoss()
 
 void MM_VotePassRandom()
 {
-	gi.LocBroadcast_Print(PRINT_HIGH, "The random number is: {}\n", irandom(2, atoi(level.vote_state.arg.data()) + 1));
+	int arg = 0;
+	if (!MM_ParseVoteNonNegativeInt(level.vote_state.arg.data(), arg))
+		return;
+
+	gi.LocBroadcast_Print(PRINT_HIGH, "The random number is: {}\n", irandom(2, arg + 1));
 }
 
 void MM_VotePassUnlagged()

@@ -377,10 +377,6 @@ struct local_game_import_t : game_import_t {
 	inline local_game_import_t(const game_import_t &imports) :
 		game_import_t(imports) {}
 
-private:
-	// shared buffer for wrappers below
-	static char print_buffer[0x10000];
-
 public:
 #ifdef USE_CPP20_FORMAT
 	template<typename... Args>
@@ -393,6 +389,7 @@ public:
 	inline void Com_PrintFmt_(const S &format_str, Args &&... args)
 #endif
 	{
+		char print_buffer[0x10000];
 		G_FmtTo_(print_buffer, format_str, std::forward<Args>(args)...);
 		Com_Print(print_buffer);
 	}
@@ -408,6 +405,7 @@ public:
 	inline void Com_ErrorFmt_(const S &format_str, Args &&... args)
 #endif
 	{
+		char print_buffer[0x10000];
 		G_FmtTo_(print_buffer, format_str, std::forward<Args>(args)...);
 		Com_Error(print_buffer);
 	}
@@ -429,15 +427,14 @@ private:
 			Com_Error("invalid loc argument");
 	}
 
-	static std::array<char[MAX_INFO_STRING], MAX_LOCALIZATION_ARGS> buffers;
-	static std::array<const char *, MAX_LOCALIZATION_ARGS> buffer_ptrs;
-
 public:
 	template<typename... Args>
 	inline void LocClient_Print(gentity_t *e, print_type_t level, const char *base, Args&& ...args) {
 		static_assert(sizeof...(args) < MAX_LOCALIZATION_ARGS, "too many arguments to gi.LocClient_Print");
 		static_assert(((is_valid_loc_embed_v<Args>) && ...), "invalid argument passed to gi.LocClient_Print");
 
+		std::array<char[MAX_INFO_STRING], MAX_LOCALIZATION_ARGS> buffers;
+		std::array<const char *, MAX_LOCALIZATION_ARGS> buffer_ptrs{};
 		size_t n = 0;
 		((loc_embed(args, buffers[n], buffer_ptrs[n]), ++n), ...);
 
@@ -449,6 +446,8 @@ public:
 		static_assert(sizeof...(args) < MAX_LOCALIZATION_ARGS, "too many arguments to gi.LocBroadcast_Print");
 		static_assert(((is_valid_loc_embed_v<Args>) && ...), "invalid argument passed to gi.LocBroadcast_Print");
 
+		std::array<char[MAX_INFO_STRING], MAX_LOCALIZATION_ARGS> buffers;
+		std::array<const char *, MAX_LOCALIZATION_ARGS> buffer_ptrs{};
 		size_t n = 0;
 		((loc_embed(args, buffers[n], buffer_ptrs[n]), ++n), ...);
 
@@ -460,6 +459,8 @@ public:
 		static_assert(sizeof...(args) < MAX_LOCALIZATION_ARGS, "too many arguments to gi.LocCenter_Print");
 		static_assert(((is_valid_loc_embed_v<Args>) && ...), "invalid argument passed to gi.LocCenter_Print");
 
+		std::array<char[MAX_INFO_STRING], MAX_LOCALIZATION_ARGS> buffers;
+		std::array<const char *, MAX_LOCALIZATION_ARGS> buffer_ptrs{};
 		size_t n = 0;
 		((loc_embed(args, buffers[n], buffer_ptrs[n]), ++n), ...);
 

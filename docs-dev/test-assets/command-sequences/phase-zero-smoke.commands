@@ -1,0 +1,6 @@
+# Console/admin command seeds for smoke testing.
+sv test
+sv nextmap
+say phase-zero-smoke
+score
+help

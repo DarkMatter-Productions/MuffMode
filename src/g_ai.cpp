@@ -3,6 +3,7 @@
 // g_ai.c
 
 #include "g_local.h"
+#include "muffmode/mm_profile.h"
 
 bool FindTarget(gentity_t *self);
 bool ai_checkattack(gentity_t *self, float dist);
@@ -334,6 +335,9 @@ returns 1 if the entity is visible to self, even if not infront ()
 =============
 */
 bool visible(gentity_t *self, gentity_t *other, bool through_glass) {
+	MM_PROFILE_ZONE("visible");
+	MM_PROFILE_INC(los_visible_calls);
+
 	// never visible
 	if (other->flags & FL_NOVISIBLE)
 		return false;
@@ -374,6 +378,7 @@ bool visible(gentity_t *self, gentity_t *other, bool through_glass) {
 	if (!through_glass)
 		mask |= CONTENTS_WINDOW;
 
+	MM_PROFILE_INC(los_visible_traces);
 	trace = gi.traceline(spot1, spot2, self, mask);
 	return trace.fraction == 1.0f || trace.ent == other; // PGM
 }

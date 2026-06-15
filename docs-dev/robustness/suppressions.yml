@@ -1,0 +1,13 @@
+# Static-analysis suppressions for MuffMode.
+# Every active suppression must include:
+# - tool: analyzer name, such as clang-tidy, cppcheck, msvc-analyze, codeql
+# - rule: rule/check id
+# - path: narrow file or glob
+# - owner: accountable maintainer
+# - issue: tracking URL or issue id
+# - expires: yyyy-mm-dd review date
+# - reason: short justification
+#
+# Keep this list empty until a finding has been triaged and cannot be fixed
+# promptly without unreasonable churn.
+suppressions: []

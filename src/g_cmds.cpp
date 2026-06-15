@@ -4,12 +4,14 @@
 #include "g_debug_log.h"
 #include "muffmode/mm_admin.h"
 #include "muffmode/mm_captain.h"
+#include "muffmode/mm_command_contracts.h"
 #include "muffmode/mm_duel.h"
 #include "muffmode/mm_ghost.h"
 #include "muffmode/mm_maps.h"
 #include "muffmode/mm_match.h"
 #include "muffmode/mm_menu.h"
 #include "muffmode/mm_motd.h"
+#include "muffmode/mm_parse.h"
 #include "muffmode/mm_pconfig.h"
 #include "muffmode/mm_team.h"
 #include "muffmode/mm_vote.h"
@@ -218,10 +220,16 @@ static void Cmd_Give_f(gentity_t *ent) {
 		give_all = false;
 
 	if (give_all || Q_strcasecmp(gi.argv(1), "health") == 0) {
-		if (gi.argc() == 3)
-			ent->health = atoi(gi.argv(2));
-		else
+		if (gi.argc() == 3) {
+			const auto health = MM_ParseIntArg(gi.argv(2));
+			if (!health) {
+				gi.LocClient_Print(ent, PRINT_HIGH, "Invalid health value.\n");
+				return;
+			}
+			ent->health = *health;
+		} else {
 			ent->health = ent->max_health;
+		}
 		if (!give_all)
 			return;
 	}
@@ -331,8 +339,15 @@ static void Cmd_Give_f(gentity_t *ent) {
 	it_ent = G_Spawn();
 	it_ent->classname = it->classname;
 	SpawnItem(it_ent, it);
-	if (it->flags & IF_AMMO && gi.argc() == 3)
-		it_ent->count = atoi(gi.argv(2));
+	if (it->flags & IF_AMMO && gi.argc() == 3) {
+		const auto count = MM_ParseIntArg(gi.argv(2));
+		if (!count) {
+			gi.LocClient_Print(ent, PRINT_HIGH, "Invalid item count.\n");
+			G_FreeEntity(it_ent);
+			return;
+		}
+		it_ent->count = *count;
+	}
 
 	// since some items don't actually spawn when you say to ..
 	if (!it_ent->inuse)
@@ -409,6 +424,16 @@ argv(3+n) "value"...
 =================
 */
 static void Cmd_Spawn_f(gentity_t *ent) {
+	const int argc = gi.argc();
+	if (!MM_IsSpawnArgcValid(argc)) {
+		gi.LocClient_Print(ent, PRINT_HIGH, "Usage: {} <classname> [<key> <value>]...\n", gi.argv(0));
+		if (argc >= 2)
+			gi.LocClient_Print(ent, PRINT_HIGH, "Spawn arguments must be key/value pairs.\n");
+		return;
+	}
+
+	const int tail_args = argc - 2;
+
 	solid_t backup = ent->solid;
 	ent->solid = SOLID_NOT;
 	gi.linkentity(ent);
@@ -421,8 +446,8 @@ static void Cmd_Spawn_f(gentity_t *ent) {
 
 	st = {};
 
-	if (gi.argc() > 3) {
-		for (int i = 2; i < gi.argc(); i += 2)
+	if (tail_args > 0) {
+		for (int i = 2; i < argc; i += 2)
 			ED_ParseField(gi.argv(i), gi.argv(i + 1), other);
 	}
 
@@ -477,27 +502,38 @@ argv(0) teleport
 argv(1) x
 argv(2) y
 argv(3) z
-argv(4) pitch
-argv(5) yaw
-argv(6) roll
+argv(4) optional pitch
+argv(5) optional yaw
+argv(6) optional roll
 =================
 */
 static void Cmd_Teleport_f(gentity_t *ent) {
-	if (gi.argc() < 4) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "Usage: {} <x> <y> <z> <pitch> <yaw> <roll>\n", gi.argv(0));
+	const int argc = gi.argc();
+	if (!MM_IsTeleportArgcValid(argc)) {
+		gi.LocClient_Print(ent, PRINT_HIGH, "Usage: {} <x> <y> <z> [<pitch> <yaw> <roll>]\n", gi.argv(0));
 		return;
 	}
 
-	ent->s.origin[0] = (float)atof(gi.argv(1));
-	ent->s.origin[1] = (float)atof(gi.argv(2));
-	ent->s.origin[2] = (float)atof(gi.argv(3));
+	const auto x = MM_ParseFloatArg(gi.argv(1));
+	const auto y = MM_ParseFloatArg(gi.argv(2));
+	const auto z = MM_ParseFloatArg(gi.argv(3));
+	if (!x || !y || !z) {
+		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid coordinate(s).\n");
+		return;
+	}
 
-	if (gi.argc() >= 4) {
-		float pitch = (float)atof(gi.argv(4));
-		float yaw = (float)atof(gi.argv(5));
-		float roll = (float)atof(gi.argv(6));
-		vec3_t ang{ pitch, yaw, roll };
+	ent->s.origin = vec3_t{ *x, *y, *z };
 
+	if (argc == 7) {
+		const auto pitch = MM_ParseFloatArg(gi.argv(4));
+		const auto yaw = MM_ParseFloatArg(gi.argv(5));
+		const auto roll = MM_ParseFloatArg(gi.argv(6));
+		if (!pitch || !yaw || !roll) {
+			gi.LocClient_Print(ent, PRINT_HIGH, "Invalid angle(s).\n");
+			return;
+		}
+
+		const vec3_t ang{ *pitch, *yaw, *roll };
 		ent->client->ps.pmove.delta_angles = (ang - ent->client->resp.cmd_angles);
 		ent->client->ps.viewangles = {};
 		ent->client->v_angle = {};
@@ -588,7 +624,12 @@ static void Cmd_Use_f(gentity_t *ent) {
 	const char	*cmd = gi.argv(0);
 
 	if (!Q_strcasecmp(cmd, "use_index") || !Q_strcasecmp(cmd, "use_index_only")) {
-		it = GetItemByIndex((item_id_t)atoi(s));
+		const auto item_index = MM_ParseIntArg(s);
+		if (!item_index) {
+			gi.LocClient_Print(ent, PRINT_HIGH, "Invalid item index.\n");
+			return;
+		}
+		it = GetItemByIndex((item_id_t)*item_index);
 	} else {
 		if (!strcmp(s, "holdable")) {
 			if (ent->client->pers.inventory[IT_AMMO_NUKE])
@@ -679,7 +720,12 @@ static void Cmd_Drop_f(gentity_t *ent) {
 	const char *cmd = gi.argv(0);
 
 	if (!Q_strcasecmp(cmd, "drop_index")) {
-		it = GetItemByIndex((item_id_t)atoi(s));
+		const auto item_index = MM_ParseIntArg(s);
+		if (!item_index) {
+			gi.LocClient_Print(ent, PRINT_HIGH, "Invalid item index.\n");
+			return;
+		}
+		it = GetItemByIndex((item_id_t)*item_index);
 	} else {
 		it = FindItem(s);
 	}
@@ -1305,7 +1351,15 @@ Cmd_Wave_f
 =================
 */
 static void Cmd_Wave_f(gentity_t *ent) {
-	int i = atoi(gi.argv(1));
+	int i = GESTURE_POINT;
+	if (gi.argc() > 1) {
+		const auto gesture = MM_ParseIntArg(gi.argv(1));
+		if (!gesture) {
+			gi.LocClient_Print(ent, PRINT_HIGH, "Invalid gesture value.\n");
+			return;
+		}
+		i = *gesture;
+	}
 
 	// no dead or noclip waving
 	if (ent->deadflag || ent->movetype == MOVETYPE_NOCLIP)
@@ -1563,19 +1617,31 @@ static void Cmd_ListEntities_f(gentity_t *ent) {
 			if (!strstr(e->classname, gi.argv(1)))
 				continue;
 		}
-		if (gi.argc() > 2) {
-			float num = atof(gi.argv(3));
-			if (e->s.origin[0] != num)
-				continue;
-		}
 		if (gi.argc() > 3) {
-			float num = atof(gi.argv(4));
-			if (e->s.origin[1] != num)
+			const auto num = MM_ParseFloatArg(gi.argv(3));
+			if (!num) {
+				gi.LocClient_Print(ent, PRINT_HIGH, "Invalid X filter.\n");
+				return;
+			}
+			if (e->s.origin[0] != *num)
 				continue;
 		}
 		if (gi.argc() > 4) {
-			float num = atof(gi.argv(5));
-			if (e->s.origin[2] != num)
+			const auto num = MM_ParseFloatArg(gi.argv(4));
+			if (!num) {
+				gi.LocClient_Print(ent, PRINT_HIGH, "Invalid Y filter.\n");
+				return;
+			}
+			if (e->s.origin[1] != *num)
+				continue;
+		}
+		if (gi.argc() > 5) {
+			const auto num = MM_ParseFloatArg(gi.argv(5));
+			if (!num) {
+				gi.LocClient_Print(ent, PRINT_HIGH, "Invalid Z filter.\n");
+				return;
+			}
+			if (e->s.origin[2] != *num)
 				continue;
 		}
 

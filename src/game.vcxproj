@@ -155,6 +155,7 @@
     <ClInclude Include="monsters\m_widow2.h" />
     <ClInclude Include="muffmode\mm_admin.h" />
     <ClInclude Include="muffmode\mm_captain.h" />
+    <ClInclude Include="muffmode\mm_command_contracts.h" />
     <ClInclude Include="muffmode\mm_debug.h" />
     <ClInclude Include="muffmode\mm_duel.h" />
     <ClInclude Include="muffmode\mm_gametype.h" />
@@ -165,7 +166,10 @@
     <ClInclude Include="muffmode\mm_match.h" />
     <ClInclude Include="muffmode\mm_menu.h" />
     <ClInclude Include="muffmode\mm_motd.h" />
+    <ClInclude Include="muffmode\mm_parse.h" />
     <ClInclude Include="muffmode\mm_pconfig.h" />
+    <ClInclude Include="muffmode\mm_profile.h" />
+    <ClInclude Include="muffmode\mm_red_rover_rules.h" />
     <ClInclude Include="muffmode\mm_ruleset.h" />
     <ClInclude Include="muffmode\mm_ruleset_weapons.h" />
     <ClInclude Include="muffmode\mm_spawn_filter.h" />
@@ -272,6 +276,7 @@
     <ClCompile Include="p_weapon.cpp" />
     <ClCompile Include="q_std.cpp" />
   </ItemGroup>
+  <Import Project="ci.analysis.props" Condition="exists('ci.analysis.props')" />
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>

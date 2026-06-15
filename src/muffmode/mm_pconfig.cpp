@@ -3,6 +3,7 @@
 
 #include "g_local.h"
 #include "muffmode/mm_pconfig.h"
+#include "muffmode/mm_parse.h"
 
 //=======================================================================
 // PLAYER CONFIGS
@@ -158,7 +159,12 @@ MM_CmdKillBeep
 void MM_CmdKillBeep(gentity_t *ent) {
 	int num = 0;
 	if (gi.argc() > 1) {
-		num = atoi(gi.argv(1));
+		const auto parsed = MM_ParseIntArg(gi.argv(1));
+		if (!parsed) {
+			gi.LocClient_Print(ent, PRINT_HIGH, "Invalid kill beep value.\n");
+			return;
+		}
+		num = *parsed;
 		if (num < 0)
 			num = 0;
 		else if (num > 4)

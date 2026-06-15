@@ -1,0 +1,8 @@
+{
+  "purpose": "Synthetic save/load parser seed for phase-zero asset-pack validation. This is not a real Quake II Rerelease save.",
+  "formatVersion": 1,
+  "game": {},
+  "level": {},
+  "entities": [],
+  "clients": []
+}

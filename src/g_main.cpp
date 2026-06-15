@@ -11,6 +11,8 @@
 #include "muffmode/mm_maps.h"
 #include "muffmode/mm_match.h"
 #include "muffmode/mm_motd.h"
+#include "muffmode/mm_profile.h"
+#include "muffmode/mm_red_rover_rules.h"
 #include "muffmode/mm_team.h"
 #include "muffmode/mm_vote.h"
 #include "bots/bot_includes.h"
@@ -28,11 +30,6 @@ game_locals_t  game;
 level_locals_t level;
 
 local_game_import_t  gi;
-
-/*static*/ char local_game_import_t::print_buffer[0x10000];
-
-/*static*/ std::array<char[MAX_INFO_STRING], MAX_LOCALIZATION_ARGS> local_game_import_t::buffers;
-/*static*/ std::array<const char *, MAX_LOCALIZATION_ARGS> local_game_import_t::buffer_ptrs;
 
 game_export_t  globals;
 spawn_temp_t   st;
@@ -734,6 +731,7 @@ static void InitGame() {
 	// initialize all clients for this game
 	game.maxclients = maxclients->integer;
 	game.clients = (gclient_t *)gi.TagMalloc(game.maxclients * sizeof(game.clients[0]), TAG_GAME);
+	memset(game.clients, 0, game.maxclients * sizeof(game.clients[0]));
 	globals.num_entities = game.maxclients + 1;
 
 	// how far back we should support lag origins for
@@ -1208,14 +1206,14 @@ void CalculateRanks() {
 	if (level.match_state == MATCH_IN_PROGRESS) {
 		if (GTF(GTF_FRAGS)) {
 			//gi.Com_PrintFmt("new={} old={}\n", game.clients[level.sorted_clients[0]].resp.score, old_first_score);
-			if (fraglimit->integer > 3) {
-				int score_diff = fraglimit->integer - game.clients[level.sorted_clients[0]].resp.score;
-				// frag_warning has 3 entries (1/2/3 frags to go). Once the leader reaches
-				// the limit score_diff is <= 0, so guard the lower bound or score_diff-1
-				// indexes frag_warning[-1] and corrupts the adjacent field (crash on match end).
-				if (score_diff >= 1 && score_diff <= 3 && !level.frag_warning[score_diff - 1]) {
+			// frag_warning has 3 entries (1/2/3 frags to go). Once the leader reaches
+			// the limit score_diff is <= 0, so guard the lower bound or score_diff-1
+			// indexes frag_warning[-1] and corrupts the adjacent field (crash on match end).
+			if (const auto warning_index = MM_FragWarningIndex(fraglimit->integer, game.clients[level.sorted_clients[0]].resp.score)) {
+				const int score_diff = static_cast<int>(*warning_index) + 1;
+				if (!level.frag_warning[*warning_index]) {
 					AnnouncerSound(world, G_Fmt("{}_frag{}", score_diff, score_diff > 1 ? "s" : "").data(), nullptr, false);
-					level.frag_warning[score_diff - 1] = true;
+					level.frag_warning[*warning_index] = true;
 					CheckDMExitRules();
 					return;
 				}
@@ -1583,7 +1581,7 @@ void CheckDMExitRules() {
 		return;
 	}
 
-	bool teams = Teams() && notGT(GT_RR);
+	bool teams = MM_UseTeamScoreLimit(Teams(), GT(GT_RR));
 	
 	if (teams && g_teamplay_force_balance->integer) {
 		if (abs(level.num_playing_red - level.num_playing_blue) > 1) {
@@ -2179,6 +2177,14 @@ Advances the world by 0.1 seconds
 ================
 */
 static inline void G_RunFrame_(bool main_loop) {
+	MM_PROFILE_ZONE("G_RunFrame_");
+	MM_PROFILE_INC(frame_runs);
+
+	if (main_loop)
+		MM_PROFILE_INC(frame_main_loop_runs);
+	else
+		MM_PROFILE_INC(frame_non_main_loop_runs);
+
 	if (level.in_frame)
 		MuffModeLog("ERROR", "G_RunFrame_: re-entrant call detected! (main_loop=%d)", main_loop);
 	level.in_frame = true;
@@ -2269,6 +2275,8 @@ static inline void G_RunFrame_(bool main_loop) {
 	//
 	gentity_t *ent = &g_entities[0];
 	for (size_t i = 0; i < globals.num_entities; i++, ent++) {
+		MM_PROFILE_INC(frame_entities_visited);
+
 		if (!ent->inuse) {
 			// defer removing client info so that disconnected, etc works
 			if (i > 0 && i <= game.maxclients) {
@@ -2309,10 +2317,12 @@ static inline void G_RunFrame_(bool main_loop) {
 		Entity_UpdateState(ent);
 
 		if (i > 0 && i <= game.maxclients) {
+			MM_PROFILE_INC(frame_clients_visited);
 			ClientBeginServerFrame(ent);
 			continue;
 		}
 
+		MM_PROFILE_INC(frame_nonclients_visited);
 		G_RunEntity(ent);
 	}
 
@@ -2370,15 +2380,21 @@ static inline bool G_AnyClientsSpawned() {
 }
 
 void G_RunFrame(bool main_loop) {
-	if (main_loop && !G_AnyClientsSpawned())
+	MM_PROFILE_ZONE("G_RunFrame");
+
+	const bool any_clients_spawned = G_AnyClientsSpawned();
+
+	if (main_loop && !any_clients_spawned) {
+		MM_PROFILE_INC(frame_no_client_skips);
 		return;
+	}
 
 	for (size_t i = 0; i < g_frames_per_frame->integer; i++)
 		G_RunFrame_(main_loop);
 
 	// match details.. only bother if there's at least 1 player in-game
 	// and not already end of game
-	if (G_AnyClientsSpawned() && !level.intermission_time) {
+	if (main_loop && any_clients_spawned && !level.intermission_time) {
 		constexpr gtime_t report_time = 45_sec;
 
 		if (level.time - level.next_match_report > report_time) {
@@ -2386,6 +2402,8 @@ void G_RunFrame(bool main_loop) {
 			G_ReportMatchDetails(false);
 		}
 	}
+
+	MM_PROFILE_FRAME_MARK("G_RunFrame");
 }
 
 /*

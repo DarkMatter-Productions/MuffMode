@@ -1,0 +1,3 @@
+# Cppcheck suppressions are intentionally empty.
+# Add active suppressions only with a matching entry in
+# docs-dev/robustness/suppressions.yml.

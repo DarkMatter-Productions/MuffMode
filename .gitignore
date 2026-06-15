@@ -81,6 +81,8 @@ StyleCopReport.xml
 *.ilk
 *.meta
 *.obj
+*.o
+*.d
 *.iobj
 *.pch
 *.pdb
@@ -423,6 +425,14 @@ src/vcpkg_installed/
 
 # Local Q2RE source copy
 /q2re-src/
+
+# Local build transcripts
+build_out.txt
+/build/
+/analysis-results/
+/compile_commands.json
+/tests/host/bin/
+/tests/host/obj/
 
 # Local security audit (not for the repo)
 docs/AUDIT.md

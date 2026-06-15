@@ -22,7 +22,9 @@
 // - backwards & forwards compatible with this same format
 // - I wrote this initially when the codebase was in C, so it
 //   does have some C-isms in here.
-constexpr size_t SAVE_FORMAT_VERSION = 1;
+constexpr uint32_t SAVE_FORMAT_VERSION = 1;
+constexpr uint32_t SAVE_FORMAT_MIN_READ_VERSION = 1;
+constexpr uint32_t SAVE_FORMAT_MAX_READ_VERSION = SAVE_FORMAT_VERSION;
 
 #include <unordered_map>
 
@@ -2189,6 +2191,28 @@ static Json::Value parseJson(const char *jsonString) {
 	return json;
 }
 
+static uint32_t ValidateSaveFormatVersion(const Json::Value &json, const char *scope) {
+	const Json::Value &version = json["save_version"];
+
+	if (version.isNull())
+		gi.Com_ErrorFmt("{} JSON is missing required save_version", scope);
+
+	if (!version.isUInt())
+		gi.Com_ErrorFmt("{} JSON save_version must be an unsigned integer", scope);
+
+	const uint32_t save_version = version.asUInt();
+
+	if (save_version < SAVE_FORMAT_MIN_READ_VERSION || save_version > SAVE_FORMAT_MAX_READ_VERSION) {
+		gi.Com_ErrorFmt("{} JSON save_version {} is unsupported; supported range is {}..{}",
+			scope,
+			save_version,
+			SAVE_FORMAT_MIN_READ_VERSION,
+			SAVE_FORMAT_MAX_READ_VERSION);
+	}
+
+	return save_version;
+}
+
 static char *saveJson(const Json::Value &json, size_t *out_size) {
 	Json::StreamWriterBuilder builder;
 	builder["indentation"] = "\t";
@@ -2239,9 +2263,10 @@ void PrecacheInventoryItems();
 // takes in pointer to JSON data. does
 // not store or modify it.
 void ReadGameJson(const char *jsonString) {
-	gi.FreeTags(TAG_GAME);
-
 	Json::Value json = parseJson(jsonString);
+	ValidateSaveFormatVersion(json, "game");
+
+	gi.FreeTags(TAG_GAME);
 
 	uint32_t max_entities = game.maxentities;
 	uint32_t max_clients = game.maxclients;
@@ -2321,11 +2346,12 @@ char *WriteLevelJson(bool transition, size_t *out_size) {
 // takes in pointer to JSON data. does
 // not store or modify it.
 void ReadLevelJson(const char *jsonString) {
+	Json::Value json = parseJson(jsonString);
+	ValidateSaveFormatVersion(json, "level");
+
 	// free any dynamic memory allocated by loading the level
 	// base state
 	gi.FreeTags(TAG_LEVEL);
-
-	Json::Value json = parseJson(jsonString);
 
 	// wipe all the entities
 	memset(g_entities, 0, game.maxentities * sizeof(g_entities[0]));

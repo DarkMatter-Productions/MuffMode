@@ -38,6 +38,8 @@
 | Build maps or entity overrides for Muff Mode | [Level Design Guide](docs/level-design-guide.md) |
 | Build or publish the Windows updater | [Updater Guide](docs/updater-guide.md) |
 | Compile the DLL from source | [Build Guide](docs/build-guide.md) |
+| Reproduce hardening, test, analysis, fuzz, and release gates | [Hardening Guide](docs/hardening-guide.md) |
+| Review license and dependency notices | [Licensing](docs/licensing.md) and [Dependency Policy](docs/dependencies.md) |
 | Prepare and publish a release package | [Release Process](docs/release-process.md) |
 
 <h2 align="center">Quick Install</h2>
@@ -85,4 +87,4 @@ The software is provided "as is" without warranty of any kind. **Muff Mode** req
 
 ---
 
-See [LICENSE](LICENSE) for license details.
+See [LICENSE](LICENSE), [Licensing](docs/licensing.md), and [Third-Party Notices](THIRD_PARTY_NOTICES.md) for license details.

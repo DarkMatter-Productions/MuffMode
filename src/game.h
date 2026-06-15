@@ -5,7 +5,9 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
 #include <limits.h>
+#include <type_traits>
 
 // compatibility with legacy float[3] stuff for engine
 #ifdef GAME_INCLUDE
@@ -1751,16 +1753,27 @@ struct entity_shared_t
 	gentity_t *owner;
 };
 
-#define CHECK_INTEGRITY(from_type, to_type, member)                           \
-    static_assert(offsetof(from_type, member) == offsetof(to_type, member) && \
-                      sizeof(from_type::member) == sizeof(to_type::member),   \
-                  "structure malformed; not compatible with server: check member \"" #member "\"")
+#define CHECK_INTEGRITY(from_type, to_type, member)                                                \
+	static_assert(offsetof(from_type, member) == offsetof(to_type, member),                         \
+		"structure malformed; not compatible with server: check offset of member \"" #member "\""); \
+	static_assert(sizeof(from_type::member) == sizeof(to_type::member),                             \
+		"structure malformed; not compatible with server: check size of member \"" #member "\"");   \
+	static_assert(alignof(decltype(from_type::member)) == alignof(decltype(to_type::member)),       \
+		"structure malformed; not compatible with server: check alignment of member \"" #member "\"")
+
+#define CHECK_SHARED_PREFIX(from_type, to_type)                                                            \
+	static_assert(sizeof(to_type) <= sizeof(from_type),                                                     \
+		"structure malformed; shared server prefix is larger than game structure: " #to_type);             \
+	static_assert(alignof(to_type) <= alignof(from_type),                                                   \
+		"structure malformed; shared server prefix has stricter alignment than game structure: " #to_type)
 
 #define CHECK_GCLIENT_INTEGRITY                       \
+    CHECK_SHARED_PREFIX(gclient_t, gclient_shared_t); \
     CHECK_INTEGRITY(gclient_t, gclient_shared_t, ps); \
     CHECK_INTEGRITY(gclient_t, gclient_shared_t, ping)
 
 #define CHECK_ENTITY_INTEGRITY                               \
+    CHECK_SHARED_PREFIX(gentity_t, entity_shared_t);          \
     CHECK_INTEGRITY(gentity_t, entity_shared_t, s);            \
     CHECK_INTEGRITY(gentity_t, entity_shared_t, client);       \
     CHECK_INTEGRITY(gentity_t, entity_shared_t, sv);           \

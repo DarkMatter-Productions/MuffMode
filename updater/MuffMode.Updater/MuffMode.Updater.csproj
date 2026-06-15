@@ -11,5 +11,8 @@
     <ApplicationIcon>Assets\MuffModeLauncher.ico</ApplicationIcon>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <Version>0.1.0</Version>
+    <Authors>DarkMatter Productions</Authors>
+    <RepositoryUrl>https://github.com/DarkMatter-Productions/MuffMode</RepositoryUrl>
+    <PackageLicenseExpression>GPL-2.0-only</PackageLicenseExpression>
   </PropertyGroup>
 </Project>

@@ -13,6 +13,7 @@ muffmode-<version>-beta/
   README.html
   CHANGELOG.md
   LICENSE
+  THIRD_PARTY_NOTICES.md
   MuffModeUpdater.exe
   rerelease/
     baseq2/
@@ -81,7 +82,7 @@ packaging/release-assets/
       maps/*.bsp
 ```
 
-The script copies these files into the generated package, then overwrites/adds the built DLL, `README.html`, and `CHANGELOG.md`.
+The script copies these files into the generated package, then overwrites/adds the built DLL, `README.html`, `CHANGELOG.md`, `LICENSE`, and `THIRD_PARTY_NOTICES.md`.
 
 ## Build A Local Package
 
@@ -110,7 +111,7 @@ Installer behavior:
 | GOG | `C:\GOG Games\Quake II` |
 | Custom or another library | User-selected folder |
 
-The installer checks Steam's install registry and `libraryfolders.vdf`, Epic Games Store manifest files, and GOG registry/common install locations before showing the store choices. It displays whether Steam, Epic Games Store, or GOG was detected and shows the selected path before the folder page. It still offers an **Other location** choice for custom libraries. The installer shows the project license, lets users browse after choosing a preset, warns if `rerelease\baseq2` is not found, corrects accidental `rerelease` or `baseq2` folder selection back to the outer Quake II folder, prompts users to close applications holding files open, offers Desktop and Start menu shortcuts for the updater and launcher, and backs up an existing `rerelease\baseq2\game_x64.dll` under `rerelease\baseq2\MuffModeBackups` before replacing it.
+The installer checks Steam's install registry and `libraryfolders.vdf`, Epic Games Store manifest files, and GOG registry/common install locations before showing the store choices. It displays whether Steam, Epic Games Store, or GOG was detected and shows the selected path before the folder page. It still offers an **Other location** choice for custom libraries. The installer shows the project license, lets users browse after choosing a preset, warns if `rerelease\baseq2` is not found, corrects accidental `rerelease` or `baseq2` folder selection back to the outer Quake II folder, prompts users to close applications holding files open, offers Desktop and Start menu shortcuts for the updater and launcher, and backs up an existing `rerelease\baseq2\game_x64.dll` under `rerelease\baseq2\MuffModeBackups` before replacing it. The installed root also includes `THIRD_PARTY_NOTICES.md`.
 
 Silent installer runs should pass `/DIR="C:\Path\To\Quake 2"` explicitly. In silent mode the installer preserves the supplied destination and refuses to continue unless it points at an outer Quake II folder containing `rerelease\baseq2`.
 
@@ -131,6 +132,10 @@ Use the **Release Muff Mode** workflow in GitHub Actions for normal releases. It
 GitHub's workflow graph shows jobs, not individual steps. This workflow is intentionally split into visible release jobs: **Preflight**, **Resolve Version**, **Build And Package**, **Publish GitHub Release**, and **Announce On Discord**.
 
 Use the separate **Validate Release Workflow** action when you only want to verify workflow startup and version resolution. It never builds, publishes, or announces a release, which keeps dry-run validation out of the actual release graph.
+
+## Release Go/No-Go
+
+Before publishing, run the hardening gates in [Hardening Guide](hardening-guide.md). A release is blocked if dependency notices are stale, generated artifacts are tracked, required tests fail, CodeQL/analysis findings are untriaged, sanitizer support regresses, or the package is missing `LICENSE` / `THIRD_PARTY_NOTICES.md`.
 
 Required repository secrets:
 
