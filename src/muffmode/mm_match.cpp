@@ -847,6 +847,16 @@ static void CheckDMWarmupState(void) {
 	bool not_enough = false;
 	bool teams_imba = false;
 
+	// Red Rover: never let a connected client sit uninitialised (TEAM_NONE) during a
+	// live match - that strands them off every team (grey tag, missing from the
+	// scoreboard) and skews the counts the reshuffle relies on. Deliberate spectators
+	// (TEAM_SPECTATOR) are left alone; leaving the match is allowed.
+	if (GT(GT_RR) && level.match_state == matchst_t::MATCH_IN_PROGRESS) {
+		for (auto ec : active_clients())
+			if (ec->client && ec->client->pers.connected && ec->client->sess.team == TEAM_NONE)
+				SetTeam(ec, PickTeam(-1), false, false, false);
+	}
+
 	// Red Rover: a disconnect (or any swap) can collapse everyone onto one team.
 	// Friendly fire is off, so no kills/defects can rebalance it — reshuffle live so
 	// play continues instead of stalemating until the timelimit.

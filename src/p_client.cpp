@@ -2226,7 +2226,9 @@ void ClientRespawn(gentity_t *ent) {
 					teammates_left++;
 			}
 
-			if (teammates_left > 0) {
+			// only a player on an actual team can defect; guard against a corrupt team
+			// value so Teams_OtherTeam() can never strand someone on spectator.
+			if (teammates_left > 0 && (cur == TEAM_RED || cur == TEAM_BLUE)) {
 				ent->client->sess.team = Teams_OtherTeam(cur);
 				G_AssignPlayerSkin(ent, ent->client->pers.skin);
 				rr_defected = true;
@@ -3752,56 +3754,53 @@ static bool ClientInactivityTimer(gentity_t *ent) {
 		ent->client->sess.inactivity_warning = false;
 		return true;
 	}
+
+	// Any input activity this frame: held buttons, movement, freshly pressed buttons,
+	// or a meaningful view-angle change (>1 degree, to ignore tiny jitter).
+	auto client_has_input = [](gentity_t *e) -> bool {
+		if (e->client->buttons)
+			return true;
+		if (e->client->cmd.forwardmove != 0 || e->client->cmd.sidemove != 0)
+			return true;
+		if (e->client->latched_buttons)
+			return true;
+		const float angle_threshold = 1.0f;
+		const gvec3_t &current_angles = e->client->cmd.angles;
+		const vec3_t &prev_angles = e->client->resp.cmd_angles;
+		auto angle_diff = [](float a, float b) -> float {
+			float diff = a - b;
+			while (diff > 180.0f)
+				diff -= 360.0f;
+			while (diff < -180.0f)
+				diff += 360.0f;
+			return fabsf(diff);
+		};
+		return angle_diff(current_angles[0], prev_angles[0]) > angle_threshold ||
+			angle_diff(current_angles[1], prev_angles[1]) > angle_threshold;
+	};
+
+	// Red Rover: an inactivity drop sends a player to spectator with sess.inactive set.
+	// The moment they're active again, fold them back onto a team automatically so they
+	// aren't stranded off every team (grey tag, missing from the scoreboard) for the rest
+	// of the match. A deliberate spectator has sess.inactive == false and is left alone.
+	if (GT(GT_RR) && level.match_state == matchst_t::MATCH_IN_PROGRESS && deathmatch->integer &&
+		!ent->client->sess.is_a_bot && ent->client->sess.team == TEAM_SPECTATOR &&
+		ent->client->sess.inactive && client_has_input(ent)) {
+		SetTeam(ent, PickTeam(-1), false, false, false);
+		return true;
+	}
+
 	if (!deathmatch->integer || !cv || !ClientIsPlaying(ent->client) || ent->client->eliminated || ent->client->sess.is_a_bot || ent->s.number == 0) {
 		// give everyone some time, so if the operator sets g_inactivity during
 		// gameplay, everyone isn't kicked
 		ent->client->sess.inactivity_time = level.time + 1_min;
 		ent->client->sess.inactivity_warning = false;
 	} else {
-		// Check for ANY input activity, not just newly pressed buttons
-		// This prevents false positives when players are actively playing but
-		// only holding movement keys or moving the mouse
-		bool has_input = false;
-		
-		// Check for any button currently pressed
-		if (ent->client->buttons)
-			has_input = true;
-		
-		// Check for movement input (forward/backward or strafe left/right)
-		if (ent->client->cmd.forwardmove != 0 || ent->client->cmd.sidemove != 0)
-			has_input = true;
-		
-		// Check for newly pressed buttons (existing check)
-		if (ent->client->latched_buttons)
-			has_input = true;
-		
-		// Check for view angle changes (mouse movement)
-		// Compare current command angles with previous frame's angles
-		// Use a threshold of 1.0 degree to avoid false positives from tiny movements
-		if (!has_input) {
-			const float angle_threshold = 1.0f;
-			const gvec3_t &current_angles = ent->client->cmd.angles;
-			const vec3_t &prev_angles = ent->client->resp.cmd_angles;
-			
-			// Calculate angular difference for pitch and yaw
-			// Handle angle wrapping by normalizing to -180 to 180 range
-			auto angle_diff = [](float a, float b) -> float {
-				float diff = a - b;
-				// Normalize to -180 to 180 range
-				while (diff > 180.0f)
-					diff -= 360.0f;
-				while (diff < -180.0f)
-					diff += 360.0f;
-				return fabsf(diff);
-			};
-			
-			// Check pitch (index 0) and yaw (index 1) for significant changes
-			if (angle_diff(current_angles[0], prev_angles[0]) > angle_threshold ||
-				angle_diff(current_angles[1], prev_angles[1]) > angle_threshold) {
-				has_input = true;
-			}
-		}
-		
+		// Check for ANY input activity, not just newly pressed buttons. This prevents
+		// false positives when players are actively playing but only holding movement
+		// keys or moving the mouse.
+		bool has_input = client_has_input(ent);
+
 		if (has_input) {
 			ent->client->sess.inactivity_time = level.time + cv;
 			ent->client->sess.inactivity_warning = false;
