@@ -847,6 +847,14 @@ static void CheckDMWarmupState(void) {
 	bool not_enough = false;
 	bool teams_imba = false;
 
+	// Red Rover: a disconnect (or any swap) can collapse everyone onto one team.
+	// Friendly fire is off, so no kills/defects can rebalance it — reshuffle live so
+	// play continues instead of stalemating until the timelimit.
+	if (GT(GT_RR) && level.match_state == matchst_t::MATCH_IN_PROGRESS &&
+		level.num_playing_clients > 1 && (!level.num_playing_red || !level.num_playing_blue)) {
+		TeamShuffle();
+	}
+
 	if (Teams()) {
 		if (g_teamplay_force_balance->integer && abs(level.num_playing_red - level.num_playing_blue) > 1) {
 			teams_imba = true;
