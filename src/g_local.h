@@ -11,7 +11,7 @@
 constexpr const char *GAMEVERSION = "baseq2";
 
 constexpr const char *GAMEMOD_TITLE = "Muff Mode";
-constexpr const char *GAMEMOD_VERSION = "0.36.05 BETA";
+constexpr const char *GAMEMOD_VERSION = "0.36.5";
 
 //==================================================================
 
@@ -4342,4 +4342,5 @@ template<> cached_imageindex *cached_imageindex::head;
 
 extern cached_modelindex sm_meat_index;
 extern cached_soundindex snd_fry;
+
 
