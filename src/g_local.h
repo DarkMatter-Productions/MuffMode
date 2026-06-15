@@ -11,7 +11,7 @@
 constexpr const char *GAMEVERSION = "baseq2";
 
 constexpr const char *GAMEMOD_TITLE = "Muff Mode";
-constexpr const char *GAMEMOD_VERSION = "0.36.01 BETA";
+constexpr const char *GAMEMOD_VERSION = "0.36.02 BETA";
 
 //==================================================================
 

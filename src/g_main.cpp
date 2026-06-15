@@ -1700,7 +1700,10 @@ void CheckDMExitRules() {
 		}
 	} else {
 		for (auto ec : active_clients()) {
-			if (ec->client->sess.team != TEAM_FREE)
+			// FFA players are TEAM_FREE; Red Rover scores individually but its players
+			// are on TEAM_RED/TEAM_BLUE, so gate on "is playing" rather than TEAM_FREE
+			// or the score/frag limit would never end an RR match.
+			if (!ClientIsPlaying(ec->client))
 				continue;
 
 			if (ec->client->resp.score >= scorelimit) {
@@ -2033,9 +2036,6 @@ void ExitLevel() {
 	// for N64 mainly, but if we're directly changing to "victorXXX.pcx" then
 	// end game
 	size_t start_offset = (level.changemap[0] == '*' ? 1 : 0);
-
-	if (GT(GT_RR) && level.num_playing_clients > 1 && (!level.num_playing_red || !level.num_playing_blue))
-		TeamShuffle();
 
 	MuffModeLog("DEBUG", "ExitLevel: issuing gamemap command for '%s'", level.changemap);
 	if (map_len > (6 + start_offset) &&

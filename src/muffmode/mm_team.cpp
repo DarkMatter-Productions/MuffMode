@@ -165,8 +165,9 @@ AllowTeamSwitch
 */
 static bool AllowTeamSwitch(gentity_t *ent, team_t desired_team) {
 	// Red Rover: death is the only way to switch teams during a match, so block
-	// manual switches that would let a player dodge the defect mechanic.
-	if (desired_team != ent->client->sess.team && GT(GT_RR) && level.match_state == matchst_t::MATCH_IN_PROGRESS) {
+	// manual switches that would let a player dodge the defect mechanic. Leaving to
+	// spectator is still allowed - that's quitting the game, not dodging a defect.
+	if (desired_team != TEAM_SPECTATOR && desired_team != ent->client->sess.team && GT(GT_RR) && level.match_state == matchst_t::MATCH_IN_PROGRESS) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "You cannot change teams during a Red Rover match.\n");
 		return false;
 	}
