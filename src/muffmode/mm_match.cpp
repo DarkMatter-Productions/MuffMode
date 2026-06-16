@@ -32,6 +32,11 @@ static gclient_t *MM_MatchSortedConnectedClient(size_t slot)
 	return client;
 }
 
+static bool MM_IsConnectedClientEntity(gentity_t *ent)
+{
+	return ent && ent->inuse && ent->client && ent->client->pers.connected;
+}
+
 static void Monsters_KillAll() {
 	for (size_t i = 0; i < globals.max_entities; i++) {
 		if (!g_entities[i].inuse)
@@ -507,9 +512,9 @@ static bool CheckReady() {
 	if (!g_dm_do_readyup->integer)
 		return true;
 
-	uint8_t count_ready, count_humans, count_bots;
-
-	count_ready = count_humans = count_bots = 0;
+	int count_ready = 0;
+	int count_humans = 0;
+	int count_bots = 0;
 	for (auto ec : active_clients()) {
 		if (!ClientIsPlaying(ec->client))
 			continue;
@@ -540,7 +545,8 @@ static bool CheckReady() {
 		return false;
 
 	// start if over min ready percentile
-	if (((float)count_ready / (float)count_humans) * 100.0f >= g_warmup_ready_percentage->value * 100.0f)
+	const float ready_percentage = clamp(g_warmup_ready_percentage->value, 0.0f, 1.0f);
+	if (((float)count_ready / (float)count_humans) >= ready_percentage)
 		return true;
 
 	return false;
@@ -752,9 +758,14 @@ static void CheckDMCountdown(void) {
 
 	gtime_t base = (level.round_state == roundst_t::ROUND_COUNTDOWN) ? level.round_state_timer : level.match_state_timer;
 	int t = (base + 1_sec - level.time).seconds<int>();
+	if (t <= 0) {
+		if (level.countdown_check)
+			level.countdown_check = 0_sec;
+		return;
+	}
 
 	if (!level.countdown_check || level.countdown_check.seconds<int>() > t) {
-		if (t > 0 && (!(t % 10) || t < 10)) {
+		if (!(t % 10) || t < 10) {
 			AnnouncerSound(world, nullptr, G_Fmt("world/{}{}.wav", t, t >= 20 ? "sec" : "").data(), false);
 			//gi.positioned_sound(world->s.origin, world, CHAN_AUTO | CHAN_RELIABLE, gi.soundindex(G_Fmt("world/{}{}.wav", t, t >= 20 ? "sec" : "").data()), 1, ATTN_NONE, 0);
 			if (t <= 3) {
@@ -782,6 +793,11 @@ static void CheckDMMatchEndWarning(void) {
 	}
 
 	int t = (level.match_time + gtime_t::from_min(timelimit->value) - level.time).seconds<int>();	// +1;
+	if (t <= 0) {
+		if (level.matchendwarn_check)
+			level.matchendwarn_check = 0_sec;
+		return;
+	}
 
 	if (!level.matchendwarn_check || level.matchendwarn_check.seconds<int>() > t) {
 		if (t && (t == 30 || t == 20 || t <= 10)) {
@@ -1068,6 +1084,9 @@ Ends a timeout session.
 ==================
 */
 void MM_CmdTimeIn(gentity_t *ent) {
+	if (!MM_IsConnectedClientEntity(ent))
+		return;
+
 	if (!MM_IsExactArgcValid(gi.argc(), 1)) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "Usage: {}\n", gi.argv(0));
 		return;
@@ -1077,6 +1096,10 @@ void MM_CmdTimeIn(gentity_t *ent) {
 		gi.Client_Print(ent, PRINT_HIGH, "A timeout is not currently in effect.\n");
 		return;
 	}
+
+	if (level.timeout_ent && !MM_IsConnectedClientEntity(level.timeout_ent))
+		level.timeout_ent = nullptr;
+
 	if (!ent->client->sess.admin && level.timeout_ent != ent) {
 		gi.Client_Print(ent, PRINT_HIGH, "The timeout can only be ended by the timeout caller or an admin.\n");
 		return;
@@ -1094,6 +1117,9 @@ Calls a timeout session.
 ==================
 */
 void MM_CmdTimeOut(gentity_t *ent) {
+	if (!MM_IsConnectedClientEntity(ent))
+		return;
+
 	if (!MM_IsExactArgcValid(gi.argc(), 1)) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "Usage: {}\n", gi.argv(0));
 		return;

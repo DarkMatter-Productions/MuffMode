@@ -815,7 +815,7 @@ void MM_Horde_NotifyEliminatedSpectator(gentity_t *ent)
 		return;
 	if (level.round_state != roundst_t::ROUND_IN_PROGRESS)
 		return;
-	if (!ent->client || !ent->client->eliminated)
+	if (!ent || !ent->client || !ent->client->eliminated)
 		return;
 	if (ent->client->sess.team == TEAM_SPECTATOR)
 		return;
@@ -832,7 +832,7 @@ void MM_Horde_OnPlayerDeath(gentity_t *ent)
 		return;
 	if (level.round_state != roundst_t::ROUND_IN_PROGRESS)
 		return;
-	if (!ent->client || !ClientIsPlaying(ent->client))
+	if (!ent || !ent->client || !ClientIsPlaying(ent->client))
 		return;
 
 	if (ent->client->pers.lives > 0)

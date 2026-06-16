@@ -2,6 +2,9 @@
 // Licensed under the GNU General Public License 2.0.
 // g_misc.c
 
+#include <cerrno>
+#include <limits>
+
 #include "g_local.h"
 
 /*QUAKED func_group (0 0 0) ? x x x x x x x x NOT_EASY NOT_MEDIUM NOT_HARD NOT_DM NOT_COOP
@@ -467,7 +470,14 @@ Default _cone value is 10 (used to set size of light for spotlights)
 constexpr spawnflags_t SPAWNFLAG_LIGHT_START_OFF = 1_spawnflag;
 constexpr spawnflags_t SPAWNFLAG_LIGHT_ALLOW_IN_DM = 2_spawnflag;
 
+static bool LightStyleIndexIsValid(int32_t style) {
+	return style >= 0 && style < static_cast<int32_t>(MAX_LIGHTSTYLES);
+}
+
 static USE(light_use) (gentity_t *self, gentity_t *other, gentity_t *activator) -> void {
+	if (!LightStyleIndexIsValid(self->style))
+		return;
+
 	if (self->spawnflags.has(SPAWNFLAG_LIGHT_START_OFF)) {
 		gi.configstring(CS_LIGHTS + self->style, self->style_on);
 		self->spawnflags &= ~SPAWNFLAG_LIGHT_START_OFF;
@@ -489,8 +499,71 @@ struct shadow_light_info_t {
 
 static shadow_light_info_t shadowlightinfo[MAX_SHADOW_LIGHTS];
 
+static size_t ShadowLightCount() {
+	if (level.shadow_light_count <= 0) {
+		return 0;
+	}
+
+	return min(static_cast<size_t>(level.shadow_light_count), MAX_SHADOW_LIGHTS);
+}
+
+static bool ParseWholeIntToken(const char *token, int &out) {
+	if (token == nullptr || token[0] == '\0') {
+		return false;
+	}
+
+	char *end = nullptr;
+	errno = 0;
+	const long value = strtol(token, &end, 10);
+	if (end == token || *end != '\0' || errno == ERANGE) {
+		return false;
+	}
+
+	out = static_cast<int>(clamp(value,
+		static_cast<long>(std::numeric_limits<int>::min()),
+		static_cast<long>(std::numeric_limits<int>::max())));
+	return true;
+}
+
+static bool ParseWholeFloatToken(const char *token, float &out) {
+	if (token == nullptr || token[0] == '\0') {
+		return false;
+	}
+
+	char *end = nullptr;
+	errno = 0;
+	const float value = strtof(token, &end);
+	if (end == token || *end != '\0' || errno == ERANGE || !std::isfinite(value)) {
+		return false;
+	}
+
+	out = value;
+	return true;
+}
+
+static bool ShadowLightEntityIndexIsValid(int entity_number) {
+	return entity_number > 0 && static_cast<uint32_t>(entity_number) < globals.num_entities;
+}
+
+static const char *LightStyleStringOrDefault(const char *value, const char *default_value) {
+	if (value == nullptr || value[0] == '\0') {
+		return default_value;
+	}
+
+	if (value[0] < '0' || value[0] > '9') {
+		return value;
+	}
+
+	int style_index = 0;
+	if (!ParseWholeIntToken(value, style_index) || style_index < 0 || style_index >= static_cast<int>(MAX_LIGHTSTYLES)) {
+		return default_value;
+	}
+
+	return gi.get_configstring(CS_LIGHTS + style_index);
+}
+
 const shadow_light_data_t *GetShadowLightData(int32_t entity_number) {
-	for (size_t i = 0; i < level.shadow_light_count; i++) {
+	for (size_t i = 0; i < ShadowLightCount(); i++) {
 		if (shadowlightinfo[i].entity_number == entity_number)
 			return &shadowlightinfo[i].shadowlight;
 	}
@@ -499,7 +572,12 @@ const shadow_light_data_t *GetShadowLightData(int32_t entity_number) {
 }
 
 void setup_shadow_lights() {
-	for (int i = 0; i < level.shadow_light_count; ++i) {
+	for (size_t i = 0; i < ShadowLightCount(); ++i) {
+		if (!ShadowLightEntityIndexIsValid(shadowlightinfo[i].entity_number)) {
+			gi.configstring(CS_SHADOWLIGHTS + i, "");
+			continue;
+		}
+
 		gentity_t *self = &g_entities[shadowlightinfo[i].entity_number];
 
 		shadowlightinfo[i].shadowlight.lighttype = shadow_light_type_t::point;
@@ -540,46 +618,32 @@ void setup_shadow_lights() {
 // if the spawn functions are changed.
 // this will work without changing the save/load code.
 void G_LoadShadowLights() {
-	for (size_t i = 0; i < level.shadow_light_count; i++) {
+	for (size_t i = 0; i < ShadowLightCount(); i++) {
 		const char *cstr = gi.get_configstring(CS_SHADOWLIGHTS + i);
-		const char *token = COM_ParseEx(&cstr, ";");
+		shadow_light_info_t loaded{};
+		int light_type = 0;
 
-		if (token && *token) {
-			shadowlightinfo[i].entity_number = atoi(token);
-
-			token = COM_ParseEx(&cstr, ";");
-			shadowlightinfo[i].shadowlight.lighttype = (shadow_light_type_t)atoi(token);
-
-			token = COM_ParseEx(&cstr, ";");
-			shadowlightinfo[i].shadowlight.radius = atof(token);
-
-			token = COM_ParseEx(&cstr, ";");
-			shadowlightinfo[i].shadowlight.resolution = atoi(token);
-
-			token = COM_ParseEx(&cstr, ";");
-			shadowlightinfo[i].shadowlight.intensity = atof(token);
-
-			token = COM_ParseEx(&cstr, ";");
-			shadowlightinfo[i].shadowlight.fade_start = atof(token);
-
-			token = COM_ParseEx(&cstr, ";");
-			shadowlightinfo[i].shadowlight.fade_end = atof(token);
-
-			token = COM_ParseEx(&cstr, ";");
-			shadowlightinfo[i].shadowlight.lightstyle = atoi(token);
-
-			token = COM_ParseEx(&cstr, ";");
-			shadowlightinfo[i].shadowlight.coneangle = atof(token);
-
-			token = COM_ParseEx(&cstr, ";");
-			shadowlightinfo[i].shadowlight.conedirection[0] = atof(token);
-
-			token = COM_ParseEx(&cstr, ";");
-			shadowlightinfo[i].shadowlight.conedirection[1] = atof(token);
-
-			token = COM_ParseEx(&cstr, ";");
-			shadowlightinfo[i].shadowlight.conedirection[2] = atof(token);
+		if (!ParseWholeIntToken(COM_ParseEx(&cstr, ";"), loaded.entity_number) ||
+			!ShadowLightEntityIndexIsValid(loaded.entity_number) ||
+			!ParseWholeIntToken(COM_ParseEx(&cstr, ";"), light_type) ||
+			!ParseWholeFloatToken(COM_ParseEx(&cstr, ";"), loaded.shadowlight.radius) ||
+			!ParseWholeIntToken(COM_ParseEx(&cstr, ";"), loaded.shadowlight.resolution) ||
+			!ParseWholeFloatToken(COM_ParseEx(&cstr, ";"), loaded.shadowlight.intensity) ||
+			!ParseWholeFloatToken(COM_ParseEx(&cstr, ";"), loaded.shadowlight.fade_start) ||
+			!ParseWholeFloatToken(COM_ParseEx(&cstr, ";"), loaded.shadowlight.fade_end) ||
+			!ParseWholeIntToken(COM_ParseEx(&cstr, ";"), loaded.shadowlight.lightstyle) ||
+			!ParseWholeFloatToken(COM_ParseEx(&cstr, ";"), loaded.shadowlight.coneangle) ||
+			!ParseWholeFloatToken(COM_ParseEx(&cstr, ";"), loaded.shadowlight.conedirection[0]) ||
+			!ParseWholeFloatToken(COM_ParseEx(&cstr, ";"), loaded.shadowlight.conedirection[1]) ||
+			!ParseWholeFloatToken(COM_ParseEx(&cstr, ";"), loaded.shadowlight.conedirection[2])) {
+			shadowlightinfo[i] = {};
+			continue;
 		}
+
+		loaded.shadowlight.lighttype = light_type == static_cast<int>(shadow_light_type_t::cone) ?
+			shadow_light_type_t::cone :
+			shadow_light_type_t::point;
+		shadowlightinfo[i] = loaded;
 	}
 }
 // ---------------------------------------------------------------------------------
@@ -587,6 +651,11 @@ void G_LoadShadowLights() {
 static void setup_dynamic_light(gentity_t *self) {
 	// [Sam-KEX] Shadow stuff
 	if (st.sl.data.radius > 0) {
+		if (level.shadow_light_count < 0 || level.shadow_light_count >= static_cast<int32_t>(MAX_SHADOW_LIGHTS)) {
+			gi.Com_PrintFmt("{}: too many shadow lights; ignoring {}\n", __FUNCTION__, *self);
+			return;
+		}
+
 		self->s.renderfx = RF_CASTSHADOW;
 		self->itemtarget = st.sl.lightstyletarget;
 
@@ -624,22 +693,18 @@ void SP_light(gentity_t *self) {
 		return;
 	}
 
-	if (self->style >= 32) {
+	if (self->style >= 32 && LightStyleIndexIsValid(self->style)) {
 		self->use = light_use;
 
-		if (!self->style_on || !*self->style_on)
-			self->style_on = "m";
-		else if (*self->style_on >= '0' && *self->style_on <= '9')
-			self->style_on = gi.get_configstring(CS_LIGHTS + atoi(self->style_on));
-		if (!self->style_off || !*self->style_off)
-			self->style_off = "a";
-		else if (*self->style_off >= '0' && *self->style_off <= '9')
-			self->style_off = gi.get_configstring(CS_LIGHTS + atoi(self->style_off));
+		self->style_on = LightStyleStringOrDefault(self->style_on, "m");
+		self->style_off = LightStyleStringOrDefault(self->style_off, "a");
 
 		if (self->spawnflags.has(SPAWNFLAG_LIGHT_START_OFF))
 			gi.configstring(CS_LIGHTS + self->style, self->style_off);
 		else
 			gi.configstring(CS_LIGHTS + self->style, self->style_on);
+	} else if (self->style >= static_cast<int32_t>(MAX_LIGHTSTYLES)) {
+		gi.Com_PrintFmt("{}: invalid lightstyle {}; light will not toggle\n", *self, self->style);
 	}
 
 	setup_dynamic_light(self);
@@ -2221,7 +2286,15 @@ static THINK(info_world_text_think) (gentity_t *self) -> void {
 	}
 
 	if (deathmatch->integer && self->spawnflags.has(SPAWNFLAG_WORLD_TEXT_LEADER_BOARD)) {
-		gentity_t *e = &g_entities[level.sorted_clients[0] + 1];
+		gentity_t *e = nullptr;
+		const int leader_index = level.sorted_clients[0];
+		const size_t entity_count = min(static_cast<size_t>(globals.num_entities), static_cast<size_t>(game.maxentities));
+		if (g_entities && leader_index >= 0 && static_cast<size_t>(leader_index) < game.maxclients) {
+			const size_t leader_entity_index = static_cast<size_t>(leader_index) + 1;
+			if (leader_entity_index < entity_count)
+				e = &g_entities[leader_entity_index];
+		}
+
 		if (level.match_state == matchst_t::MATCH_WARMUP_READYUP)
 			s = G_Fmt("Welcome to Muff Mode\nKindly ready the fuck up...").data();
 		else if (level.match_state <= matchst_t::MATCH_WARMUP_DEFAULT)
@@ -2231,15 +2304,19 @@ static THINK(info_world_text_think) (gentity_t *self) -> void {
 				e->client->resp.netname, e->client->resp.score).data();
 	}
 
+	const char *draw_text = (s && s[0]) ? s : self->message;
+	if (!draw_text)
+		draw_text = "";
+
 	if (self->s.angles[YAW] == -3.0f) {
-		gi.Draw_OrientedWorldText(self->s.origin, (s != nullptr || s[0]) ? s : self->message, color, self->size[2], FRAME_TIME_MS.seconds(), true);
+		gi.Draw_OrientedWorldText(self->s.origin, draw_text, color, self->size[2], FRAME_TIME_MS.seconds(), true);
 	} else {
 		vec3_t textAngle = { 0.0f, 0.0f, 0.0f };
 		textAngle[YAW] = anglemod(self->s.angles[YAW]) + 180;
 		if (textAngle[YAW] > 360.0f) {
 			textAngle[YAW] -= 360.0f;
 		}
-		gi.Draw_StaticWorldText(self->s.origin, textAngle, (s != nullptr || s[0]) ? s : self->message, color, self->size[2], FRAME_TIME_MS.seconds(), true);
+		gi.Draw_StaticWorldText(self->s.origin, textAngle, draw_text, color, self->size[2], FRAME_TIME_MS.seconds(), true);
 	}
 	self->nextthink = level.time + FRAME_TIME_MS;
 }

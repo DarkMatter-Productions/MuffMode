@@ -7,6 +7,9 @@
 
 void MM_ApplyStartingHealthArmor(gentity_t *ent, gclient_t *client)
 {
+	if (!ent || !client || ent->client != client)
+		return;
+
 	int health, armor;
 	gitem_armor_t armor_type = jacketarmor_info;
 	const bool arena = MM_GametypeHasFlag(GTF_ARENA);
@@ -32,9 +35,9 @@ void MM_ApplyStartingHealthArmor(gentity_t *ent, gclient_t *client)
 		client->pers.health += bonus;
 		if (!(RS(RS_Q3A))) {
 			client->pers.health_bonus = bonus;
-			ent->client->pers.health_bonus_timer = level.time + 1_sec;
+			client->pers.health_bonus_timer = level.time + 1_sec;
 		}
-		ent->client->time_residual = level.time;
+		client->time_residual = level.time;
 	}
 
 	if (armor_type.base_count == jacketarmor_info.base_count)
@@ -47,6 +50,9 @@ void MM_ApplyStartingHealthArmor(gentity_t *ent, gclient_t *client)
 
 void MM_ApplySpawnLoadout(gentity_t *ent, gclient_t *client, bool taken_loadout)
 {
+	if (!ent || !client || ent->client != client)
+		return;
+
 	if (!taken_loadout) {
 		const bool arena = MM_GametypeHasFlag(GTF_ARENA);
 
@@ -169,7 +175,7 @@ void MM_ApplySpawnLoadout(gentity_t *ent, gclient_t *client, bool taken_loadout)
 
 						gitem_t *ammo = GetItemByIndex(itemlist[i].ammo);
 						if (ammo)
-							Add_Ammo(&g_entities[client - game.clients + 1], ammo, InfiniteAmmoOn(ammo) ? AMMO_INFINITE : ammo->quantity * 2);
+							Add_Ammo(ent, ammo, InfiniteAmmoOn(ammo) ? AMMO_INFINITE : ammo->quantity * 2);
 					}
 				}
 			}

@@ -44,6 +44,9 @@ void MM_ClearItemInhibitFlags()
 
 item_id_t MM_ClientArmorIndex(gentity_t *ent)
 {
+	if (!ent || !ent->client)
+		return IT_NULL;
+
 	if (RS(RS_Q3A)) {
 		if (ent->client->pers.inventory[IT_ARMOR_JACKET] > 0 ||
 			ent->client->pers.inventory[IT_ARMOR_COMBAT] > 0 ||
@@ -63,6 +66,9 @@ item_id_t MM_ClientArmorIndex(gentity_t *ent)
 
 static bool MM_PickupArmorQ3(gentity_t *ent, gentity_t *other, int32_t base_count)
 {
+	if (!ent || !ent->item || !other || !other->client)
+		return false;
+
 	if (other->client->pers.inventory[IT_ARMOR_COMBAT] >= other->client->pers.max_health * 2)
 		return false;
 
@@ -84,6 +90,9 @@ static bool MM_PickupArmorQ3(gentity_t *ent, gentity_t *other, int32_t base_coun
 
 bool MM_PickupArmor(gentity_t *ent, gentity_t *other)
 {
+	if (!ent || !ent->item || !other || !other->client)
+		return false;
+
 	item_id_t			 old_armor_index;
 	const gitem_armor_t *oldinfo;
 	const gitem_armor_t *newinfo;
@@ -92,6 +101,8 @@ bool MM_PickupArmor(gentity_t *ent, gentity_t *other)
 	int					 salvagecount;
 
 	newinfo = ent->item->armor_info;
+	if (!newinfo && ent->item->id != IT_ARMOR_SHARD)
+		return false;
 
 	int32_t base_count = ent->count ? ent->count : newinfo ? (RS(RS_Q1) ? newinfo->max_count : newinfo->base_count) : 0;
 
@@ -157,6 +168,9 @@ bool MM_PickupArmor(gentity_t *ent, gentity_t *other)
 
 bool MM_AllowSmartAutoSwitch(gentity_t *ent, gitem_t *item)
 {
+	if (!ent || !ent->client || !item)
+		return false;
+
 	if (!ent->client->pers.weapon)
 		return true;
 
@@ -178,6 +192,9 @@ bool MM_AllowSmartAutoSwitch(gentity_t *ent, gitem_t *item)
 
 gtime_t MM_PowerupInstantPickupTimeout(gentity_t *ent, bool is_dropped_from_death)
 {
+	if (!ent)
+		return 0_sec;
+
 	if (((RS(RS_MM) || RS(RS_Q3A)) && deathmatch->integer) || !is_dropped_from_death)
 		return gtime_t::from_sec(ent->count);
 
@@ -186,6 +203,9 @@ gtime_t MM_PowerupInstantPickupTimeout(gentity_t *ent, bool is_dropped_from_deat
 
 int MM_PowerupRespawnSeconds(gentity_t *ent)
 {
+	if (!ent || !ent->item)
+		return 0;
+
 	int count = 0;
 
 	if (deathmatch->integer && (RS(RS_MM) || RS(RS_Q3A)) && !ent->spawnflags.has(SPAWNFLAG_ITEM_DROPPED | SPAWNFLAG_ITEM_DROPPED_PLAYER))
@@ -202,6 +222,9 @@ int MM_PowerupRespawnSeconds(gentity_t *ent)
 
 bool MM_DeferInitialPowerupSpawn(gentity_t *ent)
 {
+	if (!ent || !ent->item)
+		return false;
+
 	if (!(RS(RS_MM) || RS(RS_Q3A)) || !deathmatch->integer || !(ent->item->flags & IF_POWERUP))
 		return false;
 
@@ -217,11 +240,17 @@ bool MM_DeferInitialPowerupSpawn(gentity_t *ent)
 
 int MM_HealthPickupCap(gentity_t *other)
 {
+	if (!other)
+		return 0;
+
 	return RS(RS_Q3A) ? other->max_health * 2 : (MM_RulesetHealthArmorCap() ? MM_RULESET_HEALTH_CAP : 250);
 }
 
 int MM_HealthPickupAmount(gentity_t *ent, int quantity)
 {
+	if (!ent || !ent->item)
+		return quantity;
+
 	if (RS(RS_Q3A) && !ent->count) {
 		switch (ent->item->id) {
 		case IT_HEALTH_SMALL:
@@ -245,6 +274,9 @@ gtime_t MM_HealthPickupRespawnDelay()
 
 bool MM_HealthPickupUsesMegaThink(gentity_t *ent, gentity_t *other)
 {
+	if (!ent || !ent->item)
+		return false;
+
 	return !(RS(RS_Q3A)) && (ent->item->tag & HEALTH_TIMED) && !Tech_HasRegeneration(other);
 }
 
@@ -258,6 +290,9 @@ int MM_AmmoSlugPickupCount(int quantity)
 
 int MM_PickRespawnItemTeamIndex(int current_index, int count)
 {
+	if (count <= 0)
+		return 0;
+
 	if (RS(RS_MM))
 		return (current_index + 1) % count;
 
@@ -266,6 +301,9 @@ int MM_PickRespawnItemTeamIndex(int current_index, int count)
 
 void MM_OnPowerupItemRespawned(gentity_t *ent)
 {
+	if (!ent)
+		return;
+
 	if (!deathmatch->integer || !(RS(RS_MM) || RS(RS_Q3A)))
 		return;
 
@@ -344,7 +382,7 @@ void Tech_ApplyAutoDoc(gentity_t *ent) {
 }
 
 bool Tech_HasRegeneration(gentity_t *ent) {
-	if (!ent->client) return false;
+	if (!ent || !ent->client) return false;
 	if (ent->client->pers.inventory[IT_TECH_AUTODOC]) return true;
 	if (g_instagib->integer || GT(GT_INSTAGIB)) return true;
 	if (g_nadefest->integer || GT(GT_NADEFEST)) return true;

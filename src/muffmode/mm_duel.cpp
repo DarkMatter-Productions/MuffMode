@@ -22,6 +22,53 @@ bool MM_DuelAppendLayout(std::string &layout, std::string_view entry)
 	return true;
 }
 
+bool MM_DuelCvarEnabled(cvar_t *cvar)
+{
+	return cvar && cvar->integer != 0;
+}
+
+constexpr size_t MM_DUEL_MAX_LAYOUT_TEXT = 256;
+
+std::string MM_DuelLayoutText(const char *text)
+{
+	if (!text || !*text)
+		return "";
+
+	std::string out;
+	for (const unsigned char *p = reinterpret_cast<const unsigned char *>(text); *p && out.size() < MM_DUEL_MAX_LAYOUT_TEXT; p++) {
+		if (*p < ' ' || *p == 0x7F || *p == '"' || *p == '\\')
+			out += ' ';
+		else
+			out += static_cast<char>(*p);
+	}
+
+	while (!out.empty() && out.back() == ' ')
+		out.pop_back();
+
+	return out;
+}
+
+std::string MM_DuelSkinIconToken(const char *skin)
+{
+	std::string safe_skin;
+
+	if (skin) {
+		for (const unsigned char *p = reinterpret_cast<const unsigned char *>(skin); *p && safe_skin.size() < MAX_QPATH / 2; p++) {
+			if ((*p >= 'A' && *p <= 'Z') || (*p >= 'a' && *p <= 'z') ||
+				(*p >= '0' && *p <= '9') || *p == '_' || *p == '-' || *p == '/') {
+				if (*p == '/' && (safe_skin.empty() || safe_skin.back() == '/'))
+					continue;
+				safe_skin += static_cast<char>(*p);
+			}
+		}
+	}
+
+	if (safe_skin.empty() || safe_skin.front() == '/' || safe_skin.back() == '/')
+		safe_skin = "male/grunt";
+
+	return fmt::format("/players/{}_i", safe_skin);
+}
+
 int MM_DuelSortedClientAt(size_t slot)
 {
 	if (slot >= q_countof(level.sorted_clients))
@@ -32,6 +79,22 @@ int MM_DuelSortedClientAt(size_t slot)
 		return -1;
 
 	return client_num;
+}
+
+gentity_t *MM_DuelEntityForClient(const gclient_t *client)
+{
+	if (!client || !game.clients)
+		return nullptr;
+
+	const ptrdiff_t client_num = client - game.clients;
+	if (client_num < 0 || client_num >= (ptrdiff_t)game.maxclients)
+		return nullptr;
+
+	gentity_t *ent = &g_entities[client_num + 1];
+	if (!ent->inuse || ent->client != client)
+		return nullptr;
+
+	return ent;
 }
 
 size_t MM_DuelSortedClientLimit()
@@ -68,7 +131,11 @@ bool MM_Duel_AddPlayer()
 	if (!next_in_line)
 		return false;
 
-	SetTeam(&g_entities[next_in_line - game.clients + 1], TEAM_FREE, false, true, false);
+	gentity_t *ent = MM_DuelEntityForClient(next_in_line);
+	if (!ent)
+		return false;
+
+	SetTeam(ent, TEAM_FREE, false, true, false);
 
 	return true;
 }
@@ -87,7 +154,7 @@ void MM_Duel_RemoveLoser()
 	if (!ent || !ent->client || !ent->client->pers.connected)
 		return;
 
-	if (g_verbose->integer)
+	if (MM_DuelCvarEnabled(g_verbose))
 		gi.Com_PrintFmt("Duel: Moving the loser, {}, to end of queue.\n", ent->client->resp.netname);
 
 	SetTeam(ent, TEAM_NONE, false, true, false);
@@ -145,21 +212,23 @@ void MM_Duel_ScoreboardMessage(gentity_t *ent, gentity_t *killer) {
 	string.clear();
 	entry.clear();
 
-	MM_DuelAppendLayout(string, G_Fmt("xv 0 yv -40 cstring2 \"{} on {}\" ", level.gametype_name, level.level_name));
-	MM_DuelAppendLayout(string, G_Fmt("xv 0 yv -30 cstring2 \"Score Limit: {}\" ", GT_ScoreLimit()));
+	MM_DuelAppendLayout(string, fmt::format("xv 0 yv -40 cstring2 \"{} on {}\" ",
+		MM_DuelLayoutText(level.gametype_name), MM_DuelLayoutText(level.level_name)));
+	MM_DuelAppendLayout(string, fmt::format("xv 0 yv -30 cstring2 \"Score Limit: {}\" ", GT_ScoreLimit()));
 
 	if (level.intermission_time) {
 		if (level.match_start_time) {
 			int	t = (level.intermission_time - level.match_start_time - 1_sec).milliseconds();
-			MM_DuelAppendLayout(string, G_Fmt("xv 0 yv -50 cstring2 \"Total Match Time: {}\" ", G_TimeStringMs(t, false)));
+			MM_DuelAppendLayout(string, fmt::format("xv 0 yv -50 cstring2 \"Total Match Time: {}\" ", G_TimeStringMs(t, false)));
 		}
 		if (level.intermission_victor_msg[0])
-			MM_DuelAppendLayout(string, G_Fmt("xv 0 yv -10 cstring2 \"{}\" ", level.intermission_victor_msg));
+			MM_DuelAppendLayout(string, fmt::format("xv 0 yv -10 cstring2 \"{}\" ",
+				MM_DuelLayoutText(level.intermission_victor_msg)));
 
-		MM_DuelAppendLayout(string, G_Fmt("ifgef {} yb -48 xv 0 loc_cstring2 0 \"$m_eou_press_button\" endif ", (level.intermission_server_frame + (5_sec).frames())));
+		MM_DuelAppendLayout(string, fmt::format("ifgef {} yb -48 xv 0 loc_cstring2 0 \"$m_eou_press_button\" endif ", (level.intermission_server_frame + (5_sec).frames())));
 	} else if (level.match_state == MATCH_IN_PROGRESS) {
 		if (ent && ent->client && ClientIsPlaying(ent->client) && ent->client->resp.score && level.num_playing_clients > 1) {
-			MM_DuelAppendLayout(string, G_Fmt("xv 0 yv -10 cstring2 \"{} place with a score of {}\" ",
+			MM_DuelAppendLayout(string, fmt::format("xv 0 yv -10 cstring2 \"{} place with a score of {}\" ",
 				G_PlaceString(ent->client->resp.rank + 1), ent->client->resp.score));
 		}
 		//fmt::format_to(std::back_inserter(string), FMT_STRING("xv 0 yb -48 cstring2 \"{}\" "), "Use inventory bind to toggle menu.");
@@ -199,7 +268,8 @@ void MM_Duel_ScoreboardMessage(gentity_t *ent, gentity_t *killer) {
 
 			fmt::format_to(std::back_inserter(entry), FMT_STRING("xv {} yv {} picn {} "), x, y, "/tags/default");
 
-			s = G_Fmt("/players/{}_i", cl->pers.skin).data();
+			const std::string skin_icon = MM_DuelSkinIconToken(cl->pers.skin);
+			s = skin_icon.c_str();
 			img_index = cl->pers.skin_icon_index;
 
 			if (img_index)
@@ -341,7 +411,7 @@ void MM_Duel_ScoreboardMessage(gentity_t *ent, gentity_t *killer) {
 	}
 
 	if (level.intermission_time)
-		MM_DuelAppendLayout(string, G_Fmt("ifgef {} yb -48 xv 0 loc_cstring2 0 \"$m_eou_press_button\" endif ", (level.intermission_server_frame + (5_sec).frames())));
+		MM_DuelAppendLayout(string, fmt::format("ifgef {} yb -48 xv 0 loc_cstring2 0 \"$m_eou_press_button\" endif ", (level.intermission_server_frame + (5_sec).frames())));
 	else
 		MM_DuelAppendLayout(string, "xv 0 yb -48 cstring2 \"Show inventory to toggle menu.\" ");
 
@@ -373,10 +443,11 @@ void MM_Duel_CmdForfeit(gentity_t *ent) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "Forfeit is only available to the losing player.\n");
 		return;
 	}
-	if (!g_allow_forfeit->integer) {
+	if (!MM_DuelCvarEnabled(g_allow_forfeit)) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "Forfeits are not enabled on this server.\n");
 		return;
 	}
 
-	QueueIntermission(G_Fmt("{} forfeits the match.", ent->client->resp.netname).data(), true, false);
+	const std::string message = fmt::format("{} forfeits the match.", MM_DuelLayoutText(ent->client->resp.netname));
+	QueueIntermission(message.c_str(), true, false);
 }

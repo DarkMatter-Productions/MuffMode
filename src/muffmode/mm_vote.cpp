@@ -73,12 +73,19 @@ bool MM_ParseVoteNonNegativeInt(const char *text, int &out)
 	return true;
 }
 
+void MM_MarkExecutingVoteFailed()
+{
+	if (level.vote_state.state == VoteState::EXECUTING)
+		MM_TransitionVoteState(VoteState::FAILED);
+}
+
 bool MM_ParseStoredVoteNonNegativeInt(int &out, const char *description)
 {
 	if (MM_ParseVoteNonNegativeInt(level.vote_state.arg.data(), out))
 		return true;
 
 	gi.LocBroadcast_Print(PRINT_HIGH, "{} vote failed: stored vote argument is invalid.\n", description);
+	MM_MarkExecutingVoteFailed();
 	return false;
 }
 
@@ -91,6 +98,7 @@ bool MM_ParseStoredVoteBinaryInt(int &out, const char *description)
 		return true;
 
 	gi.LocBroadcast_Print(PRINT_HIGH, "{} vote failed: stored vote argument must be 0 or 1.\n", description);
+	MM_MarkExecutingVoteFailed();
 	return false;
 }
 
@@ -105,9 +113,61 @@ bool MM_RestartCurrentMapForVote(const char *description)
 	return true;
 }
 
+bool MM_ParseVoteChoice(const char *arg, int &vote)
+{
+	if (!arg || !arg[0])
+		return false;
+
+	if (!Q_strcasecmp(arg, "yes") || !Q_strcasecmp(arg, "y") || !Q_strcasecmp(arg, "1"))
+	{
+		vote = 1;
+		return true;
+	}
+
+	if (!Q_strcasecmp(arg, "no") || !Q_strcasecmp(arg, "n") || !Q_strcasecmp(arg, "0"))
+	{
+		vote = -1;
+		return true;
+	}
+
+	return false;
+}
+
 bool MM_VoteValNone(gentity_t *ent)
 {
 	return true;
+}
+
+bool MM_MapAlreadyListed(const std::vector<std::string> &maps, const char *mapname)
+{
+	for (const auto &existing : maps)
+	{
+		if (!Q_strcasecmp(existing.c_str(), mapname))
+			return true;
+	}
+	return false;
+}
+
+void MM_CollectMapsFromCvar(const char *map_string, std::vector<std::string> &maps)
+{
+	if (!map_string || !map_string[0])
+		return;
+
+	const char *cursor = map_string;
+	char *token;
+	while ((token = COM_Parse(&cursor)) && *token)
+	{
+		if (MM_IsSafeMapToken(token) && !MM_MapAlreadyListed(maps, token))
+			maps.push_back(token);
+	}
+}
+
+std::vector<std::string> MM_CollectConfiguredMaps()
+{
+	std::vector<std::string> maps;
+	MM_CollectMapsFromCvar(g_map_pool ? g_map_pool->string : nullptr, maps);
+	MM_CollectMapsFromCvar(g_map_list ? g_map_list->string : nullptr, maps);
+	return maps;
 }
 
 void MM_UpdateActiveVote()
@@ -169,30 +229,11 @@ bool MM_IsMapValidImpl(const char *mapname)
 	if (!MM_IsSafeMapToken(mapname))
 		return false;
 
-	char *token;
-
-	// First check g_map_pool if it exists and is non-empty.
-	if (g_map_pool->string[0])
+	const std::vector<std::string> maps = MM_CollectConfiguredMaps();
+	for (const auto &map : maps)
 	{
-		const char *pool = g_map_pool->string;
-
-		while ((token = COM_Parse(&pool)) && *token)
-		{
-			if (MM_IsSafeMapToken(token) && !Q_strcasecmp(token, mapname))
-				return true;
-		}
-	}
-
-	// Fall back to g_map_list if pool did not have it (or pool was empty).
-	if (g_map_list->string[0])
-	{
-		const char *mlist = g_map_list->string;
-
-		while ((token = COM_Parse(&mlist)) && *token)
-		{
-			if (MM_IsSafeMapToken(token) && !Q_strcasecmp(token, mapname))
-				return true;
-		}
+		if (!Q_strcasecmp(map.c_str(), mapname))
+			return true;
 	}
 
 	return false;
@@ -200,37 +241,7 @@ bool MM_IsMapValidImpl(const char *mapname)
 
 void MM_PrintAvailableMaps(gentity_t *ent)
 {
-	std::vector<std::string> all_maps;
-	char *token;
-
-	auto map_exists = [&all_maps](const char *map) -> bool
-	{
-		for (const auto &existing : all_maps)
-		{
-			if (!Q_strcasecmp(existing.c_str(), map))
-				return true;
-		}
-		return false;
-	};
-
-	if (g_map_pool->string[0])
-	{
-		const char *pool = g_map_pool->string;
-		while ((token = COM_Parse(&pool)) && *token)
-		{
-			if (MM_IsSafeMapToken(token) && !map_exists(token))
-				all_maps.push_back(token);
-		}
-	}
-	if (g_map_list->string[0])
-	{
-		const char *mlist = g_map_list->string;
-		while ((token = COM_Parse(&mlist)) && *token)
-		{
-			if (MM_IsSafeMapToken(token) && !map_exists(token))
-				all_maps.push_back(token);
-		}
-	}
+	std::vector<std::string> all_maps = MM_CollectConfiguredMaps();
 
 	if (all_maps.empty())
 	{
@@ -354,7 +365,7 @@ void MM_EndVoteValidationContext()
 
 void MM_VotePassed()
 {
-	if (!level.vote_state.command)
+	if (!level.vote_state.command || !level.vote_state.command->func)
 	{
 		gi.LocBroadcast_Print(PRINT_HIGH, "Vote passed but command was lost.\n");
 		MM_TransitionVoteState(VoteState::FAILED);
@@ -363,6 +374,12 @@ void MM_VotePassed()
 
 	MuffModeLog("DEBUG", "Vote_Passed: executing command '%s'", level.vote_state.command->name);
 	level.vote_state.command->func();
+	if (level.vote_state.state != VoteState::EXECUTING)
+	{
+		MuffModeLog("DEBUG", "Vote_Passed: command changed state to %d, skipping COMPLETE", (int)level.vote_state.state);
+		return;
+	}
+
 	MuffModeLog("DEBUG", "Vote_Passed: command executed, transitioning to COMPLETE");
 	MM_TransitionVoteState(VoteState::COMPLETE);
 	MuffModeLog("DEBUG", "Vote_Passed: done");
@@ -375,6 +392,8 @@ void MM_VotePassGametype()
 	if (gt == GT_NONE)
 	{
 		MuffModeLog("DEBUG", "Vote_Pass_Gametype: GT_NONE, aborting");
+		gi.LocBroadcast_Print(PRINT_HIGH, "Gametype vote failed: stored vote argument is invalid.\n");
+		MM_MarkExecutingVoteFailed();
 		return;
 	}
 
@@ -385,6 +404,7 @@ void MM_VotePassGametype()
 	{
 		gi.LocBroadcast_Print(PRINT_HIGH, "Gametype vote rejected: gametype is no longer votable.\n");
 		MuffModeLog("VOTE", "Vote_Pass_Gametype: gametype %d rejected by IsGametypeVotable at execution", (int)gt);
+		MM_MarkExecutingVoteFailed();
 		return;
 	}
 
@@ -487,6 +507,10 @@ std::string MM_GetVotableGametypesList()
 
 bool MM_IsRulesetVotable(ruleset_t rs)
 {
+	const int ruleset = (int)rs;
+	if (ruleset <= (int)RS_NONE || ruleset >= (int)RS_NUM_RULESETS)
+		return false;
+
 	// If no votable list is set, allow all rulesets (backward compatible).
 	if (!g_votable_rulesets->string[0])
 		return true;
@@ -497,7 +521,7 @@ bool MM_IsRulesetVotable(ruleset_t rs)
 
 	while ((token = COM_Parse(&votable_list)) && *token)
 	{
-		if (!Q_strcasecmp(token, rs_short_name[(int)rs]))
+		if (!Q_strcasecmp(token, rs_short_name[ruleset]))
 			return true;
 	}
 
@@ -543,7 +567,11 @@ void MM_VotePassRuleset()
 {
 	ruleset_t rs = RS_IndexFromString(level.vote_state.arg.data());
 	if (rs == ruleset_t::RS_NONE)
+	{
+		gi.LocBroadcast_Print(PRINT_HIGH, "Ruleset vote failed: stored vote argument is invalid.\n");
+		MM_MarkExecutingVoteFailed();
 		return;
+	}
 
 	// Re-check votability at execution time in case g_votable_rulesets changed
 	// during the 3-second PASSED->EXECUTING window (the value is validated at
@@ -552,6 +580,7 @@ void MM_VotePassRuleset()
 	{
 		gi.LocBroadcast_Print(PRINT_HIGH, "Ruleset vote rejected: ruleset is no longer votable.\n");
 		MuffModeLog("VOTE", "Vote_Pass_Ruleset: ruleset %d rejected by IsRulesetVotable at execution", (int)rs);
+		MM_MarkExecutingVoteFailed();
 		return;
 	}
 
@@ -597,6 +626,7 @@ void MM_VotePassMap()
 	if (!MM_IsSafeMapToken(level.vote_state.arg.c_str()) || level.vote_state.arg.length() >= sizeof(level.nextmap))
 	{
 		gi.LocBroadcast_Print(PRINT_HIGH, "Map vote failed: invalid map name.\n");
+		MM_MarkExecutingVoteFailed();
 		return;
 	}
 
@@ -660,8 +690,14 @@ void MM_VotePassCointoss()
 void MM_VotePassRandom()
 {
 	int arg = 0;
-	if (!MM_ParseStoredVoteNonNegativeInt(arg, "Random") || arg < 2 || arg > 100)
+	if (!MM_ParseStoredVoteNonNegativeInt(arg, "Random"))
 		return;
+	if (arg < 2 || arg > 100)
+	{
+		gi.LocBroadcast_Print(PRINT_HIGH, "Random vote failed: stored vote argument is out of range.\n");
+		MM_MarkExecutingVoteFailed();
+		return;
+	}
 
 	gi.LocBroadcast_Print(PRINT_HIGH, "The random number is: {}\n", irandom(2, arg + 1));
 }
@@ -700,8 +736,14 @@ bool MM_VoteValUnlagged(gentity_t *ent)
 void MM_VotePassTimelimit()
 {
 	int argi = 0;
-	if (!MM_ParseStoredVoteNonNegativeInt(argi, "Time limit") || argi > 1440)
+	if (!MM_ParseStoredVoteNonNegativeInt(argi, "Time limit"))
 		return;
+	if (argi > 1440)
+	{
+		gi.LocBroadcast_Print(PRINT_HIGH, "Time limit vote failed: stored vote argument is out of range.\n");
+		MM_MarkExecutingVoteFailed();
+		return;
+	}
 
 	if (!argi)
 		gi.LocBroadcast_Print(PRINT_HIGH, "Time limit has been DISABLED.\n");
@@ -956,7 +998,7 @@ bool MM_VoteValReadyAll(gentity_t *ent)
 
 bool MM_ValidVoteCommand(gentity_t *ent)
 {
-	if (!ent->client)
+	if (!ent || !ent->client)
 		return false;
 
 	MuffModeLog("DEBUG", "ValidVoteCommand: enter, argv(1)=%s, argc=%d", gi.argv(1), gi.argc());
@@ -967,6 +1009,12 @@ bool MM_ValidVoteCommand(gentity_t *ent)
 	if (!cc)
 	{
 		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid vote command: {}\n", gi.argv(1));
+		return false;
+	}
+
+	if (!cc->val_func || !cc->func)
+	{
+		gi.LocClient_Print(ent, PRINT_HIGH, "Vote command is not available.\n");
 		return false;
 	}
 
@@ -1013,6 +1061,12 @@ void MM_VoteCommandStore(gentity_t *ent)
 		level.vote_state.arg.clear();
 		level.vote_state.caller = nullptr;
 	};
+
+	if (!ent || !ent->client)
+	{
+		clear_idle_staged_vote();
+		return;
+	}
 
 	if (!level.vote_state.command)
 	{
@@ -1129,7 +1183,7 @@ void MM_VoteCommandStore(gentity_t *ent)
 		ec->client->showhelp = false;
 		ec->client->showscores = false;
 		gentity_t *e = ec->client->follow_target ? ec->client->follow_target : ec;
-		ec->client->ps.stats[STAT_SHOW_STATUSBAR] = !ClientIsPlaying(e->client) ? 0 : 1;
+		ec->client->ps.stats[STAT_SHOW_STATUSBAR] = (e && e->client && ClientIsPlaying(e->client)) ? 1 : 0;
 		P_Menu_Close(ec);
 		G_Menu_Vote_Open(ec);
 
@@ -1142,6 +1196,9 @@ void MM_VoteCommandStore(gentity_t *ent)
 void MM_CmdCallVote(gentity_t *ent)
 {
 	if (!deathmatch->integer)
+		return;
+
+	if (!ent || !ent->client)
 		return;
 
 	MuffModeLog("DEBUG", "Cmd_CallVote_f: enter, ent=%p, client=%p, argc=%d",
@@ -1216,13 +1273,16 @@ void MM_CmdVote(gentity_t *ent)
 	if (!deathmatch->integer)
 		return;
 
+	if (!ent || !ent->client)
+		return;
+
 	if (!ClientCanVote(ent->client))
 	{
 		gi.LocClient_Print(ent, PRINT_HIGH, "Not allowed to vote as spectator.\n");
 		return;
 	}
 
-	if (gi.argc() < 2)
+	if (gi.argc() != 2)
 	{
 		gi.LocClient_Print(ent, PRINT_HIGH, "Usage: {} [yes/no]\nCasts your vote in current voting session.\n", gi.argv(0));
 		return;
@@ -1240,12 +1300,14 @@ void MM_CmdVote(gentity_t *ent)
 		return;
 	}
 
-	const char *arg = gi.argv(1);
+	int vote = 0;
+	if (!MM_ParseVoteChoice(gi.argv(1), vote))
+	{
+		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid vote. Use yes or no.\n");
+		return;
+	}
 
-	if (arg[0] == 'y' || arg[0] == 'Y' || arg[0] == '1')
-		ent->client->pers.voted = 1;
-	else
-		ent->client->pers.voted = -1;
+	ent->client->pers.voted = vote;
 
 	gi.LocClient_Print(ent, PRINT_HIGH, "Vote cast.\n");
 
@@ -1255,6 +1317,9 @@ void MM_CmdVote(gentity_t *ent)
 
 void MM_RevertVote(gclient_t *client)
 {
+	if (!client)
+		return;
+
 	if (level.vote_state.state != VoteState::ACTIVE)
 		return;
 
@@ -1267,7 +1332,7 @@ void MM_RevertVote(gclient_t *client)
 
 bool ValidateMenuVoteCommand(gentity_t *ent, vcmds_t *cc, const char *arg)
 {
-	if (!ent || !ent->client || !cc)
+	if (!ent || !ent->client || !cc || !cc->val_func || !cc->func)
 		return false;
 
 	const char *menu_arg = arg ? arg : "";
@@ -1308,6 +1373,9 @@ vcmds_t vote_cmds[] = {
 
 vcmds_t *FindVoteCmdByName(const char *name)
 {
+	if (!name || !name[0])
+		return nullptr;
+
 	for (vcmds_t *cc = vote_cmds; cc->name; ++cc)
 	{
 		if (!Q_strcasecmp(cc->name, name))

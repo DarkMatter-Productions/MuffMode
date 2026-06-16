@@ -31,16 +31,22 @@ bool MM_TokenInList(const char *list, const char *token)
 	if (!list || !token || !*token)
 		return false;
 
-	auto is_delim = [](char c) { return c == '\0' || c == ' ' || c == ','; };
-
 	const size_t tlen = strlen(token);
-	for (const char *p = list; (p = strstr(p, token)) != nullptr; p += 1)
-	{
-		const bool at_start = (p == list) || p[-1] == ' ' || p[-1] == ',';
-		const bool at_end = is_delim(p[tlen]);
-		if (at_start && at_end)
+	auto is_delim = [](unsigned char c) { return c == '\0' || c == ',' || c <= ' '; };
+
+	for (const char *p = list; *p; ) {
+		while (*p && is_delim(static_cast<unsigned char>(*p)))
+			p++;
+
+		const char *start = p;
+		while (*p && !is_delim(static_cast<unsigned char>(*p)))
+			p++;
+
+		const size_t len = static_cast<size_t>(p - start);
+		if (len == tlen && !Q_strncasecmp(start, token, tlen))
 			return true;
 	}
+
 	return false;
 }
 

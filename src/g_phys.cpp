@@ -232,6 +232,17 @@ pushed_t pushed[MAX_ENTITIES], *pushed_p;
 
 gentity_t *obstacle;
 
+static pushed_t *G_ReservePushed() {
+	if (pushed_p >= &pushed[MAX_ENTITIES])
+		gi.Com_Error("pushed_p >= &pushed[MAX_ENTITIES], memory corrupted");
+
+	return pushed_p++;
+}
+
+static uint32_t G_PhysicsEntityLimit() {
+	return min(globals.num_entities, game.maxentities);
+}
+
 /*
 ============
 G_Push
@@ -255,11 +266,11 @@ static bool G_Push(gentity_t *pusher, vec3_t &move, vec3_t &amove) {
 	AngleVectors(org, forward, right, up);
 
 	// save the pusher's original position
-	pushed_p->ent = pusher;
-	pushed_p->origin = pusher->s.origin;
-	pushed_p->angles = pusher->s.angles;
-	pushed_p->rotated = false;
-	pushed_p++;
+	p = G_ReservePushed();
+	p->ent = pusher;
+	p->origin = pusher->s.origin;
+	p->angles = pusher->s.angles;
+	p->rotated = false;
 
 	// move the pusher to it's final position
 	pusher->s.origin += move;
@@ -268,7 +279,8 @@ static bool G_Push(gentity_t *pusher, vec3_t &move, vec3_t &amove) {
 
 	// see if any solid entities are inside the final position
 	check = g_entities + 1;
-	for (uint32_t e = 1; e < globals.num_entities; e++, check++) {
+	const uint32_t entity_limit = G_PhysicsEntityLimit();
+	for (uint32_t e = 1; e < entity_limit; e++, check++) {
 		if (!check->inuse)
 			continue;
 		if (check->movetype == MOVETYPE_PUSH || check->movetype == MOVETYPE_STOP || check->movetype == MOVETYPE_NONE ||
@@ -292,14 +304,14 @@ static bool G_Push(gentity_t *pusher, vec3_t &move, vec3_t &amove) {
 
 		if ((pusher->movetype == MOVETYPE_PUSH) || (check->groundentity == pusher)) {
 			// move this entity
-			pushed_p->ent = check;
-			pushed_p->origin = check->s.origin;
-			pushed_p->angles = check->s.angles;
-			pushed_p->rotated = !!amove[YAW];
-			if (pushed_p->rotated)
-				pushed_p->yaw =
+			p = G_ReservePushed();
+			p->ent = check;
+			p->origin = check->s.origin;
+			p->angles = check->s.angles;
+			p->rotated = !!amove[YAW];
+			if (p->rotated)
+				p->yaw =
 				pusher->client ? (float)pusher->client->ps.pmove.delta_angles[YAW] : pusher->s.angles[YAW];
-			pushed_p++;
 
 			vec3_t old_position = check->s.origin;
 

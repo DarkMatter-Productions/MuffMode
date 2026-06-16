@@ -7,6 +7,7 @@
 #include "muffmode/mm_parse.h"
 
 #include <filesystem>
+#include <string>
 
 //=======================================================================
 // PLAYER CONFIGS
@@ -20,8 +21,102 @@ bool MM_IsSafeSocialIdChar(char c) {
 		(c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.';
 }
 
+int MM_ClientSlotNumber(const gentity_t *ent)
+{
+	const uint32_t max_clients = static_cast<uint32_t>(game.maxclients);
+	if (!ent || ent->s.number < 1 || ent->s.number > max_clients)
+		return 0;
+
+	return static_cast<int>(ent->s.number - 1);
+}
+
+std::string MM_FallbackSocialId(const char *prefix, const gentity_t *ent)
+{
+	return fmt::format("{}_{}", prefix && *prefix ? prefix : "client", MM_ClientSlotNumber(ent));
+}
+
+bool MM_IsReservedWindowsDeviceName(const char *name)
+{
+	if (!name || !*name)
+		return false;
+
+	char stem[MAX_INFO_VALUE]{ 0 };
+	size_t length = 0;
+	for (const char *p = name; *p && *p != '.' && length + 1 < sizeof(stem); p++)
+		stem[length++] = *p;
+	stem[length] = '\0';
+
+	if (!stem[0])
+		return false;
+
+	static constexpr const char *reserved_names[] = {
+		"CON", "PRN", "AUX", "NUL",
+		"COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+		"LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"
+	};
+
+	for (const char *reserved : reserved_names) {
+		if (!Q_strcasecmp(stem, reserved))
+			return true;
+	}
+
+	return false;
+}
+
+void MM_SanitizeSocialId(const char *src, char *dst, size_t dst_size)
+{
+	if (!dst || !dst_size)
+		return;
+
+	dst[0] = '\0';
+	if (!src)
+		return;
+
+	char *out = dst;
+	size_t remaining = dst_size - 1;
+
+	while (*src && remaining > 0) {
+		char c = *src++;
+		// Allow alphanumeric, dash, underscore, and common ID characters.
+		// Skip leading dots to avoid ambiguous Windows device/path spellings.
+		if (MM_IsSafeSocialIdChar(c) && (c != '.' || out != dst)) {
+			*out++ = c;
+			remaining--;
+		}
+	}
+
+	while (out > dst && out[-1] == '.')
+		out--;
+	*out = '\0';
+}
+
+std::string MM_SanitizeConfigCommentText(const char *text)
+{
+	if (!text || !*text)
+		return "Player";
+
+	std::string out;
+	for (const unsigned char *p = reinterpret_cast<const unsigned char *>(text); *p && out.size() < MAX_INFO_VALUE - 1; p++) {
+		if (*p < ' ' || *p == 0x7F) {
+			if (!out.empty() && out.back() != ' ')
+				out += ' ';
+			continue;
+		}
+
+		out += static_cast<char>(*p);
+	}
+
+	while (!out.empty() && out.back() == ' ')
+		out.pop_back();
+
+	return out.empty() ? "Player" : out;
+}
+
 bool MM_RequirePConfigCommandArgc(gentity_t *ent, int min_expected, int max_expected, const char *usage)
 {
+	if (!ent || !ent->client)
+		return false;
+
 	if (MM_IsArgcInRangeValid(gi.argc(), min_expected, max_expected))
 		return true;
 
@@ -66,7 +161,7 @@ void MM_ClientInitPConfig(gentity_t *ent) {
 	bool file_exists = false;
 	bool cfg_valid = true;
 
-	if (!ent->client) return;
+	if (!ent || !ent->client) return;
 	if (ent->svflags & SVF_BOT) return;
 
 	// Validate and sanitize social_id for filesystem use
@@ -74,30 +169,16 @@ void MM_ClientInitPConfig(gentity_t *ent) {
 	char safe_social_id[MAX_INFO_VALUE] = {0};
 	if (!ent->client->pers.social_id[0]) {
 		// Empty social_id - use a fallback based on client number
-		Q_strlcpy(safe_social_id, G_Fmt("unknown_{}", ent - g_entities - 1).data(), sizeof(safe_social_id));
+		const std::string fallback = MM_FallbackSocialId("unknown", ent);
+		Q_strlcpy(safe_social_id, fallback.c_str(), sizeof(safe_social_id));
 	} else {
 		// Sanitize: remove path separators and other dangerous characters
-		const char *src = ent->client->pers.social_id;
-		char *dst = safe_social_id;
-		size_t remaining = sizeof(safe_social_id) - 1;
-
-		while (*src && remaining > 0) {
-			char c = *src++;
-			// Allow alphanumeric, dash, underscore, and common ID characters.
-			// Skip leading dots to avoid ambiguous Windows device/path spellings.
-			if (MM_IsSafeSocialIdChar(c) && (c != '.' || dst != safe_social_id)) {
-				*dst++ = c;
-				remaining--;
-			}
-		}
-
-		while (dst > safe_social_id && dst[-1] == '.')
-			dst--;
-		*dst = '\0';
+		MM_SanitizeSocialId(ent->client->pers.social_id, safe_social_id, sizeof(safe_social_id));
 
 		// If sanitization removed everything, use fallback
-		if (!safe_social_id[0]) {
-			Q_strlcpy(safe_social_id, G_Fmt("invalid_{}", ent - g_entities - 1).data(), sizeof(safe_social_id));
+		if (!safe_social_id[0] || MM_IsReservedWindowsDeviceName(safe_social_id)) {
+			const std::string fallback = MM_FallbackSocialId("invalid", ent);
+			Q_strlcpy(safe_social_id, fallback.c_str(), sizeof(safe_social_id));
 		}
 	}
 
@@ -130,7 +211,13 @@ void MM_ClientInitPConfig(gentity_t *ent) {
 		}
 
 		if (cfg_valid) {
-			buffer = (char *)gi.TagMalloc(length + 1, '\0');
+			buffer = (char *)gi.TagMalloc(length + 1, TAG_LEVEL);
+			if (!buffer) {
+				cfg_valid = false;
+			}
+		}
+
+		if (cfg_valid) {
 			if (length) {
 				const size_t read_length = fread(buffer, 1, length, f);
 
@@ -161,7 +248,8 @@ void MM_ClientInitPConfig(gentity_t *ent) {
 	if (!file_exists) {
 		f = fopen(name, "wb");
 		if (f) {
-			const std::string header = std::string(G_Fmt("// {}'s Player Config\n// Generated by Muff Mode\n", ent->client->resp.netname));
+			const std::string header = fmt::format("// {}'s Player Config\n// Generated by Muff Mode\n",
+				MM_SanitizeConfigCommentText(ent->client->resp.netname));
 
 			if (fwrite(header.c_str(), 1, header.length(), f) == header.length())
 				gi.Com_PrintFmt("{}: Player config written to: \"{}\"\n", __FUNCTION__, name);

@@ -951,7 +951,8 @@ static USE(Use_Plat2) (gentity_t *ent, gentity_t *other, gentity_t *activator) -
 	//	return;
 
 	uint32_t i;
-	for (i = 1, trigger = g_entities + 1; i < globals.num_entities; i++, trigger++) {
+	const uint32_t entity_limit = min(globals.num_entities, game.maxentities);
+	for (i = 1, trigger = g_entities + 1; i < entity_limit; i++, trigger++) {
 		if (!trigger->inuse)
 			continue;
 		if (trigger->touch == Touch_Plat_Center2) {

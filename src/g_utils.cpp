@@ -10,6 +10,10 @@
 #include <cerrno>
 #include <ctime>
 
+static size_t G_EntitySearchLimit() {
+	return min(static_cast<size_t>(globals.num_entities), static_cast<size_t>(game.maxentities));
+}
+
 /*
 =============
 G_Find
@@ -26,7 +30,11 @@ gentity_t *G_Find(gentity_t *from, std::function<bool(gentity_t *e)> matcher) {
 	else
 		from++;
 
-	for (; from < &g_entities[globals.num_entities]; from++) {
+	gentity_t *end = &g_entities[G_EntitySearchLimit()];
+	if (from >= end)
+		return nullptr;
+
+	for (; from < end; from++) {
 		if (!from->inuse)
 			continue;
 		if (matcher(from))
@@ -76,7 +84,12 @@ gentity_t *findradius(gentity_t *from, const vec3_t &org, float rad) {
 		from = g_entities;
 	else
 		from++;
-	for (; from < &g_entities[globals.num_entities]; from++) {
+
+	gentity_t *end = &g_entities[G_EntitySearchLimit()];
+	if (from >= end)
+		return nullptr;
+
+	for (; from < end; from++) {
 		if (!from->inuse)
 			continue;
 		if (from->solid == SOLID_NOT)
@@ -385,10 +398,12 @@ angles and bad trails.
 =================
 */
 gentity_t *G_Spawn() {
-	gentity_t *e = &g_entities[game.maxclients + 1];
 	size_t i;
+	const size_t first_spawn_entity = min(static_cast<size_t>(game.maxclients) + 1, static_cast<size_t>(game.maxentities));
+	const size_t entity_limit = G_EntitySearchLimit();
 
-	for (i = game.maxclients + 1; i < globals.num_entities; i++, e++) {
+	for (i = first_spawn_entity; i < entity_limit; i++) {
+		gentity_t *e = &g_entities[i];
 		// the first couple seconds of server time can involve a lot of
 		// freeing and allocating, so relax the replacement policy
 		if (!e->inuse && (e->freetime < 2_sec || level.time - e->freetime > 500_ms)) {
@@ -397,10 +412,12 @@ gentity_t *G_Spawn() {
 		}
 	}
 
-	if (i == game.maxentities)
+	i = max(i, first_spawn_entity);
+	if (i >= static_cast<size_t>(game.maxentities))
 		gi.Com_ErrorFmt("{}: no free entities.", __FUNCTION__);
 
-	globals.num_entities++;
+	gentity_t *e = &g_entities[i];
+	globals.num_entities = static_cast<uint32_t>(i + 1);
 	G_InitGentity(e);
 	//gi.Com_PrintFmt("{}: total:{}\n", __FUNCTION__, i);
 	return e;
@@ -1065,14 +1082,20 @@ Resolve a client entity from a name or validated numeric identifier string.
 =============
 */
 gentity_t *ClientEntFromString(const char *in) {
+	if (!in || !*in)
+		return nullptr;
+
 	for (auto ec : active_clients())
 		if (!strcmp(in, ec->client->resp.netname))
 			return ec;
 
+	if (*in == '-' || *in == '+')
+		return nullptr;
+
 	char *end = nullptr;
 	errno = 0;
 	const unsigned long num = strtoul(in, &end, 10);
-	if (errno == ERANGE || !end || *end != '\0')
+	if (errno == ERANGE || !end || end == in || *end != '\0')
 		return nullptr;
 	if (num >= static_cast<unsigned long>(game.maxclients))
 		return nullptr;

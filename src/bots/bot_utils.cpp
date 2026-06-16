@@ -7,6 +7,45 @@
 
 constexpr int Team_Coop_Monster = 0;
 
+namespace {
+
+bool Entity_IsActive(const gentity_t *entity) {
+	return entity != nullptr && entity->inuse;
+}
+
+bool Entity_IsLiving(const gentity_t *entity) {
+	return Entity_IsActive(entity) && entity->health > 0;
+}
+
+bool Entity_IsLivingPlayer(const gentity_t *entity) {
+	return Entity_IsLiving(entity) && (entity->svflags & SVF_PLAYER) != 0 && entity->client != nullptr;
+}
+
+bool Entity_IsLivingBot(const gentity_t *entity) {
+	return Entity_IsLivingPlayer(entity) && (entity->svflags & SVF_BOT) != 0;
+}
+
+bool Entity_IsLivingMonster(const gentity_t *entity) {
+	return Entity_IsLiving(entity) && (entity->svflags & SVF_MONSTER) != 0;
+}
+
+const gentity_t *FindFirstEntityMatching(bool (*predicate)(const gentity_t *)) {
+	if (predicate == nullptr || g_entities == nullptr) {
+		return nullptr;
+	}
+
+	const gentity_t *ent = &g_entities[0];
+	for (size_t i = 0; i < globals.num_entities; i++, ent++) {
+		if (predicate(ent)) {
+			return ent;
+		}
+	}
+
+	return nullptr;
+}
+
+} // namespace
+
 /*
 ================
 Player_UpdateState
@@ -383,6 +422,10 @@ Entity_UpdateState
 ================
 */
 void Entity_UpdateState(gentity_t *ent) {
+	if (!Entity_IsActive(ent)) {
+		return;
+	}
+
 	if (ent->svflags & SVF_MONSTER) {
 		Monster_UpdateState(ent);
 	} else if (ent->flags & FL_TRAP || ent->flags & FL_TRAP_LASER_FIELD) {
@@ -435,23 +478,7 @@ FindLocalPlayer
 ================
 */
 const gentity_t *FindLocalPlayer() {
-	const gentity_t *localPlayer = nullptr;
-
-	const gentity_t *ent = &g_entities[0];
-	for (size_t i = 0; i < globals.num_entities; i++, ent++) {
-		if (!ent->inuse || !(ent->svflags & SVF_PLAYER)) {
-			continue;
-		}
-
-		if (ent->health <= 0) {
-			continue;
-		}
-
-		localPlayer = ent;
-		break;
-	}
-
-	return localPlayer;
+	return FindFirstEntityMatching(Entity_IsLivingPlayer);
 }
 
 /*
@@ -460,27 +487,7 @@ FindFirstBot
 ================
 */
 const gentity_t *FindFirstBot() {
-	const gentity_t *firstBot = nullptr;
-
-	const gentity_t *ent = &g_entities[0];
-	for (size_t i = 0; i < globals.num_entities; i++, ent++) {
-		if (!ent->inuse || !(ent->svflags & SVF_PLAYER)) {
-			continue;
-		}
-
-		if (ent->health <= 0) {
-			continue;
-		}
-
-		if (!(ent->svflags & SVF_BOT)) {
-			continue;
-		}
-
-		firstBot = ent;
-		break;
-	}
-
-	return firstBot;
+	return FindFirstEntityMatching(Entity_IsLivingBot);
 }
 
 /*
@@ -489,39 +496,23 @@ FindFirstMonster
 ================
 */
 const gentity_t *FindFirstMonster() {
-	const gentity_t *firstMonster = nullptr;
-
-	const gentity_t *ent = &g_entities[0];
-	for (size_t i = 0; i < globals.num_entities; i++, ent++) {
-		if (!ent->inuse || !(ent->svflags & SVF_MONSTER)) {
-			continue;
-		}
-
-		if (ent->health <= 0) {
-			continue;
-		}
-
-		firstMonster = ent;
-		break;
-	}
-
-	return firstMonster;
+	return FindFirstEntityMatching(Entity_IsLivingMonster);
 }
 
 /*
 ================
-FindFirstMonster
+FindActorUnderCrosshair
 
 "Actors" are either players or monsters - i.e. something alive and thinking.
 ================
 */
 const gentity_t *FindActorUnderCrosshair(const gentity_t *player) {
-	if (player == nullptr || !player->inuse) {
+	if (!Entity_IsLivingPlayer(player)) {
 		return nullptr;
 	}
 
-	vec3_t forward, right, up;
-	AngleVectors(player->client->v_angle, forward, right, up);
+	vec3_t forward;
+	AngleVectors(player->client->v_angle, forward, nullptr, nullptr);
 
 	const vec3_t eye_position = (player->s.origin + vec3_t{ 0.0f, 0.0f, (float)player->viewheight });
 	const vec3_t end = (eye_position + (forward * 8192.0f));
@@ -530,15 +521,7 @@ const gentity_t *FindActorUnderCrosshair(const gentity_t *player) {
 	trace_t tr = gi.traceline(eye_position, end, player, mask);
 
 	const gentity_t *traceEnt = tr.ent;
-	if (traceEnt == nullptr || !tr.ent->inuse) {
-		return nullptr;
-	}
-
-	if (!(traceEnt->svflags & SVF_PLAYER) && !(traceEnt->svflags & SVF_MONSTER)) {
-		return nullptr;
-	}
-
-	if (traceEnt->health <= 0) {
+	if (!Entity_IsLivingPlayer(traceEnt) && !Entity_IsLivingMonster(traceEnt)) {
 		return nullptr;
 	}
 

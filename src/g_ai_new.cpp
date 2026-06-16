@@ -1349,18 +1349,21 @@ void TargetTesla(gentity_t *self, gentity_t *tesla) {
 // returns nullptr if bad
 
 gentity_t *PickCoopTarget(gentity_t *self) {
-	gentity_t **targets;
+	gentity_t *targets[MAX_CLIENTS_KEX] = {};
 	int		 num_targets = 0, targetID;
 
 	// if we're not in coop, this is a noop
 	if (!InCoopStyle())
 		return nullptr;
 
-	targets = (gentity_t **)alloca(sizeof(gentity_t *) * game.maxclients);
+	for (auto ec : active_clients()) {
+		if (visible(self, ec)) {
+			if (num_targets >= static_cast<int>(q_countof(targets)))
+				break;
 
-	for (auto ec : active_clients())
-		if (visible(self, ec))
 			targets[num_targets++] = ec;
+		}
+	}
 
 	if (!num_targets)
 		return nullptr;

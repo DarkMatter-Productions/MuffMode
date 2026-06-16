@@ -23,6 +23,8 @@ int s_gt_g_gametype = 0;
 bool s_gt_teams_on = false;
 gametype_t s_gt_check = GT_NONE;
 
+constexpr int MM_MAX_GAMETYPE_CFG_LINES = 4096;
+
 constexpr gametype_avail_t k_gametype_availability[GT_NUM_GAMETYPES] = {
 	/* GT_NONE */ gametype_avail_t::Removed,
 	/* GT_FFA */ gametype_avail_t::Enabled,
@@ -46,6 +48,20 @@ bool MM_IsSlotCappedSession()
 {
 	cvar_t *mc = gi.cvar("maxclients", nullptr, CVAR_NOFLAGS);
 	return mc && mc->integer <= (int)MAX_SPLIT_PLAYERS;
+}
+
+bool MM_IsValidGametypeIndex(gametype_t gt)
+{
+	const int index = static_cast<int>(gt);
+	return index >= 0 && index < GT_NUM_GAMETYPES;
+}
+
+std::string MM_GametypeCfgPath(const char *cfg_name)
+{
+	std::string path = "baseq2/gt-";
+	path += cfg_name ? cfg_name : "";
+	path += ".cfg";
+	return path;
 }
 
 const char *MM_SkipCfgWhitespace(const char *p)
@@ -187,7 +203,7 @@ bool MM_ShouldSkipGtCfgLine(const char *line)
 
 	int target = 0;
 	if (MM_TryParseMaxclientsTarget(line, &target))
-		return target > (int)MAX_SPLIT_PLAYERS;
+		return target < 1 || target > (int)MAX_SPLIT_PLAYERS;
 
 	return false;
 }
@@ -206,19 +222,29 @@ bool MM_IsOverlongCfgLine(FILE *f, const char *line)
 
 void MM_ExecGametypeCfg(gametype_t gt)
 {
-	const char *cfg_name = gt_short_name_upper[(int)gt];
-
-	if (!MM_IsSlotCappedSession())
-	{
-		gi.AddCommandString(G_Fmt("exec gt-{}.cfg\n", cfg_name).data());
+	if (!MM_IsValidGametypeIndex(gt)) {
+		gi.Com_PrintFmt("WARNING: Refusing to load gametype cfg for invalid gametype {}.\n", static_cast<int>(gt));
 		return;
 	}
 
-	const char *path = G_Fmt("baseq2/gt-{}.cfg", cfg_name).data();
-	FILE *f = fopen(path, "rb");
+	const char *cfg_name = gt_short_name_upper[(int)gt];
+	if (!cfg_name || !*cfg_name) {
+		gi.Com_PrintFmt("WARNING: Refusing to load gametype cfg for unnamed gametype {}.\n", static_cast<int>(gt));
+		return;
+	}
+
+	if (!MM_IsSlotCappedSession())
+	{
+		std::string command = std::string(G_Fmt("exec gt-{}.cfg\n", cfg_name));
+		gi.AddCommandString(command.c_str());
+		return;
+	}
+
+	const std::string path = MM_GametypeCfgPath(cfg_name);
+	FILE *f = fopen(path.c_str(), "rb");
 	if (!f)
 	{
-		gi.Com_PrintFmt("WARNING: Could not open {} for filtered load; skipping gametype cfg.\n", path);
+		gi.Com_PrintFmt("WARNING: Could not open {} for filtered load; skipping gametype cfg.\n", path.c_str());
 		return;
 	}
 
@@ -227,10 +253,19 @@ void MM_ExecGametypeCfg(gametype_t gt)
 
 	int skipped = 0;
 	int executed = 0;
+	int lines_read = 0;
 	char line_buf[1024];
 
 	while (fgets(line_buf, sizeof(line_buf), f))
 	{
+		lines_read++;
+		if (lines_read > MM_MAX_GAMETYPE_CFG_LINES)
+		{
+			gi.Com_PrintFmt("WARNING: Stopping filtered gametype cfg load after {} lines: {}\n",
+				MM_MAX_GAMETYPE_CFG_LINES, path.c_str());
+			break;
+		}
+
 		if (MM_IsOverlongCfgLine(f, line_buf))
 		{
 			skipped++;
@@ -258,6 +293,9 @@ void MM_ExecGametypeCfg(gametype_t gt)
 	}
 
 	fclose(f);
+
+	gi.Com_PrintFmt("Filtered gametype cfg complete: executed {} line{}, skipped {} line{}.\n",
+		executed, executed == 1 ? "" : "s", skipped, skipped == 1 ? "" : "s");
 }
 
 } // namespace

@@ -6,6 +6,12 @@
 #include "muffmode/mm_ghost.h"
 #include "muffmode/mm_parse.h"
 
+namespace {
+constexpr int GHOST_CODE_MIN = 10000;
+constexpr int GHOST_CODE_MAX_EXCLUSIVE = 100000;
+constexpr int GHOST_CODE_MAX = GHOST_CODE_MAX_EXCLUSIVE - 1;
+}
+
 /*
 ================
 MM_Ghost_Assign
@@ -17,6 +23,9 @@ score with the "ghost" command if they lose connection mid-match.
 void MM_Ghost_Assign(gentity_t *ent) {
 	int ghost, i;
 
+	if (!ent || !ent->client)
+		return;
+
 	for (ghost = 0; ghost < MAX_CLIENTS_KEX; ghost++)
 		if (!level.ghosts[ghost].code)
 			break;
@@ -25,7 +34,7 @@ void MM_Ghost_Assign(gentity_t *ent) {
 	level.ghosts[ghost].team = ent->client->sess.team;
 	level.ghosts[ghost].score = 0;
 	for (;;) {
-		level.ghosts[ghost].code = irandom(10000, 100000);
+		level.ghosts[ghost].code = irandom(GHOST_CODE_MIN, GHOST_CODE_MAX_EXCLUSIVE);
 		for (i = 0; i < MAX_CLIENTS_KEX; i++)
 			if (i != ghost && level.ghosts[i].code == level.ghosts[ghost].code)
 				break;
@@ -46,6 +55,9 @@ MM_Ghost_DoAssign
 ================
 */
 void MM_Ghost_DoAssign(gentity_t *ent) {
+	if (!ent || !ent->client)
+		return;
+
 	// assign a ghost code
 	if (level.match_state == matchst_t::MATCH_IN_PROGRESS) {
 		if (ent->client->resp.ghost)
@@ -64,6 +76,9 @@ MM_CmdGhost
 */
 void MM_CmdGhost(gentity_t *ent) {
 	int i, n;
+
+	if (!ent || !ent->client)
+		return;
 
 	if (!MM_IsExactArgcValid(gi.argc(), 2)) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "Usage: {} <code>\n", gi.argv(0));
@@ -84,7 +99,7 @@ void MM_CmdGhost(gentity_t *ent) {
 	}
 
 	const auto code = MM_ParseIntArg(gi.argv(1));
-	if (!code || *code < 10000 || *code > 99999) {
+	if (!code || *code < GHOST_CODE_MIN || *code > GHOST_CODE_MAX) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid ghost code.\n");
 		return;
 	}

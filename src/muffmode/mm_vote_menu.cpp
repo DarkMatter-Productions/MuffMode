@@ -266,6 +266,14 @@ inline std::vector<std::string> str_split(const std::string_view &str, char by)
 
 static bool MenuVote_ReadSelection(gentity_t *ent, menu_hnd_t *p, char *out, size_t out_size)
 {
+	if (!out || out_size == 0)
+		return false;
+
+	out[0] = '\0';
+
+	if (!ent || !ent->client)
+		return false;
+
 	if (!p || !p->entries || p->cur < 0 || p->cur >= p->num)
 		return false;
 
@@ -281,6 +289,67 @@ static bool MenuVote_ReadSelection(gentity_t *ent, menu_hnd_t *p, char *out, siz
 	return true;
 }
 
+struct menu_vote_view_t {
+	menu_t *entries = nullptr;
+	int num = 0;
+};
+
+static bool MenuVote_View(gentity_t *ent, menu_vote_view_t &view)
+{
+	if (!ent || !ent->client || !ent->client->menu || !ent->client->menu->entries || ent->client->menu->num <= 0)
+		return false;
+
+	view.entries = ent->client->menu->entries;
+	view.num = ent->client->menu->num;
+	return true;
+}
+
+static menu_t *MenuVote_Entries(gentity_t *ent, int *num = nullptr)
+{
+	menu_vote_view_t view;
+	if (!MenuVote_View(ent, view))
+		return nullptr;
+
+	if (num)
+		*num = view.num;
+	return view.entries;
+}
+
+static bool MenuVote_HasIndex(const menu_vote_view_t &view, int index)
+{
+	return index >= 0 && index < view.num;
+}
+
+static void MenuVote_ClearEntry(menu_t &entry)
+{
+	entry.text[0] = '\0';
+	entry.text_arg1[0] = '\0';
+	entry.SelectFunc = nullptr;
+}
+
+static void MenuVote_ClearRange(const menu_vote_view_t &view, int first, int last_exclusive)
+{
+	first = max(first, 0);
+	last_exclusive = min(last_exclusive, view.num);
+	for (int i = first; i < last_exclusive; ++i)
+		MenuVote_ClearEntry(view.entries[i]);
+}
+
+static int MenuVote_ContentLimit(const menu_vote_view_t &view)
+{
+	// Reserve the final row for "return" entries in these menu definitions.
+	return max(0, view.num - 1);
+}
+
+static menu_hnd_t *MenuVote_OpenMenu(gentity_t *ent, const menu_t *entries, int num, void *arg, UpdateFunc_t update)
+{
+	if (!ent || !ent->client || !entries || num <= 0)
+		return nullptr;
+
+	P_Menu_Close(ent);
+	return P_Menu_Open(ent, entries, -1, num, arg, update);
+}
+
 const char *G_Menu_CallVoteCurrentRulesetName()
 {
 	const int ruleset = clamp((int)game.ruleset, (int)RS_NONE + 1, (int)RS_NUM_RULESETS - 1);
@@ -289,6 +358,9 @@ const char *G_Menu_CallVoteCurrentRulesetName()
 
 static void MenuVote_Initiate(gentity_t *ent, const char *cmd_name, const char *arg)
 {
+	if (!ent || !ent->client)
+		return;
+
 	vcmds_t *cc = FindVoteCmdByName(cmd_name);
 	if (!cc)
 	{
@@ -307,11 +379,38 @@ static void MenuVote_Initiate(gentity_t *ent, const char *cmd_name, const char *
 	MM_VoteCommandStore(ent);
 }
 
+static void MenuVote_CloseAndInitiate(gentity_t *ent, const char *cmd_name, const char *arg)
+{
+	if (!ent || !ent->client)
+		return;
+
+	P_Menu_Close(ent);
+	MenuVote_Initiate(ent, cmd_name, arg);
+}
+
 struct map_menu_page_t {
 	int offset;
 };
 
 static constexpr int MAPS_PER_PAGE = 12;
+static constexpr int MAP_MENU_FIRST_ITEM = 2;
+
+static int MenuVote_MapPageSize(int menu_entries)
+{
+	const int content_limit = max(0, menu_entries - 1);
+	const int prev_index = content_limit - 3;
+	return min(MAPS_PER_PAGE, max(0, prev_index - MAP_MENU_FIRST_ITEM));
+}
+
+static int MenuVote_MapPrevIndex(int menu_entries)
+{
+	return max(MAP_MENU_FIRST_ITEM, max(0, menu_entries - 1) - 3);
+}
+
+static int MenuVote_MapNextIndex(int menu_entries)
+{
+	return max(MAP_MENU_FIRST_ITEM, max(0, menu_entries - 1) - 2);
+}
 
 void G_Menu_CallVote_Map_Selection(gentity_t *ent, menu_hnd_t *p)
 {
@@ -330,10 +429,17 @@ void G_Menu_CallVote_Map_Selection(gentity_t *ent, menu_hnd_t *p)
 
 void G_Menu_CallVote_Map_PrevPage(gentity_t *ent, menu_hnd_t *p)
 {
+	if (!ent || !ent->client || !p)
+		return;
+
+	const int page_size = MenuVote_MapPageSize(p->num);
+	if (page_size <= 0)
+		return;
+
 	map_menu_page_t *page = (map_menu_page_t *)p->arg;
 	if (page && page->offset > 0)
 	{
-		page->offset -= MAPS_PER_PAGE;
+		page->offset -= page_size;
 		if (page->offset < 0)
 			page->offset = 0;
 	}
@@ -342,19 +448,34 @@ void G_Menu_CallVote_Map_PrevPage(gentity_t *ent, menu_hnd_t *p)
 
 void G_Menu_CallVote_Map_NextPage(gentity_t *ent, menu_hnd_t *p)
 {
+	if (!ent || !ent->client || !p)
+		return;
+
+	const int page_size = MenuVote_MapPageSize(p->num);
+	if (page_size <= 0)
+		return;
+
 	map_menu_page_t *page = (map_menu_page_t *)p->arg;
 	if (page)
-		page->offset += MAPS_PER_PAGE;
+		page->offset += page_size;
 	P_Menu_Update(ent);
 }
 
 void G_Menu_CallVote_Map_Update(gentity_t *ent)
 {
-	menu_t *entries = ent->client->menu->entries;
+	menu_vote_view_t view;
+	if (!MenuVote_View(ent, view) || !MenuVote_HasIndex(view, 0) || !MenuVote_HasIndex(view, 1))
+		return;
 
-	entries[1].text[0] = '\0';
-	entries[1].SelectFunc = nullptr;
-	entries[1].text_arg1[0] = '\0';
+	menu_t *entries = view.entries;
+	const int page_size = MenuVote_MapPageSize(view.num);
+	const int prev_index = MenuVote_MapPrevIndex(view.num);
+	const int next_index = MenuVote_MapNextIndex(view.num);
+	const int content_limit = MenuVote_ContentLimit(view);
+	if (page_size <= 0 || prev_index >= content_limit || next_index >= content_limit)
+		return;
+
+	MenuVote_ClearEntry(entries[1]);
 
 	std::vector<std::string> values;
 	auto map_exists = [&values](const std::string &map) -> bool
@@ -399,30 +520,27 @@ void G_Menu_CallVote_Map_Update(gentity_t *ent)
 	int offset = page ? page->offset : 0;
 	int total_maps = (int)values.size();
 
+	if (offset < 0)
+		offset = 0;
 	if (offset >= total_maps)
-		offset = (total_maps > 0) ? ((total_maps - 1) / MAPS_PER_PAGE) * MAPS_PER_PAGE : 0;
+		offset = (total_maps > 0) ? ((total_maps - 1) / page_size) * page_size : 0;
 	if (page)
 		page->offset = offset;
 
-	int total_pages = (total_maps + MAPS_PER_PAGE - 1) / MAPS_PER_PAGE;
+	int total_pages = (total_maps + page_size - 1) / page_size;
 	if (total_pages < 1)
 		total_pages = 1;
-	int current_page = (offset / MAPS_PER_PAGE) + 1;
+	int current_page = (offset / page_size) + 1;
 
 	if (total_pages > 1)
 		Q_strlcpy(entries[0].text, G_Fmt("Choose a Map ({}/{})", current_page, total_pages).data(), sizeof(entries[0].text));
 	else
 		Q_strlcpy(entries[0].text, "Choose a Map", sizeof(entries[0].text));
 
-	for (int i = 2; i <= 16; i++)
-	{
-		entries[i].SelectFunc = nullptr;
-		entries[i].text[0] = '\0';
-		entries[i].text_arg1[0] = '\0';
-	}
+	MenuVote_ClearRange(view, MAP_MENU_FIRST_ITEM, content_limit);
 
-	int menu_index = 2;
-	for (int i = offset; i < total_maps && menu_index < (2 + MAPS_PER_PAGE); i++)
+	int menu_index = MAP_MENU_FIRST_ITEM;
+	for (int i = offset; i < total_maps && menu_index < (MAP_MENU_FIRST_ITEM + page_size); i++)
 	{
 		Q_strlcpy(entries[menu_index].text_arg1, values[i].c_str(), sizeof(entries[menu_index].text_arg1));
 		Q_strlcpy(entries[menu_index].text, values[i].c_str(), sizeof(entries[menu_index].text));
@@ -432,51 +550,54 @@ void G_Menu_CallVote_Map_Update(gentity_t *ent)
 
 	if (offset > 0)
 	{
-		Q_strlcpy(entries[14].text, "< Prev Page", sizeof(entries[14].text));
-		entries[14].SelectFunc = G_Menu_CallVote_Map_PrevPage;
+		Q_strlcpy(entries[prev_index].text, "< Prev Page", sizeof(entries[prev_index].text));
+		entries[prev_index].SelectFunc = G_Menu_CallVote_Map_PrevPage;
 	}
 
-	if (offset + MAPS_PER_PAGE < total_maps)
+	if (offset + page_size < total_maps)
 	{
-		Q_strlcpy(entries[15].text, "> Next Page", sizeof(entries[15].text));
-		entries[15].SelectFunc = G_Menu_CallVote_Map_NextPage;
+		Q_strlcpy(entries[next_index].text, "> Next Page", sizeof(entries[next_index].text));
+		entries[next_index].SelectFunc = G_Menu_CallVote_Map_NextPage;
 	}
 }
 
 void G_Menu_CallVote_Map(gentity_t *ent, menu_hnd_t *p)
 {
-	P_Menu_Close(ent);
+	if (!ent || !ent->client)
+		return;
+
 	map_menu_page_t *page = (map_menu_page_t *)gi.TagMalloc(sizeof(map_menu_page_t), TAG_LEVEL);
 	page->offset = 0;
-	P_Menu_Open(ent, pmcallvotemenu_map, -1, sizeof(pmcallvotemenu_map) / sizeof(menu_t), page, G_Menu_CallVote_Map_Update);
+	MenuVote_OpenMenu(ent, pmcallvotemenu_map, (int)q_countof(pmcallvotemenu_map), page, G_Menu_CallVote_Map_Update);
 }
 
 void G_Menu_CallVote_NextMap(gentity_t *ent, menu_hnd_t *p)
 {
-	P_Menu_Close(ent);
-	MenuVote_Initiate(ent, "nextmap", nullptr);
+	MenuVote_CloseAndInitiate(ent, "nextmap", nullptr);
 }
 
 void G_Menu_CallVote_Restart(gentity_t *ent, menu_hnd_t *p)
 {
-	P_Menu_Close(ent);
-	MenuVote_Initiate(ent, "restart", nullptr);
+	MenuVote_CloseAndInitiate(ent, "restart", nullptr);
 }
 
 void G_Menu_CallVote_GameType_Update(gentity_t *ent)
 {
-	menu_t *entries = ent->client->menu->entries;
+	menu_vote_view_t view;
+	if (!MenuVote_View(ent, view) || !MenuVote_HasIndex(view, 0))
+		return;
+
+	menu_t *entries = view.entries;
+	const int content_limit = MenuVote_ContentLimit(view);
+	if (content_limit <= 2)
+		return;
+
 	Q_strlcpy(entries[0].text, "Select Gametype", sizeof(entries[0].text));
 
-	for (int i = 2; i < 17; i++)
-	{
-		entries[i].SelectFunc = nullptr;
-		entries[i].text[0] = '\0';
-		entries[i].text_arg1[0] = '\0';
-	}
+	MenuVote_ClearRange(view, 2, content_limit);
 
 	int menu_index = 2;
-	for (int i = (int)GT_FIRST; i <= (int)GT_LAST && menu_index < 17; i++)
+	for (int i = (int)GT_FIRST; i <= (int)GT_LAST && menu_index < content_limit; i++)
 	{
 		gametype_t gt = (gametype_t)i;
 		if (gt == GT_NONE)
@@ -514,24 +635,26 @@ void G_Menu_CallVote_GameType_Selection(gentity_t *ent, menu_hnd_t *p)
 
 void G_Menu_CallVote_GameType(gentity_t *ent, menu_hnd_t *p)
 {
-	P_Menu_Close(ent);
-	P_Menu_Open(ent, pmcallvotemenu_gametype, -1, sizeof(pmcallvotemenu_gametype) / sizeof(menu_t), nullptr, G_Menu_CallVote_GameType_Update);
+	MenuVote_OpenMenu(ent, pmcallvotemenu_gametype, (int)q_countof(pmcallvotemenu_gametype), nullptr, G_Menu_CallVote_GameType_Update);
 }
 
 void G_Menu_CallVote_Ruleset_Update(gentity_t *ent)
 {
-	menu_t *entries = ent->client->menu->entries;
+	menu_vote_view_t view;
+	if (!MenuVote_View(ent, view) || !MenuVote_HasIndex(view, 0))
+		return;
+
+	menu_t *entries = view.entries;
+	const int content_limit = MenuVote_ContentLimit(view);
+	if (content_limit <= 2)
+		return;
+
 	Q_strlcpy(entries[0].text, "Select Ruleset", sizeof(entries[0].text));
 
-	for (int i = 2; i < 17; i++)
-	{
-		entries[i].SelectFunc = nullptr;
-		entries[i].text[0] = '\0';
-		entries[i].text_arg1[0] = '\0';
-	}
+	MenuVote_ClearRange(view, 2, content_limit);
 
 	int menu_index = 2;
-	for (int i = (int)RS_NONE + 1; i < (int)RS_NUM_RULESETS && menu_index < 17; i++)
+	for (int i = (int)RS_NONE + 1; i < (int)RS_NUM_RULESETS && menu_index < content_limit; i++)
 	{
 		ruleset_t rs = (ruleset_t)i;
 		if (rs == RS_NONE)
@@ -569,13 +692,17 @@ void G_Menu_CallVote_Ruleset_Selection(gentity_t *ent, menu_hnd_t *p)
 
 void G_Menu_CallVote_Ruleset(gentity_t *ent, menu_hnd_t *p)
 {
-	P_Menu_Close(ent);
-	P_Menu_Open(ent, pmcallvotemenu_ruleset, -1, sizeof(pmcallvotemenu_ruleset) / sizeof(menu_t), nullptr, G_Menu_CallVote_Ruleset_Update);
+	MenuVote_OpenMenu(ent, pmcallvotemenu_ruleset, (int)q_countof(pmcallvotemenu_ruleset), nullptr, G_Menu_CallVote_Ruleset_Update);
 }
 
 void G_Menu_CallVote_TimeLimit_Update(gentity_t *ent)
 {
-	menu_t *entries = ent->client->menu->entries;
+	menu_vote_view_t view;
+	if (!MenuVote_View(ent, view) || !MenuVote_HasIndex(view, 0))
+		return;
+
+	menu_t *entries = view.entries;
+	const int content_limit = MenuVote_ContentLimit(view);
 	Q_strlcpy(entries[0].text, "Select Time Limit (mins)", sizeof(entries[0].text));
 
 	static const char *time_values[] = { "0", "5", "10", "15", "20", "25", "30" };
@@ -585,6 +712,8 @@ void G_Menu_CallVote_TimeLimit_Update(gentity_t *ent)
 	for (int i = 0; i < num_values; ++i)
 	{
 		int idx = first_index + i;
+		if (idx >= content_limit)
+			break;
 		Q_strlcpy(entries[idx].text, time_values[i], sizeof(entries[idx].text));
 		Q_strlcpy(entries[idx].text_arg1, time_values[i], sizeof(entries[idx].text_arg1));
 	}
@@ -600,13 +729,17 @@ void G_Menu_CallVote_TimeLimit_Selection(gentity_t *ent, menu_hnd_t *p)
 
 void G_Menu_CallVote_TimeLimit(gentity_t *ent, menu_hnd_t *p)
 {
-	P_Menu_Close(ent);
-	P_Menu_Open(ent, pmcallvotemenu_timelimit, -1, sizeof(pmcallvotemenu_timelimit) / sizeof(menu_t), nullptr, G_Menu_CallVote_TimeLimit_Update);
+	MenuVote_OpenMenu(ent, pmcallvotemenu_timelimit, (int)q_countof(pmcallvotemenu_timelimit), nullptr, G_Menu_CallVote_TimeLimit_Update);
 }
 
 void G_Menu_CallVote_ScoreLimit_Update(gentity_t *ent)
 {
-	menu_t *entries = ent->client->menu->entries;
+	menu_vote_view_t view;
+	if (!MenuVote_View(ent, view) || !MenuVote_HasIndex(view, 0))
+		return;
+
+	menu_t *entries = view.entries;
+	const int content_limit = MenuVote_ContentLimit(view);
 	Q_strlcpy(entries[0].text, "Select Score Limit", sizeof(entries[0].text));
 
 	static const char *score_values[] = { "0", "5", "10", "20", "30", "40", "50", "100" };
@@ -616,6 +749,8 @@ void G_Menu_CallVote_ScoreLimit_Update(gentity_t *ent)
 	for (int i = 0; i < num_values; ++i)
 	{
 		int idx = first_index + i;
+		if (idx >= content_limit)
+			break;
 		Q_strlcpy(entries[idx].text, score_values[i], sizeof(entries[idx].text));
 		Q_strlcpy(entries[idx].text_arg1, score_values[i], sizeof(entries[idx].text_arg1));
 	}
@@ -631,43 +766,42 @@ void G_Menu_CallVote_ScoreLimit_Selection(gentity_t *ent, menu_hnd_t *p)
 
 void G_Menu_CallVote_ScoreLimit(gentity_t *ent, menu_hnd_t *p)
 {
-	P_Menu_Close(ent);
-	P_Menu_Open(ent, pmcallvotemenu_scorelimit, -1, sizeof(pmcallvotemenu_scorelimit) / sizeof(menu_t), nullptr, G_Menu_CallVote_ScoreLimit_Update);
+	MenuVote_OpenMenu(ent, pmcallvotemenu_scorelimit, (int)q_countof(pmcallvotemenu_scorelimit), nullptr, G_Menu_CallVote_ScoreLimit_Update);
 }
 
 void G_Menu_CallVote_ShuffleTeams(gentity_t *ent, menu_hnd_t *p)
 {
-	P_Menu_Close(ent);
-	MenuVote_Initiate(ent, "shuffle", nullptr);
+	MenuVote_CloseAndInitiate(ent, "shuffle", nullptr);
 }
 
 void G_Menu_CallVote_BalanceTeams(gentity_t *ent, menu_hnd_t *p)
 {
-	P_Menu_Close(ent);
-	MenuVote_Initiate(ent, "balance", nullptr);
+	MenuVote_CloseAndInitiate(ent, "balance", nullptr);
 }
 
 void G_Menu_CallVote_Cointoss(gentity_t *ent, menu_hnd_t *p)
 {
-	P_Menu_Close(ent);
-	MenuVote_Initiate(ent, "cointoss", nullptr);
+	MenuVote_CloseAndInitiate(ent, "cointoss", nullptr);
 }
 
 void G_Menu_CallVote_ReadyAll(gentity_t *ent, menu_hnd_t *p)
 {
-	P_Menu_Close(ent);
-	MenuVote_Initiate(ent, "readyall", nullptr);
+	MenuVote_CloseAndInitiate(ent, "readyall", nullptr);
 }
 
 void G_Menu_CallVote_Update(gentity_t *ent)
 {
-	menu_t *entries = ent->client->menu->entries;
+	menu_vote_view_t view;
+	if (!MenuVote_View(ent, view))
+		return;
 
-	for (int i = 0; i < 15; i++)
-	{
-		entries[i].SelectFunc = nullptr;
-		entries[i].text[0] = '\0';
-	}
+	menu_t *entries = view.entries;
+	const int content_limit = MenuVote_ContentLimit(view);
+	const int readyall_index = 14;
+	if (content_limit <= readyall_index)
+		return;
+
+	MenuVote_ClearRange(view, 0, content_limit);
 
 	Q_strlcpy(entries[0].text, "Call a Vote", sizeof(entries[0].text));
 
@@ -752,7 +886,6 @@ void G_Menu_CallVote_Update(gentity_t *ent)
 		Q_strlcpy(entries[shuffle_index].text, "Shuffle Teams: N/A", sizeof(entries[shuffle_index].text));
 	}
 
-	int readyall_index = shuffle_index + 1;
 	if (g_dm_do_readyup->integer && level.match_state == matchst_t::MATCH_WARMUP_READYUP)
 	{
 		entries[readyall_index].SelectFunc = G_Menu_CallVote_ReadyAll;
@@ -764,16 +897,16 @@ void G_Menu_CallVote_Update(gentity_t *ent)
 		Q_strlcpy(entries[readyall_index].text, "Ready All: N/A", sizeof(entries[readyall_index].text));
 	}
 
-	for (int i = readyall_index + 1; i < 15; i++)
-	{
-		entries[i].SelectFunc = nullptr;
-		entries[i].text[0] = '\0';
-	}
+	MenuVote_ClearRange(view, readyall_index + 1, content_limit);
 }
 
 void G_Menu_CallVote_Powerups_Update(gentity_t *ent)
 {
-	menu_t *entries = ent->client->menu->entries;
+	menu_vote_view_t view;
+	if (!MenuVote_View(ent, view) || !MenuVote_HasIndex(view, 3))
+		return;
+
+	menu_t *entries = view.entries;
 	Q_strlcpy(entries[0].text, "Powerups", sizeof(entries[0].text));
 	Q_strlcpy(entries[2].text, "ON", sizeof(entries[2].text));
 	Q_strlcpy(entries[2].text_arg1, "1", sizeof(entries[2].text_arg1));
@@ -806,7 +939,11 @@ void G_Menu_CallVote_Powerups_Selection(gentity_t *ent, menu_hnd_t *p)
 
 void G_Menu_CallVote_Techs_Update(gentity_t *ent)
 {
-	menu_t *entries = ent->client->menu->entries;
+	menu_vote_view_t view;
+	if (!MenuVote_View(ent, view) || !MenuVote_HasIndex(view, 3))
+		return;
+
+	menu_t *entries = view.entries;
 	Q_strlcpy(entries[0].text, "Techs", sizeof(entries[0].text));
 	Q_strlcpy(entries[2].text, "ON", sizeof(entries[2].text));
 	Q_strlcpy(entries[2].text_arg1, "1", sizeof(entries[2].text_arg1));
@@ -839,19 +976,21 @@ void G_Menu_CallVote_Techs_Selection(gentity_t *ent, menu_hnd_t *p)
 
 void G_Menu_CallVote_Techs(gentity_t *ent, menu_hnd_t *p)
 {
-	P_Menu_Close(ent);
-	P_Menu_Open(ent, pmcallvotemenu_techs, -1, sizeof(pmcallvotemenu_techs) / sizeof(menu_t), nullptr, G_Menu_CallVote_Techs_Update);
+	MenuVote_OpenMenu(ent, pmcallvotemenu_techs, (int)q_countof(pmcallvotemenu_techs), nullptr, G_Menu_CallVote_Techs_Update);
 }
 
 void G_Menu_CallVote_Powerups(gentity_t *ent, menu_hnd_t *p)
 {
-	P_Menu_Close(ent);
-	P_Menu_Open(ent, pmcallvotemenu_powerups, -1, sizeof(pmcallvotemenu_powerups) / sizeof(menu_t), nullptr, G_Menu_CallVote_Powerups_Update);
+	MenuVote_OpenMenu(ent, pmcallvotemenu_powerups, (int)q_countof(pmcallvotemenu_powerups), nullptr, G_Menu_CallVote_Powerups_Update);
 }
 
 void G_Menu_CallVote_FriendlyFire_Update(gentity_t *ent)
 {
-	menu_t *entries = ent->client->menu->entries;
+	menu_vote_view_t view;
+	if (!MenuVote_View(ent, view) || !MenuVote_HasIndex(view, 3))
+		return;
+
+	menu_t *entries = view.entries;
 	Q_strlcpy(entries[0].text, "Friendly Fire", sizeof(entries[0].text));
 	Q_strlcpy(entries[2].text, "ON", sizeof(entries[2].text));
 	Q_strlcpy(entries[2].text_arg1, "1", sizeof(entries[2].text_arg1));
@@ -884,12 +1023,14 @@ void G_Menu_CallVote_FriendlyFire_Selection(gentity_t *ent, menu_hnd_t *p)
 
 void G_Menu_CallVote_FriendlyFire(gentity_t *ent, menu_hnd_t *p)
 {
-	P_Menu_Close(ent);
-	P_Menu_Open(ent, pmcallvotemenu_friendlyfire, -1, sizeof(pmcallvotemenu_friendlyfire) / sizeof(menu_t), nullptr, G_Menu_CallVote_FriendlyFire_Update);
+	MenuVote_OpenMenu(ent, pmcallvotemenu_friendlyfire, (int)q_countof(pmcallvotemenu_friendlyfire), nullptr, G_Menu_CallVote_FriendlyFire_Update);
 }
 
 void G_Menu_Vote_Yes(gentity_t *ent, menu_hnd_t *p)
 {
+	if (!ent || !ent->client)
+		return;
+
 	if (level.vote_state.state != VoteState::ACTIVE)
 	{
 		gi.LocClient_Print(ent, PRINT_HIGH, "No vote in progress.\n");
@@ -910,6 +1051,9 @@ void G_Menu_Vote_Yes(gentity_t *ent, menu_hnd_t *p)
 
 void G_Menu_Vote_No(gentity_t *ent, menu_hnd_t *p)
 {
+	if (!ent || !ent->client)
+		return;
+
 	if (level.vote_state.state != VoteState::ACTIVE)
 	{
 		gi.LocClient_Print(ent, PRINT_HIGH, "No vote in progress.\n");
@@ -951,6 +1095,9 @@ const menu_t votemenu[] = {
 
 void G_Menu_Vote_Update(gentity_t *ent)
 {
+	if (!ent || !ent->client)
+		return;
+
 	int ci = (int)(ent->client - game.clients);
 	MuffModeLog("DEBUG", "G_Menu_Vote_Update: enter for client %d, menu=%p", ci, (void *)ent->client->menu);
 
@@ -967,7 +1114,11 @@ void G_Menu_Vote_Update(gentity_t *ent)
 		return;
 	}
 
-	menu_t *entries = ent->client->menu->entries;
+	int num_entries = 0;
+	menu_t *entries = MenuVote_Entries(ent, &num_entries);
+	if (!entries || num_entries <= 16)
+		return;
+
 	MuffModeLog("DEBUG", "G_Menu_Vote_Update: entries=%p, caller=%p, command=%p",
 		(void *)entries, (void *)level.vote_state.caller, (void *)level.vote_state.command);
 
@@ -1017,6 +1168,9 @@ void G_Menu_Vote_Update(gentity_t *ent)
 
 bool Vote_Menu_Active(gentity_t *ent)
 {
+	if (!ent || !ent->client)
+		return false;
+
 	if (level.vote_state.state != VoteState::ACTIVE)
 		return false;
 
@@ -1031,24 +1185,31 @@ bool Vote_Menu_Active(gentity_t *ent)
 
 void G_Menu_CallVote(gentity_t *ent, menu_hnd_t *p)
 {
+	if (!ent || !ent->client)
+		return;
+
 	if (!ClientCanVote(ent->client))
 	{
 		gi.LocClient_Print(ent, PRINT_HIGH, "You are not allowed to call a vote as a spectator.\n");
 		return;
 	}
 
-	P_Menu_Close(ent);
-	P_Menu_Open(ent, pmcallvotemenu, -1, sizeof(pmcallvotemenu) / sizeof(menu_t), nullptr, G_Menu_CallVote_Update);
+	MenuVote_OpenMenu(ent, pmcallvotemenu, (int)q_countof(pmcallvotemenu), nullptr, G_Menu_CallVote_Update);
 }
 
 void G_Menu_ReturnToCallVote(gentity_t *ent, menu_hnd_t *p)
 {
-	P_Menu_Close(ent);
-	P_Menu_Open(ent, pmcallvotemenu, -1, sizeof(pmcallvotemenu) / sizeof(menu_t), nullptr, G_Menu_CallVote_Update);
+	if (!ent || !ent->client)
+		return;
+
+	MenuVote_OpenMenu(ent, pmcallvotemenu, (int)q_countof(pmcallvotemenu), nullptr, G_Menu_CallVote_Update);
 	gi.local_sound(ent, CHAN_AUTO, gi.soundindex("misc/menu3.wav"), 1, ATTN_NONE, 0);
 }
 
 void G_Menu_Vote_Open(gentity_t *ent)
 {
+	if (!ent || !ent->client)
+		return;
+
 	P_Menu_Open(ent, votemenu, -1, sizeof(votemenu) / sizeof(menu_t), nullptr, G_Menu_Vote_Update);
 }

@@ -29,8 +29,8 @@ gentity_t *AI_GetSightClient(gentity_t *self) {
 	if (level.intermission_time)
 		return nullptr;
 
-	gentity_t **visible_players = (gentity_t **)alloca(sizeof(gentity_t *) * game.maxclients);
-	size_t num_visible = 0;
+	gentity_t *visible_players[MAX_CLIENTS_KEX] = {};
+	int32_t num_visible = 0;
 
 	for (auto player : active_clients()) {
 		if (player->health <= 0 || player->deadflag || !player->solid)
@@ -43,6 +43,9 @@ gentity_t *AI_GetSightClient(gentity_t *self) {
 			if ((!(self->monsterinfo.aiflags & AI_THIRD_EYE) && !infront(self, player)) || !visible(self, player))
 				continue;
 		}
+
+		if (num_visible >= static_cast<int32_t>(q_countof(visible_players)))
+			break;
 
 		visible_players[num_visible++] = player; // got one
 	}
