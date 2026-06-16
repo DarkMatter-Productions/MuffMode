@@ -25,6 +25,9 @@ jobs:
         shell: pwsh
         run: ./scripts/ci/check-regression-corpus.ps1
 
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v3
+
       - name: Run host smoke tests
         shell: pwsh
         run: ./scripts/ci/run-host-tests.ps1 -Configuration Release -Platform x64
@@ -48,9 +51,6 @@ jobs:
       - name: Check dependency inventory
         shell: pwsh
         run: ./scripts/ci/check-dependency-inventory.ps1
-
-      - name: Setup MSBuild
-        uses: microsoft/setup-msbuild@v3
 
       - name: Build
         shell: pwsh
