@@ -5,6 +5,42 @@
 #include "muffmode/mm_duel.h"
 #include "muffmode/mm_team.h"
 
+#include <string>
+#include <string_view>
+
+namespace {
+
+bool MM_DuelAppendLayout(std::string &layout, std::string_view entry)
+{
+	constexpr size_t terminator_reserve = 1;
+	if (entry.size() > MAX_STRING_CHARS - terminator_reserve)
+		return false;
+	if (layout.size() > MAX_STRING_CHARS - terminator_reserve - entry.size())
+		return false;
+
+	layout += entry;
+	return true;
+}
+
+int MM_DuelSortedClientAt(size_t slot)
+{
+	if (slot >= q_countof(level.sorted_clients))
+		return -1;
+
+	const int client_num = level.sorted_clients[slot];
+	if (client_num < 0 || client_num >= (int)game.maxclients)
+		return -1;
+
+	return client_num;
+}
+
+size_t MM_DuelSortedClientLimit()
+{
+	return min<size_t>(game.maxclients, q_countof(level.sorted_clients));
+}
+
+} // namespace
+
 bool MM_Duel_AddPlayer()
 {
 	if (notGT(GT_DUEL))
@@ -42,7 +78,11 @@ void MM_Duel_RemoveLoser()
 	if (level.num_playing_clients != 2)
 		return;
 
-	gentity_t *ent = &g_entities[level.sorted_clients[1] + 1];
+	const int loser_num = MM_DuelSortedClientAt(1);
+	if (loser_num < 0)
+		return;
+
+	gentity_t *ent = &g_entities[loser_num + 1];
 
 	if (!ent || !ent->client || !ent->client->pers.connected)
 		return;
@@ -58,11 +98,11 @@ void MM_Duel_MatchEnd_AdjustScores()
 	if (notGT(GT_DUEL))
 		return;
 
-	int client_num = level.sorted_clients[0];
+	int client_num = MM_DuelSortedClientAt(0);
 	if (client_num >= 0 && game.clients[client_num].pers.connected)
 		game.clients[client_num].sess.wins++;
 
-	client_num = level.sorted_clients[1];
+	client_num = MM_DuelSortedClientAt(1);
 	if (client_num >= 0 && game.clients[client_num].pers.connected) {
 		// handled in SetTeam
 	}
@@ -96,8 +136,8 @@ Duel scoreboard layout: the two contenders, queued challengers and spectators.
 ==================
 */
 void MM_Duel_ScoreboardMessage(gentity_t *ent, gentity_t *killer) {
-	uint8_t	i, i2 = 0;
-	uint32_t	j, k, n;
+	uint8_t	i2 = 0;
+	uint32_t	j, k;
 
 	static std::string entry, string;
 	int			x, y;
@@ -105,22 +145,22 @@ void MM_Duel_ScoreboardMessage(gentity_t *ent, gentity_t *killer) {
 	string.clear();
 	entry.clear();
 
-	fmt::format_to(std::back_inserter(string), FMT_STRING("xv 0 yv -40 cstring2 \"{} on {}\" "), level.gametype_name, level.level_name);
-	fmt::format_to(std::back_inserter(string), FMT_STRING("xv 0 yv -30 cstring2 \"Score Limit: {}\" "), GT_ScoreLimit());
+	MM_DuelAppendLayout(string, G_Fmt("xv 0 yv -40 cstring2 \"{} on {}\" ", level.gametype_name, level.level_name));
+	MM_DuelAppendLayout(string, G_Fmt("xv 0 yv -30 cstring2 \"Score Limit: {}\" ", GT_ScoreLimit()));
 
 	if (level.intermission_time) {
 		if (level.match_start_time) {
 			int	t = (level.intermission_time - level.match_start_time - 1_sec).milliseconds();
-			fmt::format_to(std::back_inserter(string), FMT_STRING("xv 0 yv -50 cstring2 \"Total Match Time: {}\" "), G_TimeStringMs(t, false));
+			MM_DuelAppendLayout(string, G_Fmt("xv 0 yv -50 cstring2 \"Total Match Time: {}\" ", G_TimeStringMs(t, false)));
 		}
 		if (level.intermission_victor_msg[0])
-			fmt::format_to(std::back_inserter(string), FMT_STRING("xv 0 yv -10 cstring2 \"{}\" "), level.intermission_victor_msg);
+			MM_DuelAppendLayout(string, G_Fmt("xv 0 yv -10 cstring2 \"{}\" ", level.intermission_victor_msg));
 
-		fmt::format_to(std::back_inserter(string), FMT_STRING("ifgef {} yb -48 xv 0 loc_cstring2 0 \"$m_eou_press_button\" endif "), (level.intermission_server_frame + (5_sec).frames()));
+		MM_DuelAppendLayout(string, G_Fmt("ifgef {} yb -48 xv 0 loc_cstring2 0 \"$m_eou_press_button\" endif ", (level.intermission_server_frame + (5_sec).frames())));
 	} else if (level.match_state == MATCH_IN_PROGRESS) {
-		if (ent->client && ClientIsPlaying(ent->client) && ent->client->resp.score && level.num_playing_clients > 1) {
-			fmt::format_to(std::back_inserter(string), FMT_STRING("xv 0 yv -10 cstring2 \"{} place with a score of {}\" "),
-				G_PlaceString(ent->client->resp.rank + 1), ent->client->resp.score);
+		if (ent && ent->client && ClientIsPlaying(ent->client) && ent->client->resp.score && level.num_playing_clients > 1) {
+			MM_DuelAppendLayout(string, G_Fmt("xv 0 yv -10 cstring2 \"{} place with a score of {}\" ",
+				G_PlaceString(ent->client->resp.rank + 1), ent->client->resp.score));
 		}
 		//fmt::format_to(std::back_inserter(string), FMT_STRING("xv 0 yb -48 cstring2 \"{}\" "), "Use inventory bind to toggle menu.");
 	}
@@ -132,11 +172,12 @@ void MM_Duel_ScoreboardMessage(gentity_t *ent, gentity_t *killer) {
 
 	if (level.num_playing_clients) {
 		i2 = 0;
-		for (i = 0; i < level.num_playing_clients; i++) {
-			if (level.sorted_clients[i] < 0)
+		for (size_t i = 0; i < level.num_playing_clients; i++) {
+			const int client_num = MM_DuelSortedClientAt(i);
+			if (client_num < 0)
 				continue;
 
-			cl = &game.clients[level.sorted_clients[i]];
+			cl = &game.clients[client_num];
 			if (!cl)
 				continue;
 			if (!cl->pers.connected)
@@ -145,7 +186,7 @@ void MM_Duel_ScoreboardMessage(gentity_t *ent, gentity_t *killer) {
 			if (!ClientIsPlaying(cl))
 				continue;
 
-			cl_ent = g_entities + 1 + level.sorted_clients[i];
+			cl_ent = g_entities + 1 + client_num;
 			if (!cl_ent)
 				continue;
 			if (!cl_ent->inuse)
@@ -168,21 +209,17 @@ void MM_Duel_ScoreboardMessage(gentity_t *ent, gentity_t *killer) {
 			if (level.match_state == matchst_t::MATCH_WARMUP_READYUP && (cl->sess.is_a_bot || cl->resp.ready))
 				fmt::format_to(std::back_inserter(entry), FMT_STRING("xv {} yv {} picn {} "), x + 16, y + 16, "wheel/p_compass_selected");
 
-			if (string.length() + entry.length() > MAX_STRING_CHARS)
+			if (!MM_DuelAppendLayout(string, entry))
 				break;
-
-			string += entry;
 
 			entry.clear();
 
 			fmt::format_to(std::back_inserter(entry),
 				FMT_STRING("client {} {} {} {} {} {} "),
-				x, y, level.sorted_clients[i], cl->resp.score, cl->ping, 0);	// (level.time - cl->sess.team_join_time).minutes<int>());
+				x, y, client_num, cl->resp.score, cl->ping, 0);	// (level.time - cl->sess.team_join_time).minutes<int>());
 
-			if (string.length() + entry.length() > MAX_STRING_CHARS)
+			if (!MM_DuelAppendLayout(string, entry))
 				break;
-
-			string += entry;
 
 			entry.clear();
 
@@ -192,18 +229,19 @@ void MM_Duel_ScoreboardMessage(gentity_t *ent, gentity_t *killer) {
 		}
 	}
 
-	if ((level.num_connected_clients - level.num_playing_clients) > 0) {
+	if (level.num_connected_clients > level.num_playing_clients) {
 		j = 58;
 
 		i2 = 0;
-		k = n = 0;
+		k = 0;
 		if (string.size() < MAX_STRING_CHARS - 50) {
-			for (i = 0; i < MAX_CLIENTS_KEX; i++) {
-				if (level.sorted_clients[i] < 0)
+			for (size_t i = 0; i < MM_DuelSortedClientLimit(); i++) {
+				const int client_num = MM_DuelSortedClientAt(i);
+				if (client_num < 0)
 					continue;
 
-				cl = &game.clients[level.sorted_clients[i]];
-				cl_ent = g_entities + 1 + level.sorted_clients[i];
+				cl = &game.clients[client_num];
+				cl_ent = g_entities + 1 + client_num;
 
 				if (!cl_ent)
 					continue;
@@ -225,22 +263,22 @@ void MM_Duel_ScoreboardMessage(gentity_t *ent, gentity_t *killer) {
 
 				if (!k) {
 					k = 1;
-					fmt::format_to(std::back_inserter(string), FMT_STRING("xv 0 yv {} loc_string2 0 \"Queued Contenders:\" "), j);
+					if (!MM_DuelAppendLayout(string, G_Fmt("xv 0 yv {} loc_string2 0 \"Queued Contenders:\" ", j)))
+						break;
 					j += 8;
-					fmt::format_to(std::back_inserter(string), FMT_STRING("xv -40 yv {} loc_string2 0 \"w  l  name\" "), j);
+					if (!MM_DuelAppendLayout(string, G_Fmt("xv -40 yv {} loc_string2 0 \"w  l  name\" ", j)))
+						break;
 					j += 8;
 				}
 
-				std::string_view entry = G_Fmt("ctf {} {} {} {} {} \"\" ",
+				if (!MM_DuelAppendLayout(string, G_Fmt("ctf {} {} {} {} {} \"\" ",
 					-40,						// x
 					j,							// y
-					level.sorted_clients[i],	// playernum
+					client_num,					// playernum
 					cl->sess.wins,
 					cl->sess.losses
-				);
-
-				if (string.size() + entry.size() < MAX_STRING_CHARS)
-					string += entry;
+				)))
+					break;
 
 				j += 8;
 				i2++;
@@ -252,14 +290,15 @@ void MM_Duel_ScoreboardMessage(gentity_t *ent, gentity_t *killer) {
 		j += 8;
 
 		i2 = 0;
-		k = n = 0;
+		k = 0;
 		if (string.size() < MAX_STRING_CHARS - 50) {
-			for (i = 0; i < MAX_CLIENTS_KEX; i++) {
-				if (level.sorted_clients[i] < 0)
+			for (size_t i = 0; i < MM_DuelSortedClientLimit(); i++) {
+				const int client_num = MM_DuelSortedClientAt(i);
+				if (client_num < 0)
 					continue;
 
-				cl = &game.clients[level.sorted_clients[i]];
-				cl_ent = g_entities + 1 + level.sorted_clients[i];
+				cl = &game.clients[client_num];
+				cl_ent = g_entities + 1 + client_num;
 
 				if (!cl_ent)
 					continue;
@@ -281,18 +320,17 @@ void MM_Duel_ScoreboardMessage(gentity_t *ent, gentity_t *killer) {
 
 				if (!k) {
 					k = 1;
-					fmt::format_to(std::back_inserter(string), FMT_STRING("xv 0 yv {} loc_string2 0 \"Spectators:\" "), j);
+					if (!MM_DuelAppendLayout(string, G_Fmt("xv 0 yv {} loc_string2 0 \"Spectators:\" ", j)))
+						break;
 					j += 8;
 				}
 
-				std::string_view entry = G_Fmt("ctf {} {} {} 0 0 \"\" ",
+				if (!MM_DuelAppendLayout(string, G_Fmt("ctf {} {} {} 0 0 \"\" ",
 					-40,						// x
 					j,							// y
-					level.sorted_clients[i]		// playernum
-				);
-
-				if (string.size() + entry.size() < MAX_STRING_CHARS)
-					string += entry;
+					client_num					// playernum
+				)))
+					break;
 
 				j += 8;
 				i2++;
@@ -303,9 +341,9 @@ void MM_Duel_ScoreboardMessage(gentity_t *ent, gentity_t *killer) {
 	}
 
 	if (level.intermission_time)
-		fmt::format_to(std::back_inserter(string), FMT_STRING("ifgef {} yb -48 xv 0 loc_cstring2 0 \"$m_eou_press_button\" endif "), (level.intermission_server_frame + (5_sec).frames()));
+		MM_DuelAppendLayout(string, G_Fmt("ifgef {} yb -48 xv 0 loc_cstring2 0 \"$m_eou_press_button\" endif ", (level.intermission_server_frame + (5_sec).frames())));
 	else
-		fmt::format_to(std::back_inserter(string), FMT_STRING("xv 0 yb -48 cstring2 \"{}\" "), "Show inventory to toggle menu.");
+		MM_DuelAppendLayout(string, "xv 0 yb -48 cstring2 \"Show inventory to toggle menu.\" ");
 
 	gi.WriteByte(svc_layout);
 	gi.WriteString(string.c_str());
@@ -319,6 +357,9 @@ Losing player concedes the duel.
 ==================
 */
 void MM_Duel_CmdForfeit(gentity_t *ent) {
+	if (!ent || !ent->client)
+		return;
+
 	if (notGT(GT_DUEL)) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "Forfeit is only available in a duel.\n");
 		return;
@@ -327,7 +368,8 @@ void MM_Duel_CmdForfeit(gentity_t *ent) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "Forfeit is not available during warmup.\n");
 		return;
 	}
-	if (level.sorted_clients[1] < 0 || ent->client != &game.clients[level.sorted_clients[1]]) {
+	const int loser_num = MM_DuelSortedClientAt(1);
+	if (loser_num < 0 || ent->client != &game.clients[loser_num]) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "Forfeit is only available to the losing player.\n");
 		return;
 	}

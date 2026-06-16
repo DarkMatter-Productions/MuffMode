@@ -5,6 +5,7 @@
 #include "g_debug_log.h"
 #include "muffmode/mm_captain.h"
 #include "muffmode/mm_gametype.h"
+#include "muffmode/mm_maps.h"
 #include "muffmode/mm_match.h"
 #include "muffmode/mm_parse.h"
 #include "muffmode/mm_team.h"
@@ -72,6 +73,38 @@ bool MM_ParseVoteNonNegativeInt(const char *text, int &out)
 	return true;
 }
 
+bool MM_ParseStoredVoteNonNegativeInt(int &out, const char *description)
+{
+	if (MM_ParseVoteNonNegativeInt(level.vote_state.arg.data(), out))
+		return true;
+
+	gi.LocBroadcast_Print(PRINT_HIGH, "{} vote failed: stored vote argument is invalid.\n", description);
+	return false;
+}
+
+bool MM_ParseStoredVoteBinaryInt(int &out, const char *description)
+{
+	if (!MM_ParseStoredVoteNonNegativeInt(out, description))
+		return false;
+
+	if (out == 0 || out == 1)
+		return true;
+
+	gi.LocBroadcast_Print(PRINT_HIGH, "{} vote failed: stored vote argument must be 0 or 1.\n", description);
+	return false;
+}
+
+bool MM_RestartCurrentMapForVote(const char *description)
+{
+	if (!MM_IsSafeMapToken(level.mapname)) {
+		gi.LocBroadcast_Print(PRINT_HIGH, "{} vote passed, but current map name is unsafe to restart.\n", description);
+		return false;
+	}
+
+	gi.AddCommandString(G_Fmt("gamemap \"{}\"\n", level.mapname).data());
+	return true;
+}
+
 bool MM_VoteValNone(gentity_t *ent)
 {
 	return true;
@@ -133,7 +166,7 @@ void MM_UpdateActiveVote()
 
 bool MM_IsMapValidImpl(const char *mapname)
 {
-	if (!mapname || !mapname[0])
+	if (!MM_IsSafeMapToken(mapname))
 		return false;
 
 	char *token;
@@ -145,7 +178,7 @@ bool MM_IsMapValidImpl(const char *mapname)
 
 		while ((token = COM_Parse(&pool)) && *token)
 		{
-			if (!Q_strcasecmp(token, mapname))
+			if (MM_IsSafeMapToken(token) && !Q_strcasecmp(token, mapname))
 				return true;
 		}
 	}
@@ -157,7 +190,7 @@ bool MM_IsMapValidImpl(const char *mapname)
 
 		while ((token = COM_Parse(&mlist)) && *token)
 		{
-			if (!Q_strcasecmp(token, mapname))
+			if (MM_IsSafeMapToken(token) && !Q_strcasecmp(token, mapname))
 				return true;
 		}
 	}
@@ -185,7 +218,7 @@ void MM_PrintAvailableMaps(gentity_t *ent)
 		const char *pool = g_map_pool->string;
 		while ((token = COM_Parse(&pool)) && *token)
 		{
-			if (!map_exists(token))
+			if (MM_IsSafeMapToken(token) && !map_exists(token))
 				all_maps.push_back(token);
 		}
 	}
@@ -194,7 +227,7 @@ void MM_PrintAvailableMaps(gentity_t *ent)
 		const char *mlist = g_map_list->string;
 		while ((token = COM_Parse(&mlist)) && *token)
 		{
-			if (!map_exists(token))
+			if (MM_IsSafeMapToken(token) && !map_exists(token))
 				all_maps.push_back(token);
 		}
 	}
@@ -561,7 +594,7 @@ void MM_VotePassMap()
 		level.vote_state.arg.c_str(), (int)level.vote_state.arg.length(),
 		(void *)level.vote_state.arg.c_str());
 
-	if (level.vote_state.arg.empty() || level.vote_state.arg.length() >= sizeof(level.nextmap))
+	if (!MM_IsSafeMapToken(level.vote_state.arg.c_str()) || level.vote_state.arg.length() >= sizeof(level.nextmap))
 	{
 		gi.LocBroadcast_Print(PRINT_HIGH, "Map vote failed: invalid map name.\n");
 		return;
@@ -627,7 +660,7 @@ void MM_VotePassCointoss()
 void MM_VotePassRandom()
 {
 	int arg = 0;
-	if (!MM_ParseVoteNonNegativeInt(level.vote_state.arg.data(), arg))
+	if (!MM_ParseStoredVoteNonNegativeInt(arg, "Random") || arg < 2 || arg > 100)
 		return;
 
 	gi.LocBroadcast_Print(PRINT_HIGH, "The random number is: {}\n", irandom(2, arg + 1));
@@ -635,7 +668,9 @@ void MM_VotePassRandom()
 
 void MM_VotePassUnlagged()
 {
-	int argi = strtoul(level.vote_state.arg.data(), nullptr, 10);
+	int argi = 0;
+	if (!MM_ParseStoredVoteBinaryInt(argi, "Unlagged"))
+		return;
 
 	gi.LocBroadcast_Print(PRINT_HIGH, "Lag compensation has been {}.\n", argi ? "ENABLED" : "DISABLED");
 
@@ -664,15 +699,16 @@ bool MM_VoteValUnlagged(gentity_t *ent)
 
 void MM_VotePassTimelimit()
 {
-	const char *s = level.vote_state.arg.data();
-	int argi = strtoul(s, nullptr, 10);
+	int argi = 0;
+	if (!MM_ParseStoredVoteNonNegativeInt(argi, "Time limit") || argi > 1440)
+		return;
 
 	if (!argi)
 		gi.LocBroadcast_Print(PRINT_HIGH, "Time limit has been DISABLED.\n");
 	else
 		gi.LocBroadcast_Print(PRINT_HIGH, "Time limit has been set to {}.\n", G_TimeString(argi * 60000, false));
 
-	gi.cvar_forceset("timelimit", s);
+	gi.cvar_forceset("timelimit", G_Fmt("{}", argi).data());
 }
 
 bool MM_VoteValTimelimit(gentity_t *ent)
@@ -695,14 +731,16 @@ bool MM_VoteValTimelimit(gentity_t *ent)
 
 void MM_VotePassScorelimit()
 {
-	int argi = strtoul(level.vote_state.arg.data(), nullptr, 10);
+	int argi = 0;
+	if (!MM_ParseStoredVoteNonNegativeInt(argi, "Score limit"))
+		return;
 
 	if (argi)
 		gi.LocBroadcast_Print(PRINT_HIGH, "Score limit has been set to {}.\n", argi);
 	else
 		gi.LocBroadcast_Print(PRINT_HIGH, "Score limit has been DISABLED.\n");
 
-	gi.cvar_forceset(G_Fmt("{}limit", GT_ScoreLimitString()).data(), level.vote_state.arg.data());
+	gi.cvar_forceset(G_Fmt("{}limit", GT_ScoreLimitString()).data(), G_Fmt("{}", argi).data());
 }
 
 bool MM_VoteValScorelimit(gentity_t *ent)
@@ -726,14 +764,16 @@ bool MM_VoteValScorelimit(gentity_t *ent)
 
 void MM_VotePassPowerups()
 {
-	int argi = strtoul(level.vote_state.arg.data(), nullptr, 10);
+	int argi = 0;
+	if (!MM_ParseStoredVoteBinaryInt(argi, "Powerups"))
+		return;
 
 	gi.LocBroadcast_Print(PRINT_HIGH, "Powerups have been {}.\n", argi ? "ENABLED" : "DISABLED");
 
 	gi.cvar_forceset("g_no_powerups", argi ? "0" : "1");
 
 	// Restart the map so powerup changes take effect immediately.
-	gi.AddCommandString(G_Fmt("gamemap {}\n", level.mapname).data());
+	MM_RestartCurrentMapForVote("Powerups");
 }
 
 bool MM_VoteValPowerups(gentity_t *ent)
@@ -760,14 +800,16 @@ bool MM_VoteValPowerups(gentity_t *ent)
 
 void MM_VotePassTechs()
 {
-	int argi = strtoul(level.vote_state.arg.data(), nullptr, 10);
+	int argi = 0;
+	if (!MM_ParseStoredVoteBinaryInt(argi, "Techs"))
+		return;
 
 	gi.LocBroadcast_Print(PRINT_HIGH, "Techs have been {}.\n", argi ? "ENABLED" : "DISABLED");
 
 	gi.cvar_forceset("g_allow_techs", argi ? "1" : "0");
 
 	// Restart the map so tech changes take effect immediately.
-	gi.AddCommandString(G_Fmt("gamemap {}\n", level.mapname).data());
+	MM_RestartCurrentMapForVote("Techs");
 }
 
 bool MM_VoteValTechs(gentity_t *ent)
@@ -800,7 +842,9 @@ bool MM_VoteValTechs(gentity_t *ent)
 
 void MM_VotePassFriendlyFire()
 {
-	int argi = strtoul(level.vote_state.arg.data(), nullptr, 10);
+	int argi = 0;
+	if (!MM_ParseStoredVoteBinaryInt(argi, "Friendly fire"))
+		return;
 
 	gi.LocBroadcast_Print(PRINT_HIGH, "Friendly fire has been {}.\n", argi ? "ENABLED" : "DISABLED");
 
@@ -842,7 +886,13 @@ void MM_VotePassShuffleTeams()
 		gi.LocBroadcast_Print(PRINT_HIGH, "Shuffle vote failed: not a team gametype.\n");
 		return;
 	}
-	TeamShuffle();
+
+	if (!TeamShuffle())
+	{
+		gi.LocBroadcast_Print(PRINT_HIGH, "Shuffle vote failed: teams could not be shuffled.\n");
+		return;
+	}
+
 	Match_Reset();
 	gi.LocBroadcast_Print(PRINT_HIGH, "Teams have been shuffled.\n");
 }
@@ -854,12 +904,25 @@ bool MM_VoteValShuffleTeams(gentity_t *ent)
 		gi.LocClient_Print(ent, PRINT_HIGH, "Shuffle teams is only available in team gametypes.\n");
 		return false;
 	}
+	if (level.num_playing_clients < 2)
+	{
+		gi.LocClient_Print(ent, PRINT_HIGH, "Not enough players to shuffle teams.\n");
+		return false;
+	}
 	return true;
 }
 
 void MM_VotePassBalanceTeams()
 {
-	TeamBalance(true);
+	if (!Teams())
+	{
+		gi.LocBroadcast_Print(PRINT_HIGH, "Balance vote failed: not a team gametype.\n");
+		return;
+	}
+
+	const int moved = TeamBalance(true);
+	if (moved <= 0)
+		gi.LocBroadcast_Print(PRINT_HIGH, "Teams are already balanced.\n");
 }
 
 bool MM_VoteValBalanceTeams(gentity_t *ent)
@@ -913,6 +976,13 @@ bool MM_ValidVoteCommand(gentity_t *ent)
 		return false;
 	}
 
+	const int expected_argc = 1 + cc->min_args;
+	if (gi.argc() > expected_argc)
+	{
+		gi.LocClient_Print(ent, PRINT_HIGH, "Too many arguments for vote command.\nUsage: {} {}\n", cc->name, cc->args ? cc->args : "");
+		return false;
+	}
+
 	if (!cc->val_func(ent))
 		return false;
 
@@ -935,21 +1005,33 @@ bool MM_ValidVoteCommand(gentity_t *ent)
 
 void MM_VoteCommandStore(gentity_t *ent)
 {
+	auto clear_idle_staged_vote = []() {
+		if (level.vote_state.state != VoteState::IDLE)
+			return;
+
+		level.vote_state.command = nullptr;
+		level.vote_state.arg.clear();
+		level.vote_state.caller = nullptr;
+	};
+
 	if (!level.vote_state.command)
 	{
 		gi.LocClient_Print(ent, PRINT_HIGH, "Internal error: vote command was lost.\n");
+		clear_idle_staged_vote();
 		return;
 	}
 
 	if (!g_allow_voting->integer)
 	{
 		gi.LocClient_Print(ent, PRINT_HIGH, "Voting not allowed here.\n");
+		clear_idle_staged_vote();
 		return;
 	}
 
 	if (g_vote_flags->integer & level.vote_state.command->flag)
 	{
 		gi.LocClient_Print(ent, PRINT_HIGH, "This vote type is not allowed.\n");
+		clear_idle_staged_vote();
 		return;
 	}
 
@@ -962,18 +1044,21 @@ void MM_VoteCommandStore(gentity_t *ent)
 	if (!ClientCanVote(ent->client))
 	{
 		gi.LocClient_Print(ent, PRINT_HIGH, "You are not allowed to call a vote as a spectator.\n");
+		clear_idle_staged_vote();
 		return;
 	}
 
 	if (g_vote_limit->integer && ent->client->pers.vote_count >= g_vote_limit->integer)
 	{
 		gi.LocClient_Print(ent, PRINT_HIGH, "You have called the maximum number of votes ({}).\n", g_vote_limit->integer);
+		clear_idle_staged_vote();
 		return;
 	}
 
 	if (!g_allow_vote_midgame->integer && level.match_state >= matchst_t::MATCH_COUNTDOWN)
 	{
 		gi.LocClient_Print(ent, PRINT_HIGH, "Voting is only allowed during the warm up period.\n");
+		clear_idle_staged_vote();
 		return;
 	}
 

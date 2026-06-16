@@ -2,14 +2,16 @@
 // Licensed under the GNU General Public License 2.0.
 
 #include "g_local.h"
+#include "muffmode/mm_gametype.h"
 #include "muffmode/mm_spawn_loadout.h"
 
 void MM_ApplyStartingHealthArmor(gentity_t *ent, gclient_t *client)
 {
 	int health, armor;
 	gitem_armor_t armor_type = jacketarmor_info;
+	const bool arena = MM_GametypeHasFlag(GTF_ARENA);
 
-	if (GTF(GTF_ARENA)) {
+	if (arena) {
 		health = clamp(g_arena_start_health->integer, 1, 9999);
 		armor = clamp(g_arena_start_armor->integer, 0, 999);
 	} else {
@@ -26,7 +28,7 @@ void MM_ApplyStartingHealthArmor(gentity_t *ent, gclient_t *client)
 	client->pers.health = client->pers.max_health = health;
 
 	int bonus = RS(RS_Q3A) ? 25 : g_starting_health_bonus->integer;
-	if (!(GTF(GTF_ARENA)) && bonus > 0) {
+	if (!arena && bonus > 0) {
 		client->pers.health += bonus;
 		if (!(RS(RS_Q3A))) {
 			client->pers.health_bonus = bonus;
@@ -46,12 +48,14 @@ void MM_ApplyStartingHealthArmor(gentity_t *ent, gclient_t *client)
 void MM_ApplySpawnLoadout(gentity_t *ent, gclient_t *client, bool taken_loadout)
 {
 	if (!taken_loadout) {
+		const bool arena = MM_GametypeHasFlag(GTF_ARENA);
+
 		if (g_instagib->integer || GT(GT_INSTAGIB)) {
 			client->pers.inventory[IT_WEAPON_RAILGUN] = 1;
 			client->pers.inventory[IT_AMMO_SLUGS] = AMMO_INFINITE;
 		} else if (g_nadefest->integer || GT(GT_NADEFEST)) {
 			client->pers.inventory[IT_AMMO_GRENADES] = AMMO_INFINITE;
-		} else if (GTF(GTF_ARENA)) {
+		} else if (arena) {
 			client->pers.max_ammo.fill(50);
 			client->pers.max_ammo[AMMO_SHELLS] = 50;
 			client->pers.max_ammo[AMMO_BULLETS] = 300;

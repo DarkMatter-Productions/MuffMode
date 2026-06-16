@@ -3,6 +3,7 @@
 
 #include "g_local.h"
 #include "muffmode/mm_captain.h"
+#include "muffmode/mm_command_contracts.h"
 #include "muffmode/mm_ghost.h"
 #include "muffmode/mm_match.h"
 #include "muffmode/mm_red_rover_rules.h"
@@ -361,7 +362,8 @@ bool TeamShuffle() {
 		else if (count_blue >= maxteam || count_blue > count_red)
 			setteam = TEAM_RED;
 		
-		ent->client->sess.team = setteam;
+		if (!SetTeam(ent, setteam, false, true, true))
+			continue;
 
 		if (setteam == TEAM_RED)
 			count_red++;
@@ -516,6 +518,11 @@ MM_CmdTeam
 =================
 */
 void MM_CmdTeam(gentity_t *ent) {
+	if (!MM_IsArgcInRangeValid(gi.argc(), 1, 2)) {
+		gi.LocClient_Print(ent, PRINT_HIGH, "Usage: {} [team]\n", gi.argv(0));
+		return;
+	}
+
 	if (gi.argc() == 1) {
 		switch (ent->client->sess.team) {
 		case TEAM_SPECTATOR:
@@ -536,8 +543,10 @@ void MM_CmdTeam(gentity_t *ent) {
 
 	const char *s = gi.argv(1);
 	team_t team = StringToTeamNum(s);
-	if (team == TEAM_NONE)
+	if (team == TEAM_NONE) {
+		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid team.\n");
 		return;
+	}
 
 	SetTeam(ent, team, false, false, false);
 }
@@ -548,7 +557,7 @@ MM_CmdSetTeam
 =================
 */
 void MM_CmdSetTeam(gentity_t *ent) {
-	if (gi.argc() < 2) {
+	if (!MM_IsArgcInRangeValid(gi.argc(), 2, 3)) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "Usage: {} [client name/num] [team]\n", gi.argv(0));
 		return;
 	}
@@ -581,8 +590,12 @@ void MM_CmdSetTeam(gentity_t *ent) {
 		return;
 	}
 
+	if (!SetTeam(targ, team, false, true, false)) {
+		gi.LocClient_Print(ent, PRINT_HIGH, "Could not move {} to {} team.\n", targ->client->resp.netname, Teams_TeamName(team));
+		return;
+	}
+
 	gi.LocBroadcast_Print(PRINT_HIGH, "[ADMIN]: Moved {} to {} team.\n", targ->client->resp.netname, Teams_TeamName(team));
-	SetTeam(targ, team, false, true, false);
 }
 
 /*
@@ -591,8 +604,27 @@ MM_CmdShuffle
 =================
 */
 void MM_CmdShuffle(gentity_t *ent) {
+	if (!MM_IsExactArgcValid(gi.argc(), 1)) {
+		gi.LocClient_Print(ent, PRINT_HIGH, "Usage: {}\n", gi.argv(0));
+		return;
+	}
+
+	if (!Teams()) {
+		gi.LocClient_Print(ent, PRINT_HIGH, "Team shuffle is only available in team modes.\n");
+		return;
+	}
+
+	if (level.num_playing_clients < 2) {
+		gi.LocClient_Print(ent, PRINT_HIGH, "Not enough players to shuffle teams.\n");
+		return;
+	}
+
+	if (!TeamShuffle()) {
+		gi.LocClient_Print(ent, PRINT_HIGH, "Teams could not be shuffled.\n");
+		return;
+	}
+
 	gi.Broadcast_Print(PRINT_HIGH, "[ADMIN]: Forced team shuffle.\n");
-	TeamShuffle();
 	Match_Reset();
 }
 
@@ -602,6 +634,19 @@ MM_CmdBalanceTeams
 =================
 */
 void MM_CmdBalanceTeams(gentity_t *ent) {
-	gi.Broadcast_Print(PRINT_HIGH, "[ADMIN]: Forced team balancing.\n");
-	TeamBalance(true);
+	if (!MM_IsExactArgcValid(gi.argc(), 1)) {
+		gi.LocClient_Print(ent, PRINT_HIGH, "Usage: {}\n", gi.argv(0));
+		return;
+	}
+
+	if (!Teams()) {
+		gi.LocClient_Print(ent, PRINT_HIGH, "Team balancing is only available in team modes.\n");
+		return;
+	}
+
+	const int moved = TeamBalance(true);
+	if (moved > 0)
+		gi.Broadcast_Print(PRINT_HIGH, "[ADMIN]: Forced team balancing.\n");
+	else
+		gi.LocClient_Print(ent, PRINT_HIGH, "Teams are already balanced.\n");
 }

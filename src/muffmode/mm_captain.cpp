@@ -3,6 +3,25 @@
 
 #include "g_local.h"
 #include "muffmode/mm_captain.h"
+#include "muffmode/mm_command_contracts.h"
+
+namespace {
+
+bool MM_RequireCaptainCommandArgc(gentity_t *ent, int min_expected, int max_expected, const char *usage)
+{
+	if (MM_IsArgcInRangeValid(gi.argc(), min_expected, max_expected))
+		return true;
+
+	gi.LocClient_Print(ent, PRINT_HIGH, "Usage: {}\n", usage);
+	return false;
+}
+
+bool MM_RequireNoCaptainCommandArgs(gentity_t *ent)
+{
+	return MM_RequireCaptainCommandArgc(ent, 1, 1, gi.argv(0));
+}
+
+} // namespace
 
 /*----------------------------------------------------------------*/
 /* CAPTAINS AND TEAM LOCKS                                        */
@@ -194,7 +213,14 @@ void MM_CmdLockTeam(gentity_t *ent) {
 
 	team_t team;
 
-	if (ent->client->sess.admin && gi.argc() >= 2) {
+	if (ent->client->sess.admin) {
+		if (!MM_RequireCaptainCommandArgc(ent, 1, 2, G_Fmt("{} [red|blue]", gi.argv(0)).data()))
+			return;
+	} else if (!MM_RequireNoCaptainCommandArgs(ent)) {
+		return;
+	}
+
+	if (ent->client->sess.admin && gi.argc() == 2) {
 		team = StringToTeamNum(gi.argv(1));
 	} else {
 		team = ent->client->sess.team;
@@ -235,7 +261,14 @@ void MM_CmdUnlockTeam(gentity_t *ent) {
 
 	team_t team;
 
-	if (ent->client->sess.admin && gi.argc() >= 2) {
+	if (ent->client->sess.admin) {
+		if (!MM_RequireCaptainCommandArgc(ent, 1, 2, G_Fmt("{} [red|blue]", gi.argv(0)).data()))
+			return;
+	} else if (!MM_RequireNoCaptainCommandArgs(ent)) {
+		return;
+	}
+
+	if (ent->client->sess.admin && gi.argc() == 2) {
 		team = StringToTeamNum(gi.argv(1));
 	} else {
 		team = ent->client->sess.team;
@@ -333,6 +366,9 @@ static bool ReadyConditions(gentity_t *ent, bool desired_status, bool admin_cmd)
 }
 
 void MM_CmdReadyAll(gentity_t *ent) {
+	if (!MM_RequireNoCaptainCommandArgs(ent))
+		return;
+
 	if (!ReadyConditions(ent, true, true))
 		return;
 
@@ -342,6 +378,9 @@ void MM_CmdReadyAll(gentity_t *ent) {
 }
 
 void MM_CmdUnReadyAll(gentity_t *ent) {
+	if (!MM_RequireNoCaptainCommandArgs(ent))
+		return;
+
 	if (!ReadyConditions(ent, false, true))
 		return;
 
@@ -358,6 +397,9 @@ Captain readies up all players on their team.
 =================
 */
 void MM_CmdReadyTeam(gentity_t *ent) {
+	if (!MM_RequireNoCaptainCommandArgs(ent))
+		return;
+
 	if (!Teams()) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "This command is only available in team modes.\n");
 		return;
@@ -402,6 +444,9 @@ static void BroadcastReadyStatus(gentity_t *ent) {
 }
 
 void MM_CmdReady(gentity_t *ent) {
+	if (!MM_RequireNoCaptainCommandArgs(ent))
+		return;
+
 	if (!ReadyConditions(ent, true, false))
 		return;
 
@@ -420,6 +465,9 @@ void MM_CmdReady(gentity_t *ent) {
 }
 
 void MM_CmdNotReady(gentity_t *ent) {
+	if (!MM_RequireNoCaptainCommandArgs(ent))
+		return;
+
 	if (!ReadyConditions(ent, false, false))
 		return;
 
@@ -433,6 +481,9 @@ void MM_CmdNotReady(gentity_t *ent) {
 }
 
 void MM_CmdReadyUp(gentity_t *ent) {
+	if (!MM_RequireNoCaptainCommandArgs(ent))
+		return;
+
 	if (!ReadyConditions(ent, !ent->client->resp.ready, false))
 		return;
 

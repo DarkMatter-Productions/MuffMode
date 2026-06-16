@@ -36,6 +36,12 @@ static void G_Menu_SetLevelName(menu_t *p) {
 	Q_strlcpy(p->text, levelname, sizeof(p->text));
 }
 
+static const char *G_Menu_CurrentRulesetName()
+{
+	const int ruleset = clamp((int)game.ruleset, (int)RS_NONE + 1, (int)RS_NUM_RULESETS - 1);
+	return rs_long_name[ruleset];
+}
+
 /*----------------------------------------------------------------------------------*/
 /* ADMIN */
 
@@ -664,7 +670,7 @@ static void G_Menu_ServerInfo_Update(gentity_t *ent) {
 		i++;
 	}
 
-	Q_strlcpy(entries[i].text, G_Fmt("ruleset: {}", rs_long_name[(int)game.ruleset]).data(), sizeof(entries[i].text));
+	Q_strlcpy(entries[i].text, G_Fmt("ruleset: {}", G_Menu_CurrentRulesetName()).data(), sizeof(entries[i].text));
 	i++;
 
 	if (scorelimit) {

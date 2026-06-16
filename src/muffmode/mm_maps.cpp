@@ -3,6 +3,7 @@
 
 #include "g_local.h"
 #include "g_debug_log.h"
+#include "muffmode/mm_command_contracts.h"
 #include "muffmode/mm_maps.h"
 
 #include <algorithm>
@@ -23,7 +24,46 @@ std::vector<std::string> MM_StrSplit(const std::string_view &str, char by)
 }
 
 int s_map_list_shuffle_modified = -1;
+
+bool MM_IsSafeMapTokenImpl(const char *mapname)
+{
+	if (!mapname || !*mapname)
+		return false;
+
+	if (!strcmp(mapname, ".") || !strcmp(mapname, ".."))
+		return false;
+
+	size_t length = 0;
+	for (const unsigned char *p = reinterpret_cast<const unsigned char *>(mapname); *p; p++) {
+		length++;
+		if (length >= MAX_QPATH)
+			return false;
+
+		if (*p <= ' ' || *p == '"' || *p == '\'' || *p == ';' || *p == '/' || *p == '\\')
+			return false;
+	}
+
+	return true;
+}
+
+char *MM_ParseNextSafeMapToken(const char **text)
+{
+	while (char *map = COM_ParseEx(text, " ")) {
+		if (!*map)
+			return nullptr;
+
+		if (MM_IsSafeMapTokenImpl(map))
+			return map;
+	}
+
+	return nullptr;
+}
 } // namespace
+
+bool MM_IsSafeMapToken(const char *mapname)
+{
+	return MM_IsSafeMapTokenImpl(mapname);
+}
 
 void MM_ShuffleMapList()
 {
@@ -31,9 +71,21 @@ void MM_ShuffleMapList()
 		return;
 
 	auto values = MM_StrSplit(g_map_list->string, ' ');
+	const size_t original_count = values.size();
+	values.erase(std::remove_if(values.begin(), values.end(),
+		[](const std::string &map) { return !MM_IsSafeMapToken(map.c_str()); }), values.end());
 
-	if (values.size() <= 1)
+	if (values.empty()) {
+		gi.cvar_forceset("g_map_list", "");
+		gi.Com_PrintFmt("Map list shuffle skipped: no valid maps remain.\n");
 		return;
+	}
+
+	if (values.size() <= 1) {
+		if (values.size() != original_count)
+			gi.cvar_forceset("g_map_list", join_strings(values, " ").data());
+		return;
+	}
 
 	std::shuffle(values.begin(), values.end(), mt_rand);
 
@@ -68,9 +120,8 @@ void MM_GametypeChangeMapFirst()
 	if (g_map_list->string[0])
 	{
 		const char *mlist = g_map_list->string;
-		char *token;
 
-		if ((token = COM_Parse(&mlist)) && *token)
+		if (char *token = MM_ParseNextSafeMapToken(&mlist))
 		{
 			first_map = token;
 			MuffModeLog("GAMETYPE", "SVCmd_GametypeChangeMapFirst_f: Found map '%s' from g_map_list", first_map);
@@ -80,6 +131,12 @@ void MM_GametypeChangeMapFirst()
 	// If no map found in g_map_list, fall back to current map.
 	if (!first_map || !first_map[0])
 	{
+		if (!MM_IsSafeMapToken(level.mapname)) {
+			gi.Com_PrintFmt("ERROR: Current map name is unsafe: {}\n", level.mapname);
+			MuffModeLog("GAMETYPE", "ERROR: Current map name is unsafe: %s", level.mapname);
+			return;
+		}
+
 		first_map = level.mapname;
 		MuffModeLog("GAMETYPE", "SVCmd_GametypeChangeMapFirst_f: No map in g_map_list, reloading current map '%s'", first_map);
 	}
@@ -111,20 +168,23 @@ bool MM_TryBeginIntermissionFromMapList()
 
 	while (1)
 	{
-		map = COM_ParseEx(&str, " ");
+		map = MM_ParseNextSafeMapToken(&str);
 
-		if (!*map)
+		if (!map || !*map)
 			break;
 
 		if (Q_strcasecmp(map, level.mapname) == 0)
 		{
 			// It's in the list, go to the next one.
-			map = COM_ParseEx(&str, " ");
-			if (!*map)
+			map = MM_ParseNextSafeMapToken(&str);
+			if (!map || !*map)
 			{
 				// End of list, go to first one.
 				if (!first_map[0])
 				{
+					if (!MM_IsSafeMapToken(level.mapname))
+						return false;
+
 					BeginIntermission(CreateTargetChangeLevel(level.mapname));
 					return true;
 				}
@@ -148,7 +208,7 @@ bool MM_TryBeginIntermissionFromMapList()
 
 				// Re-read first map from (possibly shuffled) list.
 				const char *reshuffled_str = g_map_list->string;
-				char *reshuffled_first = COM_ParseEx(&reshuffled_str, " ");
+				char *reshuffled_first = MM_ParseNextSafeMapToken(&reshuffled_str);
 				if (reshuffled_first && *reshuffled_first)
 					BeginIntermission(CreateTargetChangeLevel(reshuffled_first));
 				else
@@ -208,14 +268,14 @@ bool MM_MQ_Update()
 	if (!g_allow_mymap->integer)
 		return false;
 
-	if (!g_map_list->string[0] && game.mapqueue.size()) {
+	if (!g_map_list->string[0] && !g_map_pool->string[0] && game.mapqueue.size()) {
 		MM_MQ_Clear();
 		gi.Broadcast_Print(PRINT_HIGH, "Map queue has been cleared.\n");
 		return false;
 	}
 
 	auto it = std::remove_if(game.mapqueue.begin(), game.mapqueue.end(),
-		[](const std::string &s) { return s.empty(); });
+		[](const std::string &s) { return !MM_IsSafeMapToken(s.c_str()); });
 	game.mapqueue.erase(it, game.mapqueue.end());
 
 	return true;
@@ -243,6 +303,44 @@ void MM_PrintTruncatedMapList(gentity_t *ent)
 	gi.LocClient_Print(ent, PRINT_HIGH, "{}\n", map_list_display.c_str());
 }
 
+void MM_PrintTruncatedMapSource(gentity_t *ent)
+{
+	const char *maps = g_map_list->string[0] ? g_map_list->string : g_map_pool->string;
+	std::string display = maps ? maps : "";
+	if (display.length() > MAX_MAP_LIST_DISPLAY)
+		display = display.substr(0, MAX_MAP_LIST_DISPLAY) + "...";
+	gi.LocClient_Print(ent, PRINT_HIGH, "{}\n", display.c_str());
+}
+
+bool MM_IsValidMyMapModifier(const char *modifier)
+{
+	if (!modifier || !modifier[0] || !modifier[1])
+		return false;
+
+	if (modifier[0] != '+' && modifier[0] != '-')
+		return false;
+
+	const char *name = modifier + 1;
+	return !Q_strcasecmp(name, "pu") ||
+		!Q_strcasecmp(name, "pa") ||
+		!Q_strcasecmp(name, "ht") ||
+		!Q_strcasecmp(name, "ar") ||
+		!Q_strcasecmp(name, "am") ||
+		!Q_strcasecmp(name, "wp");
+}
+
+bool MM_MapQueueContains(const char *mapname)
+{
+	for (const auto &queued_map : game.mapqueue) {
+		if (!Q_strcasecmp(queued_map.c_str(), mapname))
+			return true;
+	}
+
+	return false;
+}
+
+std::string s_next_mapqueue_return;
+
 } // namespace
 
 int MM_MQ_Count()
@@ -267,7 +365,7 @@ bool MM_MQ_Add(gentity_t *ent, const char *mapname)
 	if (!g_allow_mymap->integer)
 		return false;
 
-	if (!mapname[0]) {
+	if (!MM_IsSafeMapToken(mapname)) {
 		gi.Client_Print(ent, PRINT_HIGH, "Invalid map name.\n");
 		return false;
 	}
@@ -282,7 +380,7 @@ bool MM_MQ_Add(gentity_t *ent, const char *mapname)
 		const char *pool = g_map_pool->string;
 
 		while ((token = COM_Parse(&pool)) && *token) {
-			if (!Q_strcasecmp(token, mapname)) {
+			if (MM_IsSafeMapToken(token) && !Q_strcasecmp(token, mapname)) {
 				found = true;
 				break;
 			}
@@ -293,7 +391,7 @@ bool MM_MQ_Add(gentity_t *ent, const char *mapname)
 		const char *mlist = g_map_list->string;
 
 		while ((token = COM_Parse(&mlist)) && *token) {
-			if (!Q_strcasecmp(token, mapname)) {
+			if (MM_IsSafeMapToken(token) && !Q_strcasecmp(token, mapname)) {
 				found = true;
 				break;
 			}
@@ -308,7 +406,7 @@ bool MM_MQ_Add(gentity_t *ent, const char *mapname)
 	if (!MM_MQ_Update())
 		return false;
 
-	if (std::find(game.mapqueue.begin(), game.mapqueue.end(), mapname) != game.mapqueue.end()) {
+	if (MM_MapQueueContains(mapname)) {
 		gi.Client_Print(ent, PRINT_HIGH, "Selected map is already in queue.\n");
 		return false;
 	}
@@ -325,12 +423,15 @@ const char *MM_MQ_Go_Next()
 	if (!MM_MQ_Update())
 		return nullptr;
 
-	for (size_t i = 0; i < game.mapqueue.size(); i++) {
-		if (game.mapqueue[i].empty())
+	for (size_t i = 0; i < game.mapqueue.size();) {
+		if (!MM_IsSafeMapToken(game.mapqueue[i].c_str())) {
+			game.mapqueue.erase(game.mapqueue.begin() + i);
 			continue;
-		const char *s = G_Fmt("{}", game.mapqueue[i]).data();
+		}
+
+		s_next_mapqueue_return = game.mapqueue[i];
 		game.mapqueue.erase(game.mapqueue.begin() + i);
-		return s;
+		return s_next_mapqueue_return.c_str();
 	}
 
 	return nullptr;
@@ -338,15 +439,23 @@ const char *MM_MQ_Go_Next()
 
 void MM_CmdMapList(gentity_t *ent)
 {
-	if (g_map_list->string[0]) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "Current map list:\n");
-		MM_PrintTruncatedMapList(ent);
+	if (!MM_IsExactArgcValid(gi.argc(), 1)) {
+		gi.LocClient_Print(ent, PRINT_HIGH, "Usage: {}\n", gi.argv(0));
+		return;
+	}
+
+	if (g_map_list->string[0] || g_map_pool->string[0]) {
+		gi.LocClient_Print(ent, PRINT_HIGH, g_map_list->string[0] ? "Current map list:\n" : "Current map pool:\n");
+		if (g_map_list->string[0])
+			MM_PrintTruncatedMapList(ent);
+		else
+			MM_PrintTruncatedMapSource(ent);
 		if (MM_MQ_Count()) {
 			gi.LocClient_Print(ent, PRINT_HIGH, "\nCurrent MyMap Queue:\n");
 			MM_MQ_PrintList(ent);
 		}
 	} else {
-		gi.LocClient_Print(ent, PRINT_HIGH, "No Map List set.\n");
+		gi.LocClient_Print(ent, PRINT_HIGH, "No map list or pool set.\n");
 	}
 }
 
@@ -357,14 +466,14 @@ void MM_CmdMyMap(gentity_t *ent)
 		return;
 	}
 
-	if (!g_map_list->string[0]) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "No maps are queued as no map list is present.\n");
+	if (!g_map_list->string[0] && !g_map_pool->string[0]) {
+		gi.LocClient_Print(ent, PRINT_HIGH, "No maps are queued as no map list or pool is present.\n");
 		return;
 	}
 
 	if (gi.argc() < 2) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "Add a map to the MyMap Queue.\nRecognized maps are:\n");
-		MM_PrintTruncatedMapList(ent);
+		MM_PrintTruncatedMapSource(ent);
 
 		if (MM_MQ_Count()) {
 			gi.LocClient_Print(ent, PRINT_HIGH, "MyMap Queue => ");
@@ -373,7 +482,14 @@ void MM_CmdMyMap(gentity_t *ent)
 		return;
 	}
 
-	if (!strcmp(gi.argv(1), level.mapname)) {
+	for (int i = 2; i < gi.argc(); i++) {
+		if (!MM_IsValidMyMapModifier(gi.argv(i))) {
+			gi.LocClient_Print(ent, PRINT_HIGH, "Invalid MyMap modifier: {}\n", gi.argv(i));
+			return;
+		}
+	}
+
+	if (!Q_strcasecmp(gi.argv(1), level.mapname)) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "Cannot add current map to MyMap Queue.\n");
 		return;
 	}

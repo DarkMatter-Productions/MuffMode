@@ -9,6 +9,8 @@
 #include "muffmode/mm_team.h"
 
 #include <cstdio>
+#include <cstring>
+#include <string>
 
 namespace {
 
@@ -46,48 +48,124 @@ bool MM_IsSlotCappedSession()
 	return mc && mc->integer <= (int)MAX_SPLIT_PLAYERS;
 }
 
+const char *MM_SkipCfgWhitespace(const char *p)
+{
+	if (!p)
+		return "";
+
+	while (MM_IsAsciiWhitespace(*p))
+		p++;
+
+	return p;
+}
+
+bool MM_ConsumeCfgCommand(const char *&p, const char *command)
+{
+	const size_t len = std::strlen(command);
+	if (Q_strncasecmp(p, command, len))
+		return false;
+
+	if (p[len] && !MM_IsAsciiWhitespace(p[len]))
+		return false;
+
+	p += len;
+	return true;
+}
+
+bool MM_ConsumeCfgTargetName(const char *&p, const char *name)
+{
+	p = MM_SkipCfgWhitespace(p);
+
+	const size_t len = std::strlen(name);
+	if (*p == '"')
+	{
+		const char *quoted = p + 1;
+		if (Q_strncasecmp(quoted, name, len) || quoted[len] != '"')
+			return false;
+
+		p = quoted + len + 1;
+		if (*p && !MM_IsAsciiWhitespace(*p))
+			return false;
+		return true;
+	}
+
+	if (Q_strncasecmp(p, name, len))
+		return false;
+
+	if (p[len] && !MM_IsAsciiWhitespace(p[len]))
+		return false;
+
+	p += len;
+	return true;
+}
+
+const char *MM_FindCfgCommentStart(const char *p)
+{
+	bool in_quotes = false;
+
+	for (const char *cursor = p; *cursor; cursor++)
+	{
+		if (*cursor == '"')
+		{
+			in_quotes = !in_quotes;
+			continue;
+		}
+
+		if (in_quotes)
+			continue;
+
+		const bool is_comment = *cursor == '#' || (cursor[0] == '/' && cursor[1] == '/');
+		if (!is_comment)
+			continue;
+
+		const char *end = cursor;
+		while (end > p && MM_IsAsciiWhitespace(end[-1]))
+			end--;
+
+		if (end == p || end < cursor)
+			return end;
+	}
+
+	return nullptr;
+}
+
 bool MM_IsCommentOrEmptyCfgLine(const char *line)
 {
-	while (*line == ' ' || *line == '\t')
-		line++;
+	line = MM_SkipCfgWhitespace(line);
 	return !*line || *line == '#' || (line[0] == '/' && line[1] == '/');
 }
 
 std::optional<int32_t> MM_ParseCfgIntValue(const char *p)
 {
-	return MM_ParseCfgIntArg(p);
+	p = MM_SkipCfgWhitespace(p);
+
+	const char *comment = MM_FindCfgCommentStart(p);
+	if (!comment)
+		return MM_ParseCfgIntArg(p);
+
+	std::string value(p, comment - p);
+	return MM_ParseCfgIntArg(value.c_str());
 }
 
 bool MM_TryParseMaxclientsTarget(const char *line, int *out_target)
 {
-	const char *p = line;
-	while (*p == ' ' || *p == '\t')
-		p++;
+	const char *p = MM_SkipCfgWhitespace(line);
 
-	if (!Q_strncasecmp(p, "seta ", 5))
-		p += 5;
-	else if (!Q_strncasecmp(p, "set ", 4))
-		p += 4;
-	else if (!Q_strncasecmp(p, "sets ", 5))
-		p += 5;
-	else if (!Q_strncasecmp(p, "cvar_forceset ", 14))
-		p += 14;
-	else if (!Q_strncasecmp(p, "cvar_set ", 9))
-		p += 9;
+	if (MM_ConsumeCfgCommand(p, "seta") ||
+		MM_ConsumeCfgCommand(p, "set") ||
+		MM_ConsumeCfgCommand(p, "sets") ||
+		MM_ConsumeCfgCommand(p, "cvar_forceset") ||
+		MM_ConsumeCfgCommand(p, "cvar_set"))
+	{
+		p = MM_SkipCfgWhitespace(p);
+	}
 	else
+	{
 		return false;
+	}
 
-	while (*p == ' ' || *p == '\t')
-		p++;
-
-	if (Q_strncasecmp(p, "maxclients", 10))
+	if (!MM_ConsumeCfgTargetName(p, "maxclients"))
 		return false;
-
-	const char c = p[10];
-	if (c && c != ' ' && c != '\t' && c != '"')
-		return false;
-
-	p += 10;
 	const auto target = MM_ParseCfgIntValue(p);
 	if (!target)
 		return false;
@@ -101,12 +179,10 @@ bool MM_ShouldSkipGtCfgLine(const char *line)
 	if (!MM_IsSlotCappedSession())
 		return false;
 
-	const char *p = line;
-	while (*p == ' ' || *p == '\t')
-		p++;
+	const char *p = MM_SkipCfgWhitespace(line);
 
 	// Lobby/setup command; never appropriate during gametype change.
-	if (!Q_strncasecmp(p, "kexmultiplayer", 14))
+	if (MM_ConsumeCfgCommand(p, "kexmultiplayer"))
 		return true;
 
 	int target = 0;
@@ -114,6 +190,18 @@ bool MM_ShouldSkipGtCfgLine(const char *line)
 		return target > (int)MAX_SPLIT_PLAYERS;
 
 	return false;
+}
+
+bool MM_IsOverlongCfgLine(FILE *f, const char *line)
+{
+	if (strchr(line, '\n') || feof(f))
+		return false;
+
+	int ch = 0;
+	while ((ch = fgetc(f)) != '\n' && ch != EOF) {
+	}
+
+	return true;
 }
 
 void MM_ExecGametypeCfg(gametype_t gt)
@@ -143,6 +231,12 @@ void MM_ExecGametypeCfg(gametype_t gt)
 
 	while (fgets(line_buf, sizeof(line_buf), f))
 	{
+		if (MM_IsOverlongCfgLine(f, line_buf))
+		{
+			skipped++;
+			continue;
+		}
+
 		char *nl = strchr(line_buf, '\n');
 		if (nl)
 			*nl = '\0';
@@ -179,6 +273,21 @@ gametype_avail_t MM_GetGametypeAvailability(gametype_t gt)
 bool MM_IsGametypeEnabled(gametype_t gt)
 {
 	return MM_GetGametypeAvailability(gt) == gametype_avail_t::Enabled;
+}
+
+gametype_t MM_CurrentGametype()
+{
+	return (gametype_t)clamp(g_gametype ? g_gametype->integer : (int)GT_FFA, (int)GT_NONE, (int)GT_NUM_GAMETYPES - 1);
+}
+
+int MM_CurrentGametypeFlags()
+{
+	return _gt[(int)MM_CurrentGametype()];
+}
+
+bool MM_GametypeHasFlag(int flag)
+{
+	return (MM_CurrentGametypeFlags() & flag) != 0;
 }
 
 gametype_t MM_SanitizeGametype(gametype_t gt)
@@ -480,7 +589,12 @@ void MM_GTChanges()
 	MuffModeLog("DEBUG", "GT_Changes: issuing gamemap '%s' (gt=%d gt_check=%d gt_g_gametype=%d g_gametype->modified_count=%d teamplay=%d ctf=%d in_frame=%d)",
 		level.mapname, (int)gt, (int)s_gt_check, s_gt_g_gametype, g_gametype->modified_count,
 		teamplay->integer, ctf->integer, level.in_frame);
-	gi.AddCommandString(G_Fmt("gamemap {}\n", level.mapname).data());
+	if (!MM_IsSafeMapToken(level.mapname)) {
+		gi.Com_PrintFmt("ERROR: Current map name is unsafe: {}\n", level.mapname);
+		return;
+	}
+
+	gi.AddCommandString(G_Fmt("gamemap \"{}\"\n", level.mapname).data());
 }
 
 void MM_SyncGametypeTracking()

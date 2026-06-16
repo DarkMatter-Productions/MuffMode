@@ -4,7 +4,9 @@
 #include "g_local.h"
 #include "g_debug_log.h"
 #include "muffmode/mm_gametype.h"
+#include "muffmode/mm_maps.h"
 #include "muffmode/mm_menu.h"
+#include "muffmode/mm_parse.h"
 #include "muffmode/mm_vote.h"
 #include "muffmode/mm_vote_menu.h"
 
@@ -279,12 +281,23 @@ static bool MenuVote_ReadSelection(gentity_t *ent, menu_hnd_t *p, char *out, siz
 	return true;
 }
 
+const char *G_Menu_CallVoteCurrentRulesetName()
+{
+	const int ruleset = clamp((int)game.ruleset, (int)RS_NONE + 1, (int)RS_NUM_RULESETS - 1);
+	return rs_long_name[ruleset];
+}
+
 static void MenuVote_Initiate(gentity_t *ent, const char *cmd_name, const char *arg)
 {
 	vcmds_t *cc = FindVoteCmdByName(cmd_name);
 	if (!cc)
 	{
 		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid vote command: {}\n", cmd_name ? cmd_name : "(null)");
+		return;
+	}
+	if (level.vote_state.state != VoteState::IDLE)
+	{
+		gi.LocClient_Print(ent, PRINT_HIGH, "A vote is already in progress.\n");
 		return;
 	}
 	if (!ValidateMenuVoteCommand(ent, cc, arg))
@@ -302,11 +315,11 @@ static constexpr int MAPS_PER_PAGE = 12;
 
 void G_Menu_CallVote_Map_Selection(gentity_t *ent, menu_hnd_t *p)
 {
-	char value[64];
+	char value[MAX_QPATH];
 	if (!MenuVote_ReadSelection(ent, p, value, sizeof(value)))
 		return;
 
-	if (strstr(value, "..") || strpbrk(value, ":?*\"<>|"))
+	if (!MM_IsSafeMapToken(value))
 	{
 		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid characters in map name.\n");
 		return;
@@ -359,7 +372,7 @@ void G_Menu_CallVote_Map_Update(gentity_t *ent)
 		auto pool_values = str_split(g_map_pool->string, ' ');
 		for (const auto &map : pool_values)
 		{
-			if (!map.empty() && !map_exists(map))
+			if (MM_IsSafeMapToken(map.c_str()) && !map_exists(map))
 				values.push_back(map);
 		}
 	}
@@ -369,7 +382,7 @@ void G_Menu_CallVote_Map_Update(gentity_t *ent)
 		auto list_values = str_split(g_map_list->string, ' ');
 		for (const auto &map : list_values)
 		{
-			if (!map.empty() && !map_exists(map))
+			if (MM_IsSafeMapToken(map.c_str()) && !map_exists(map))
 				values.push_back(map);
 		}
 	}
@@ -664,7 +677,7 @@ void G_Menu_CallVote_Update(gentity_t *ent)
 
 	int ruleset_index = gametype_index + 1;
 	entries[ruleset_index].SelectFunc = G_Menu_CallVote_Ruleset;
-	Q_strlcpy(entries[ruleset_index].text, G_Fmt("Ruleset: {}", rs_long_name[(int)game.ruleset]).data(), sizeof(entries[ruleset_index].text));
+	Q_strlcpy(entries[ruleset_index].text, G_Fmt("Ruleset: {}", G_Menu_CallVoteCurrentRulesetName()).data(), sizeof(entries[ruleset_index].text));
 
 	int map_index = ruleset_index + 1;
 	entries[map_index].SelectFunc = G_Menu_CallVote_Map;
@@ -774,7 +787,13 @@ void G_Menu_CallVote_Powerups_Selection(gentity_t *ent, menu_hnd_t *p)
 	if (!MenuVote_ReadSelection(ent, p, value, sizeof(value)))
 		return;
 
-	int v = strtoul(value, nullptr, 10);
+	const auto parsed = MM_ParseNonNegativeIntArg(value);
+	if (!parsed || (*parsed != 0 && *parsed != 1)) {
+		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid powerups selection.\n");
+		return;
+	}
+
+	const int v = *parsed;
 	bool currently_enabled = g_no_powerups->integer == 0;
 	if (currently_enabled == (v == 1))
 	{
@@ -801,7 +820,13 @@ void G_Menu_CallVote_Techs_Selection(gentity_t *ent, menu_hnd_t *p)
 	if (!MenuVote_ReadSelection(ent, p, value, sizeof(value)))
 		return;
 
-	int v = strtoul(value, nullptr, 10);
+	const auto parsed = MM_ParseNonNegativeIntArg(value);
+	if (!parsed || (*parsed != 0 && *parsed != 1)) {
+		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid techs selection.\n");
+		return;
+	}
+
+	const int v = *parsed;
 	bool currently_enabled = AllowTechs();
 	if (currently_enabled == (v == 1))
 	{
@@ -840,7 +865,13 @@ void G_Menu_CallVote_FriendlyFire_Selection(gentity_t *ent, menu_hnd_t *p)
 	if (!MenuVote_ReadSelection(ent, p, value, sizeof(value)))
 		return;
 
-	int v = strtoul(value, nullptr, 10);
+	const auto parsed = MM_ParseNonNegativeIntArg(value);
+	if (!parsed || (*parsed != 0 && *parsed != 1)) {
+		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid friendly fire selection.\n");
+		return;
+	}
+
+	const int v = *parsed;
 	bool currently_enabled = g_friendly_fire->integer != 0;
 	if (currently_enabled == (v == 1))
 	{

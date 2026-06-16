@@ -1,10 +1,14 @@
 using System.ComponentModel;
+using System.Text;
 
 namespace MuffMode.Updater;
 
 internal sealed class MainForm : Form
 {
     private const string OtherInstallLocationText = "Other location - choose or paste a folder";
+    private const int MaxDisplayedChangelogCharacters = 120_000;
+    private const int MaxDialogMessageCharacters = 4_000;
+    private const int MaxStatusCharacters = 240;
 
     private readonly AppSettings _settings;
     private readonly GitHubReleaseClient _releaseClient = new();
@@ -463,7 +467,7 @@ internal sealed class MainForm : Form
         catch (Exception ex)
         {
             SetStatus("Could not create shortcuts.");
-            MessageBox.Show(this, ex.Message, "Shortcut creation failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            ShowMessage(ex.Message, "Shortcut creation failed", MessageBoxIcon.Error);
         }
     }
 
@@ -503,7 +507,8 @@ internal sealed class MainForm : Form
         catch (Exception ex)
         {
             _latestRelease = null;
-            _changelogTextBox.Text = ex.Message;
+            _changelogTextBox.Text = BuildErrorText("Could not check GitHub releases.", ex.Message);
+            UpdateVersionLabels();
             SetStatus("Could not check GitHub releases.");
         }
         finally
@@ -525,7 +530,10 @@ internal sealed class MainForm : Form
         var installPath = _installPathTextBox.Text.Trim();
         if (!InstallationManager.IsValidInstallPath(installPath))
         {
-            MessageBox.Show(this, "Select the Quake 2 installation folder, its rerelease folder, or its baseq2 folder.", "Install path required", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            ShowMessage(
+                "Select the Quake 2 installation folder, its rerelease folder, or its baseq2 folder.",
+                "Install path required",
+                MessageBoxIcon.Warning);
             return;
         }
 
@@ -561,7 +569,7 @@ internal sealed class MainForm : Form
         catch (Exception ex)
         {
             SetStatus("Update failed.");
-            MessageBox.Show(this, ex.Message, "Muff Mode update failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            ShowMessage(ex.Message, "Muff Mode update failed", MessageBoxIcon.Error);
         }
         finally
         {
@@ -578,7 +586,7 @@ internal sealed class MainForm : Form
         using var dialog = new FolderBrowserDialog
         {
             Description = "Select the Quake 2 folder, its rerelease folder, or its baseq2 folder.",
-            InitialDirectory = Directory.Exists(_installPathTextBox.Text) ? _installPathTextBox.Text : Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
+            InitialDirectory = GetBrowseInitialDirectory(),
             UseDescriptionForTitle = true
         };
 
@@ -603,7 +611,7 @@ internal sealed class MainForm : Form
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, ex.Message, "Could not launch Quake II", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            ShowMessage(ex.Message, "Could not launch Quake II", MessageBoxIcon.Error);
         }
     }
 
@@ -619,7 +627,9 @@ internal sealed class MainForm : Form
             ? "Latest: not checked"
             : $"Latest: {_latestRelease.Version} ({_latestRelease.TagName})";
 
-        _localVersionLabel.Text = $"Local: {_localVersion.DisplayText}";
+        _localVersionLabel.Text = string.IsNullOrWhiteSpace(_localVersion.Source)
+            ? $"Local: {_localVersion.DisplayText}"
+            : $"Local: {_localVersion.DisplayText} ({_localVersion.Source})";
         UpdateButtonStates();
     }
 
@@ -679,6 +689,7 @@ internal sealed class MainForm : Form
             SetStatus(status);
         }
 
+        _installSourceComboBox.Enabled = !busy;
         _installPathTextBox.Enabled = !busy;
         _browseButton.Enabled = !busy;
         _autoLaunchCheckBox.Enabled = !busy;
@@ -717,7 +728,7 @@ internal sealed class MainForm : Form
         }
     }
 
-    private void SetStatus(string text) => _statusLabel.Text = text;
+    private void SetStatus(string text) => _statusLabel.Text = TruncateSingleLine(CollapseWhitespace(text), MaxStatusCharacters);
 
     private void SaveCurrentSettings()
     {
@@ -780,6 +791,12 @@ internal sealed class MainForm : Form
 
     private static string BuildChangelogText(ReleaseInfo release)
     {
+        var changelog = string.IsNullOrWhiteSpace(release.Changelog)
+            ? "No changelog text was published with this release."
+            : TruncateForDisplay(
+                release.Changelog.Trim(),
+                MaxDisplayedChangelogCharacters,
+                "[Release notes truncated for display.]");
         var lines = new List<string>
         {
             release.Name,
@@ -787,10 +804,125 @@ internal sealed class MainForm : Form
             release.IsPrerelease ? "Prerelease" : "Release",
             release.PublishedAt is null ? "" : $"Published: {release.PublishedAt:yyyy-MM-dd HH:mm} UTC",
             "",
-            string.IsNullOrWhiteSpace(release.Changelog) ? "No changelog text was published with this release." : release.Changelog.Trim()
+            changelog
         };
 
         return string.Join(Environment.NewLine, lines.Where(line => line is not null));
+    }
+
+    private static string BuildErrorText(string heading, string message)
+    {
+        var detail = string.IsNullOrWhiteSpace(message)
+            ? "No details were provided."
+            : TruncateForDisplay(message.Trim(), MaxDisplayedChangelogCharacters, "[Error details truncated for display.]");
+
+        return string.Join(Environment.NewLine, heading, "", detail);
+    }
+
+    private string GetBrowseInitialDirectory()
+    {
+        if (TryGetExistingDirectory(_installPathTextBox.Text, out var currentDirectory))
+        {
+            return currentDirectory;
+        }
+
+        if (TryGetExistingDirectory(
+            InstallationManager.ResolveInstallRoot(_installPathTextBox.Text),
+            out var resolvedDirectory))
+        {
+            return resolvedDirectory;
+        }
+
+        if (TryGetExistingDirectory(
+            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
+            out var programFilesDirectory))
+        {
+            return programFilesDirectory;
+        }
+
+        return Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+    }
+
+    private static bool TryGetExistingDirectory(string? path, out string directory)
+    {
+        directory = "";
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return false;
+        }
+
+        try
+        {
+            var fullPath = Path.GetFullPath(path);
+            if (Directory.Exists(fullPath) && !IsReparsePoint(fullPath))
+            {
+                directory = fullPath;
+                return true;
+            }
+        }
+        catch
+        {
+            return false;
+        }
+
+        return false;
+    }
+
+    private void ShowMessage(string message, string caption, MessageBoxIcon icon)
+    {
+        var displayMessage = string.IsNullOrWhiteSpace(message)
+            ? "No details were provided."
+            : TruncateForDisplay(message.Trim(), MaxDialogMessageCharacters, "[Message truncated.]");
+
+        MessageBox.Show(this, displayMessage, caption, MessageBoxButtons.OK, icon);
+    }
+
+    private static string TruncateForDisplay(string text, int maxCharacters, string truncationNotice)
+    {
+        return text.Length <= maxCharacters
+            ? text
+            : $"{text[..maxCharacters]}{Environment.NewLine}{Environment.NewLine}{truncationNotice}";
+    }
+
+    private static string CollapseWhitespace(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return "";
+        }
+
+        var builder = new StringBuilder(text.Length);
+        var previousWasWhitespace = false;
+        foreach (var value in text.Trim())
+        {
+            if (char.IsWhiteSpace(value))
+            {
+                if (!previousWasWhitespace)
+                {
+                    builder.Append(' ');
+                }
+
+                previousWasWhitespace = true;
+                continue;
+            }
+
+            builder.Append(value);
+            previousWasWhitespace = false;
+        }
+
+        return builder.ToString();
+    }
+
+    private static string TruncateSingleLine(string text, int maxCharacters)
+    {
+        if (text.Length <= maxCharacters)
+        {
+            return text;
+        }
+
+        return maxCharacters <= 3
+            ? text[..maxCharacters]
+            : $"{text[..(maxCharacters - 3)]}...";
     }
 
     private static void TryDeleteFile(string? path)
@@ -802,7 +934,7 @@ internal sealed class MainForm : Form
 
         try
         {
-            if (File.Exists(path))
+            if (File.Exists(path) && !IsReparsePoint(path))
             {
                 File.Delete(path);
             }
@@ -810,6 +942,18 @@ internal sealed class MainForm : Form
         catch
         {
             // Temp cleanup failure is non-fatal.
+        }
+    }
+
+    private static bool IsReparsePoint(string path)
+    {
+        try
+        {
+            return (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0;
+        }
+        catch
+        {
+            return false;
         }
     }
 }

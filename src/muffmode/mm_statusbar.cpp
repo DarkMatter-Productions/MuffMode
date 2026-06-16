@@ -3,6 +3,7 @@
 
 #include "g_local.h"
 #include "g_statusbar.h"
+#include "muffmode/mm_gametype.h"
 #include "muffmode/mm_statusbar.h"
 
 void MM_InitStatusbar()
@@ -73,7 +74,7 @@ void MM_InitStatusbar()
 		sb.story();
 	} else {
 		if (Teams()) {
-			if (GTF(GTF_CTF))
+			if (MM_GametypeHasFlag(GTF_CTF))
 				sb.ifstat(STAT_CTF_FLAG_PIC).xr(-24).yt(26).pic(STAT_CTF_FLAG_PIC).endifstat();
 
 			// Red Rover: teams flip on death, so show the current team's logo prominently

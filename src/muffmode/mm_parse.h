@@ -11,6 +11,10 @@
 #include <cstring>
 #include <optional>
 
+inline bool MM_IsAsciiWhitespace(char c) {
+	return c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '\v' || c == '\f';
+}
+
 inline std::optional<int32_t> MM_ParseIntArg(const char *s) {
 	if (!s || !*s)
 		return std::nullopt;
@@ -37,6 +41,9 @@ inline std::optional<float> MM_ParseFloatArg(const char *s) {
 	if (!s || !*s)
 		return std::nullopt;
 
+	if (MM_IsAsciiWhitespace(*s))
+		return std::nullopt;
+
 	errno = 0;
 	char *end = nullptr;
 	const float value = std::strtof(s, &end);
@@ -50,7 +57,7 @@ inline std::optional<int32_t> MM_ParseCfgIntArg(const char *s) {
 	if (!s)
 		return std::nullopt;
 
-	while (*s == ' ' || *s == '\t')
+	while (MM_IsAsciiWhitespace(*s))
 		s++;
 
 	const char *begin = s;
@@ -62,12 +69,12 @@ inline std::optional<int32_t> MM_ParseCfgIntArg(const char *s) {
 			return std::nullopt;
 
 		for (const char *tail = end + 1; *tail; tail++) {
-			if (*tail != ' ' && *tail != '\t')
+			if (!MM_IsAsciiWhitespace(*tail))
 				return std::nullopt;
 		}
 	} else {
 		end = s + std::strlen(s);
-		while (end > begin && (end[-1] == ' ' || end[-1] == '\t'))
+		while (end > begin && MM_IsAsciiWhitespace(end[-1]))
 			end--;
 	}
 

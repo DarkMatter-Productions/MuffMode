@@ -2,6 +2,7 @@
 // Licensed under the GNU General Public License 2.0.
 
 #include "g_local.h"
+#include "muffmode/mm_gametype.h"
 #include "muffmode/mm_items_rules.h"
 #include "muffmode/mm_ruleset.h"
 
@@ -281,12 +282,15 @@ bool MM_ShouldAnnouncePowerupUse()
 
 // [MuffMode] AutoDoc tech regen with per-ruleset/per-mod tuning (moved from g_items.cpp).
 void Tech_ApplyAutoDoc(gentity_t *ent) {
+	if (!ent)
+		return;
+
 	bool		noise = false;
 	gclient_t	*cl;
 	int			index;
 	float		volume = 1.0;
 	bool		mod = (g_instagib->integer || GT(GT_INSTAGIB)) || (g_nadefest->integer || GT(GT_NADEFEST));
-	bool		no_health = mod || GTF(GTF_ARENA) || g_no_health->integer;
+	bool		no_health = mod || MM_GametypeHasFlag(GTF_ARENA) || g_no_health->integer;
 	int			max = g_vampiric_damage->integer ? (g_vampiric_health_max->integer + 1) / 2 : mod ? 100 : 150;
 
 	cl = ent->client;

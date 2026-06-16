@@ -2,6 +2,7 @@
 // Licensed under the GNU General Public License 2.0.
 
 #include "g_local.h"
+#include "muffmode/mm_command_contracts.h"
 #include "muffmode/mm_ghost.h"
 #include "muffmode/mm_parse.h"
 
@@ -64,7 +65,7 @@ MM_CmdGhost
 void MM_CmdGhost(gentity_t *ent) {
 	int i, n;
 
-	if (gi.argc() < 2) {
+	if (!MM_IsExactArgcValid(gi.argc(), 2)) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "Usage: {} <code>\n", gi.argv(0));
 		return;
 	}
@@ -83,7 +84,7 @@ void MM_CmdGhost(gentity_t *ent) {
 	}
 
 	const auto code = MM_ParseIntArg(gi.argv(1));
-	if (!code) {
+	if (!code || *code < 10000 || *code > 99999) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid ghost code.\n");
 		return;
 	}
@@ -92,7 +93,8 @@ void MM_CmdGhost(gentity_t *ent) {
 	for (i = 0; i < MAX_CLIENTS_KEX; i++) {
 		if (level.ghosts[i].code && level.ghosts[i].code == n) {
 			gi.LocClient_Print(ent, PRINT_HIGH, "Ghost code accepted, your position has been reinstated.\n");
-			level.ghosts[i].ent->client->resp.ghost = nullptr;
+			if (level.ghosts[i].ent && level.ghosts[i].ent->client && level.ghosts[i].ent->client->resp.ghost == &level.ghosts[i])
+				level.ghosts[i].ent->client->resp.ghost = nullptr;
 			ent->client->sess.team = level.ghosts[i].team;
 			ent->client->resp.ghost = level.ghosts + i;
 			ent->client->resp.score = level.ghosts[i].score;

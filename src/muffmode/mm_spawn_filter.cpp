@@ -18,7 +18,9 @@ constexpr const char *k_gt_spawn_string[GT_NUM_GAMETYPES] = {
 	"rr",
 	"lms",
 	"horde",
-	"ball"
+	"ball",
+	"instagib",
+	"nadefest"
 };
 
 // Whole-token membership test for the spawn-filter fields, which may be space- or
@@ -40,6 +42,24 @@ bool MM_TokenInList(const char *list, const char *token)
 			return true;
 	}
 	return false;
+}
+
+const char *MM_CurrentSpawnGametypeToken()
+{
+	const int gt = clamp(g_gametype ? g_gametype->integer : (int)GT_FFA, (int)GT_NONE, (int)GT_NUM_GAMETYPES - 1);
+	return k_gt_spawn_string[gt];
+}
+
+int MM_CurrentSpawnGametypeFlags()
+{
+	const int gt = clamp(g_gametype ? g_gametype->integer : (int)GT_FFA, (int)GT_NONE, (int)GT_NUM_GAMETYPES - 1);
+	return _gt[gt];
+}
+
+const char *MM_CurrentSpawnRulesetToken()
+{
+	const int ruleset = clamp((int)game.ruleset, (int)RS_NONE + 1, (int)RS_NUM_RULESETS - 1);
+	return rs_short_name[ruleset];
 }
 
 } // namespace
@@ -89,12 +109,13 @@ bool MM_ShouldInhibitSpawnEntity(gentity_t *ent)
 	if (!ent)
 		return false;
 
+	const char *gametype_token = MM_CurrentSpawnGametypeToken();
 	if (ent->gametype) {
-		if (!MM_TokenInList(ent->gametype, k_gt_spawn_string[g_gametype->integer]))
+		if (!MM_TokenInList(ent->gametype, gametype_token))
 			return true;
 	}
 	if (ent->not_gametype) {
-		if (MM_TokenInList(ent->not_gametype, k_gt_spawn_string[g_gametype->integer]))
+		if (MM_TokenInList(ent->not_gametype, gametype_token))
 			return true;
 	}
 
@@ -102,15 +123,16 @@ bool MM_ShouldInhibitSpawnEntity(gentity_t *ent)
 		return true;
 	if (ent->notq3a && RS(RS_Q3A))
 		return true;
-	if (ent->notarena && (GTF(GTF_ARENA)))
+	if (ent->notarena && (MM_CurrentSpawnGametypeFlags() & GTF_ARENA))
 		return true;
 
+	const char *ruleset_token = MM_CurrentSpawnRulesetToken();
 	if (ent->ruleset) {
-		if (!MM_TokenInList(ent->ruleset, rs_short_name[game.ruleset]))
+		if (!MM_TokenInList(ent->ruleset, ruleset_token))
 			return true;
 	}
 	if (ent->not_ruleset) {
-		if (MM_TokenInList(ent->not_ruleset, rs_short_name[game.ruleset]))
+		if (MM_TokenInList(ent->not_ruleset, ruleset_token))
 			return true;
 	}
 

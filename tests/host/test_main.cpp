@@ -81,14 +81,16 @@ MM_TEST(parse_float_rejects_non_finite_and_trailing_values) {
 	MM_CHECK_EQ(*MM_ParseFloatArg("-0.25"), -0.25f);
 	MM_CHECK_FALSE(MM_ParseFloatArg("nan"));
 	MM_CHECK_FALSE(MM_ParseFloatArg("inf"));
+	MM_CHECK_FALSE(MM_ParseFloatArg(" 1.0"));
 	MM_CHECK_FALSE(MM_ParseFloatArg("1.0x"));
 }
 
 MM_TEST(parse_cfg_int_accepts_quoted_or_plain_values) {
 	MM_CHECK_EQ(*MM_ParseCfgIntArg("16"), 16);
 	MM_CHECK_EQ(*MM_ParseCfgIntArg(" \t16\t "), 16);
+	MM_CHECK_EQ(*MM_ParseCfgIntArg("\r\n16\r\n"), 16);
 	MM_CHECK_EQ(*MM_ParseCfgIntArg("\"8\""), 8);
-	MM_CHECK_EQ(*MM_ParseCfgIntArg(" \"4\" \t"), 4);
+	MM_CHECK_EQ(*MM_ParseCfgIntArg(" \"4\" \t\r\n"), 4);
 	MM_CHECK_FALSE(MM_ParseCfgIntArg("\"4"));
 	MM_CHECK_FALSE(MM_ParseCfgIntArg("4 extra"));
 	MM_CHECK_FALSE(MM_ParseCfgIntArg("\"4\" extra"));
@@ -107,6 +109,23 @@ MM_TEST(command_argument_contracts_match_phase_one_fixes) {
 	MM_CHECK_FALSE(MM_IsSpawnArgcValid(1));
 	MM_CHECK_FALSE(MM_IsSpawnArgcValid(3));
 	MM_CHECK_FALSE(MM_IsSpawnArgcValid(5));
+}
+
+MM_TEST(command_contract_helpers_enforce_exact_arity_and_timeout_bounds) {
+	MM_CHECK(MM_IsExactArgcValid(2, 2));
+	MM_CHECK_FALSE(MM_IsExactArgcValid(1, 2));
+	MM_CHECK_FALSE(MM_IsExactArgcValid(3, 2));
+	MM_CHECK(MM_IsArgcInRangeValid(2, 1, 3));
+	MM_CHECK(MM_IsArgcInRangeValid(3, 1, 3));
+	MM_CHECK_FALSE(MM_IsArgcInRangeValid(0, 1, 3));
+	MM_CHECK_FALSE(MM_IsArgcInRangeValid(4, 1, 3));
+	MM_CHECK_FALSE(MM_IsArgcInRangeValid(2, 3, 1));
+
+	MM_CHECK_EQ(MM_ClampTimeoutSeconds(-1), 0);
+	MM_CHECK_EQ(MM_ClampTimeoutSeconds(0), 0);
+	MM_CHECK_EQ(MM_ClampTimeoutSeconds(120), 120);
+	MM_CHECK_EQ(MM_ClampTimeoutSeconds(3600), 3600);
+	MM_CHECK_EQ(MM_ClampTimeoutSeconds(3601), 3600);
 }
 
 MM_TEST(red_rover_frag_warning_never_indexes_below_zero) {

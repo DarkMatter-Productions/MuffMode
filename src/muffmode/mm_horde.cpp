@@ -456,6 +456,22 @@ static bool HordeActive()
 	return g_gametype->integer == static_cast<int>(GT_HORDE);
 }
 
+static gclient_t *Horde_SortedConnectedClient(size_t slot)
+{
+	if (slot >= q_countof(level.sorted_clients))
+		return nullptr;
+
+	const int client_num = level.sorted_clients[slot];
+	if (client_num < 0 || client_num >= (int)game.maxclients)
+		return nullptr;
+
+	gclient_t *client = &game.clients[client_num];
+	if (!client->pers.connected)
+		return nullptr;
+
+	return client;
+}
+
 static int Horde_MarkMonsterSlots()
 {
 	return clamp(g_horde_mark_monsters_max->integer, 1, static_cast<int>(POI_HORDE_MONSTER_END - POI_HORDE_MONSTER_0 + 1));
@@ -925,12 +941,12 @@ bool MM_Horde_CheckMatchEnd()
 	if (roundlimit->integer <= 0 || level.round_number < roundlimit->integer)
 		return false;
 
-	const int winner = level.sorted_clients[0];
-	if (winner < 0)
+	gclient_t *winner = Horde_SortedConnectedClient(0);
+	if (!winner)
 		QueueIntermission("MATCH ENDED", false, false);
 	else
-		QueueIntermission(G_Fmt("{} WINS with a final score of {}.", game.clients[winner].resp.netname,
-			game.clients[winner].resp.score).data(),
+		QueueIntermission(G_Fmt("{} WINS with a final score of {}.", winner->resp.netname,
+			winner->resp.score).data(),
 			false, false);
 	return true;
 }
