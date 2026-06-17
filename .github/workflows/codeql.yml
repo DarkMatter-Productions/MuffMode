@@ -1,0 +1,58 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [muffdev]
+  pull_request:
+    branches: [muffdev]
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * 1"
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  analyze:
+    name: CodeQL C/C++
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 90
+
+    env:
+      VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Cache vcpkg
+        uses: actions/cache@v5
+        with:
+          path: |
+            vcpkg/downloads
+            vcpkg/buildtrees
+            vcpkg/packages
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('src/vcpkg.json') }}
+          restore-keys: vcpkg-${{ runner.os }}-
+
+      - name: Setup vcpkg
+        shell: pwsh
+        run: ./scripts/ci/setup-vcpkg.ps1 -Install
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v3
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: c-cpp
+          build-mode: manual
+          config-file: ./.github/codeql/codeql-config.yml
+
+      - name: Build for CodeQL
+        shell: pwsh
+        run: ./scripts/ci/build-msbuild.ps1 -Configuration Release -Platform x64
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3

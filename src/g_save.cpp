@@ -1,6 +1,8 @@
 // Copyright (c) ZeniMax Media Inc.
 // Licensed under the GNU General Public License 2.0.
 
+#include <cerrno>
+#include <limits>
 #include <sstream>
 
 #include "g_local.h"
@@ -22,7 +24,9 @@
 // - backwards & forwards compatible with this same format
 // - I wrote this initially when the codebase was in C, so it
 //   does have some C-isms in here.
-constexpr size_t SAVE_FORMAT_VERSION = 1;
+constexpr uint32_t SAVE_FORMAT_VERSION = 1;
+constexpr uint32_t SAVE_FORMAT_MIN_READ_VERSION = 1;
+constexpr uint32_t SAVE_FORMAT_MAX_READ_VERSION = SAVE_FORMAT_VERSION;
 
 #include <unordered_map>
 
@@ -1743,8 +1747,11 @@ bool write_save_struct_json(const void *data, const save_struct_t *structure, bo
 #define TYPED_DATA_IS_EMPTY(type, expr) (type->is_empty ? type->is_empty(data) : (expr))
 
 inline bool string_is_high(const char *c) {
-	for (size_t i = 0; i < strlen(c); i++)
-		if (c[i] & 128)
+	if (!c)
+		return false;
+
+	for (; *c; c++)
+		if (*c & 128)
 			return true;
 
 	return false;
@@ -1753,8 +1760,11 @@ inline bool string_is_high(const char *c) {
 inline Json::Value string_to_bytes(const char *c) {
 	Json::Value array(Json::arrayValue);
 
-	for (size_t i = 0; i < strlen(c); i++)
-		array.append((int32_t)(unsigned char)c[i]);
+	if (!c)
+		return array;
+
+	for (; *c; c++)
+		array.append((int32_t)(unsigned char)*c);
 
 	return array;
 }
@@ -2189,6 +2199,60 @@ static Json::Value parseJson(const char *jsonString) {
 	return json;
 }
 
+static uint32_t ValidateSaveFormatVersion(const Json::Value &json, const char *scope) {
+	const Json::Value &version = json["save_version"];
+
+	if (version.isNull())
+		gi.Com_ErrorFmt("{} JSON is missing required save_version", scope);
+
+	if (!version.isUInt())
+		gi.Com_ErrorFmt("{} JSON save_version must be an unsigned integer", scope);
+
+	const uint32_t save_version = version.asUInt();
+
+	if (save_version < SAVE_FORMAT_MIN_READ_VERSION || save_version > SAVE_FORMAT_MAX_READ_VERSION) {
+		gi.Com_ErrorFmt("{} JSON save_version {} is unsupported; supported range is {}..{}",
+			scope,
+			save_version,
+			SAVE_FORMAT_MIN_READ_VERSION,
+			SAVE_FORMAT_MAX_READ_VERSION);
+	}
+
+	return save_version;
+}
+
+static uint32_t ParseSavedEntityNumber(const char *id) {
+	if (!id || !*id || *id == '-' || *id == '+') {
+		gi.Com_ErrorFmt("invalid entity id in level JSON: {}", id ? id : "");
+	}
+
+	char *end = nullptr;
+	errno = 0;
+	const unsigned long value = strtoul(id, &end, 10);
+	if (end == id || *end != '\0' || errno == ERANGE ||
+		value > static_cast<unsigned long>(std::numeric_limits<uint32_t>::max())) {
+		gi.Com_ErrorFmt("invalid entity id in level JSON: {}", id);
+	}
+
+	if (value >= static_cast<unsigned long>(game.maxentities)) {
+		gi.Com_ErrorFmt("entity id {} exceeds maxentities {}", value, game.maxentities);
+	}
+
+	return static_cast<uint32_t>(value);
+}
+
+static size_t SaveEntityCount() {
+	return min(static_cast<size_t>(globals.num_entities), static_cast<size_t>(game.maxentities));
+}
+
+static size_t SaveClientEntityCount() {
+	if (game.maxentities <= 1) {
+		return 0;
+	}
+
+	return min(static_cast<size_t>(game.maxclients), static_cast<size_t>(game.maxentities) - 1);
+}
+
 static char *saveJson(const Json::Value &json, size_t *out_size) {
 	Json::StreamWriterBuilder builder;
 	builder["indentation"] = "\t";
@@ -2239,12 +2303,13 @@ void PrecacheInventoryItems();
 // takes in pointer to JSON data. does
 // not store or modify it.
 void ReadGameJson(const char *jsonString) {
+	Json::Value json = parseJson(jsonString);
+	ValidateSaveFormatVersion(json, "game");
+
 	gi.FreeTags(TAG_GAME);
 
-	Json::Value json = parseJson(jsonString);
-
-	uint32_t max_entities = game.maxentities;
-	uint32_t max_clients = game.maxclients;
+	const uint32_t max_entities = game.maxentities;
+	const uint32_t max_clients = game.maxclients;
 
 	game = {};
 	g_entities = (gentity_t *)gi.TagMalloc(max_entities * sizeof(g_entities[0]), TAG_GAME);
@@ -2255,6 +2320,15 @@ void ReadGameJson(const char *jsonString) {
 	json_push_stack("game");
 	read_save_struct_json(json["game"], &game, &game_locals_t_savestruct);
 	json_pop_stack();
+
+	if (game.maxentities != max_entities) {
+		gi.Com_ErrorFmt("saved game maxentities {} does not match current maxentities {}", game.maxentities, max_entities);
+	}
+	if (game.maxclients != max_clients) {
+		gi.Com_ErrorFmt("saved game maxclients {} does not match current maxclients {}", game.maxclients, max_clients);
+	}
+
+	globals.max_entities = game.maxentities;
 
 	// read clients
 	const Json::Value &clients = json["clients"];
@@ -2292,8 +2366,9 @@ char *WriteLevelJson(bool transition, size_t *out_size) {
 	// write entities
 	Json::Value entities(Json::objectValue);
 	char		number[16];
+	const size_t entity_count = SaveEntityCount();
 
-	for (size_t i = 0; i < globals.num_entities; i++) {
+	for (size_t i = 0; i < entity_count; i++) {
 		if (!globals.gentities[i].inuse)
 			continue;
 		// clear all the client inuse flags before saving so that
@@ -2321,15 +2396,16 @@ char *WriteLevelJson(bool transition, size_t *out_size) {
 // takes in pointer to JSON data. does
 // not store or modify it.
 void ReadLevelJson(const char *jsonString) {
+	Json::Value json = parseJson(jsonString);
+	ValidateSaveFormatVersion(json, "level");
+
 	// free any dynamic memory allocated by loading the level
 	// base state
 	gi.FreeTags(TAG_LEVEL);
 
-	Json::Value json = parseJson(jsonString);
-
 	// wipe all the entities
 	memset(g_entities, 0, game.maxentities * sizeof(g_entities[0]));
-	globals.num_entities = game.maxclients + 1;
+	globals.num_entities = static_cast<uint32_t>(min(static_cast<size_t>(game.maxclients) + 1, static_cast<size_t>(game.maxentities)));
 
 	// read level
 	json_push_stack("level");
@@ -2347,7 +2423,7 @@ void ReadLevelJson(const char *jsonString) {
 		const char *dummy;
 		const char *id = it.memberName(&dummy);
 		const Json::Value &value = *it;//json[key];
-		uint32_t		   number = strtoul(id, nullptr, 10);
+		uint32_t		   number = ParseSavedEntityNumber(id);
 
 		if (number >= globals.num_entities)
 			globals.num_entities = number + 1;
@@ -2361,7 +2437,8 @@ void ReadLevelJson(const char *jsonString) {
 	}
 
 	// mark all clients as unconnected
-	for (size_t i = 0; i < game.maxclients; i++) {
+	const size_t client_entity_count = SaveClientEntityCount();
+	for (size_t i = 0; i < client_entity_count; i++) {
 		gentity_t *ent = &g_entities[i + 1];
 		ent->client = game.clients + i;
 		ent->client->pers.connected = false;
@@ -2369,7 +2446,8 @@ void ReadLevelJson(const char *jsonString) {
 	}
 
 	// do any load time things at this point
-	for (size_t i = 0; i < globals.num_entities; i++) {
+	const size_t entity_count = SaveEntityCount();
+	for (size_t i = 0; i < entity_count; i++) {
 		gentity_t *ent = &g_entities[i];
 
 		if (!ent->inuse)

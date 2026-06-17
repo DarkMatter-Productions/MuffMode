@@ -1,0 +1,27 @@
+# Phase-three command regression seed.
+#
+# These commands are intentionally mixed valid/invalid cases. Harnesses should
+# assert that malformed inputs are rejected without applying partial state.
+
+teleport 0 0 64
+teleport 0 0 64 0 90 0
+teleport 0 0
+teleport 0 0 64 0
+teleport 0 nope 64
+
+spawn monster_soldier
+spawn monster_soldier spawnflags 1
+spawn monster_soldier spawnflags
+
+give health 100
+give health bad
+use_index 1
+use_index nope
+drop_index 1
+drop_index nope
+wave 0
+wave nope
+ghost 1234
+ghost nope
+killbeep 4
+killbeep nope

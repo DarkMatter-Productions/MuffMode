@@ -3,7 +3,9 @@
 
 #include "g_local.h"
 #include "muffmode/mm_captain.h"
+#include "muffmode/mm_command_contracts.h"
 #include "muffmode/mm_duel.h"
+#include "muffmode/mm_gametype.h"
 #include "muffmode/mm_ghost.h"
 #include "muffmode/mm_horde.h"
 #include "muffmode/mm_match.h"
@@ -13,6 +15,27 @@
 extern cvar_t *g_horde_champions;
 extern cvar_t *g_horde_champion_max_per_run;
 extern cvar_t *g_horde_champion_chance;
+
+static gclient_t *MM_MatchSortedConnectedClient(size_t slot)
+{
+	if (slot >= q_countof(level.sorted_clients))
+		return nullptr;
+
+	const int client_num = level.sorted_clients[slot];
+	if (client_num < 0 || client_num >= (int)game.maxclients)
+		return nullptr;
+
+	gclient_t *client = &game.clients[client_num];
+	if (!client->pers.connected)
+		return nullptr;
+
+	return client;
+}
+
+static bool MM_IsConnectedClientEntity(gentity_t *ent)
+{
+	return ent && ent->inuse && ent->client && ent->client->pers.connected;
+}
 
 static void Monsters_KillAll() {
 	for (size_t i = 0; i < globals.max_entities; i++) {
@@ -294,7 +317,7 @@ Round_StartNew
 =============
 */
 static bool Round_StartNew() {
-	if (!(GTF(GTF_ROUNDS))) {
+	if (!MM_GametypeHasFlag(GTF_ROUNDS)) {
 		level.round_state = roundst_t::ROUND_NONE;
 		level.round_state_timer = 0_sec;
 		return false;
@@ -351,7 +374,7 @@ Round_End
 */
 void Round_End() {
 	// reset if not round based
-	if (!(GTF(GTF_ROUNDS))) {
+	if (!MM_GametypeHasFlag(GTF_ROUNDS)) {
 		level.round_state = roundst_t::ROUND_NONE;
 		level.round_state_timer = 0_sec;
 		return;
@@ -489,9 +512,9 @@ static bool CheckReady() {
 	if (!g_dm_do_readyup->integer)
 		return true;
 
-	uint8_t count_ready, count_humans, count_bots;
-
-	count_ready = count_humans = count_bots = 0;
+	int count_ready = 0;
+	int count_humans = 0;
+	int count_bots = 0;
 	for (auto ec : active_clients()) {
 		if (!ClientIsPlaying(ec->client))
 			continue;
@@ -522,7 +545,8 @@ static bool CheckReady() {
 		return false;
 
 	// start if over min ready percentile
-	if (((float)count_ready / (float)count_humans) * 100.0f >= g_warmup_ready_percentage->value * 100.0f)
+	const float ready_percentage = clamp(g_warmup_ready_percentage->value, 0.0f, 1.0f);
+	if (((float)count_ready / (float)count_humans) >= ready_percentage)
 		return true;
 
 	return false;
@@ -534,7 +558,7 @@ CheckDMRoundState
 =============
 */
 static void CheckDMRoundState(void) {
-	if (!(GTF(GTF_ROUNDS)))
+	if (!MM_GametypeHasFlag(GTF_ROUNDS))
 		return;
 
 	if (level.match_state != matchst_t::MATCH_IN_PROGRESS)
@@ -588,7 +612,7 @@ static void CheckDMRoundState(void) {
 				!ent->client->eliminated && ent->health > 0;
 		};
 
-		switch (g_gametype->integer) {
+		switch (MM_CurrentGametype()) {
 		case GT_CA:
 		case GT_STRIKE:
 		{
@@ -734,9 +758,14 @@ static void CheckDMCountdown(void) {
 
 	gtime_t base = (level.round_state == roundst_t::ROUND_COUNTDOWN) ? level.round_state_timer : level.match_state_timer;
 	int t = (base + 1_sec - level.time).seconds<int>();
+	if (t <= 0) {
+		if (level.countdown_check)
+			level.countdown_check = 0_sec;
+		return;
+	}
 
 	if (!level.countdown_check || level.countdown_check.seconds<int>() > t) {
-		if (t > 0 && (!(t % 10) || t < 10)) {
+		if (!(t % 10) || t < 10) {
 			AnnouncerSound(world, nullptr, G_Fmt("world/{}{}.wav", t, t >= 20 ? "sec" : "").data(), false);
 			//gi.positioned_sound(world->s.origin, world, CHAN_AUTO | CHAN_RELIABLE, gi.soundindex(G_Fmt("world/{}{}.wav", t, t >= 20 ? "sec" : "").data()), 1, ATTN_NONE, 0);
 			if (t <= 3) {
@@ -754,7 +783,7 @@ CheckDMMatchEndWarning
 =============
 */
 static void CheckDMMatchEndWarning(void) {
-	if (GTF(GTF_ROUNDS))
+	if (MM_GametypeHasFlag(GTF_ROUNDS))
 		return;
 
 	if (level.match_state != matchst_t::MATCH_IN_PROGRESS || !timelimit->value) {
@@ -764,6 +793,11 @@ static void CheckDMMatchEndWarning(void) {
 	}
 
 	int t = (level.match_time + gtime_t::from_min(timelimit->value) - level.time).seconds<int>();	// +1;
+	if (t <= 0) {
+		if (level.matchendwarn_check)
+			level.matchendwarn_check = 0_sec;
+		return;
+	}
 
 	if (!level.matchendwarn_check || level.matchendwarn_check.seconds<int>() > t) {
 		if (t && (t == 30 || t == 20 || t <= 10)) {
@@ -994,9 +1028,10 @@ countdown:
 				level.match_state_timer = level.time + gtime_t::from_sec(g_warmup_countdown->integer);
 
 				// announce it
-				if ((GT(GT_DUEL) || (level.num_playing_clients == 2 && g_match_lock->integer)) &&
-						level.sorted_clients[0] >= 0 && level.sorted_clients[1] >= 0)
-					gi.LocBroadcast_Print(PRINT_CENTER, "{} vs {}\nBegins in...", game.clients[level.sorted_clients[0]].resp.netname, game.clients[level.sorted_clients[1]].resp.netname);
+				gclient_t *first = MM_MatchSortedConnectedClient(0);
+				gclient_t *second = MM_MatchSortedConnectedClient(1);
+				if ((GT(GT_DUEL) || (level.num_playing_clients == 2 && g_match_lock->integer)) && first && second)
+					gi.LocBroadcast_Print(PRINT_CENTER, "{} vs {}\nBegins in...", first->resp.netname, second->resp.netname);
 				else
 					gi.LocBroadcast_Print(PRINT_CENTER, "{}\nBegins in...", level.gametype_name);
 
@@ -1059,10 +1094,22 @@ Ends a timeout session.
 ==================
 */
 void MM_CmdTimeIn(gentity_t *ent) {
+	if (!MM_IsConnectedClientEntity(ent))
+		return;
+
+	if (!MM_IsExactArgcValid(gi.argc(), 1)) {
+		gi.LocClient_Print(ent, PRINT_HIGH, "Usage: {}\n", gi.argv(0));
+		return;
+	}
+
 	if (!level.timeout_in_place) {
 		gi.Client_Print(ent, PRINT_HIGH, "A timeout is not currently in effect.\n");
 		return;
 	}
+
+	if (level.timeout_ent && !MM_IsConnectedClientEntity(level.timeout_ent))
+		level.timeout_ent = nullptr;
+
 	if (!ent->client->sess.admin && level.timeout_ent != ent) {
 		gi.Client_Print(ent, PRINT_HIGH, "The timeout can only be ended by the timeout caller or an admin.\n");
 		return;
@@ -1080,7 +1127,16 @@ Calls a timeout session.
 ==================
 */
 void MM_CmdTimeOut(gentity_t *ent) {
-	if (g_dm_timeout_length->integer <= 0) {
+	if (!MM_IsConnectedClientEntity(ent))
+		return;
+
+	if (!MM_IsExactArgcValid(gi.argc(), 1)) {
+		gi.LocClient_Print(ent, PRINT_HIGH, "Usage: {}\n", gi.argv(0));
+		return;
+	}
+
+	const int timeout_seconds = MM_ClampTimeoutSeconds(g_dm_timeout_length->integer);
+	if (timeout_seconds <= 0) {
 		gi.Client_Print(ent, PRINT_HIGH, "Server has disabled timeouts.\n");
 		return;
 	}
@@ -1098,8 +1154,8 @@ void MM_CmdTimeOut(gentity_t *ent) {
 	}
 
 	level.timeout_ent = ent;
-	level.timeout_in_place = gtime_t::from_sec(g_dm_timeout_length->integer);
-	gi.LocBroadcast_Print(PRINT_CENTER, "{} called a timeout!\n{} has been granted.", ent->client->resp.netname, G_TimeString(g_dm_timeout_length->integer * 1000, false));
+	level.timeout_in_place = gtime_t::from_sec(timeout_seconds);
+	gi.LocBroadcast_Print(PRINT_CENTER, "{} called a timeout!\n{} has been granted.", ent->client->resp.netname, G_TimeString(timeout_seconds * 1000, false));
 	gi.positioned_sound(world->s.origin, world, CHAN_RELIABLE | CHAN_NO_PHS_ADD | CHAN_AUX, gi.soundindex("world/klaxon2.wav"), 1, ATTN_NONE, 0);
 	ent->client->pers.timeout_used = true;
 }

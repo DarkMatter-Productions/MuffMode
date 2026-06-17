@@ -3,6 +3,7 @@
 // g_ai.c
 
 #include "g_local.h"
+#include "muffmode/mm_profile.h"
 
 bool FindTarget(gentity_t *self);
 bool ai_checkattack(gentity_t *self, float dist);
@@ -28,8 +29,8 @@ gentity_t *AI_GetSightClient(gentity_t *self) {
 	if (level.intermission_time)
 		return nullptr;
 
-	gentity_t **visible_players = (gentity_t **)alloca(sizeof(gentity_t *) * game.maxclients);
-	size_t num_visible = 0;
+	gentity_t *visible_players[MAX_CLIENTS_KEX] = {};
+	int32_t num_visible = 0;
 
 	for (auto player : active_clients()) {
 		if (player->health <= 0 || player->deadflag || !player->solid)
@@ -42,6 +43,9 @@ gentity_t *AI_GetSightClient(gentity_t *self) {
 			if ((!(self->monsterinfo.aiflags & AI_THIRD_EYE) && !infront(self, player)) || !visible(self, player))
 				continue;
 		}
+
+		if (num_visible >= static_cast<int32_t>(q_countof(visible_players)))
+			break;
 
 		visible_players[num_visible++] = player; // got one
 	}
@@ -334,6 +338,9 @@ returns 1 if the entity is visible to self, even if not infront ()
 =============
 */
 bool visible(gentity_t *self, gentity_t *other, bool through_glass) {
+	MM_PROFILE_ZONE("visible");
+	MM_PROFILE_INC(los_visible_calls);
+
 	// never visible
 	if (other->flags & FL_NOVISIBLE)
 		return false;
@@ -374,6 +381,7 @@ bool visible(gentity_t *self, gentity_t *other, bool through_glass) {
 	if (!through_glass)
 		mask |= CONTENTS_WINDOW;
 
+	MM_PROFILE_INC(los_visible_traces);
 	trace = gi.traceline(spot1, spot2, self, mask);
 	return trace.fraction == 1.0f || trace.ent == other; // PGM
 }

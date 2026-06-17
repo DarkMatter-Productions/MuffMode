@@ -2,6 +2,14 @@
 // Licensed under the GNU General Public License 2.0.
 #include "g_local.h"
 
+static size_t WeaponEntityCount() {
+	return min(static_cast<size_t>(globals.num_entities), static_cast<size_t>(game.maxentities));
+}
+
+static size_t WeaponClientEntityCount() {
+	return min(WeaponEntityCount(), static_cast<size_t>(game.maxclients) + 1);
+}
+
 /*
 =================
 fire_hit
@@ -2181,7 +2189,7 @@ constexpr gtime_t NUKE_QUAKE_TIME = 3_sec;
 constexpr float	  NUKE_QUAKE_STRENGTH = 100;
 
 static THINK(Nuke_Quake) (gentity_t *self) -> void {
-	uint32_t i;
+	size_t i;
 	gentity_t *e;
 
 	if (self->last_move_time < level.time) {
@@ -2189,7 +2197,8 @@ static THINK(Nuke_Quake) (gentity_t *self) -> void {
 		self->last_move_time = level.time + 500_ms;
 	}
 
-	for (i = 1, e = g_entities + i; i < globals.num_entities; i++, e++) {
+	const size_t client_entity_limit = WeaponClientEntityCount();
+	for (i = 1, e = g_entities + i; i < client_entity_limit; i++, e++) {
 		if (!e->inuse)
 			continue;
 		if (!e->client)
@@ -3143,7 +3152,8 @@ static THINK(Trap_Think) (gentity_t *ent) -> void {
 				ent->s.frame = 5;
 
 				// link up any gibs that this monster may have spawned
-				for (size_t i = 0; i < globals.num_entities; i++) {
+				const size_t entity_count = WeaponEntityCount();
+				for (size_t i = 0; i < entity_count; i++) {
 					gentity_t *e = &g_entities[i];
 
 					if (!e->inuse)

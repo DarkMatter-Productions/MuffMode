@@ -11,6 +11,8 @@
 #include "muffmode/mm_maps.h"
 #include "muffmode/mm_match.h"
 #include "muffmode/mm_motd.h"
+#include "muffmode/mm_profile.h"
+#include "muffmode/mm_red_rover_rules.h"
 #include "muffmode/mm_team.h"
 #include "muffmode/mm_vote.h"
 #include "bots/bot_includes.h"
@@ -29,11 +31,6 @@ level_locals_t level;
 
 local_game_import_t  gi;
 
-/*static*/ char local_game_import_t::print_buffer[0x10000];
-
-/*static*/ std::array<char[MAX_INFO_STRING], MAX_LOCALIZATION_ARGS> local_game_import_t::buffers;
-/*static*/ std::array<const char *, MAX_LOCALIZATION_ARGS> local_game_import_t::buffer_ptrs;
-
 game_export_t  globals;
 spawn_temp_t   st;
 
@@ -41,6 +38,35 @@ cached_modelindex		sm_meat_index;
 cached_soundindex		snd_fry;
 
 gentity_t *g_entities;
+
+static size_t G_AllocatedEntityCount() {
+	return min(static_cast<size_t>(globals.num_entities), static_cast<size_t>(game.maxentities));
+}
+
+static size_t G_FrameEntityCount() {
+	return min(
+		static_cast<size_t>(game.maxentities),
+		static_cast<size_t>(globals.num_entities) + 1 + static_cast<size_t>(game.maxclients) + BODY_QUEUE_SIZE);
+}
+
+static gentity_t *G_PrimaryClientEntity() {
+	if (!g_entities || game.maxclients < 1 || G_AllocatedEntityCount() <= 1)
+		return nullptr;
+
+	gentity_t *ent = &g_entities[1];
+	return (ent->inuse && ent->client) ? ent : nullptr;
+}
+
+static uint32_t G_ClampGameLimit(const char *name, int value, uint32_t min_value, uint32_t max_value) {
+	const int64_t raw_value = value;
+	const uint32_t clamped_value = static_cast<uint32_t>(clamp<int64_t>(raw_value, min_value, max_value));
+
+	if (raw_value != clamped_value) {
+		gi.Com_PrintFmt("{}: clamped {} from {} to {}\n", __FUNCTION__, name, raw_value, clamped_value);
+	}
+
+	return clamped_value;
+}
 
 cvar_t *hostname;
 
@@ -725,15 +751,20 @@ static void InitGame() {
 
 	game = {};
 
+	const uint32_t clamped_max_clients = G_ClampGameLimit("maxclients", maxclients->integer, 1, MAX_CLIENTS_KEX);
+	const uint32_t minimum_entities = clamped_max_clients + static_cast<uint32_t>(BODY_QUEUE_SIZE) + 1;
+	const uint32_t clamped_max_entities = G_ClampGameLimit("maxentities", maxentities->integer, minimum_entities, MAX_ENTITIES);
+
 	// initialize all entities for this game
-	game.maxentities = maxentities->integer;
+	game.maxentities = clamped_max_entities;
 	g_entities = (gentity_t *)gi.TagMalloc(game.maxentities * sizeof(g_entities[0]), TAG_GAME);
 	globals.gentities = g_entities;
 	globals.max_entities = game.maxentities;
 
 	// initialize all clients for this game
-	game.maxclients = maxclients->integer;
+	game.maxclients = clamped_max_clients;
 	game.clients = (gclient_t *)gi.TagMalloc(game.maxclients * sizeof(game.clients[0]), TAG_GAME);
+	memset(game.clients, 0, game.maxclients * sizeof(game.clients[0]));
 	globals.num_entities = game.maxclients + 1;
 
 	// how far back we should support lag origins for
@@ -997,6 +1028,21 @@ ScoreIsTied
 Adapted from Quake III
 =============
 */
+static bool ClientIndexIsValid(int client_index) {
+	return client_index >= 0 && static_cast<size_t>(client_index) < game.maxclients;
+}
+
+static gclient_t *ClientFromSortedSlot(size_t slot) {
+	if (slot >= q_countof(level.sorted_clients))
+		return nullptr;
+
+	const int client_index = level.sorted_clients[slot];
+	if (!ClientIndexIsValid(client_index))
+		return nullptr;
+
+	return &game.clients[client_index];
+}
+
 static bool ScoreIsTied(void) {
 	if (level.num_playing_clients < 2)
 		return false;
@@ -1004,7 +1050,9 @@ static bool ScoreIsTied(void) {
 	if (Teams() && notGT(GT_RR))
 		return level.team_scores[TEAM_RED] == level.team_scores[TEAM_BLUE];
 
-	return game.clients[level.sorted_clients[0]].resp.score == game.clients[level.sorted_clients[1]].resp.score;
+	gclient_t *first = ClientFromSortedSlot(0);
+	gclient_t *second = ClientFromSortedSlot(1);
+	return first && second && first->resp.score == second->resp.score;
 }
 
 /*
@@ -1149,9 +1197,10 @@ void CalculateRanks() {
 		}
 	}
 
-	for (size_t i = 0; i < level.num_playing_clients; i++) {
-		if (game.clients[i].pers.connected) {
-			game.clients[level.sorted_clients[i]].resp.old_rank = game.clients[level.sorted_clients[i]].resp.rank;
+	for (size_t i = 0; i < level.num_connected_clients; i++) {
+		gclient_t *sorted_client = ClientFromSortedSlot(i);
+		if (sorted_client && sorted_client->pers.connected) {
+			sorted_client->resp.old_rank = sorted_client->resp.rank;
 		}
 	}
 
@@ -1162,7 +1211,10 @@ void CalculateRanks() {
 		if (teams && notGT(GT_RR)) {
 			// in team games, rank is just the order of the teams, 0=red, 1=blue, 2=tied
 			for (size_t i = 0; i < level.num_connected_clients; i++) {
-				cl = &game.clients[level.sorted_clients[i]];
+				cl = ClientFromSortedSlot(i);
+				if (!cl)
+					continue;
+
 				if (level.team_scores[TEAM_RED] == level.team_scores[TEAM_BLUE]) {
 					cl->resp.rank = 2;
 				}
@@ -1178,19 +1230,21 @@ void CalculateRanks() {
 			int score = 0, new_score, rank = 0;
 
 			for (size_t i = 0; i < level.num_playing_clients; i++) {
-				if (game.clients[i].pers.connected) {
-					cl = &game.clients[level.sorted_clients[i]];
+				cl = ClientFromSortedSlot(i);
+				if (cl && cl->pers.connected && ClientIsPlaying(cl)) {
 					cl->resp.old_score = cl->resp.score;
 					new_score = cl->resp.score;
 					if (i == 0 || new_score != score) {
 						rank = i;
 						// assume we aren't tied until the next client is checked
-						game.clients[level.sorted_clients[i]].resp.rank = rank;
+						cl->resp.rank = rank;
 					}
 					else {
 						// we are tied with the previous client
-						game.clients[level.sorted_clients[i - 1]].resp.rank = rank | RANK_TIED_FLAG;
-						game.clients[level.sorted_clients[i]].resp.rank = rank | RANK_TIED_FLAG;
+						gclient_t *previous = ClientFromSortedSlot(i - 1);
+						if (previous)
+							previous->resp.rank = rank | RANK_TIED_FLAG;
+						cl->resp.rank = rank | RANK_TIED_FLAG;
 					}
 					score = new_score;
 				}
@@ -1208,20 +1262,24 @@ void CalculateRanks() {
 	if (level.match_state == MATCH_IN_PROGRESS) {
 		if (GTF(GTF_FRAGS)) {
 			//gi.Com_PrintFmt("new={} old={}\n", game.clients[level.sorted_clients[0]].resp.score, old_first_score);
-			if (fraglimit->integer > 3) {
-				int score_diff = fraglimit->integer - game.clients[level.sorted_clients[0]].resp.score;
-				// frag_warning has 3 entries (1/2/3 frags to go). Once the leader reaches
-				// the limit score_diff is <= 0, so guard the lower bound or score_diff-1
-				// indexes frag_warning[-1] and corrupts the adjacent field (crash on match end).
-				if (score_diff >= 1 && score_diff <= 3 && !level.frag_warning[score_diff - 1]) {
-					AnnouncerSound(world, G_Fmt("{}_frag{}", score_diff, score_diff > 1 ? "s" : "").data(), nullptr, false);
-					level.frag_warning[score_diff - 1] = true;
-					CheckDMExitRules();
-					return;
+			// frag_warning has 3 entries (1/2/3 frags to go). Once the leader reaches
+			// the limit score_diff is <= 0, so guard the lower bound or score_diff-1
+			// indexes frag_warning[-1] and corrupts the adjacent field (crash on match end).
+			gclient_t *leader = ClientFromSortedSlot(0);
+			if (leader) {
+				if (const auto warning_index = MM_FragWarningIndex(fraglimit->integer, leader->resp.score)) {
+					const int score_diff = static_cast<int>(*warning_index) + 1;
+					if (!level.frag_warning[*warning_index]) {
+						AnnouncerSound(world, G_Fmt("{}_frag{}", score_diff, score_diff > 1 ? "s" : "").data(), nullptr, false);
+						level.frag_warning[*warning_index] = true;
+						CheckDMExitRules();
+						return;
+					}
 				}
 			}
 		}
-		if ((!Teams() || GT(GT_RR)) && game.clients[level.sorted_clients[0]].resp.score > 0) {
+		gclient_t *leader = ClientFromSortedSlot(0);
+		if ((!Teams() || GT(GT_RR)) && leader && leader->resp.score > 0) {
 			// check changes in rank to trigger sounds
 			// (RR is a team mode but scores individually, so it uses the FFA lead announcer)
 			int new_rank = 0, old_rank = 0;
@@ -1583,7 +1641,7 @@ void CheckDMExitRules() {
 		return;
 	}
 
-	bool teams = Teams() && notGT(GT_RR);
+	bool teams = MM_UseTeamScoreLimit(Teams(), GT(GT_RR));
 	
 	if (teams && g_teamplay_force_balance->integer) {
 		if (abs(level.num_playing_red - level.num_playing_blue) > 1) {
@@ -1636,7 +1694,11 @@ void CheckDMExitRules() {
 						return;
 					}
 				} else {
-					QueueIntermission(G_Fmt("{} WINS with a final score of {}.", game.clients[level.sorted_clients[0]].resp.netname, game.clients[level.sorted_clients[0]].resp.score).data(), false, false);
+					gclient_t *leader = ClientFromSortedSlot(0);
+					if (leader)
+						QueueIntermission(G_Fmt("{} WINS with a final score of {}.", leader->resp.netname, leader->resp.score).data(), false, false);
+					else
+						QueueIntermission("Timelimit hit.", false, false);
 					return;
 				}
 
@@ -1659,8 +1721,8 @@ void CheckDMExitRules() {
 		} else if (!MM_Horde_SkipMercyLimit()) {
 			gclient_t *cl1, *cl2;
 
-			cl1 = &game.clients[level.sorted_clients[0]];
-			cl2 = &game.clients[level.sorted_clients[1]];
+			cl1 = ClientFromSortedSlot(0);
+			cl2 = ClientFromSortedSlot(1);
 			if (cl1 && cl2) {
 				if (cl1->resp.score >= cl2->resp.score + mercylimit->integer) {
 					QueueIntermission(G_Fmt("{} hit the mercylimit ({}).", cl1->resp.netname, mercylimit->integer).data(), true, false);
@@ -1939,9 +2001,9 @@ void ExitLevel() {
 			screenshot_cmd = std::string(G_Fmt("screenshot {}\n", filename));
 			gi.Com_PrintFmt("Screenshot saved: {}\n", filename.c_str());
 		} else {
-			gentity_t *ent = &g_entities[1];
+			gentity_t *ent = G_PrimaryClientEntity();
 			const char *raw_name = "player";
-			if (ent && ent->inuse && ent->client) {
+			if (ent) {
 				gentity_t *follow = ent->client->follow_target;
 				raw_name = (follow && follow->inuse && follow->client)
 					? follow->client->resp.netname
@@ -2079,7 +2141,8 @@ static void CheckPowerups() {
 	bool	disable = g_dm_powerups_minplayers->integer > 0 && (level.num_playing_clients < g_dm_powerups_minplayers->integer);
 	gentity_t	*ent = nullptr;
 	size_t	i;
-	for (ent = g_entities + 1, i = 1; i < globals.num_entities; i++, ent++) {
+	const size_t entity_count = G_AllocatedEntityCount();
+	for (ent = g_entities + 1, i = 1; i < entity_count; i++, ent++) {
 		if (!ent->inuse || !ent->item)
 			continue;
 
@@ -2179,6 +2242,14 @@ Advances the world by 0.1 seconds
 ================
 */
 static inline void G_RunFrame_(bool main_loop) {
+	MM_PROFILE_ZONE("G_RunFrame_");
+	MM_PROFILE_INC(frame_runs);
+
+	if (main_loop)
+		MM_PROFILE_INC(frame_main_loop_runs);
+	else
+		MM_PROFILE_INC(frame_non_main_loop_runs);
+
 	if (level.in_frame)
 		MuffModeLog("ERROR", "G_RunFrame_: re-entrant call detected! (main_loop=%d)", main_loop);
 	level.in_frame = true;
@@ -2268,7 +2339,10 @@ static inline void G_RunFrame_(bool main_loop) {
 	// even the world gets a chance to think
 	//
 	gentity_t *ent = &g_entities[0];
-	for (size_t i = 0; i < globals.num_entities; i++, ent++) {
+	const size_t frame_entity_count = G_AllocatedEntityCount();
+	for (size_t i = 0; i < frame_entity_count; i++, ent++) {
+		MM_PROFILE_INC(frame_entities_visited);
+
 		if (!ent->inuse) {
 			// defer removing client info so that disconnected, etc works
 			if (i > 0 && i <= game.maxclients) {
@@ -2309,10 +2383,12 @@ static inline void G_RunFrame_(bool main_loop) {
 		Entity_UpdateState(ent);
 
 		if (i > 0 && i <= game.maxclients) {
+			MM_PROFILE_INC(frame_clients_visited);
 			ClientBeginServerFrame(ent);
 			continue;
 		}
 
+		MM_PROFILE_INC(frame_nonclients_visited);
 		G_RunEntity(ent);
 	}
 
@@ -2345,11 +2421,13 @@ static inline void G_RunFrame_(bool main_loop) {
 
 	// [Paril-KEX] if not in intermission and player 1 is loaded in
 	// the game as an entity, increase timer on current entry
-	if (level.entry && !level.intermission_time && g_entities[1].inuse && g_entities[1].client->pers.connected)
+	gentity_t *primary_client = G_PrimaryClientEntity();
+	if (level.entry && !level.intermission_time && primary_client && primary_client->client->pers.connected)
 		level.entry->time += FRAME_TIME_S;
 
 	// [Paril-KEX] run monster pains now
-	for (size_t i = 0; i < globals.num_entities + 1 + game.maxclients + BODY_QUEUE_SIZE; i++) {
+	const size_t pain_entity_count = G_FrameEntityCount();
+	for (size_t i = 0; i < pain_entity_count; i++) {
 		gentity_t *e = &g_entities[i];
 
 		if (!e->inuse || !(e->svflags & SVF_MONSTER))
@@ -2370,15 +2448,21 @@ static inline bool G_AnyClientsSpawned() {
 }
 
 void G_RunFrame(bool main_loop) {
-	if (main_loop && !G_AnyClientsSpawned())
+	MM_PROFILE_ZONE("G_RunFrame");
+
+	const bool any_clients_spawned = G_AnyClientsSpawned();
+
+	if (main_loop && !any_clients_spawned) {
+		MM_PROFILE_INC(frame_no_client_skips);
 		return;
+	}
 
 	for (size_t i = 0; i < g_frames_per_frame->integer; i++)
 		G_RunFrame_(main_loop);
 
 	// match details.. only bother if there's at least 1 player in-game
 	// and not already end of game
-	if (G_AnyClientsSpawned() && !level.intermission_time) {
+	if (main_loop && any_clients_spawned && !level.intermission_time) {
 		constexpr gtime_t report_time = 45_sec;
 
 		if (level.time - level.next_match_report > report_time) {
@@ -2386,6 +2470,8 @@ void G_RunFrame(bool main_loop) {
 			G_ReportMatchDetails(false);
 		}
 	}
+
+	MM_PROFILE_FRAME_MARK("G_RunFrame");
 }
 
 /*
@@ -2397,7 +2483,8 @@ player processing happens outside RunFrame
 ================
 */
 void G_PrepFrame() {
-	for (size_t i = 0; i < globals.num_entities; i++)
+	const size_t entity_count = G_AllocatedEntityCount();
+	for (size_t i = 0; i < entity_count; i++)
 		g_entities[i].s.event = EV_NONE;
 
 	for (auto player : active_clients())

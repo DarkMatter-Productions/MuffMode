@@ -2,9 +2,9 @@ name: Build Windows DLL
 
 on:
   push:
-    branches: [main, master, ozdev]
+    branches: [muffdev]
   pull_request:
-    branches: [main, master, ozdev]
+    branches: [muffdev]
 
 jobs:
   build-windows:
@@ -13,12 +13,24 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Setup vcpkg
-        run: |
-          git clone https://github.com/microsoft/vcpkg.git $env:VCPKG_ROOT
-          & "$env:VCPKG_ROOT\bootstrap-vcpkg.bat" -disableMetrics
-        env:
-          VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+      - name: Check generated artifacts
+        shell: pwsh
+        run: ./scripts/ci/check-generated-artifacts.ps1
+
+      - name: Check phase-zero asset seeds
+        shell: pwsh
+        run: ./scripts/ci/check-test-assets.ps1 -RepoOnly
+
+      - name: Check regression corpus
+        shell: pwsh
+        run: ./scripts/ci/check-regression-corpus.ps1
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v3
+
+      - name: Run host smoke tests
+        shell: pwsh
+        run: ./scripts/ci/run-host-tests.ps1 -Configuration Release -Platform x64
 
       - name: Cache vcpkg
         uses: actions/cache@v5
@@ -30,20 +42,28 @@ jobs:
           key: vcpkg-${{ runner.os }}-${{ hashFiles('src/vcpkg.json') }}
           restore-keys: vcpkg-${{ runner.os }}-
 
-      - name: Install vcpkg dependencies
-        run: |
-          & "$env:VCPKG_ROOT\vcpkg.exe" install --triplet x64-windows-static
-        working-directory: src
+      - name: Setup vcpkg
+        shell: pwsh
+        run: ./scripts/ci/setup-vcpkg.ps1 -Install
         env:
           VCPKG_ROOT: ${{ github.workspace }}/vcpkg
 
-      - name: Setup MSBuild
-        uses: microsoft/setup-msbuild@v3
+      - name: Check dependency inventory
+        shell: pwsh
+        run: ./scripts/ci/check-dependency-inventory.ps1
 
       - name: Build
-        run: msbuild src\MuffMode.sln /p:Configuration=Release /p:Platform=x64
+        shell: pwsh
+        run: ./scripts/ci/build-msbuild.ps1 -Configuration Release -Platform x64 -TreatWarningsAsErrors -BinaryLog
         env:
           VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+
+      - name: Upload MSBuild log
+        uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: build-msbuild-log
+          path: build/logs/*.binlog
 
       - name: Upload game_x64.dll
         uses: actions/upload-artifact@v7

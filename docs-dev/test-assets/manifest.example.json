@@ -1,0 +1,30 @@
+{
+  "assetPack": "muffmode-robustness-phase-zero",
+  "targetBranch": "muffdev",
+  "baselineCommit": "0853a089d38c0f8528e8dc009ac2bd46315608c8",
+  "currentIntegratedCommit": "9c13a5f6c46ce1a201d36eff700d25292b6c3df4",
+  "currentIntegratedVersion": "0.36.04",
+  "externalRootVariable": "MUFFMODE_TEST_ASSET_ROOT",
+  "q2re": {
+    "installRoot": "%MUFFMODE_TEST_ASSET_ROOT%/clean-install",
+    "license": "User-provided legitimate Quake II Rerelease installation; not redistributable."
+  },
+  "corpora": {
+    "smokeConfig": "configs/server-headless-smoke.cfg",
+    "commandSequences": "command-sequences",
+    "rotationConfigs": "rotation",
+    "saveLoad": "save-load",
+    "redRoverRegressions": "red-rover",
+    "fuzzCorpus": "fuzz-corpus",
+    "requiredSeeds": [
+      "configs/server-headless-smoke.cfg",
+      "command-sequences/phase-zero-smoke.commands",
+      "command-sequences/phase-three-regression.commands",
+      "rotation/basic-rotation.txt",
+      "save-load/synthetic-minimal-save.json",
+      "red-rover/0.36.04-regressions.json",
+      "fuzz-corpus/numeric-parsers/valid-and-invalid.txt",
+      "fuzz-corpus/gt-cfg/maxclients-lines.txt"
+    ]
+  }
+}

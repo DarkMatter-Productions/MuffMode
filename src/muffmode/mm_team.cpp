@@ -3,21 +3,78 @@
 
 #include "g_local.h"
 #include "muffmode/mm_captain.h"
+#include "muffmode/mm_command_contracts.h"
 #include "muffmode/mm_ghost.h"
 #include "muffmode/mm_match.h"
+#include "muffmode/mm_red_rover_rules.h"
 #include "muffmode/mm_team.h"
 #include "muffmode/mm_vote.h"
+
+#include <string>
 
 /*
 =================
 PlayerSortByJoinTime
 =================
 */
+static bool MM_IsClientIndexInRange(int client_num)
+{
+	return client_num >= 0 && (size_t)client_num < game.maxclients;
+}
+
+static int MM_TeamCvarInteger(cvar_t *cvar)
+{
+	return cvar ? cvar->integer : 0;
+}
+
+static bool MM_TeamCvarEnabled(cvar_t *cvar)
+{
+	return MM_TeamCvarInteger(cvar) != 0;
+}
+
+static bool MM_HumanPlayerLimitReached()
+{
+	const int limit = MM_TeamCvarInteger(maxplayers);
+	return limit > 0 && level.num_playing_human_clients >= limit;
+}
+
+static std::string MM_TeamDisplayName(gentity_t *ent)
+{
+	char name[MAX_INFO_VALUE] = { 0 };
+
+	if (ent && ent->client)
+		gi.Info_ValueForKey(ent->client->pers.userinfo, "name", name, sizeof(name));
+	if (!name[0] && ent && ent->client)
+		Q_strlcpy(name, ent->client->resp.netname, sizeof(name));
+
+	std::string display;
+	for (const unsigned char *p = reinterpret_cast<const unsigned char *>(name); *p; p++) {
+		if (*p < ' ' || *p == 0x7F || *p == '%')
+			display += ' ';
+		else
+			display += static_cast<char>(*p);
+	}
+
+	while (!display.empty() && display.back() == ' ')
+		display.pop_back();
+
+	return display.empty() ? "player" : display;
+}
+
 int PlayerSortByJoinTime(const void *a, const void *b) {
 	int anum, bnum;
 
 	anum = *(const int *)a;
 	bnum = *(const int *)b;
+
+	const bool a_valid = MM_IsClientIndexInRange(anum);
+	const bool b_valid = MM_IsClientIndexInRange(bnum);
+	if (!a_valid && !b_valid)
+		return 0;
+	if (!a_valid)
+		return 1;
+	if (!b_valid)
+		return -1;
 
 	anum = game.clients[anum].sess.team_join_time.milliseconds();
 	bnum = game.clients[bnum].sess.team_join_time.milliseconds();
@@ -32,6 +89,12 @@ int PlayerSortByJoinTime(const void *a, const void *b) {
 // =========================================
 // TEAMPLAY - MOSTLY PORTED FROM QUAKE III
 // =========================================
+
+static bool MM_IsTeamInRange(team_t team)
+{
+	const int value = (int)team;
+	return value >= (int)TEAM_NONE && value < (int)TEAM_NUM_TEAMS;
+}
 
 /*
 ================
@@ -60,7 +123,7 @@ team_t PickTeam(int ignore_client_num) {
 		int iscore_red = 0, iscore_blue = 0;
 
 		for (size_t i = 0; i < game.maxclients; i++) {
-			if (i == ignore_client_num)
+			if (ignore_client_num >= 0 && i == (size_t)ignore_client_num)
 				continue;
 			if (!game.clients[i].pers.connected)
 				continue;
@@ -94,10 +157,10 @@ Let everyone know about a team change
 */
 void BroadcastTeamChange(gentity_t *ent, int old_team, bool inactive, bool silent) {
 
-	if (!deathmatch->integer)
+	if (!MM_TeamCvarEnabled(deathmatch))
 		return;
 
-	if (!ent->client)
+	if (!ent || !ent->client)
 		return;
 
 	if (notGT(GT_DUEL) && ent->client->sess.team == old_team)
@@ -106,55 +169,52 @@ void BroadcastTeamChange(gentity_t *ent, int old_team, bool inactive, bool silen
 	if (silent)
 		return;
 
-	const char *s = nullptr, *t = nullptr;
-	char		name[MAX_INFO_VALUE] = { 0 };
-	int32_t		client_num;
-
-	client_num = ent - g_entities - 1;
-	gi.Info_ValueForKey(ent->client->pers.userinfo, "name", name, sizeof(name));
+	std::string s;
+	std::string t;
+	const std::string name = MM_TeamDisplayName(ent);
 
 	switch (ent->client->sess.team) {
 	case TEAM_FREE:
-		s = G_Fmt("{} joined the battle.\n", name).data();
+		s = fmt::format("{} joined the battle.\n", name);
 		//t = "%bind:inven:Toggles Menu%You have joined the game.";
 		t = "You have joined the game.";
 		break;
 	case TEAM_SPECTATOR:
 		if (inactive) {
-			s = G_Fmt("{} is inactive,\nmoved to spectators.\n", name).data();
+			s = fmt::format("{} is inactive,\nmoved to spectators.\n", name);
 			t = "You are inactive and have been\nmoved to spectators.";
 		} else {
 			if (GT(GT_DUEL) && ent->client->sess.duel_queued) {
-				s = G_Fmt("{} is in the queue to play.\n", name).data();
+				s = fmt::format("{} is in the queue to play.\n", name);
 				t = "You are in the queue to play.";
 			} else {
-				s = G_Fmt("{} joined the spectators.\n", name).data();
+				s = fmt::format("{} joined the spectators.\n", name);
 				t = "You are now spectating.";
 			}
 		}
 		break;
 	case TEAM_RED:
 	case TEAM_BLUE:
-		s = G_Fmt("{} joined the {} Team.\n", name, Teams_TeamName(ent->client->sess.team)).data();
-		t = G_Fmt("You have joined the {} Team.\n", Teams_TeamName(ent->client->sess.team)).data();
+		s = fmt::format("{} joined the {} Team.\n", name, Teams_TeamName(ent->client->sess.team));
+		t = fmt::format("You have joined the {} Team.\n", Teams_TeamName(ent->client->sess.team));
 		break;
 	}
 
-	if (s) {
+	if (!s.empty()) {
 		for (auto ec : active_clients()) {
 			if (ec == ent)
 				continue;
 			if (ec->svflags & SVF_BOT)
 				continue;
-			gi.LocClient_Print(ec, PRINT_CENTER, s);
+			gi.LocClient_Print(ec, PRINT_CENTER, "{}", s.c_str());
 		}
 		//gi.Com_Print(s);
 	}
 
-	if (g_dm_do_readyup->integer && level.match_state == matchst_t::MATCH_WARMUP_READYUP) {
+	if (MM_TeamCvarEnabled(g_dm_do_readyup) && level.match_state == matchst_t::MATCH_WARMUP_READYUP) {
 		BroadcastReadyReminderMessage();
-	} else if (t) {
-		gi.LocClient_Print(ent, PRINT_CENTER, G_Fmt("%bind:inven:Toggles Menu%{}", t).data() );
+	} else if (!t.empty()) {
+		gi.LocClient_Print(ent, PRINT_CENTER, "%bind:inven:Toggles Menu%{}", t.c_str());
 	}
 }
 
@@ -164,15 +224,18 @@ AllowTeamSwitch
 =================
 */
 static bool AllowTeamSwitch(gentity_t *ent, team_t desired_team) {
+	if (!ent || !ent->client || !MM_IsTeamInRange(desired_team) || desired_team == TEAM_NONE)
+		return false;
+
 	// Red Rover: death is the only way to switch teams during a match, so block an
 	// already-playing player from manually switching sides to dodge the defect mechanic.
 	// Joining from spectator is allowed (otherwise nobody could enter a match in progress),
 	// and leaving to spectator is allowed - that's quitting, not dodging a defect.
-	if (ent->client->sess.team != TEAM_SPECTATOR && desired_team != TEAM_SPECTATOR && desired_team != ent->client->sess.team && GT(GT_RR) && level.match_state == matchst_t::MATCH_IN_PROGRESS) {
+	if (MM_RedRoverBlocksManualTeamSwitch(ent->client->sess.team, desired_team, TEAM_SPECTATOR, GT(GT_RR), level.match_state == matchst_t::MATCH_IN_PROGRESS)) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "You cannot change teams during a Red Rover match.\n");
 		return false;
 	}
-	if (desired_team != TEAM_SPECTATOR && maxplayers->integer && level.num_playing_human_clients >= maxplayers->integer) {
+	if (desired_team != TEAM_SPECTATOR && MM_HumanPlayerLimitReached()) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "Maximum player count has been reached.\n");
 		return false; // ignore the request
 	}
@@ -183,7 +246,7 @@ static bool AllowTeamSwitch(gentity_t *ent, team_t desired_team) {
 	}
 
 	if (Teams()) {
-		if (g_teamplay_force_balance->integer) {
+		if (MM_TeamCvarEnabled(g_teamplay_force_balance)) {
 			// We allow a spread of two
 			if ((desired_team == TEAM_RED && (level.num_playing_red - level.num_playing_blue > 1)) ||
 				(desired_team == TEAM_BLUE && (level.num_playing_blue - level.num_playing_red > 1))) {
@@ -204,10 +267,13 @@ AllowClientTeamSwitch
 =================
 */
 bool AllowClientTeamSwitch(gentity_t *ent) {
-	if (!deathmatch->integer)
+	if (!MM_TeamCvarEnabled(deathmatch))
 		return false;
 
-	if (g_dm_force_join->integer || !g_teamplay_allow_team_pick->integer) {
+	if (!ent || !ent->client)
+		return false;
+
+	if (MM_TeamCvarEnabled(g_dm_force_join) || !MM_TeamCvarEnabled(g_teamplay_allow_team_pick)) {
 		if (!(ent->svflags & SVF_BOT)) {
 			gi.LocClient_Print(ent, PRINT_HIGH, "Team picks are disabled.");
 			return false;
@@ -315,25 +381,21 @@ bool TeamShuffle() {
 	gentity_t *ent;
 	int32_t index[MAX_CLIENTS_KEX] = { 0 };
 
-	memset(index, -1, sizeof(index));
+	for (int32_t i = 0; i < MAX_CLIENTS_KEX; i++)
+		index[i] = i;
+
+	for (int32_t i = MAX_CLIENTS_KEX - 1; i > 0; i--) {
+		const int32_t j = irandom(i + 1);
+		const int32_t tmp = index[i];
+		index[i] = index[j];
+		index[j] = tmp;
+	}
 
 	// determine max team size based from active players
 	int maxteam = (level.num_playing_clients + 1) / 2;
 	int count_red = 0, count_blue = 0;
 	team_t setteam = join_red ? TEAM_RED : TEAM_BLUE;
 	
-	// create random array
-	for (size_t i = 0; i < MAX_CLIENTS_KEX; i++) {
-		if (index[i] >= 0)
-			continue;
-
-		int rnd = irandom(0, MAX_CLIENTS_KEX);
-		while (index[rnd] >= 0)
-			rnd = irandom(0, MAX_CLIENTS_KEX);
-
-		index[i] = rnd;
-		index[rnd] = i;
-	}
 #if 0
 	for (size_t i = 0; i < MAX_CLIENTS_KEX; i++) {
 		gi.Com_PrintFmt("{}={}\n", i, index[i]);
@@ -341,11 +403,9 @@ bool TeamShuffle() {
 #endif
 
 	// set teams
-	for (size_t i = 1; i <= MAX_CLIENTS_KEX; i++) {
+	for (size_t i = 0; i < MAX_CLIENTS_KEX; i++) {
 		// index[] holds client numbers (0..MAX_CLIENTS_KEX-1); client N is entity N+1.
-		ent = &g_entities[index[i-1] + 1];
-		if (!ent)
-			continue;
+		ent = &g_entities[index[i] + 1];
 		if (!ent->inuse)
 			continue;
 		if (!ent->client)
@@ -360,7 +420,8 @@ bool TeamShuffle() {
 		else if (count_blue >= maxteam || count_blue > count_red)
 			setteam = TEAM_RED;
 		
-		ent->client->sess.team = setteam;
+		if (!SetTeam(ent, setteam, false, true, true))
+			continue;
 
 		if (setteam == TEAM_RED)
 			count_red++;
@@ -379,6 +440,15 @@ SetTeam
 =================
 */
 bool SetTeam(gentity_t *ent, team_t desired_team, bool inactive, bool force, bool silent) {
+	if (!ent || !ent->client)
+		return false;
+
+	if (!MM_IsTeamInRange(desired_team))
+		return false;
+
+	if (desired_team == TEAM_NONE && !(force && GT(GT_DUEL)))
+		return false;
+
 	team_t old_team = ent->client->sess.team;
 	bool queue = false;
 	
@@ -392,7 +462,7 @@ bool SetTeam(gentity_t *ent, team_t desired_team, bool inactive, bool force, boo
 			if (level.locked[desired_team] && !would_be_duel_queue) {
 				gi.LocClient_Print(ent, PRINT_HIGH, "{} is locked.\n", Teams_TeamName(desired_team));
 				revoke = true;
-			} else if (level.num_playing_human_clients >= maxplayers->integer) {
+			} else if (MM_HumanPlayerLimitReached()) {
 				gi.LocClient_Print(ent, PRINT_HIGH, "Maximum player load reached.\n");
 				revoke = true;
 			}
@@ -515,6 +585,14 @@ MM_CmdTeam
 =================
 */
 void MM_CmdTeam(gentity_t *ent) {
+	if (!ent || !ent->client)
+		return;
+
+	if (!MM_IsArgcInRangeValid(gi.argc(), 1, 2)) {
+		gi.LocClient_Print(ent, PRINT_HIGH, "Usage: {} [team]\n", gi.argv(0));
+		return;
+	}
+
 	if (gi.argc() == 1) {
 		switch (ent->client->sess.team) {
 		case TEAM_SPECTATOR:
@@ -535,8 +613,10 @@ void MM_CmdTeam(gentity_t *ent) {
 
 	const char *s = gi.argv(1);
 	team_t team = StringToTeamNum(s);
-	if (team == TEAM_NONE)
+	if (team == TEAM_NONE) {
+		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid team.\n");
 		return;
+	}
 
 	SetTeam(ent, team, false, false, false);
 }
@@ -547,7 +627,10 @@ MM_CmdSetTeam
 =================
 */
 void MM_CmdSetTeam(gentity_t *ent) {
-	if (gi.argc() < 2) {
+	if (!ent || !ent->client)
+		return;
+
+	if (!MM_IsArgcInRangeValid(gi.argc(), 2, 3)) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "Usage: {} [client name/num] [team]\n", gi.argv(0));
 		return;
 	}
@@ -580,8 +663,12 @@ void MM_CmdSetTeam(gentity_t *ent) {
 		return;
 	}
 
+	if (!SetTeam(targ, team, false, true, false)) {
+		gi.LocClient_Print(ent, PRINT_HIGH, "Could not move {} to {} team.\n", targ->client->resp.netname, Teams_TeamName(team));
+		return;
+	}
+
 	gi.LocBroadcast_Print(PRINT_HIGH, "[ADMIN]: Moved {} to {} team.\n", targ->client->resp.netname, Teams_TeamName(team));
-	SetTeam(targ, team, false, true, false);
 }
 
 /*
@@ -590,8 +677,30 @@ MM_CmdShuffle
 =================
 */
 void MM_CmdShuffle(gentity_t *ent) {
+	if (!ent || !ent->client)
+		return;
+
+	if (!MM_IsExactArgcValid(gi.argc(), 1)) {
+		gi.LocClient_Print(ent, PRINT_HIGH, "Usage: {}\n", gi.argv(0));
+		return;
+	}
+
+	if (!Teams()) {
+		gi.LocClient_Print(ent, PRINT_HIGH, "Team shuffle is only available in team modes.\n");
+		return;
+	}
+
+	if (level.num_playing_clients < 2) {
+		gi.LocClient_Print(ent, PRINT_HIGH, "Not enough players to shuffle teams.\n");
+		return;
+	}
+
+	if (!TeamShuffle()) {
+		gi.LocClient_Print(ent, PRINT_HIGH, "Teams could not be shuffled.\n");
+		return;
+	}
+
 	gi.Broadcast_Print(PRINT_HIGH, "[ADMIN]: Forced team shuffle.\n");
-	TeamShuffle();
 	Match_Reset();
 }
 
@@ -601,6 +710,22 @@ MM_CmdBalanceTeams
 =================
 */
 void MM_CmdBalanceTeams(gentity_t *ent) {
-	gi.Broadcast_Print(PRINT_HIGH, "[ADMIN]: Forced team balancing.\n");
-	TeamBalance(true);
+	if (!ent || !ent->client)
+		return;
+
+	if (!MM_IsExactArgcValid(gi.argc(), 1)) {
+		gi.LocClient_Print(ent, PRINT_HIGH, "Usage: {}\n", gi.argv(0));
+		return;
+	}
+
+	if (!Teams()) {
+		gi.LocClient_Print(ent, PRINT_HIGH, "Team balancing is only available in team modes.\n");
+		return;
+	}
+
+	const int moved = TeamBalance(true);
+	if (moved > 0)
+		gi.Broadcast_Print(PRINT_HIGH, "[ADMIN]: Forced team balancing.\n");
+	else
+		gi.LocClient_Print(ent, PRINT_HIGH, "Teams are already balanced.\n");
 }

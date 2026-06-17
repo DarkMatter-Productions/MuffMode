@@ -1,6 +1,9 @@
 // Copyright (c) ZeniMax Media Inc.
 // Licensed under the GNU General Public License 2.0.
 
+#include <cerrno>
+#include <limits>
+
 #include "g_local.h"
 #include "g_debug_log.h"
 // [MuffMode] Spawn filtering, statusbar and gametype hooks
@@ -611,6 +614,42 @@ struct member_object_container_type<T1 T2:: *> { using type = T2; };
 template<typename T>
 using member_object_container_type_t = typename member_object_container_type<std::remove_cv_t<T>>::type;
 
+static bool ED_ParseConsumesWholeToken(const char *s, const char *end) {
+	return s != nullptr && end != nullptr && end != s && *end == '\0';
+}
+
+static bool ED_TryLoadFloat(const char *s, float &out) {
+	char *end = nullptr;
+	errno = 0;
+	const float value = strtof(s, &end);
+	if (!ED_ParseConsumesWholeToken(s, end) || errno == ERANGE || !std::isfinite(value)) {
+		return false;
+	}
+
+	out = value;
+	return true;
+}
+
+template<typename T>
+static T ED_LoadInteger(const char *s) {
+	char *end = nullptr;
+	errno = 0;
+	const long long raw_value = strtoll(s, &end, 10);
+	if (!ED_ParseConsumesWholeToken(s, end)) {
+		return {};
+	}
+
+	const long long min_value = static_cast<long long>(std::numeric_limits<T>::min());
+	const long long max_value = static_cast<long long>(std::numeric_limits<T>::max());
+	return static_cast<T>(clamp(raw_value, min_value, max_value));
+}
+
+static float ED_LoadFloat(const char *s) {
+	float value = 0.0f;
+	ED_TryLoadFloat(s, value);
+	return value;
+}
+
 struct type_loaders_t {
 	template<typename T, std::enable_if_t<std::is_same_v<T, const char *>, int> = 0>
 	static T load(const char *s) {
@@ -619,25 +658,23 @@ struct type_loaders_t {
 
 	template<typename T, std::enable_if_t<std::is_integral_v<T>, int> = 0>
 	static T load(const char *s) {
-		return atoi(s);
+		return ED_LoadInteger<T>(s);
 	}
 
 	template<typename T, std::enable_if_t<std::is_same_v<T, spawnflags_t>, int> = 0>
 	static T load(const char *s) {
-		return spawnflags_t(atoi(s));
+		return spawnflags_t(ED_LoadInteger<uint32_t>(s));
 	}
 
 	template<typename T, std::enable_if_t<std::is_floating_point_v<T>, int> = 0>
 	static T load(const char *s) {
-		return atof(s);
+		return static_cast<T>(ED_LoadFloat(s));
 	}
 
 	template<typename T, std::enable_if_t<std::is_enum_v<T>, int> = 0>
 	static T load(const char *s) {
-		if constexpr (sizeof(T) > 4)
-			return static_cast<T>(atoll(s));
-		else
-			return static_cast<T>(atoi(s));
+		using underlying_t = std::underlying_type_t<T>;
+		return static_cast<T>(ED_LoadInteger<underlying_t>(s));
 	}
 
 	template<typename T, std::enable_if_t<std::is_same_v<T, vec3_t>, int> = 0>
@@ -645,11 +682,11 @@ struct type_loaders_t {
 		vec3_t vec;
 		static char vec_buffer[32];
 		const char *token = COM_Parse(&s, vec_buffer, sizeof(vec_buffer));
-		vec.x = atof(token);
+		vec.x = ED_LoadFloat(token);
 		token = COM_Parse(&s);
-		vec.y = atof(token);
+		vec.y = ED_LoadFloat(token);
 		token = COM_Parse(&s);
-		vec.z = atof(token);
+		vec.z = ED_LoadFloat(token);
 		return vec;
 	}
 };
@@ -670,7 +707,7 @@ static int32_t ED_LoadColor(const char *value) {
 			const char *token = COM_Parse(&value, color_buffer, sizeof(color_buffer));
 
 			if (*token) {
-				v = atof(token);
+				v = ED_LoadFloat(token);
 
 				if (v > 1.0f)
 					is_float = false;
@@ -685,7 +722,7 @@ static int32_t ED_LoadColor(const char *value) {
 	}
 
 	// integral
-	return atoi(value);
+	return ED_LoadInteger<int32_t>(value);
 }
 
 #define FIELD_COLOR(n, x) \
@@ -740,7 +777,7 @@ static const std::initializer_list<field_t> entity_fields = {
 	FIELD_AUTO_NAMED("angles", s.angles),
 	{ "angle", [](gentity_t *e, const char *value) {
 		e->s.angles = {};
-		e->s.angles[YAW] = atof(value);
+		e->s.angles[YAW] = ED_LoadFloat(value);
 	} },
 	FIELD_COLOR("rgba", s.skinnum), // [Sam-KEX]
 	FIELD_AUTO(hackflags), // [Paril-KEX] n64
@@ -799,7 +836,7 @@ static const std::initializer_list<field_t> entity_fields = {
 	// [Paril-KEX] customizable power armor stuff
 	FIELD_AUTO_NAMED("power_armor_power", monsterinfo.power_armor_power),
 	{ "power_armor_type", [](gentity_t *s, const char *v) {
-			int32_t type = atoi(v);
+			int32_t type = ED_LoadInteger<int32_t>(v);
 
 			if (type == 0)
 				s->monsterinfo.power_armor_type = IT_NULL;
@@ -1031,13 +1068,18 @@ All but the last will have the teamchain field set to the next one
 
 // adjusts teams so that trains that move their children
 // are in the front of the team
+static uint32_t G_SpawnEntityLimit() {
+	return min(globals.num_entities, game.maxentities);
+}
+
 static void G_FixTeams() {
 	gentity_t *e, *e2, *chain;
 	uint32_t i, j;
 	uint32_t c;
+	const uint32_t entity_limit = G_SpawnEntityLimit();
 
 	c = 0;
-	for (i = 1, e = g_entities + i; i < globals.num_entities; i++, e++) {
+	for (i = 1, e = g_entities + i; i < entity_limit; i++, e++) {
 		if (!e->inuse)
 			continue;
 		if (!e->team)
@@ -1050,7 +1092,7 @@ static void G_FixTeams() {
 				e->flags &= ~FL_TEAMSLAVE;
 				e->flags |= FL_TEAMMASTER;
 				c++;
-				for (j = 1, e2 = g_entities + j; j < globals.num_entities; j++, e2++) {
+				for (j = 1, e2 = g_entities + j; j < entity_limit; j++, e2++) {
 					if (e2 == e)
 						continue;
 					if (!e2->inuse)
@@ -1080,10 +1122,11 @@ static void G_FindTeams() {
 	gentity_t *e1, *e2, *chain;
 	uint32_t i, j;
 	uint32_t c1, c2;
+	const uint32_t entity_limit = G_SpawnEntityLimit();
 
 	c1 = 0;
 	c2 = 0;
-	for (i = 1, e1 = g_entities + i; i < globals.num_entities; i++, e1++) {
+	for (i = 1, e1 = g_entities + i; i < entity_limit; i++, e1++) {
 		if (!e1->inuse)
 			continue;
 		if (!e1->team)
@@ -1095,7 +1138,7 @@ static void G_FindTeams() {
 		e1->flags |= FL_TEAMMASTER;
 		c1++;
 		c2++;
-		for (j = i + 1, e2 = e1 + 1; j < globals.num_entities; j++, e2++) {
+		for (j = i + 1, e2 = e1 + 1; j < entity_limit; j++, e2++) {
 			if (!e2->inuse)
 				continue;
 			if (!e2->team)
@@ -1411,8 +1454,9 @@ static void PrecacheForRandomRespawn() {
 static void G_LocateSpawnSpots(void) {
 	gentity_t *ent;
 	int			n;
-	const char *s = nullptr;
-	size_t		sl = 0;
+	const char *s = "info_player_";
+	const size_t sl = strlen(s);
+	gentity_t *end = &g_entities[G_SpawnEntityLimit()];
 
 	level.spawn_spots[SPAWN_SPOT_INTERMISSION] = nullptr;
 	level.num_spawn_spots_free = 0;
@@ -1420,13 +1464,10 @@ static void G_LocateSpawnSpots(void) {
 
 	// locate all spawn spots
 	n = 0;
-	for (ent = g_entities; ent < &g_entities[globals.num_entities]; ent++) {
+	for (ent = g_entities; ent < end; ent++) {
 
 		if (!ent->inuse || !ent->classname)
 			continue;
-
-		s = "info_player_";
-		sl = strlen(s);
 
 		if (Q_strncasecmp(ent->classname, s, sl))
 			continue;
@@ -2026,7 +2067,10 @@ void SP_worldspawn(gentity_t *ent) {
 		level.gravity = 800.f;
 		gi.cvar_set("g_gravity", "800");
 	} else {
-		level.gravity = atof(st.gravity);
+		if (!ED_TryLoadFloat(st.gravity, level.gravity)) {
+			level.gravity = 800.f;
+			st.gravity = "800";
+		}
 		gi.cvar_set("g_gravity", st.gravity);
 	}
 

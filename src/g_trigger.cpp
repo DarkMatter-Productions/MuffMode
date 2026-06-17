@@ -1,5 +1,7 @@
 // Copyright (c) ZeniMax Media Inc.
 // Licensed under the GNU General Public License 2.0.
+#include <cerrno>
+
 #include "g_local.h"
 
 constexpr spawnflags_t SPAWNFLAG_TRIGGER_MONSTER = 0x01_spawnflag;
@@ -8,6 +10,22 @@ constexpr spawnflags_t SPAWNFLAG_TRIGGER_TRIGGERED = 0x04_spawnflag;
 constexpr spawnflags_t SPAWNFLAG_TRIGGER_TOGGLE = 0x08_spawnflag;
 constexpr spawnflags_t SPAWNFLAG_TRIGGER_LATCHED = 0x10_spawnflag;
 constexpr spawnflags_t SPAWNFLAG_TRIGGER_CLIP = 0x20_spawnflag;
+
+static bool TriggerParseFiniteFloat(const char *token, float &out) {
+	if (!token || !*token) {
+		return false;
+	}
+
+	char *end = nullptr;
+	errno = 0;
+	const float value = strtof(token, &end);
+	if (end == token || *end != '\0' || errno == ERANGE || !std::isfinite(value)) {
+		return false;
+	}
+
+	out = value;
+	return true;
+}
 
 static void InitTrigger(gentity_t *self) {
 	if (st.was_key_specified("angle") || st.was_key_specified("angles") || self->s.angles)
@@ -853,15 +871,13 @@ static TOUCH(trigger_gravity_touch) (gentity_t *self, gentity_t *other, const tr
 }
 
 void SP_trigger_gravity(gentity_t *self) {
-	if (!st.gravity || !*st.gravity) {
-		gi.Com_PrintFmt("{}: no gravity set\n", *self);
+	if (!TriggerParseFiniteFloat(st.gravity, self->gravity)) {
+		gi.Com_PrintFmt("{}: invalid gravity '{}'\n", *self, st.gravity ? st.gravity : "");
 		G_FreeEntity(self);
 		return;
 	}
 
 	InitTrigger(self);
-
-	self->gravity = (float)atof(st.gravity);
 
 	if (self->spawnflags.has(SPAWNFLAG_GRAVITY_TOGGLE))
 		self->use = trigger_gravity_use;

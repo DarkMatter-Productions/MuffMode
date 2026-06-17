@@ -1,0 +1,4 @@
+# Minimal map-rotation seed for parser/regression tests.
+q2dm1
+q2dm3
+q2dm8

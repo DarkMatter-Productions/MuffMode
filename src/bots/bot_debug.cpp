@@ -14,6 +14,42 @@ static vec3_t moveToPointPos = vec3_origin;
 // how close the bot will try to get to the move to point goal
 constexpr float moveToPointTolerance = 16.0f;
 
+static bool DebugEntityIsActive(const gentity_t *entity) {
+	return entity != nullptr && entity->inuse;
+}
+
+static bool DebugBotIsUsable(const gentity_t *entity) {
+	return DebugEntityIsActive(entity) && entity->health > 0 && (entity->svflags & SVF_BOT) != 0;
+}
+
+static bool DebugActorIsUsable(const gentity_t *entity) {
+	return DebugEntityIsActive(entity) && entity->health > 0 &&
+		((entity->svflags & SVF_PLAYER) != 0 || (entity->svflags & SVF_MONSTER) != 0);
+}
+
+static void ClearFollowActorDebugState() {
+	escortBot = nullptr;
+	escortActor = nullptr;
+}
+
+static void ClearMoveToPointDebugState() {
+	moveToPointBot = nullptr;
+	moveToPointPos = vec3_origin;
+}
+
+static void ResetBotDebugState() {
+	ClearFollowActorDebugState();
+	ClearMoveToPointDebugState();
+
+	if (bot_debug_follow_actor->integer) {
+		gi.cvar_set("bot_debug_follow_actor", "0");
+	}
+
+	if (bot_debug_move_to_point->integer) {
+		gi.cvar_set("bot_debug_move_to_point", "0");
+	}
+}
+
 /*
 ================
 ShowMonsterPathToPlayer
@@ -43,8 +79,8 @@ static void ShowMonsterPathToPlayer(const gentity_t *player) {
 
 	PathInfo info;
 	if (gi.GetPathToGoal(request, info)) {
-		// Do movement stuff....
-		for (int i = 0; i < info.numPathPoints; ++i) {
+		const int32_t pathPointCount = clamp(info.numPathPoints, 0, static_cast<int32_t>(pathPoints.size()));
+		for (int32_t i = 0; i < pathPointCount; ++i) {
 			const gvec3_t &point = pathPoints[i];
 			gi.Draw_Point(point, 8.0f, rgba_yellow, 0.10f, false);
 		}
@@ -73,24 +109,27 @@ static void UpdateFollowActorDebug(const gentity_t *localPlayer) {
 			escortBot = FindFirstBot();
 			escortActor = FindActorUnderCrosshair(localPlayer);
 
-			if (gi.Bot_FollowActor(escortBot, escortActor) != GoalReturnCode::Error) {
+			if (DebugBotIsUsable(escortBot) && DebugActorIsUsable(escortActor) &&
+				gi.Bot_FollowActor(escortBot, escortActor) != GoalReturnCode::Error) {
 				gi.cvar_set("bot_debug_follow_actor", "2");
 				gi.Com_Print("Follow_Actor: Bot Found Actor To Follow!\n");
 			} else {
+				ClearFollowActorDebugState();
 				gi.Com_Print("Follow_Actor: Hover Over Monster/Player To Follow...\n");
 			}
 		} else {
-			if (gi.Bot_FollowActor(escortBot, escortActor) != GoalReturnCode::Error) {
+			if (DebugBotIsUsable(escortBot) && DebugActorIsUsable(escortActor) &&
+				gi.Bot_FollowActor(escortBot, escortActor) != GoalReturnCode::Error) {
 				gi.Draw_Bounds(escortActor->absmin, escortActor->absmax, rgba_yellow, gi.frame_time_s, false);
 				gi.Draw_Bounds(escortBot->absmin, escortBot->absmax, rgba_cyan, gi.frame_time_s, false);
 			} else {
+				ClearFollowActorDebugState();
 				gi.Com_Print("Follow_Actor: Bot Or Actor Removed...\n");
 				gi.cvar_set("bot_debug_follow_actor", "0");
 			}
 		}
 	} else {
-		escortBot = nullptr;
-		escortActor = nullptr;
+		ClearFollowActorDebugState();
 	}
 }
 
@@ -116,8 +155,8 @@ static void UpdateMoveToPointDebug(const gentity_t *localPlayer) {
 	if (bot_debug_move_to_point->integer) {
 		if (bot_debug_move_to_point->integer == 1) {
 			if (localPlayer->client->buttons & BUTTON_ATTACK) {
-				vec3_t localPlayerForward, right, up;
-				AngleVectors(localPlayer->client->v_angle, localPlayerForward, right, up);
+				vec3_t localPlayerForward;
+				AngleVectors(localPlayer->client->v_angle, localPlayerForward, nullptr, nullptr);
 
 				const vec3_t localPlayerViewPos = (localPlayer->s.origin + vec3_t{ 0.0f, 0.0f, (float)localPlayer->viewheight });
 				const vec3_t end = (localPlayerViewPos + (localPlayerForward * 8192.0f));
@@ -127,19 +166,26 @@ static void UpdateMoveToPointDebug(const gentity_t *localPlayer) {
 				moveToPointPos = tr.endpos;
 
 				moveToPointBot = FindFirstBot();
-				if (gi.Bot_MoveToPoint(moveToPointBot, moveToPointPos, moveToPointTolerance) != GoalReturnCode::Error) {
+				if (DebugBotIsUsable(moveToPointBot) &&
+					gi.Bot_MoveToPoint(moveToPointBot, moveToPointPos, moveToPointTolerance) != GoalReturnCode::Error) {
 					gi.cvar_set("bot_debug_move_to_point", "2");
 					gi.Com_Print("Move_To_Point: Bot Has Position To Move Toward!\n");
+				} else {
+					ClearMoveToPointDebugState();
 				}
 			} else {
 				gi.Com_Print("Move_To_Point: Fire Weapon To Select Move Point...\n");
 			}
 		} else {
-			const GoalReturnCode result = gi.Bot_MoveToPoint(moveToPointBot, moveToPointPos, moveToPointTolerance);
+			const GoalReturnCode result = DebugBotIsUsable(moveToPointBot) ?
+				gi.Bot_MoveToPoint(moveToPointBot, moveToPointPos, moveToPointTolerance) :
+				GoalReturnCode::Error;
 			if (result == GoalReturnCode::Error) {
+				ClearMoveToPointDebugState();
 				gi.cvar_set("bot_debug_move_to_point", "0");
 				gi.Com_Print("Move_To_Point: Bot Can't Reach Goal Position!\n");
 			} else if (result == GoalReturnCode::Finished) {
+				ClearMoveToPointDebugState();
 				gi.cvar_set("bot_debug_move_to_point", "0");
 				gi.Com_Print("Move_To_Point: Bot Reached Goal Position!\n");
 			} else {
@@ -148,8 +194,7 @@ static void UpdateMoveToPointDebug(const gentity_t *localPlayer) {
 			}
 		}
 	} else {
-		moveToPointBot = nullptr;
-		moveToPointPos = vec3_origin;
+		ClearMoveToPointDebugState();
 	}
 }
 
@@ -159,11 +204,14 @@ Bot_UpdateDebug
 ================
 */
 void Bot_UpdateDebug() {
-	if (!g_cheats->integer)
+	if (!g_cheats->integer) {
+		ResetBotDebugState();
 		return;
+	}
 
 	const gentity_t *localPlayer = FindLocalPlayer();
 	if (localPlayer == nullptr) {
+		ResetBotDebugState();
 		return;
 	}
 

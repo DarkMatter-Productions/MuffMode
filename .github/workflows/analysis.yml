@@ -1,0 +1,176 @@
+name: Analysis Gates
+
+on:
+  push:
+    branches: [muffdev]
+  pull_request:
+    branches: [muffdev]
+  workflow_dispatch:
+  schedule:
+    - cron: "23 4 * * 2"
+
+permissions:
+  contents: read
+
+jobs:
+  msvc-code-analysis:
+    name: MSVC Code Analysis
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 60
+
+    env:
+      VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Cache vcpkg
+        uses: actions/cache@v5
+        with:
+          path: |
+            vcpkg/downloads
+            vcpkg/buildtrees
+            vcpkg/packages
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('src/vcpkg.json') }}
+          restore-keys: vcpkg-${{ runner.os }}-
+
+      - name: Setup vcpkg
+        shell: pwsh
+        run: ./scripts/ci/setup-vcpkg.ps1 -Install
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v3
+
+      - name: Run MSVC /analyze
+        shell: pwsh
+        run: ./scripts/ci/run-msvc-analyze.ps1 -Configuration Release -Platform x64
+
+      - name: Upload MSVC analysis logs
+        uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: msvc-analysis
+          path: build/analysis/*
+
+  static-analysis:
+    name: clang-tidy and Cppcheck
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 60
+
+    env:
+      VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Install analyzer tools
+        shell: pwsh
+        run: |
+          if (-not (Get-Command clang-tidy -ErrorAction SilentlyContinue)) {
+            choco install llvm --yes --no-progress
+          }
+          if (-not (Get-Command cppcheck -ErrorAction SilentlyContinue)) {
+            choco install cppcheck --yes --no-progress
+          }
+          $env:Path = "C:\Program Files\LLVM\bin;C:\Program Files\Cppcheck;$env:Path"
+          clang-tidy --version
+          cppcheck --version
+
+      - name: Cache vcpkg
+        uses: actions/cache@v5
+        with:
+          path: |
+            vcpkg/downloads
+            vcpkg/buildtrees
+            vcpkg/packages
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('src/vcpkg.json') }}
+          restore-keys: vcpkg-${{ runner.os }}-
+
+      - name: Setup vcpkg
+        shell: pwsh
+        run: ./scripts/ci/setup-vcpkg.ps1 -Install
+
+      - name: Generate compile database
+        shell: pwsh
+        run: ./scripts/ci/export-compile-commands.ps1
+
+      - name: Run clang-tidy on touched files
+        shell: pwsh
+        run: |
+          $changedSince = "${{ github.event.pull_request.base.sha || github.event.before }}"
+          if ([string]::IsNullOrWhiteSpace($changedSince) -or $changedSince -match "^0+$") {
+            $changedSince = "HEAD~1"
+          }
+          ./scripts/ci/run-clang-tidy.ps1 -ChangedSince $changedSince -AllowEmpty
+
+      - name: Run Cppcheck
+        shell: pwsh
+        continue-on-error: true
+        run: ./scripts/ci/run-cppcheck.ps1
+
+      - name: Upload static analysis output
+        uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: static-analysis
+          path: build/analysis/*
+
+  sanitizer-builds:
+    name: Sanitizer Build (${{ matrix.sanitizer }})
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 60
+    continue-on-error: ${{ matrix.experimental }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - sanitizer: Address
+            experimental: false
+          - sanitizer: Undefined
+            experimental: true
+
+    env:
+      VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Cache vcpkg
+        uses: actions/cache@v5
+        with:
+          path: |
+            vcpkg/downloads
+            vcpkg/buildtrees
+            vcpkg/packages
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('src/vcpkg.json') }}
+          restore-keys: vcpkg-${{ runner.os }}-
+
+      - name: Setup vcpkg
+        shell: pwsh
+        run: ./scripts/ci/setup-vcpkg.ps1 -Install
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v3
+
+      - name: Run sanitizer build
+        shell: pwsh
+        run: |
+          if ("${{ matrix.experimental }}" -eq "true") {
+            ./scripts/ci/run-sanitized-build.ps1 -Sanitizer "${{ matrix.sanitizer }}" -AllowUnsupported
+          }
+          else {
+            ./scripts/ci/run-sanitized-build.ps1 -Sanitizer "${{ matrix.sanitizer }}"
+          }
+
+      - name: Upload sanitizer build logs
+        uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: sanitizer-${{ matrix.sanitizer }}
+          path: build/analysis/*

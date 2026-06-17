@@ -1,6 +1,98 @@
 // Copyright (c) ZeniMax Media Inc.
 // Licensed under the GNU General Public License 2.0.
+#include <cerrno>
+#include <limits>
+
 #include "g_local.h"
+
+static bool TargetParseConsumesWholeToken(const char *token, const char *end) {
+	return token != nullptr && token[0] != '\0' && end != nullptr && end != token && *end == '\0';
+}
+
+static bool TargetParseFiniteFloat(const char *token, float &out) {
+	if (token == nullptr || token[0] == '\0') {
+		return false;
+	}
+
+	char *end = nullptr;
+	errno = 0;
+	const float value = strtof(token, &end);
+	if (!TargetParseConsumesWholeToken(token, end) || errno == ERANGE || !std::isfinite(value)) {
+		return false;
+	}
+
+	out = value;
+	return true;
+}
+
+static bool TargetParseInt32(const char *token, int32_t &out) {
+	if (token == nullptr || token[0] == '\0') {
+		return false;
+	}
+
+	char *end = nullptr;
+	errno = 0;
+	const long value = strtol(token, &end, 10);
+	if (!TargetParseConsumesWholeToken(token, end) || errno == ERANGE ||
+		value < static_cast<long>(std::numeric_limits<int32_t>::min()) ||
+		value > static_cast<long>(std::numeric_limits<int32_t>::max())) {
+		return false;
+	}
+
+	out = static_cast<int32_t>(value);
+	return true;
+}
+
+static bool TargetParseUInt32(const char *token, uint32_t &out) {
+	if (token == nullptr || token[0] == '\0' || token[0] == '-' || token[0] == '+') {
+		return false;
+	}
+
+	char *end = nullptr;
+	errno = 0;
+	const unsigned long value = strtoul(token, &end, 10);
+	if (!TargetParseConsumesWholeToken(token, end) || errno == ERANGE ||
+		value > static_cast<unsigned long>(std::numeric_limits<uint32_t>::max())) {
+		return false;
+	}
+
+	out = static_cast<uint32_t>(value);
+	return true;
+}
+
+static size_t TargetLightStyleIndex(float delay, size_t style_length) {
+	if (style_length == 0 || !std::isfinite(delay)) {
+		return 0;
+	}
+
+	float wrapped = fmod(delay, static_cast<float>(style_length));
+	if (wrapped < 0.0f) {
+		wrapped += static_cast<float>(style_length);
+	}
+
+	return static_cast<size_t>(wrapped);
+}
+
+static float TargetLightDelayFraction(float delay) {
+	if (!std::isfinite(delay)) {
+		return 0.0f;
+	}
+
+	float fraction = fmod(delay, 1.0f);
+	if (fraction < 0.0f) {
+		fraction += 1.0f;
+	}
+
+	return fraction;
+}
+
+static uint32_t TargetEntityLimit() {
+	return min(globals.num_entities, game.maxentities);
+}
+
+static uint32_t TargetClientEntityLimit() {
+	return min(TargetEntityLimit(), game.maxclients + 1);
+}
 
 /*QUAKED target_temp_entity (1 0 0) (-8 -8 -8) (8 8 8) x x x x x x x x NOT_EASY NOT_MEDIUM NOT_HARD NOT_DM NOT_COOP
 Fire an origin based temp entity event to the clients.
@@ -841,8 +933,18 @@ message		two letters; starting lightlevel and ending lightlevel
 
 constexpr spawnflags_t SPAWNFLAG_LIGHTRAMP_TOGGLE = 1_spawnflag;
 
+static bool TargetLightrampStyleIsValid(int32_t style) {
+	return style >= 0 && style < static_cast<int32_t>(MAX_LIGHTSTYLES);
+}
+
 static THINK(target_lightramp_think) (gentity_t *self) -> void {
 	char style[2];
+
+	if (!self->enemy || !TargetLightrampStyleIsValid(self->enemy->style)) {
+		self->think = nullptr;
+		self->nextthink = 0_ms;
+		return;
+	}
 
 	style[0] = (char)('a' + self->movedir[0] + ((level.time - self->timestamp) / gi.frame_time_s).seconds() * self->movedir[2]);
 	style[1] = 0;
@@ -873,6 +975,8 @@ static USE(target_lightramp_use) (gentity_t *self, gentity_t *other, gentity_t *
 				break;
 			if (strcmp(e->classname, "light") != 0) {
 				gi.Com_PrintFmt("{}: target {} ({}) is not a light\n", *self, self->target, *e);
+			} else if (!TargetLightrampStyleIsValid(e->style)) {
+				gi.Com_PrintFmt("{}: target {} ({}) has invalid lightstyle {}\n", *self, self->target, *e, e->style);
 			} else {
 				self->enemy = e;
 			}
@@ -906,6 +1010,9 @@ void SP_target_lightramp(gentity_t *self) {
 		G_FreeEntity(self);
 		return;
 	}
+
+	if (self->speed <= 0.0f || !std::isfinite(self->speed))
+		self->speed = 1.0f;
 
 	self->svflags |= SVF_NOCLIENT;
 	self->use = target_lightramp_use;
@@ -941,7 +1048,8 @@ static THINK(target_earthquake_think) (gentity_t *self) -> void {
 		}
 	}
 
-	for (i = 1, e = g_entities + i; i < globals.num_entities; i++, e++) {
+	const uint32_t client_entity_limit = TargetClientEntityLimit();
+	for (i = 1, e = g_entities + i; i < client_entity_limit; i++, e++) {
 		if (!e->inuse)
 			continue;
 		if (!e->client)
@@ -959,7 +1067,8 @@ static USE(target_earthquake_use) (gentity_t *self, gentity_t *other, gentity_t 
 		uint32_t i;
 		gentity_t *e;
 
-		for (i = 1, e = g_entities + i; i < globals.num_entities; i++, e++) {
+		const uint32_t client_entity_limit = TargetClientEntityLimit();
+		for (i = 1, e = g_entities + i; i < client_entity_limit; i++, e++) {
 			if (!e->inuse)
 				continue;
 			if (!e->client)
@@ -1243,8 +1352,13 @@ static USE(use_target_gravity) (gentity_t *self, gentity_t *other, gentity_t *ac
 }
 
 void SP_target_gravity(gentity_t *self) {
+	if (!TargetParseFiniteFloat(st.gravity, self->gravity)) {
+		gi.Com_PrintFmt("{}: invalid gravity '{}'\n", *self, st.gravity ? st.gravity : "");
+		G_FreeEntity(self);
+		return;
+	}
+
 	self->use = use_target_gravity;
-	self->gravity = atof(st.gravity);
 }
 
 /*QUAKED target_soundfx (1 0 0) (-8 -8 -8) (8 8 8) NOTRAIL NOEFFECTS x x x x x x NOT_EASY NOT_MEDIUM NOT_HARD NOT_DM NOT_COOP
@@ -1269,7 +1383,14 @@ void SP_target_soundfx(gentity_t *self) {
 	else if (self->attenuation == -1) // use -1 so 0 defaults to 1
 		self->attenuation = 0;
 
-	self->noise_index = strtoul(st.noise, nullptr, 10);
+	uint32_t noise = 0;
+	if (!TargetParseUInt32(st.noise, noise) || noise > static_cast<uint32_t>(std::numeric_limits<int32_t>::max())) {
+		gi.Com_PrintFmt("{}: invalid noise '{}'\n", *self, st.noise ? st.noise : "");
+		G_FreeEntity(self);
+		return;
+	}
+
+	self->noise_index = static_cast<int32_t>(noise);
 
 	switch (self->noise_index) {
 	case 1:
@@ -1289,6 +1410,7 @@ void SP_target_soundfx(gentity_t *self) {
 		break;
 	default:
 		gi.Com_PrintFmt("{}: unknown noise {}\n", *self, self->noise_index);
+		G_FreeEntity(self);
 		return;
 	}
 
@@ -1316,20 +1438,26 @@ static THINK(target_light_think) (gentity_t *self) -> void {
 		target_light_flicker_think(self);
 
 	const char *style = gi.get_configstring(CS_LIGHTS + self->style);
+	const size_t style_length = style ? strlen(style) : 0;
+	if (style_length == 0) {
+		self->nextthink = level.time + 10_hz;
+		return;
+	}
+
 	self->delay += self->speed;
 
-	int32_t index = ((int32_t)self->delay) % strlen(style);
+	size_t index = TargetLightStyleIndex(self->delay, style_length);
 	char style_value = style[index];
 	float current_lerp = (float)(style_value - 'a') / (float)('z' - 'a');
 	float lerp;
 
 	if (!(self->spawnflags & SPAWNFLAG_TARGET_LIGHT_NO_LERP)) {
-		int32_t next_index = (index + 1) % strlen(style);
+		size_t next_index = (index + 1) % style_length;
 		char next_style_value = style[next_index];
 
 		float next_lerp = (float)(next_style_value - 'a') / (float)('z' - 'a');
 
-		float mod_lerp = fmod(self->delay, 1.0f);
+		float mod_lerp = TargetLightDelayFraction(self->delay);
 		lerp = (next_lerp * mod_lerp) + (current_lerp * (1.f - mod_lerp));
 	} else
 		lerp = current_lerp;
@@ -1391,9 +1519,6 @@ void SP_target_light(gentity_t *self) {
 	if (self->target)
 		self->chain = G_PickTarget(self->target);
 
-	if (self->spawnflags.has(SPAWNFLAG_TARGET_LIGHT_START_ON))
-		target_light_use(self, self, self);
-
 	if (!self->speed)
 		self->speed = 1.0f;
 	else
@@ -1402,7 +1527,16 @@ void SP_target_light(gentity_t *self) {
 	if (level.is_n64)
 		self->style += 10;
 
+	if (self->style < 0 || self->style >= static_cast<int32_t>(MAX_LIGHTSTYLES)) {
+		gi.Com_PrintFmt("{}: invalid lightstyle {}\n", *self, self->style);
+		G_FreeEntity(self);
+		return;
+	}
+
 	self->use = target_light_use;
+
+	if (self->spawnflags.has(SPAWNFLAG_TARGET_LIGHT_START_ON))
+		target_light_use(self, self, self);
 
 	gi.linkentity(self);
 }
@@ -2144,7 +2278,8 @@ USE(target_killplayers_use) (gentity_t *self, gentity_t *other, gentity_t *activ
 	level.deadly_kill_box = true;
 
 	// kill any visible monsters
-	for (ent = g_entities; ent < &g_entities[globals.num_entities]; ent++) {
+	gentity_t *end = &g_entities[TargetEntityLimit()];
+	for (ent = g_entities; ent < end; ent++) {
 		if (!ent->inuse)
 			continue;
 		if (ent->health < 1)
@@ -2519,17 +2654,25 @@ static USE(target_setskill_use) (gentity_t *self, gentity_t *other, gentity_t *a
 	if (!activator || !activator->client)
 		return;
 	
-	int skill_level = clamp(atoi(self->message), 0, 4);
-	gi.cvar_set("skill", G_Fmt("{}", skill_level).data());
+	gi.cvar_set("skill", G_Fmt("{}", self->count).data());
 }
 
 void SP_target_setskill(gentity_t *ent) {
-	if (!ent->message[0]) {
+	int32_t skill_level = 0;
+
+	if (!ent->message || !ent->message[0]) {
 		gi.Com_PrintFmt("{}: No message key set, removing.\n", *ent);
 		G_FreeEntity(ent);
 		return;
 	}
 
+	if (!TargetParseInt32(ent->message, skill_level)) {
+		gi.Com_PrintFmt("{}: Invalid skill '{}', removing.\n", *ent, ent->message);
+		G_FreeEntity(ent);
+		return;
+	}
+
+	ent->count = clamp(skill_level, 0, 4);
 	ent->use = target_setskill_use;
 }
 //==========================================================

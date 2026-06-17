@@ -11,7 +11,9 @@ This guide explains how to build MuffMode on Windows with Visual Studio/MSBuild.
 - The C++ desktop workload and Windows SDK.
 - MSBuild and a configured Visual C++ environment.
 
-The Visual Studio project uses the vcpkg manifest at [src/vcpkg.json](../src/vcpkg.json).
+The Visual Studio project uses the vcpkg manifest at [src/vcpkg.json](../src/vcpkg.json). Dependency policy and third-party notice obligations are recorded in [Dependency Policy](dependencies.md).
+
+The currently supported branch/build matrix is recorded in [Build Matrix](build-matrix.md).
 
 ## Project Root
 
@@ -40,11 +42,76 @@ Release build:
 msbuild src\MuffMode.sln /p:Configuration=Release /p:Platform=x64
 ```
 
+Canonical CI/local release build:
+
+```powershell
+./scripts/ci/build-msbuild.ps1 -Configuration Release -Platform x64
+```
+
+Strict warning gate:
+
+```powershell
+./scripts/ci/build-msbuild.ps1 -Configuration Release -Platform x64 -TreatWarningsAsErrors
+```
+
 Debug build:
 
 ```bat
 msbuild src\MuffMode.sln /p:Configuration=Debug /p:Platform=x64
 ```
+
+## Analysis Commands
+
+Generate a compile database for host-side analysis tools:
+
+```powershell
+./scripts/ci/export-compile-commands.ps1
+```
+
+Run the currently configured analyzer entrypoints:
+
+```powershell
+./scripts/ci/run-msvc-analyze.ps1
+./scripts/ci/run-clang-tidy.ps1 -Files src/muffmode/mm_pconfig.cpp
+./scripts/ci/run-cppcheck.ps1
+./scripts/ci/run-sanitized-build.ps1 -Sanitizer Address
+```
+
+UndefinedBehaviorSanitizer is configured through the ClangCL MSBuild platform toolset:
+
+```powershell
+./scripts/ci/run-sanitized-build.ps1 -Sanitizer Undefined -AllowUnsupported
+```
+
+That job is experimental until the Visual Studio ClangCL build tools are installed and validated on the CI runner.
+
+## Test And Fuzz Commands
+
+Run the fast host-side smoke tests:
+
+```powershell
+./scripts/ci/run-host-tests.ps1 -Configuration Release -Platform x64
+```
+
+Validate checked-in regression and fuzz corpus seeds:
+
+```powershell
+./scripts/ci/check-regression-corpus.ps1
+```
+
+Validate dependency inventory and release notices:
+
+```powershell
+./scripts/ci/check-dependency-inventory.ps1
+```
+
+Build the first-wave libFuzzer targets:
+
+```powershell
+./scripts/ci/build-fuzz-targets.ps1 -AllowUnsupported
+```
+
+The current fuzz target build is a smoke gate. Runtime fuzzing depends on the local/CI LLVM sanitizer runtime being available.
 
 ## Output
 
@@ -67,4 +134,7 @@ The build produces `game_x64.dll` in the repository root. To test locally:
 
 - Install and run a server: [Server Host Guide](server-host-guide.md)
 - Configure gametypes, cvars, and votes: [Configuration Reference](configuration-reference.md)
+- Hardening and release gates: [Hardening Guide](hardening-guide.md)
+- Dependency policy: [Dependency Policy](dependencies.md)
+- Licensing: [Licensing](licensing.md)
 - Package and publish releases: [Release Process](release-process.md)

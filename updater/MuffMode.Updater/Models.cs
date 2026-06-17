@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 
@@ -18,7 +19,8 @@ internal sealed record ReleaseInfo(
     bool IsPrerelease,
     DateTimeOffset? PublishedAt,
     string AssetName,
-    string AssetDownloadUrl);
+    string AssetDownloadUrl,
+    long? AssetSize);
 
 internal sealed record LocalInstallVersion(SemanticVersion? Version, string DisplayText, string Source);
 
@@ -55,10 +57,14 @@ internal readonly partial record struct SemanticVersion(int Major, int Minor, in
             return false;
         }
 
-        version = new SemanticVersion(
-            int.Parse(match.Groups["major"].Value),
-            int.Parse(match.Groups["minor"].Value),
-            int.Parse(match.Groups["patch"].Value));
+        if (!int.TryParse(match.Groups["major"].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var major)
+            || !int.TryParse(match.Groups["minor"].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var minor)
+            || !int.TryParse(match.Groups["patch"].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var patch))
+        {
+            return false;
+        }
+
+        version = new SemanticVersion(major, minor, patch);
         return true;
     }
 
@@ -119,4 +125,7 @@ internal sealed class GitHubAssetDto
 
     [JsonPropertyName("browser_download_url")]
     public string? BrowserDownloadUrl { get; set; }
+
+    [JsonPropertyName("size")]
+    public long? Size { get; set; }
 }
