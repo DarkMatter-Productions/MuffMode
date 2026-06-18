@@ -11,7 +11,7 @@
 constexpr const char *GAMEVERSION = "baseq2";
 
 constexpr const char *GAMEMOD_TITLE = "Muff Mode";
-constexpr const char *GAMEMOD_VERSION = "0.36.20";
+constexpr const char *GAMEMOD_VERSION = "0.36.21";
 
 //==================================================================
 
@@ -2475,7 +2475,6 @@ extern cvar_t *g_quick_weapon_switch;
 extern cvar_t *g_rollangle;
 extern cvar_t *g_rollspeed;
 extern cvar_t *g_round_countdown;
-extern cvar_t *g_rr_rounds;
 extern cvar_t *g_select_empty;
 extern cvar_t *g_showhelp;
 extern cvar_t *g_showmotd;
@@ -3450,7 +3449,7 @@ struct client_respawn_t {
 	int32_t				score;		  // frags, etc
 	int32_t				old_score;		// track changes in score
 	int32_t				round_start_score;	// Red Rover: snapshot of score at round start, to find that round's top fragger
-	int32_t				round_start_dmg;	// Red Rover: snapshot of damage dealt at round start, tie-breaks the round winner
+	int32_t				round_dmg;			// Red Rover: enemy damage dealt this round (reset each round); tie-breaks the round winner. Tracked directly (not match-stats) so it counts bots.
 	vec3_t				cmd_angles;	  // angles sent over in the last command
 
 	bool				spectator; // client is a spectator

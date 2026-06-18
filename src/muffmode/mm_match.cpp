@@ -331,10 +331,9 @@ static bool Round_StartNew() {
 	if (!MM_Horde_ShouldSkipEntitiesReset())
 		Entities_Reset(true, false, false);
 
-	// Red Rover (rounds mode): re-split the teams evenly at the start of every round, so
-	// each round opens balanced after the previous one funnelled everyone onto one side.
-	// Continuous mode (g_rr_rounds 0) leaves teams as-is - it runs as one endless round.
-	if (GT(GT_RR) && g_rr_rounds->integer)
+	// Red Rover: re-split the teams evenly at the start of every round, so each round opens
+	// balanced after the previous one funnelled everyone onto one side.
+	if (GT(GT_RR))
 		TeamShuffle();
 
 	if (GT(GT_STRIKE)) {
@@ -469,6 +468,11 @@ void Match_Start() {
 		level.round_number = 0;
 	}
 
+	// Red Rover ends after roundlimit rounds, so the count must start at 0 each match
+	// (Horde manages its own starting wave; CA/Strike decide by team score, not this).
+	if (GT(GT_RR))
+		level.round_number = 0;
+
 	if (Round_StartNew())
 		return;
 
@@ -589,14 +593,14 @@ static void CheckDMRoundState(void) {
 			level.round_state = roundst_t::ROUND_IN_PROGRESS;
 			level.round_state_timer = level.time + gtime_t::from_min(roundtimelimit->value);
 
-			// Red Rover: snapshot each player's score and damage dealt so the round-end
-			// winner is whoever fragged the most *this* round (resp.score minus the
-			// snapshot), with damage dealt this round as the tie-break. Frozen players can't
-			// score or deal damage during the countdown, so these baselines are accurate.
+			// Red Rover: snapshot each player's score and clear their per-round damage so the
+			// round-end winner is whoever fragged the most *this* round (resp.score minus the
+			// snapshot), tie-broken by damage dealt this round. Frozen players can't score or
+			// deal damage during the countdown, so the baseline is accurate.
 			if (GT(GT_RR))
 				for (auto ec : active_clients()) {
 					ec->client->resp.round_start_score = ec->client->resp.score;
-					ec->client->resp.round_start_dmg = MS_Value(ec->client, MSTAT_DMG_DEALT);
+					ec->client->resp.round_dmg = 0;
 				}
 
 			// Strike manages round_number/turn in Round_StartNew(); others advance it here.
@@ -688,7 +692,7 @@ static void CheckDMRoundState(void) {
 			// Red Rover: the round ends when the defect mechanic has funnelled everyone
 			// onto a single team. Frags are individual and already counted per kill, so
 			// no team score is awarded here - the round simply resets and reshuffles
-			// (Round_StartNew). RR has no per-round timer tiebreak, so always return.
+			// (Round_StartNew). It also ends if the round time limit expires.
 			int count_red = 0, count_blue = 0;
 
 			for (auto ec : active_clients()) {
@@ -700,7 +704,9 @@ static void CheckDMRoundState(void) {
 					count_blue++;
 			}
 
-			if (MM_RedRoverRoundShouldEnd(count_red, count_blue, g_rr_rounds->integer != 0)) {
+				const bool team_cleared = MM_RedRoverRoundShouldEnd(count_red, count_blue);
+				const bool time_expired = roundtimelimit->value > 0 && level.time >= level.round_state_timer;
+				if (team_cleared || time_expired) {
 				// Round winner = whoever fragged the most this round (score gained since the
 				// round-start snapshot), tie-broken by damage dealt this round. Remaining
 				// ties resolve to the first one found.
@@ -710,7 +716,7 @@ static void CheckDMRoundState(void) {
 					if (!ClientIsPlaying(ec->client))
 						continue;
 					int round_frags = ec->client->resp.score - ec->client->resp.round_start_score;
-					int round_dmg = MS_Value(ec->client, MSTAT_DMG_DEALT) - ec->client->resp.round_start_dmg;
+					int round_dmg = ec->client->resp.round_dmg;
 					if (!top || round_frags > best_round_frags ||
 						(round_frags == best_round_frags && round_dmg > best_round_dmg)) {
 						top = ec->client;
@@ -950,7 +956,7 @@ static void CheckDMWarmupState(void) {
 
 	// Red Rover: never let a connected client sit uninitialised (TEAM_NONE) during a
 	// live match - that strands them off every team (grey tag, missing from the
-	// scoreboard) and skews the counts the reshuffle relies on. Deliberate spectators
+	// scoreboard) and skews the per-team counts the round logic relies on. Deliberate spectators
 	// (TEAM_SPECTATOR) are left alone; leaving the match is allowed.
 	if (GT(GT_RR) && level.match_state == matchst_t::MATCH_IN_PROGRESS) {
 		for (auto ec : active_clients())
@@ -958,14 +964,15 @@ static void CheckDMWarmupState(void) {
 				SetTeam(ec, PickTeam(-1), false, false, false);
 	}
 
-	// Red Rover: a disconnect (or any swap) can collapse everyone onto one team.
-	// Continuous mode (g_rr_rounds 0) has friendly fire off and no round-end to rebalance
-	// it, so reshuffle live to keep play going instead of stalemating until the timelimit.
-	// Rounds mode instead treats an emptied team as a round win (CheckDMRoundState) and
-	// reshuffles at the next Round_StartNew, so don't pre-empt that here.
-	if (GT(GT_RR) && !g_rr_rounds->integer && level.match_state == matchst_t::MATCH_IN_PROGRESS &&
+	// Red Rover: a match ends with everyone funnelled onto one team, and that team
+	// assignment carries into warmup / the next map - leaving the other side empty so the
+	// next match can never reach the player/balance requirements and start. Reshuffle during
+	// warmup to restore balance. NOT during a live match: there an emptied team is the
+	// round-end trigger (CheckDMRoundState), and the next round reshuffles in Round_StartNew.
+	if (GT(GT_RR) && level.match_state < matchst_t::MATCH_IN_PROGRESS &&
 		level.num_playing_clients > 1 && (!level.num_playing_red || !level.num_playing_blue)) {
 		TeamShuffle();
+		CalculateRanks();
 	}
 
 	if (Teams()) {

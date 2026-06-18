@@ -734,6 +734,12 @@ void T_Damage(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, const 
 			}
 		}
 
+		// Red Rover: tally enemy damage dealt this round for the round-winner tie-break and
+		// display. Tracked here rather than via MS_*/match-stats so it counts bots too and
+		// works regardless of g_matchstats. Reset each round in CheckDMRoundState.
+		if (GT(GT_RR) && !OnSameTeam(targ, attacker))
+			attacker->client->resp.round_dmg += stat_take + psave + asave;
+
 		// team damage checks and warnings
 		if (OnSameTeam(targ, attacker)) {
 			attacker->client->pers.dmg_team += take + psave + asave;

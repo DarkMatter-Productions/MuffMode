@@ -269,7 +269,6 @@ cvar_t *g_quick_weapon_switch;
 cvar_t *g_rollangle;
 cvar_t *g_rollspeed;
 cvar_t *g_round_countdown;
-cvar_t *g_rr_rounds;
 cvar_t *g_select_empty;
 cvar_t *g_showhelp;
 cvar_t *g_showmotd;
@@ -688,10 +687,6 @@ static void InitGame() {
 	g_no_spheres = gi.cvar("g_no_spheres", "0", CVAR_NOFLAGS);
 	g_quick_weapon_switch = gi.cvar("g_quick_weapon_switch", "1", CVAR_LATCH);
 	g_round_countdown = gi.cvar("g_round_countdown", "10", CVAR_NOFLAGS);
-	// Red Rover: 1 = Quake Live rounds (a team emptying ends the round, teams reshuffle,
-	// individual frags carry over); 0 = continuous (the last player never defects, so a
-	// team is never emptied and play runs to the frag/time limit).
-	g_rr_rounds = gi.cvar("g_rr_rounds", "1", CVAR_NOFLAGS);
 	g_select_empty = gi.cvar("g_select_empty", "0", CVAR_ARCHIVE);
 	g_showhelp = gi.cvar("g_showhelp", "1", CVAR_NOFLAGS);
 	g_showmotd = gi.cvar("g_showmotd", "1", CVAR_NOFLAGS);
@@ -1265,7 +1260,9 @@ void CalculateRanks() {
 	level.warmup_notice_time = level.time;
 
 	if (level.match_state == MATCH_IN_PROGRESS) {
-		if (GTF(GTF_FRAGS)) {
+		// Red Rover is decided by the round/time limits, not a frag target, so it skips the
+		// "N frags to win" countdown even though it tracks individual frags (GTF_FRAGS).
+		if (GTF(GTF_FRAGS) && notGT(GT_RR)) {
 			//gi.Com_PrintFmt("new={} old={}\n", game.clients[level.sorted_clients[0]].resp.score, old_first_score);
 			// frag_warning has 3 entries (1/2/3 frags to go). Once the leader reaches
 			// the limit score_diff is <= 0, so guard the lower bound or score_diff-1
@@ -1630,10 +1627,7 @@ void CheckDMExitRules() {
 	if (MM_Horde_CheckAllFightersLost())
 		return;
 
-	// Red Rover is round-based for reset/reshuffle only, but still scored by individual
-	// frags - so its frag/time/mercy limits must resolve the moment they're hit, not wait
-	// for a round boundary the way elimination gametypes do.
-	if (GTF(GTF_ROUNDS) && notGT(GT_RR) && level.round_state != roundst_t::ROUND_ENDED)
+	if (GTF(GTF_ROUNDS) && level.round_state != roundst_t::ROUND_ENDED)
 		return;
 
 	if (MM_Horde_CheckMatchEnd())
@@ -1663,7 +1657,7 @@ void CheckDMExitRules() {
 	}
 
 	if (timelimit->value) {
-		if (!(GTF(GTF_ROUNDS)) || GT(GT_RR) || level.round_state == roundst_t::ROUND_ENDED) {
+		if (!(GTF(GTF_ROUNDS)) || level.round_state == roundst_t::ROUND_ENDED) {
 			if (level.time >= level.match_time + gtime_t::from_min(timelimit->value) + level.overtime) {
 				// check for overtime
 				if (ScoreIsTied()) {
@@ -1726,7 +1720,7 @@ void CheckDMExitRules() {
 				QueueIntermission(G_Fmt("{} hit the mercylimit ({}).", Teams_TeamName(TEAM_BLUE), mercylimit->integer).data(), true, false);
 				return;
 			}
-		} else if (!MM_Horde_SkipMercyLimit()) {
+		} else if (!MM_Horde_SkipMercyLimit() && notGT(GT_RR)) {
 			gclient_t *cl1, *cl2;
 
 			cl1 = ClientFromSortedSlot(0);
@@ -1750,9 +1744,24 @@ void CheckDMExitRules() {
 	// no score limit in race
 	if (false) // Race mode removed
 		return;
-	
+
 	int	scorelimit = GT_ScoreLimit();
 	if (!scorelimit) return;
+
+	// Red Rover is an arena mode like CA: the match ends after `roundlimit` rounds (or the
+	// timelimit backstop above), never on a frag target. But unlike CA it scores individual
+	// frags rather than team round-wins, so the winner is the frag leader after that many
+	// rounds. GT_ScoreLimit() returns roundlimit here (GTF_ROUNDS), and level.round_number
+	// is the round just finished (we only reach this at ROUND_ENDED).
+	if (GT(GT_RR)) {
+		if (level.round_number >= scorelimit) {
+			gclient_t *leader = ClientFromSortedSlot(0);
+			QueueIntermission(leader
+				? G_Fmt("{} WINS! (most frags after {} rounds)", leader->resp.netname, scorelimit).data()
+				: "Round limit hit.", false, false);
+		}
+		return;
+	}
 
 	if (teams) {
 		// Strike: only decide the match between rounds, after both teams have had an

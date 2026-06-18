@@ -2227,15 +2227,12 @@ void ClientRespawn(gentity_t *ent) {
 					opponents++;
 			}
 
-			// Continuous mode keeps a teammate behind so the swap never empties a team
-			// (which would stall play, e.g. collapse a 1v1 onto a single team). Rounds
-			// mode (Quake Live) lets the last player defect - emptying the team is exactly
-			// what ends the round (see CheckDMRoundState) - as long as there's an opposing
-			// team to land on. The team check also guards against a corrupt team value so
-			// Teams_OtherTeam() can never strand someone on spectator.
-			const bool rr_rounds = g_rr_rounds->integer != 0;
+			// The last player on a team defects too - emptying the team is exactly what ends
+			// the round (see CheckDMRoundState) - as long as there's an opposing team to land
+			// on. The team check also guards against a corrupt team value so Teams_OtherTeam()
+			// can never strand someone on spectator.
 			if ((cur == TEAM_RED || cur == TEAM_BLUE) &&
-				(teammates_left > 0 || (rr_rounds && opponents > 0))) {
+				(teammates_left > 0 || opponents > 0)) {
 				ent->client->sess.team = other;
 				G_AssignPlayerSkin(ent, ent->client->pers.skin);
 				rr_defected = true;
