@@ -154,6 +154,26 @@ MM_TEST(red_rover_uses_individual_scorelimit_and_blocks_only_manual_side_switche
 	MM_CHECK_FALSE(MM_RedRoverBlocksManualTeamSwitch(red, blue, spectator, true, false));
 }
 
+MM_TEST(red_rover_round_ends_only_when_one_team_is_cleared) {
+	// rounds enabled: a round ends the moment one side is emptied (>= 2 players total)
+	MM_CHECK(MM_RedRoverRoundShouldEnd(3, 0, true));
+	MM_CHECK(MM_RedRoverRoundShouldEnd(0, 4, true));
+	MM_CHECK(MM_RedRoverRoundShouldEnd(2, 0, true));
+
+	// both teams populated: round continues
+	MM_CHECK_FALSE(MM_RedRoverRoundShouldEnd(3, 1, true));
+	MM_CHECK_FALSE(MM_RedRoverRoundShouldEnd(1, 1, true));
+
+	// lone survivor (everyone else gone) must not trip an instant round-end
+	MM_CHECK_FALSE(MM_RedRoverRoundShouldEnd(1, 0, true));
+	MM_CHECK_FALSE(MM_RedRoverRoundShouldEnd(0, 1, true));
+	MM_CHECK_FALSE(MM_RedRoverRoundShouldEnd(0, 0, true));
+
+	// continuous mode never ends a round on a team-clear
+	MM_CHECK_FALSE(MM_RedRoverRoundShouldEnd(3, 0, false));
+	MM_CHECK_FALSE(MM_RedRoverRoundShouldEnd(0, 4, false));
+}
+
 MM_TEST(scoreboard_footer_reserve_keeps_layout_room_available) {
 	MM_CHECK_EQ(MM_ScoreboardFooterReserve(false), 96u);
 	MM_CHECK_EQ(MM_ScoreboardFooterReserve(true), 320u);

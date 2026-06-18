@@ -2213,23 +2213,30 @@ void ClientRespawn(gentity_t *ent) {
 
 		bool rr_defected = false;
 		if (GT(GT_RR) && level.match_state == matchst_t::MATCH_IN_PROGRESS) {
-			// Red Rover: defect to the opposing team on death. Only switch while a
-			// teammate remains behind, so the swap never empties a team (which would
-			// stall play, e.g. collapse a 1v1 onto a single team).
+			// Red Rover: defect to the opposing team on death.
 			team_t cur = ent->client->sess.team;
-			int teammates_left = 0;
+			team_t other = Teams_OtherTeam(cur);
+			int teammates_left = 0, opponents = 0;
 
 			for (auto ec : active_clients()) {
 				if (ec == ent || !ClientIsPlaying(ec->client))
 					continue;
 				if (ec->client->sess.team == cur)
 					teammates_left++;
+				else if (ec->client->sess.team == other)
+					opponents++;
 			}
 
-			// only a player on an actual team can defect; guard against a corrupt team
-			// value so Teams_OtherTeam() can never strand someone on spectator.
-			if (teammates_left > 0 && (cur == TEAM_RED || cur == TEAM_BLUE)) {
-				ent->client->sess.team = Teams_OtherTeam(cur);
+			// Continuous mode keeps a teammate behind so the swap never empties a team
+			// (which would stall play, e.g. collapse a 1v1 onto a single team). Rounds
+			// mode (Quake Live) lets the last player defect - emptying the team is exactly
+			// what ends the round (see CheckDMRoundState) - as long as there's an opposing
+			// team to land on. The team check also guards against a corrupt team value so
+			// Teams_OtherTeam() can never strand someone on spectator.
+			const bool rr_rounds = g_rr_rounds->integer != 0;
+			if ((cur == TEAM_RED || cur == TEAM_BLUE) &&
+				(teammates_left > 0 || (rr_rounds && opponents > 0))) {
+				ent->client->sess.team = other;
 				G_AssignPlayerSkin(ent, ent->client->pers.skin);
 				rr_defected = true;
 			}

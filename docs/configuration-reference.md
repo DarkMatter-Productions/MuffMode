@@ -196,6 +196,7 @@ Use `callvote <command> [arg]` or `cv <command> [arg]`.
 | `g_dm_spawnpads` | `1` | Controls deathmatch spawn pads. |
 | `g_dm_timeout_length` | `120` | Timeout length in seconds; `0` disables timeouts. |
 | `g_round_countdown` | `10` | Round countdown time. |
+| `g_rr_rounds` | `1` | Red Rover only. `1` = Quake Live rounds: a team being emptied by the defect mechanic ends the round and reshuffles teams (frags carry over). `0` = continuous swap (the last player never defects, so a team is never emptied). |
 | `g_warmup_countdown` | `10` | Warmup countdown time. |
 | `g_warmup_ready_percentage` | `0.51f` | Ready percentage required to start. |
 

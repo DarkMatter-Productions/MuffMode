@@ -2475,6 +2475,7 @@ extern cvar_t *g_quick_weapon_switch;
 extern cvar_t *g_rollangle;
 extern cvar_t *g_rollspeed;
 extern cvar_t *g_round_countdown;
+extern cvar_t *g_rr_rounds;
 extern cvar_t *g_select_empty;
 extern cvar_t *g_showhelp;
 extern cvar_t *g_showmotd;

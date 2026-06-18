@@ -9,6 +9,7 @@
 #include "muffmode/mm_ghost.h"
 #include "muffmode/mm_horde.h"
 #include "muffmode/mm_match.h"
+#include "muffmode/mm_red_rover_rules.h"
 #include "muffmode/mm_team.h"
 #include "monsters/m_player.h"	// corpse frames on match reset
 
@@ -329,6 +330,12 @@ static bool Round_StartNew() {
 
 	if (!MM_Horde_ShouldSkipEntitiesReset())
 		Entities_Reset(true, false, false);
+
+	// Red Rover (rounds mode): re-split the teams evenly at the start of every round, so
+	// each round opens balanced after the previous one funnelled everyone onto one side.
+	// Continuous mode (g_rr_rounds 0) leaves teams as-is - it runs as one endless round.
+	if (GT(GT_RR) && g_rr_rounds->integer)
+		TeamShuffle();
 
 	if (GT(GT_STRIKE)) {
 		// A "round" is a pair of turns: each team attacks once. strike_turn tracks which
@@ -666,6 +673,32 @@ static void CheckDMRoundState(void) {
 				Round_End();
 			return;
 
+		case GT_RR:
+		{
+			// Red Rover: the round ends when the defect mechanic has funnelled everyone
+			// onto a single team. Frags are individual and already counted per kill, so
+			// no team score is awarded here - the round simply resets and reshuffles
+			// (Round_StartNew). RR has no per-round timer tiebreak, so always return.
+			int count_red = 0, count_blue = 0;
+
+			for (auto ec : active_clients()) {
+				if (!ClientIsPlaying(ec->client))
+					continue;
+				if (ec->client->sess.team == TEAM_RED)
+					count_red++;
+				else if (ec->client->sess.team == TEAM_BLUE)
+					count_blue++;
+			}
+
+			if (MM_RedRoverRoundShouldEnd(count_red, count_blue, g_rr_rounds->integer != 0)) {
+				team_t winner = count_red ? TEAM_RED : TEAM_BLUE;
+				gi.LocBroadcast_Print(PRINT_CENTER, "{} Team cleared the board!\nRound over.\n", Teams_TeamName(winner));
+				AnnouncerSound(world, winner == TEAM_RED ? "red_wins_round" : "blue_wins_round", "ctf/flagcap.wav", winner == TEAM_BLUE);
+				Round_End();
+			}
+			return;
+		}
+
 		}
 
 		// hit the round time limit, check any other winning conditions
@@ -892,9 +925,11 @@ static void CheckDMWarmupState(void) {
 	}
 
 	// Red Rover: a disconnect (or any swap) can collapse everyone onto one team.
-	// Friendly fire is off, so no kills/defects can rebalance it — reshuffle live so
-	// play continues instead of stalemating until the timelimit.
-	if (GT(GT_RR) && level.match_state == matchst_t::MATCH_IN_PROGRESS &&
+	// Continuous mode (g_rr_rounds 0) has friendly fire off and no round-end to rebalance
+	// it, so reshuffle live to keep play going instead of stalemating until the timelimit.
+	// Rounds mode instead treats an emptied team as a round win (CheckDMRoundState) and
+	// reshuffles at the next Round_StartNew, so don't pre-empt that here.
+	if (GT(GT_RR) && !g_rr_rounds->integer && level.match_state == matchst_t::MATCH_IN_PROGRESS &&
 		level.num_playing_clients > 1 && (!level.num_playing_red || !level.num_playing_blue)) {
 		TeamShuffle();
 	}

@@ -117,6 +117,7 @@ Good match flow matters for both audiences: casual players should not get stuck 
 | `g_warmup_ready_percentage` | `0.51f` | Percentage of ready players needed to start. |
 | `g_warmup_countdown` | `10` | Countdown length once match conditions are met. |
 | `g_round_countdown` | `10` | Round countdown for round-based gametypes. |
+| `g_rr_rounds` | `1` | Red Rover: `1` ends a round and reshuffles when a team is cleared (Quake Live style); `0` runs continuous swap with no round resets. |
 | `g_dm_overtime` | `120` | Overtime session length in seconds, currently for Duels. |
 | `g_dm_tie_max_time` | `1800` | Maximum total tied-overtime duration before forced resolution. |
 | `g_dm_timeout_length` | `120` | Timeout length in seconds. Set `0` to disable timeouts. |
