@@ -405,6 +405,14 @@ void MM_PrintTruncatedMapSource(gentity_t *ent)
 	gi.LocClient_Print(ent, PRINT_HIGH, "{}\n", display.c_str());
 }
 
+void MM_PrintTruncatedMapPool(gentity_t *ent)
+{
+	std::string display = MM_CvarString(g_map_pool);
+	if (display.length() > MAX_MAP_LIST_DISPLAY)
+		display = display.substr(0, MAX_MAP_LIST_DISPLAY) + "...";
+	gi.LocClient_Print(ent, PRINT_HIGH, "{}\n", display.c_str());
+}
+
 bool MM_IsValidMyMapModifier(const char *modifier)
 {
 	if (!modifier || !modifier[0] || !modifier[1])
@@ -523,18 +531,29 @@ void MM_CmdMapList(gentity_t *ent)
 		return;
 	}
 
-	if (MM_HasConfiguredMapSource()) {
-		gi.LocClient_Print(ent, PRINT_HIGH, MM_CvarString(g_map_list)[0] ? "Current map list:\n" : "Current map pool:\n");
-		if (MM_CvarString(g_map_list)[0])
-			MM_PrintTruncatedMapList(ent);
-		else
-			MM_PrintTruncatedMapSource(ent);
-		if (MM_MQ_Count()) {
-			gi.LocClient_Print(ent, PRINT_HIGH, "\nCurrent MyMap Queue:\n");
-			MM_MQ_PrintList(ent);
-		}
-	} else {
+	if (!MM_HasConfiguredMapSource()) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "No map list or pool set.\n");
+		return;
+	}
+
+	const bool has_list = MM_CvarString(g_map_list)[0];
+	const bool has_pool = MM_CvarString(g_map_pool)[0];
+
+	// Show both the rotation list and the votable pool so players see every map
+	// available on the server, not just whichever source happens to be set.
+	if (has_list) {
+		gi.LocClient_Print(ent, PRINT_HIGH, "Current map list (rotation):\n");
+		MM_PrintTruncatedMapList(ent);
+	}
+
+	if (has_pool) {
+		gi.LocClient_Print(ent, PRINT_HIGH, has_list ? "\nMap pool (votable):\n" : "Current map pool:\n");
+		MM_PrintTruncatedMapPool(ent);
+	}
+
+	if (MM_MQ_Count()) {
+		gi.LocClient_Print(ent, PRINT_HIGH, "\nCurrent MyMap Queue:\n");
+		MM_MQ_PrintList(ent);
 	}
 }
 
