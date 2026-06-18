@@ -570,15 +570,44 @@ MM_CheckLastManStanding
 In the round team modes (Clan Arena, CaptureStrike, Red Rover) a player becomes the
 "last one standing" the moment their team is reduced to a single survivor - whether the
 others were eliminated (CA/Strike), defected (Red Rover), disconnected, or moved to
-spectator. Polled each frame while the round is live; the survivor count per team is
-remembered so we only fire on the >1 -> 1 edge (not every frame, and not at round start
-for a team that began short-handed). The lone survivor gets a brief centerprint in the
-same slot as "FIGHT!"; ClientEndServerFrame clears it after a couple of seconds.
+spectator. Horde is co-op: the whole wave shares one side, so it fires for the last
+fighter still in the wave once everyone else has been eliminated. Polled each frame
+while the round is live; the survivor count is remembered so we only fire on the
+>1 -> 1 edge (not every frame, and not at round start for a side that began short-handed).
+The lone survivor gets a brief centerprint in the same slot as "FIGHT!";
+ClientEndServerFrame clears it after a few seconds.
 =============
 */
 static void MM_CheckLastManStanding(void) {
-	if (notGT(GT_CA) && notGT(GT_STRIKE) && notGT(GT_RR))
+	if (notGT(GT_CA) && notGT(GT_STRIKE) && notGT(GT_RR) && notGT(GT_HORDE))
 		return;
+
+	auto announce_survivor = [](gentity_t *survivor) {
+		gi.LocClient_Print(survivor, PRINT_CENTER, "You are the last one standing!");
+		survivor->client->last_standing_clear_time = level.time + 3_sec;
+	};
+
+	// Horde is co-op survival: all fighters share one side against the monsters, so the
+	// "last one standing" is the final fighter still in the wave. Count fighters who have
+	// not been eliminated (out of lives) rather than current health - a fighter who is
+	// briefly dead but still has lives will respawn, so they are not yet the last survivor.
+	if (GT(GT_HORDE)) {
+		gentity_t *survivor = nullptr;
+		int count = 0;
+
+		for (auto ec : active_clients()) {
+			if (!ClientIsPlaying(ec->client) || ec->client->eliminated)
+				continue;
+			count++;
+			survivor = ec;
+		}
+
+		if (level.last_standing_count[TEAM_FREE] > 1 && count == 1 && survivor)
+			announce_survivor(survivor);
+
+		level.last_standing_count[TEAM_FREE] = count;
+		return;
+	}
 
 	for (team_t team : { TEAM_RED, TEAM_BLUE }) {
 		gentity_t *survivor = nullptr;
@@ -595,10 +624,8 @@ static void MM_CheckLastManStanding(void) {
 			}
 		}
 
-		if (level.last_standing_count[team] > 1 && count == 1 && survivor) {
-			gi.LocClient_Print(survivor, PRINT_CENTER, "You are the last one standing!");
-			survivor->client->last_standing_clear_time = level.time + 3_sec;
-		}
+		if (level.last_standing_count[team] > 1 && count == 1 && survivor)
+			announce_survivor(survivor);
 
 		level.last_standing_count[team] = count;
 	}
@@ -634,9 +661,10 @@ static void CheckDMRoundState(void) {
 			level.round_state = roundst_t::ROUND_IN_PROGRESS;
 			level.round_state_timer = level.time + gtime_t::from_min(roundtimelimit->value);
 
-			// fresh round: seed survivor counts to 0 so MM_CheckLastManStanding() doesn't
-			// fire for a team that simply starts the round with a single player.
-			level.last_standing_count[TEAM_RED] = level.last_standing_count[TEAM_BLUE] = 0;
+			// fresh round/wave: seed survivor counts to 0 so MM_CheckLastManStanding() doesn't
+			// fire for a side that simply starts with a single player.
+			for (int &c : level.last_standing_count)
+				c = 0;
 
 			// Red Rover: snapshot each player's score and clear their per-round damage so the
 			// round-end winner is whoever fragged the most *this* round (resp.score minus the
