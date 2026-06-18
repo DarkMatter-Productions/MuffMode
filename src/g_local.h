@@ -11,7 +11,7 @@
 constexpr const char *GAMEVERSION = "baseq2";
 
 constexpr const char *GAMEMOD_TITLE = "Muff Mode";
-constexpr const char *GAMEMOD_VERSION = "0.36.24";
+constexpr const char *GAMEMOD_VERSION = "0.36.25";
 
 //==================================================================
 
@@ -1659,6 +1659,8 @@ struct level_locals_t {
 	gtime_t		tied_overtime_start;
 
 	int			count_living[TEAM_NUM_TEAMS];
+
+	int			last_standing_count[TEAM_NUM_TEAMS];	// round team modes: survivors per team last poll, to fire "last one standing" only on the >1 -> 1 edge
 
 	bool		locked[TEAM_NUM_TEAMS];
 	gentity_t	*captain[TEAM_NUM_TEAMS];	// team captains (nullptr = no captain)
@@ -3609,6 +3611,8 @@ struct gclient_t {
 
 	gtime_t respawn_min_time; // can't respawn before time > this
 	gtime_t respawn_time; // can respawn when time > this
+
+	gtime_t last_standing_clear_time; // round team modes: clear the "last one standing" centerprint at this time (0 = none)
 
 	gentity_t *follow_queued_target;
 	gtime_t	follow_queued_time;

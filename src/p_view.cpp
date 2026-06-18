@@ -1262,6 +1262,15 @@ void ClientEndServerFrame(gentity_t *ent) {
 	if (!ent->client->pers.spawned)
 		return;
 
+	// expire the brief "last one standing" centerprint. Only clear it while the round is
+	// still live: if the round has since ended, a round-result centerprint is showing and
+	// an instant empty centerprint would wipe it.
+	if (ent->client->last_standing_clear_time && level.time >= ent->client->last_standing_clear_time) {
+		if (level.round_state == roundst_t::ROUND_IN_PROGRESS)
+			gi.LocClient_Print(ent, PRINT_CENTER, "");
+		ent->client->last_standing_clear_time = 0_ms;
+	}
+
 	float bobtime, bobtime_run;
 	gentity_t *e = ent;	// g_eyecam->integer &&ent->client->follow_target ? ent->client->follow_target : ent;
 

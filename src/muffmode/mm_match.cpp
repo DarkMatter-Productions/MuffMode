@@ -565,6 +565,47 @@ static bool CheckReady() {
 
 /*
 =============
+MM_CheckLastManStanding
+
+In the round team modes (Clan Arena, CaptureStrike, Red Rover) a player becomes the
+"last one standing" the moment their team is reduced to a single survivor - whether the
+others were eliminated (CA/Strike), defected (Red Rover), disconnected, or moved to
+spectator. Polled each frame while the round is live; the survivor count per team is
+remembered so we only fire on the >1 -> 1 edge (not every frame, and not at round start
+for a team that began short-handed). The lone survivor gets a brief centerprint in the
+same slot as "FIGHT!"; ClientEndServerFrame clears it after a couple of seconds.
+=============
+*/
+static void MM_CheckLastManStanding(void) {
+	if (notGT(GT_CA) && notGT(GT_STRIKE) && notGT(GT_RR))
+		return;
+
+	for (team_t team : { TEAM_RED, TEAM_BLUE }) {
+		gentity_t *survivor = nullptr;
+		int count = 0;
+
+		for (auto ec : active_clients()) {
+			if (ec->client->sess.team != team || !ClientIsPlaying(ec->client))
+				continue;
+			// Red Rover keeps everyone currently on the team (death there defects rather
+			// than eliminates); CA/Strike count only living, non-eliminated round players.
+			if (GT(GT_RR) || (!ec->client->eliminated && ec->health > 0)) {
+				count++;
+				survivor = ec;
+			}
+		}
+
+		if (level.last_standing_count[team] > 1 && count == 1 && survivor) {
+			gi.LocClient_Print(survivor, PRINT_CENTER, "You are the last one standing!");
+			survivor->client->last_standing_clear_time = level.time + 3_sec;
+		}
+
+		level.last_standing_count[team] = count;
+	}
+}
+
+/*
+=============
 CheckDMRoundState
 =============
 */
@@ -592,6 +633,10 @@ static void CheckDMRoundState(void) {
 
 			level.round_state = roundst_t::ROUND_IN_PROGRESS;
 			level.round_state_timer = level.time + gtime_t::from_min(roundtimelimit->value);
+
+			// fresh round: seed survivor counts to 0 so MM_CheckLastManStanding() doesn't
+			// fire for a team that simply starts the round with a single player.
+			level.last_standing_count[TEAM_RED] = level.last_standing_count[TEAM_BLUE] = 0;
 
 			// Red Rover: snapshot each player's score and clear their per-round damage so the
 			// round-end winner is whoever fragged the most *this* round (resp.score minus the
@@ -628,6 +673,9 @@ static void CheckDMRoundState(void) {
 
 	// end round
 	if (level.round_state == roundst_t::ROUND_IN_PROGRESS) {
+		// announce a lone survivor (death/defection/disconnect/spectate all reduce the count)
+		MM_CheckLastManStanding();
+
 		auto is_living_round_player = [](gentity_t *ent) {
 			return ent->client && ClientIsPlaying(ent->client) &&
 				!ent->client->eliminated && ent->health > 0;
