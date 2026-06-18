@@ -589,6 +589,16 @@ static void CheckDMRoundState(void) {
 			level.round_state = roundst_t::ROUND_IN_PROGRESS;
 			level.round_state_timer = level.time + gtime_t::from_min(roundtimelimit->value);
 
+			// Red Rover: snapshot each player's score and damage dealt so the round-end
+			// winner is whoever fragged the most *this* round (resp.score minus the
+			// snapshot), with damage dealt this round as the tie-break. Frozen players can't
+			// score or deal damage during the countdown, so these baselines are accurate.
+			if (GT(GT_RR))
+				for (auto ec : active_clients()) {
+					ec->client->resp.round_start_score = ec->client->resp.score;
+					ec->client->resp.round_start_dmg = MS_Value(ec->client, MSTAT_DMG_DEALT);
+				}
+
 			// Strike manages round_number/turn in Round_StartNew(); others advance it here.
 			if (GT(GT_HORDE))
 				MM_Horde_AdvanceRoundNumber();
@@ -691,9 +701,33 @@ static void CheckDMRoundState(void) {
 			}
 
 			if (MM_RedRoverRoundShouldEnd(count_red, count_blue, g_rr_rounds->integer != 0)) {
-				team_t winner = count_red ? TEAM_RED : TEAM_BLUE;
-				gi.LocBroadcast_Print(PRINT_CENTER, "{} Team cleared the board!\nRound over.\n", Teams_TeamName(winner));
-				AnnouncerSound(world, winner == TEAM_RED ? "red_wins_round" : "blue_wins_round", "ctf/flagcap.wav", winner == TEAM_BLUE);
+				// Round winner = whoever fragged the most this round (score gained since the
+				// round-start snapshot), tie-broken by damage dealt this round. Remaining
+				// ties resolve to the first one found.
+				gclient_t *top = nullptr;
+				int best_round_frags = 0, best_round_dmg = 0;
+				for (auto ec : active_clients()) {
+					if (!ClientIsPlaying(ec->client))
+						continue;
+					int round_frags = ec->client->resp.score - ec->client->resp.round_start_score;
+					int round_dmg = MS_Value(ec->client, MSTAT_DMG_DEALT) - ec->client->resp.round_start_dmg;
+					if (!top || round_frags > best_round_frags ||
+						(round_frags == best_round_frags && round_dmg > best_round_dmg)) {
+						top = ec->client;
+						best_round_frags = round_frags;
+						best_round_dmg = round_dmg;
+					}
+				}
+
+				if (top)
+					gi.LocBroadcast_Print(PRINT_CENTER, "Round winner:\n{}\nwith {} {} ({} dmg)", top->resp.netname,
+						best_round_frags, best_round_frags == 1 ? "frag" : "frags", best_round_dmg);
+				else
+					gi.LocBroadcast_Print(PRINT_CENTER, "Round over.");
+				AnnouncerSound(world, "round_won", "ctf/flagcap.wav", true);
+
+				// Round_End() sets the shared 3s gate that holds the result on screen before
+				// the next round counts down - consistent with CA/Strike/Horde.
 				Round_End();
 			}
 			return;
