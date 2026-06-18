@@ -230,6 +230,7 @@ cvar_t *g_horde_late_wave_factor;
 cvar_t *g_horde_weight_floor;
 cvar_t *g_horde_theme_min_monsters;
 cvar_t *g_horde_start_chainsaw;
+cvar_t *g_horde_item_respawn_scale;
 cvar_t *g_huntercam;
 cvar_t *g_inactivity;
 cvar_t *g_infinite_ammo;
@@ -514,6 +515,7 @@ static void InitGame() {
 	g_horde_weight_floor = gi.cvar("g_horde_weight_floor", "0.12", CVAR_NOFLAGS);
 	g_horde_theme_min_monsters = gi.cvar("g_horde_theme_min_monsters", "2", CVAR_NOFLAGS);
 	g_horde_start_chainsaw = gi.cvar("g_horde_start_chainsaw", "1", CVAR_NOFLAGS);
+	g_horde_item_respawn_scale = gi.cvar("g_horde_item_respawn_scale", "4", CVAR_NOFLAGS);
 
 	g_huntercam = gi.cvar("g_huntercam", "1", CVAR_SERVERINFO | CVAR_LATCH);
 	g_dm_strong_mines = gi.cvar("g_dm_strong_mines", "0", CVAR_NOFLAGS);

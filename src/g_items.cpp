@@ -1413,9 +1413,15 @@ void SetRespawn(gentity_t *ent, gtime_t delay, bool hide_self) {
 
 	ent->nextthink = level.time + delay + t;
 
-	// 4x longer delay in horde
-	if (GT(GT_HORDE))
-		ent->nextthink += delay*3;
+	// In horde, non-weapon items respawn slower by g_horde_item_respawn_scale (default 4),
+	// so the effective time is base * g_dm_item_respawn_rate * g_horde_item_respawn_scale.
+	// Weapons are exempt: they use g_weapon_respawn_time directly so the configured value
+	// matches the real respawn time for server admins.
+	if (GT(GT_HORDE) && !((ent->item->flags & IF_WEAPON) && !(ent->item->flags & IF_AMMO))) {
+		float scale = g_horde_item_respawn_scale->value;
+		if (scale > 1.0f)
+			ent->nextthink += delay * (scale - 1.0f);
+	}
 
 	ent->think = RespawnItem;
 }

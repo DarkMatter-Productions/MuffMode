@@ -11,7 +11,7 @@
 constexpr const char *GAMEVERSION = "baseq2";
 
 constexpr const char *GAMEMOD_TITLE = "Muff Mode";
-constexpr const char *GAMEMOD_VERSION = "0.36.22";
+constexpr const char *GAMEMOD_VERSION = "0.36.24";
 
 //==================================================================
 
@@ -2382,6 +2382,7 @@ extern cvar_t *g_coop_instanced_items;
 extern cvar_t *g_coop_num_lives;
 extern cvar_t *g_horde_lives;
 extern cvar_t *g_horde_start_chainsaw;
+extern cvar_t *g_horde_item_respawn_scale;
 extern cvar_t *g_coop_player_collision;
 extern cvar_t *g_coop_squad_respawn;
 extern cvar_t *g_corpse_sink_time;

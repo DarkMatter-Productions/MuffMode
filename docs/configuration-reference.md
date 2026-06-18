@@ -234,6 +234,7 @@ Use `callvote <command> [arg]` or `cv <command> [arg]`.
 | `g_corpse_sink_time` | `15` | Seconds before corpses sink and disappear. |
 | `g_damage_scale` | `1` | Global damage scale. |
 | `g_dm_holdable_adrenaline` | `1` | Allows holdable Adrenaline in deathmatch. |
+| `g_dm_item_respawn_rate` | `1.0` | Global multiplier on every item's respawn time (weapons included). |
 | `g_dm_no_self_damage` | `0` | Disables self damage after knockback calculation. |
 | `g_dm_powerup_drop` | `1` | Drops carried powerups on death. |
 | `g_dm_powerups_minplayers` | `0` | Minimum players required for powerup pickup; `0` disables. |
@@ -254,7 +255,7 @@ Use `callvote <command> [arg]` or `cv <command> [arg]`.
 | `g_vampiric_health_max` | `9999` | Maximum health cap from vampiric damage. |
 | `g_vampiric_percentile` | `0.67f` | Health percentile bonus for vampiric damage. |
 | `g_weapon_projection` | `0` | Weapon projection offset mode. |
-| `g_weapon_respawn_time` | `30` | Weapon respawn time in seconds. |
+| `g_weapon_respawn_time` | `30` | Weapon respawn time in seconds. This is the literal time even in Horde — weapons are not affected by `g_horde_item_respawn_scale`. Effective time is `g_weapon_respawn_time` × `g_dm_item_respawn_rate`. |
 
 ## Interface And Debug Cvars
 
@@ -302,6 +303,18 @@ When `g_gametype_cfg` is enabled, MuffMode executes a config named for the activ
 These files can contain any server commands, cvar settings, map lists, or other gametype-specific setup. For examples, see the [MuffMode Server Configs repository](https://github.com/ozy24/muffmode-server-configs).
 
 An optional `gt-HORDE-endless.cfg` preset ships alongside `gt-HORDE.cfg`; `exec` it (or set `roundlimit 0`) to run endless Horde. See [Horde Late-Wave & Endless](#horde-late-wave--endless).
+
+## Horde Item Respawn
+
+In Horde, non-weapon items (health, ammo, armor, powerups) respawn slower than in other modes. The
+effective respawn time is `base × g_dm_item_respawn_rate × g_horde_item_respawn_scale`, where `base`
+is the item's built-in respawn time. **Weapons are exempt** from `g_horde_item_respawn_scale` — they
+respawn at exactly `g_weapon_respawn_time` (× `g_dm_item_respawn_rate`), so the configured value is the
+real in-game time. `gt-HORDE.cfg` ships `g_weapon_respawn_time 60` and `g_horde_item_respawn_scale 4`.
+
+| Cvar | Default | Purpose |
+| --- | --- | --- |
+| `g_horde_item_respawn_scale` | `4` | Multiplies non-weapon item respawn time in Horde. `1` disables the slowdown; values below `1` are treated as `1`. Weapons are unaffected. |
 
 ## Horde Late-Wave & Endless
 
