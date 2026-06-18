@@ -43,13 +43,25 @@ bool MM_IsSafeMapTokenImpl(const char *mapname)
 	if (!strcmp(mapname, ".") || !strcmp(mapname, ".."))
 		return false;
 
+	// Subdirectory maps (e.g. "q64/outpost") are legitimate, so a path separator is allowed
+	// mid-token - but never as a leading character, which would denote an absolute path or a
+	// UNC share ("\\host\..", "/etc/..").
+	if (mapname[0] == '/' || mapname[0] == '\\')
+		return false;
+
 	size_t length = 0;
 	for (const unsigned char *p = reinterpret_cast<const unsigned char *>(mapname); *p; p++) {
 		length++;
 		if (length >= MAX_QPATH)
 			return false;
 
-		if (*p <= ' ' || *p == '"' || *p == '\'' || *p == ';' || *p == '/' || *p == '\\')
+		// Block control/space chars, quotes and ';' (console-command injection) and ':'
+		// (drive letters / URL schemes). '/' and '\\' are permitted as subdirectory
+		// separators; only ".." path traversal is rejected (checked below).
+		if (*p <= ' ' || *p == '"' || *p == '\'' || *p == ';' || *p == ':')
+			return false;
+
+		if (*p == '.' && p[1] == '.')
 			return false;
 	}
 
