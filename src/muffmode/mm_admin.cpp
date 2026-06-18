@@ -280,9 +280,9 @@ void MM_CmdGametype(gentity_t *ent)
 		const gametype_t current_gt = MM_CurrentGametypeForAdminDisplay();
 		const std::string enabled_list = MM_GetEnabledGametypesList();
 		if (!enabled_list.empty())
-			gi.LocClient_Print(ent, PRINT_HIGH, "Usage: {} <{}>\nChanges current gametype. Current gametype is {} ({}).\n", gi.argv(0), enabled_list.c_str(), gt_long_name[(int)current_gt], (int)current_gt);
+			gi.LocClient_Print(ent, PRINT_HIGH, "Usage: {} <{}>\nChanges current gametype. Current gametype is {} ({}).\n", gi.argv(0), enabled_list.c_str(), gt_long_name[(int)current_gt], gt_short_name[(int)current_gt]);
 		else
-			gi.LocClient_Print(ent, PRINT_HIGH, "Usage: {} <gametype>\nChanges current gametype. Current gametype is {} ({}).\n", gi.argv(0), gt_long_name[(int)current_gt], (int)current_gt);
+			gi.LocClient_Print(ent, PRINT_HIGH, "Usage: {} <gametype>\nChanges current gametype. Current gametype is {} ({}).\n", gi.argv(0), gt_long_name[(int)current_gt], gt_short_name[(int)current_gt]);
 		return;
 	}
 
