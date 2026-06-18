@@ -2241,7 +2241,7 @@ cmds_t client_cmds[] = {
 	{"followpowerup",	Cmd_FollowPowerup_f,	CF_ALLOW_SPEC | CF_ALLOW_DEAD},
 	{"forcevote",		Cmd_ForceVote_f,		CF_ADMIN_ONLY | CF_ALLOW_INT | CF_ALLOW_SPEC},
 	{"forfeit",			Cmd_Forfeit_f,			CF_ALLOW_DEAD},
-	{"gametype",		Cmd_Gametype_f,			CF_ADMIN_ONLY | CF_ALLOW_INT | CF_ALLOW_SPEC},
+	{"gametype",		Cmd_Gametype_f,			CF_ALLOW_DEAD | CF_ALLOW_INT | CF_ALLOW_SPEC},	// listing is open to all; changing is gated to admins inside the handler
 	{"ghost",			Cmd_Ghost_f,			CF_ALLOW_DEAD | CF_ALLOW_INT | CF_ALLOW_SPEC},
 	{"give",			Cmd_Give_f,				CF_ALLOW_SPEC | CF_CHEAT_PROTECT},
 	{"god",				Cmd_God_f,				CF_ALLOW_SPEC | CF_CHEAT_PROTECT},

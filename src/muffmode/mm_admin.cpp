@@ -286,6 +286,14 @@ void MM_CmdGametype(gentity_t *ent)
 		return;
 	}
 
+	// Listing the available gametypes (the no-argument path above) is open to everyone so
+	// players can see what's on offer; actually changing the gametype stays admin-only.
+	if (!MM_AdminCvarEnabled(g_allow_admin) || !ent->client->sess.admin)
+	{
+		gi.LocClient_Print(ent, PRINT_HIGH, "Only admins can change the gametype.\n");
+		return;
+	}
+
 	gametype_t gt = GT_IndexFromString(gi.argv(1));
 	if (gt == GT_NONE)
 	{
