@@ -185,6 +185,7 @@ Use `callvote <command> [arg]` or `cv <command> [arg]`.
 | Cvar | Default | Purpose |
 | --- | --- | --- |
 | `g_dm_allow_no_humans` | `1` | Allows matches with only bots. |
+| `g_dm_death_scoreboard` | `1` | Automatically opens the scoreboard when a player dies in deathmatch. |
 | `g_dm_do_warmup` | `1` | Enables match warmup. |
 | `g_dm_do_readyup` | `0` | Requires ready-up during warmup. |
 | `g_dm_force_join` | `0` | Forces players to join instead of staying spectator, depending on mode. |

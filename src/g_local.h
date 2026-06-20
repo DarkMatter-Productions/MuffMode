@@ -11,7 +11,7 @@
 constexpr const char *GAMEVERSION = "baseq2";
 
 constexpr const char *GAMEMOD_TITLE = "Muff Mode";
-constexpr const char *GAMEMOD_VERSION = "0.36.35";
+constexpr const char *GAMEMOD_VERSION = "0.36.36";
 
 //==================================================================
 
@@ -2398,6 +2398,7 @@ extern cvar_t *g_dm_allow_exit;
 extern cvar_t *g_dm_allow_no_humans;
 extern cvar_t *g_dm_auto_join;
 extern cvar_t *g_dm_crosshair_id;
+extern cvar_t *g_dm_death_scoreboard;
 extern cvar_t *g_dm_do_readyup;
 extern cvar_t *g_dm_do_warmup;
 extern cvar_t *g_dm_exec_level_cfg;
