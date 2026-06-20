@@ -3407,6 +3407,8 @@ bool ClientConnect(gentity_t *ent, char *userinfo, const char *social_id, bool i
 			ent->client->sess.pc.killbeep_num = 1;
 			ent->client->sess.pc.follow_killer = false;
 			ent->client->sess.pc.follow_powerup = false;
+			ent->client->sess.pc.enemy_skin[0] = 0;
+			ent->client->sess.pc.team_skin[0] = 0;
 
 			InitClientResp(ent->client);
 		}

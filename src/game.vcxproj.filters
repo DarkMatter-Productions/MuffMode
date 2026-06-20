@@ -156,6 +156,9 @@
     <ClInclude Include="muffmode\mm_pconfig.h">
       <Filter>muffmode</Filter>
     </ClInclude>
+    <ClInclude Include="muffmode\mm_skin.h">
+      <Filter>muffmode</Filter>
+    </ClInclude>
     <ClInclude Include="muffmode\mm_motd.h">
       <Filter>muffmode</Filter>
     </ClInclude>
@@ -349,6 +352,9 @@
       <Filter>muffmode</Filter>
     </ClCompile>
     <ClCompile Include="muffmode\mm_pconfig.cpp">
+      <Filter>muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="muffmode\mm_skin.cpp">
       <Filter>muffmode</Filter>
     </ClCompile>
     <ClCompile Include="muffmode\mm_motd.cpp">

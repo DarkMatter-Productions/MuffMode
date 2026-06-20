@@ -19,6 +19,7 @@
 #include "mm_pconfig.h"
 #include "mm_ruleset.h"
 #include "mm_ruleset_weapons.h"
+#include "mm_skin.h"
 #include "mm_duel.h"
 #include "mm_spawn_filter.h"
 #include "mm_spawn_loadout.h"

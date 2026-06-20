@@ -6,6 +6,7 @@
 #include "muffmode/mm_captain.h"
 #include "muffmode/mm_items_rules.h"
 #include "muffmode/mm_ruleset.h"
+#include "muffmode/mm_skin.h"
 
 bool Pickup_Weapon(gentity_t *ent, gentity_t *other);
 void Use_Weapon(gentity_t *ent, gitem_t *inv);
@@ -1550,6 +1551,9 @@ static bool Pickup_Powerup(gentity_t *ent, gentity_t *other) {
 			ec->client->follow_target = other;
 			ec->client->follow_update = true;
 			UpdateChaseCam(ec);
+
+			// [MuffMode] Auto-switched follow target; re-evaluate this viewer's skin overrides.
+			MM_RefreshSkinOverridesForViewer(ec);
 		}
 	}
 	/*

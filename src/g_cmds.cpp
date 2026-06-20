@@ -13,6 +13,7 @@
 #include "muffmode/mm_motd.h"
 #include "muffmode/mm_parse.h"
 #include "muffmode/mm_pconfig.h"
+#include "muffmode/mm_skin.h"
 #include "muffmode/mm_team.h"
 #include "muffmode/mm_vote.h"
 #include "muffmode/mm_vote_menu.h"
@@ -1829,6 +1830,15 @@ static void Cmd_KillBeep_f(gentity_t *ent) {
 	MM_CmdKillBeep(ent);
 }
 
+// [MuffMode] Per-viewer skin override bodies live in muffmode/mm_skin
+static void Cmd_EnemySkin_f(gentity_t *ent) {
+	MM_CmdEnemySkin(ent);
+}
+
+static void Cmd_TeamSkin_f(gentity_t *ent) {
+	MM_CmdTeamSkin(ent);
+}
+
 // [MuffMode] Ghost rejoin body lives in muffmode/mm_ghost
 static void Cmd_Ghost_f(gentity_t *ent) {
 	MM_CmdGhost(ent);
@@ -2234,6 +2244,8 @@ cmds_t client_cmds[] = {
 	{"drop_index", 		Cmd_Drop_f,				CF_NONE},
 	{"doctor", 			Cmd_Doctor_f,			CF_ADMIN_ONLY | CF_ALLOW_INT | CF_ALLOW_SPEC},
 	{"endmatch", 		Cmd_EndMatch_f,			CF_ADMIN_ONLY | CF_ALLOW_INT | CF_ALLOW_SPEC},
+	{"enemyskin",		Cmd_EnemySkin_f,		CF_ALLOW_SPEC | CF_ALLOW_DEAD},
+	{"eskin",			Cmd_EnemySkin_f,		CF_ALLOW_SPEC | CF_ALLOW_DEAD},
 	{"fm", 				Cmd_FragMessages_f,		CF_ALLOW_SPEC | CF_ALLOW_DEAD},
 	{"follow",			Cmd_Follow_f,			CF_ALLOW_SPEC | CF_ALLOW_DEAD},
 	{"followkiller",	Cmd_FollowKiller_f,		CF_ALLOW_SPEC | CF_ALLOW_DEAD},
@@ -2295,6 +2307,8 @@ cmds_t client_cmds[] = {
 	{"stats",			Cmd_Stats_f,			CF_ALLOW_INT | CF_ALLOW_SPEC},
 	{"target",			Cmd_Target_f,			CF_ALLOW_DEAD | CF_ALLOW_SPEC | CF_CHEAT_PROTECT},
 	{"team",			Cmd_Team_f,				CF_ALLOW_DEAD | CF_ALLOW_SPEC},
+	{"teamskin",		Cmd_TeamSkin_f,			CF_ALLOW_SPEC | CF_ALLOW_DEAD},
+	{"tskin",			Cmd_TeamSkin_f,			CF_ALLOW_SPEC | CF_ALLOW_DEAD},
 	{"teleport",		Cmd_Teleport_f,			CF_ALLOW_SPEC | CF_CHEAT_PROTECT},
 	{"time-out",		Cmd_TimeOut_f,			CF_ALLOW_DEAD | CF_ALLOW_SPEC},
 	{"time-in",			Cmd_TimeIn_f,			CF_ALLOW_DEAD | CF_ALLOW_SPEC},

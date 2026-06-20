@@ -11,7 +11,7 @@
 constexpr const char *GAMEVERSION = "baseq2";
 
 constexpr const char *GAMEMOD_TITLE = "Muff Mode";
-constexpr const char *GAMEMOD_VERSION = "0.36.30";
+constexpr const char *GAMEMOD_VERSION = "0.36.31";
 
 //==================================================================
 
@@ -2363,6 +2363,7 @@ extern cvar_t *run_roll;
 extern cvar_t *g_airaccelerate;
 extern cvar_t *g_allow_admin;
 extern cvar_t *g_allow_custom_skins;
+extern cvar_t *g_allow_skin_overrides;
 extern cvar_t *g_team_force_models;
 extern cvar_t *g_team_red_model;
 extern cvar_t *g_team_blue_model;
@@ -3415,6 +3416,11 @@ struct client_config_t {
 	bool			follow_powerup;
 
 	bool			use_expanded;
+
+	// [MuffMode] Per-viewer skin overrides (eskin/tskin): how this player sees
+	// enemies and teammates on their own screen. Empty = no override.
+	char			enemy_skin[MAX_QPATH];
+	char			team_skin[MAX_QPATH];
 };
 
 // client data that stays across deathmatch level changes, handled differently to client_persistent_t

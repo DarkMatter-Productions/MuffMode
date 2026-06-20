@@ -117,6 +117,7 @@ cvar_t *run_roll;
 cvar_t *g_airaccelerate;
 cvar_t *g_allow_admin;
 cvar_t *g_allow_custom_skins;
+cvar_t *g_allow_skin_overrides;
 cvar_t *g_team_force_models;
 cvar_t *g_team_red_model;
 cvar_t *g_team_blue_model;
@@ -606,6 +607,7 @@ static void InitGame() {
 	g_airaccelerate = gi.cvar("g_airaccelerate", "0", CVAR_NOFLAGS);
 	g_allow_admin = gi.cvar("g_allow_admin", "1", CVAR_NOFLAGS);
 	g_allow_custom_skins = gi.cvar("g_allow_custom_skins", "1", CVAR_NOFLAGS);
+	g_allow_skin_overrides = gi.cvar("g_allow_skin_overrides", "1", CVAR_NOFLAGS);
 	g_team_force_models = gi.cvar("g_team_force_models", "1",           CVAR_NOFLAGS);
 	g_team_red_model    = gi.cvar("g_team_red_model",   "male/ctf_r",  CVAR_NOFLAGS);
 	g_team_blue_model   = gi.cvar("g_team_blue_model",  "female/ctf_b", CVAR_NOFLAGS);

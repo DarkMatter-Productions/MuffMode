@@ -6,6 +6,7 @@
 #include "g_local.h"
 // [MuffMode] Join menu lives in muffmode/mm_menu
 #include "muffmode/mm_menu.h"
+#include "muffmode/mm_skin.h"
 #include "muffmode/mm_team.h"
 
 void FreeFollower(gentity_t *ent) {
@@ -28,6 +29,9 @@ void FreeFollower(gentity_t *ent) {
 	ent->client->ps.screen_blend = {};
 	ent->client->ps.damage_blend = {};
 	ent->client->ps.rdflags = RDF_NONE;
+
+	// [MuffMode] No longer following anyone; restore canonical skins for this viewer.
+	MM_RefreshSkinOverridesForViewer(ent);
 }
 
 void FreeClientFollowers(gentity_t *ent) {
@@ -289,6 +293,9 @@ void FollowNext(gentity_t *ent) {
 	ent->client->follow_target = e;
 	ent->client->follow_update = true;
 	ent->client->sess.spectator_state = SPECTATOR_FOLLOW;
+
+	// [MuffMode] Follow target changed; re-evaluate this viewer's skin overrides.
+	MM_RefreshSkinOverridesForViewer(ent);
 }
 
 void FollowPrev(gentity_t *ent) {
@@ -315,6 +322,9 @@ void FollowPrev(gentity_t *ent) {
 	ent->client->follow_target = e;
 	ent->client->follow_update = true;
 	ent->client->sess.spectator_state = SPECTATOR_FOLLOW;
+
+	// [MuffMode] Follow target changed; re-evaluate this viewer's skin overrides.
+	MM_RefreshSkinOverridesForViewer(ent);
 }
 
 void FollowCycle(gentity_t *ent, int dir) {
@@ -368,6 +378,9 @@ void FollowCycle(gentity_t *ent, int dir) {
 		ent->client->follow_target = follow_ent;
 		ent->client->follow_update = true;
 
+		// [MuffMode] Follow target changed; re-evaluate this viewer's skin overrides.
+		MM_RefreshSkinOverridesForViewer(ent);
+
 		return;
 	} while (clientnum != original);
 
@@ -383,6 +396,9 @@ void GetFollowTarget(gentity_t *ent) {
 			ent->client->follow_update = true;
 			ent->client->sess.spectator_state = SPECTATOR_FOLLOW;
 			UpdateChaseCam(ent);
+
+			// [MuffMode] Acquired a follow target; re-evaluate this viewer's skin overrides.
+			MM_RefreshSkinOverridesForViewer(ent);
 			return;
 		}
 	}

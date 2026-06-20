@@ -172,6 +172,7 @@
     <ClInclude Include="muffmode\mm_red_rover_rules.h" />
     <ClInclude Include="muffmode\mm_ruleset.h" />
     <ClInclude Include="muffmode\mm_ruleset_weapons.h" />
+    <ClInclude Include="muffmode\mm_skin.h" />
     <ClInclude Include="muffmode\mm_spawn_filter.h" />
     <ClInclude Include="muffmode\mm_spawn_loadout.h" />
     <ClInclude Include="muffmode\mm_statusbar.h" />
@@ -261,6 +262,7 @@
     <ClCompile Include="muffmode\mm_pconfig.cpp" />
     <ClCompile Include="muffmode\mm_ruleset.cpp" />
     <ClCompile Include="muffmode\mm_ruleset_weapons.cpp" />
+    <ClCompile Include="muffmode\mm_skin.cpp" />
     <ClCompile Include="muffmode\mm_spawn_filter.cpp" />
     <ClCompile Include="muffmode\mm_spawn_loadout.cpp" />
     <ClCompile Include="muffmode\mm_statusbar.cpp" />
