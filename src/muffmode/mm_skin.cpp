@@ -191,6 +191,13 @@ void MM_CmdSkinOverride(gentity_t *ent, bool is_enemy, const char *label, const 
 		return;
 	}
 
+	if (gi.argc() > 2) {
+		gi.LocClient_Print(ent, PRINT_HIGH,
+			"Usage: {} <model/skin> (example: {} male/grunt) or {} off. A skin path is a single token with no spaces.\n",
+			command, command, command);
+		return;
+	}
+
 	const char *skin = gi.argv(1);
 
 	if (MM_IsDisableToken(skin)) {
@@ -252,12 +259,4 @@ void MM_RefreshSkinOverridesForViewer(gentity_t *viewer) {
 		MM_SendCanonicalPlayerSkin(viewer, target);
 		MM_SendSkinOverride(viewer, target);
 	}
-}
-
-void MM_RefreshSkinOverridesForClient(gentity_t *ent) {
-	if (!MM_IsClientEntity(ent))
-		return;
-
-	MM_RefreshSkinOverridesForTarget(ent);
-	MM_RefreshSkinOverridesForViewer(ent);
 }

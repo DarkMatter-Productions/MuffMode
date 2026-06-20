@@ -14,4 +14,3 @@ void MM_CmdEnemySkin(gentity_t *ent);
 void MM_CmdTeamSkin(gentity_t *ent);
 void MM_RefreshSkinOverridesForTarget(gentity_t *target);
 void MM_RefreshSkinOverridesForViewer(gentity_t *viewer);
-void MM_RefreshSkinOverridesForClient(gentity_t *ent);
