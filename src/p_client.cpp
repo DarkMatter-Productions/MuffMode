@@ -988,6 +988,7 @@ DIE(player_die) (gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 			TossClientItems(self);
 		Weapon_Grapple_DoReset(self->client);
 
+		// [MuffMode] Optional auto-scoreboard on death (g_dm_death_scoreboard)
 		if (deathmatch->integer && g_dm_death_scoreboard->integer && !self->client->showscores)
 			Cmd_Help_f(self); // show scores
 
