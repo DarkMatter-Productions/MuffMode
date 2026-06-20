@@ -2027,6 +2027,9 @@ static void Cmd_Follow_f(gentity_t *ent) {
 	ent->client->follow_target = follow_ent;
 	ent->client->follow_update = true;
 	UpdateChaseCam(ent);
+
+	// [MuffMode] Follow target changed; re-evaluate this viewer's skin overrides.
+	MM_RefreshSkinOverridesForViewer(ent);
 }
 
 /*
@@ -2065,6 +2068,9 @@ static void Cmd_FollowLeader_f(gentity_t *ent) {
 		ent->client->follow_target = leader;
 		ent->client->follow_update = true;
 		UpdateChaseCam(ent);
+
+		// [MuffMode] Follow target changed; re-evaluate this viewer's skin overrides.
+		MM_RefreshSkinOverridesForViewer(ent);
 	}
 }
 
