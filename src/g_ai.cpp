@@ -3,7 +3,12 @@
 // g_ai.c
 
 #include "g_local.h"
+#include "muffmode/mm_horde.h"
 #include "muffmode/mm_profile.h"
+
+extern cvar_t *g_horde_ai_retarget;
+extern cvar_t *g_horde_ai_aggro_range;
+extern cvar_t *g_horde_ai_stagger;
 
 bool FindTarget(gentity_t *self);
 bool ai_checkattack(gentity_t *self, float dist);
@@ -448,6 +453,10 @@ void FoundTarget(gentity_t *self) {
 	if (self->monsterinfo.champion_damage_scale <= 1.25f)
 		self->monsterinfo.attack_finished += skill->integer == 0 ? 400_ms : skill->integer == 1 ? 200_ms : 0_ms;
 
+	// [MuffMode] horde: stagger first-shot timing so swarms don't alpha-strike together
+	if (GT(GT_HORDE) && g_horde_ai_stagger->integer)
+		self->monsterinfo.attack_finished += gtime_t::from_ms(irandom(0, 400));
+
 	self->monsterinfo.last_sighting = self->monsterinfo.saved_goal = self->enemy->s.origin;
 	self->monsterinfo.trail_time = level.time;
 	self->monsterinfo.blind_fire_target = self->monsterinfo.last_sighting + (self->enemy->velocity * -0.1f);
@@ -699,7 +708,9 @@ bool FindTarget(gentity_t *self) {
 		// this is where we would check invisibility
 		float r = range_to(self, client);
 
-		if (r > RANGE_MID)
+		const bool horde_wide_aggro = GT(GT_HORDE) && g_horde_ai_aggro_range->integer;
+
+		if (!horde_wide_aggro && r > RANGE_MID)
 			return false;
 
 		// Paril: revised so that monsters can be woken up
@@ -708,6 +719,12 @@ bool FindTarget(gentity_t *self) {
 		bool is_visible =
 			((r <= RANGE_NEAR && client->show_hostile >= level.time && !(self->spawnflags & SPAWNFLAG_MONSTER_AMBUSH)) ||
 				(visible(self, client) && (r <= RANGE_MELEE || (self->monsterinfo.aiflags & AI_THIRD_EYE) || infront(self, client))));
+
+		// [MuffMode] horde: re-acquire living fighters across the map via PHS when line-of-sight is lost
+		if (!is_visible && horde_wide_aggro && client->client && ClientIsPlaying(client->client) &&
+			client->health > 0 && !client->client->eliminated &&
+			gi.inPHS(self->s.origin, client->s.origin, true))
+			is_visible = true;
 
 		if (!is_visible)
 			return false;
@@ -1130,6 +1147,15 @@ bool ai_checkattack(gentity_t *self, float dist) {
 		}
 
 		else {
+			// [MuffMode] horde: pick next fighter instead of idling after a kill
+			if (GT(GT_HORDE) && g_horde_ai_retarget->integer) {
+				if (gentity_t *t = MM_Horde_PickTarget(self)) {
+					self->enemy = t;
+					FoundTarget(self);
+					return true;
+				}
+			}
+
 			if (self->movetarget && !(self->monsterinfo.aiflags & AI_STAND_GROUND)) {
 				self->goalentity = self->movetarget;
 				self->monsterinfo.walk(self);

@@ -237,6 +237,9 @@ cvar_t *g_horde_ai_target_spread;
 cvar_t *g_horde_ai_spawn_tactics;
 cvar_t *g_horde_ai_adaptive;
 cvar_t *g_horde_ai_roles;
+cvar_t *g_horde_ai_retarget;
+cvar_t *g_horde_ai_aggro_range;
+cvar_t *g_horde_ai_stagger;
 cvar_t *g_huntercam;
 cvar_t *g_inactivity;
 cvar_t *g_infinite_ammo;
@@ -526,6 +529,9 @@ static void InitGame() {
 	g_horde_ai_spawn_tactics = gi.cvar("g_horde_ai_spawn_tactics", "1", CVAR_NOFLAGS);
 	g_horde_ai_adaptive = gi.cvar("g_horde_ai_adaptive", "1", CVAR_NOFLAGS);
 	g_horde_ai_roles = gi.cvar("g_horde_ai_roles", "1", CVAR_NOFLAGS);
+	g_horde_ai_retarget = gi.cvar("g_horde_ai_retarget", "1", CVAR_NOFLAGS);
+	g_horde_ai_aggro_range = gi.cvar("g_horde_ai_aggro_range", "1", CVAR_NOFLAGS);
+	g_horde_ai_stagger = gi.cvar("g_horde_ai_stagger", "1", CVAR_NOFLAGS);
 
 	g_huntercam = gi.cvar("g_huntercam", "1", CVAR_SERVERINFO | CVAR_LATCH);
 	g_dm_strong_mines = gi.cvar("g_dm_strong_mines", "0", CVAR_NOFLAGS);

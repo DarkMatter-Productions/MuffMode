@@ -351,6 +351,16 @@ Each cvar defaults to `1` (enabled); set to `0` to restore the previous behavior
 | `g_horde_ai_adaptive` | `1` | Modulate spawn cadence, concurrency cap, and next-wave budget from live player health, deaths, and wave clear rate. |
 | `g_horde_ai_roles` | `1` | Apply per-spawn role tuning (mixed combat style, blindfire) to appropriate ranged monsters. |
 
+## Horde AI Hooks (Tier 1)
+
+Thin vanilla hooks in monster think / AI (gated per cvar; default `1`).
+
+| Cvar | Default | Purpose |
+| --- | --- | --- |
+| `g_horde_ai_retarget` | `1` | Re-acquire the least-burdened living fighter (not player slot 1) on spawn think and after killing an enemy, instead of idling. |
+| `g_horde_ai_aggro_range` | `1` | Relax `FindTarget` range and visibility so horde monsters re-acquire fighters across the map via PHS. |
+| `g_horde_ai_stagger` | `1` | Add a small random delay to `attack_finished` when a monster first spots a target, reducing swarm alpha-strikes. |
+
 ## Debug-Only Weapon Balance Cvars
 
 These cvars are available only in debug builds:
