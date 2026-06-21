@@ -6,6 +6,7 @@
 #include "muffmode/mm_horde_ai_rules.h"
 
 #include <climits>
+#include <limits>
 #include <vector>
 
 // Late-wave tuning cvars are referenced by helpers defined before the main extern block below.
@@ -212,6 +213,12 @@ gentity_t *FindClosestPlayerToPoint(vec3_t point)
 }
 
 constexpr float HORDE_AI_TARGET_SPREAD_WEIGHT = 512.f;
+// Rough average spawn_points per monster body; used to turn wave point budget into an expected kill rate.
+constexpr float HORDE_AI_ADAPTIVE_POINTS_PER_MONSTER = 2.f;
+// Seconds over which we expect a wave's monster bodies to be cleared at a "normal" pace.
+constexpr float HORDE_AI_ADAPTIVE_WAVE_SECONDS = 90.f;
+// Tactical spawns never pick a spot closer than this to any living fighter (independent of theme).
+constexpr float HORDE_AI_SPAWN_MIN_PLAYER_DIST = 192.f;
 
 struct horde_adaptive_state_t {
 	int     wave = -1;
@@ -223,6 +230,10 @@ struct horde_adaptive_state_t {
 
 static horde_adaptive_state_t horde_adaptive;
 static float                  horde_adaptive_last_wave_pressure = 1.f;
+
+// Single-threaded reuse buffers (game DLL is not multi-threaded).
+static gtime_t horde_target_load_frame = 0_ms;
+static int     horde_target_load[MAX_CLIENTS + 1];
 
 static void Horde_CountMonstersTargetingPlayers(int *counts, int count_capacity)
 {
@@ -250,6 +261,15 @@ static void Horde_CountMonstersTargetingPlayers(int *counts, int count_capacity)
 
 		counts[slot]++;
 	}
+}
+
+static void Horde_RefreshTargetLoadCache()
+{
+	if (horde_target_load_frame == level.time)
+		return;
+
+	horde_target_load_frame = level.time;
+	Horde_CountMonstersTargetingPlayers(horde_target_load, q_countof(horde_target_load));
 }
 
 static float Horde_FighterHealthFraction()
@@ -285,9 +305,11 @@ static float Horde_AdaptivePressureMult()
 	const int killed = max(0, level.killed_monsters - horde_adaptive.monsters_killed_at_start);
 	const float elapsed = (level.time - horde_adaptive.wave_start_time).seconds();
 	const float clear_rate = elapsed > 0.f ? static_cast<float>(killed) / elapsed : 0.f;
-	const float expected_rate = horde_adaptive.wave_budget_start > 0
-		? static_cast<float>(horde_adaptive.wave_budget_start) / 90.f
+	// Compare monsters/sec cleared against an expected monsters/sec derived from budget, not raw points.
+	const float expected_monsters = horde_adaptive.wave_budget_start > 0
+		? static_cast<float>(horde_adaptive.wave_budget_start) / HORDE_AI_ADAPTIVE_POINTS_PER_MONSTER
 		: 0.f;
+	const float expected_rate = expected_monsters / HORDE_AI_ADAPTIVE_WAVE_SECONDS;
 	const float clear_ratio = expected_rate > 0.f ? clear_rate / expected_rate : 1.f;
 
 	return MM_Horde_ComputeAdaptiveSpawnMult(health_frac, death_pressure, clear_ratio);
@@ -322,6 +344,25 @@ static void Horde_Adaptive_RecordWaveEnd()
 	horde_adaptive_last_wave_pressure = Horde_AdaptivePressureMult();
 }
 
+static bool Horde_SpawnPointClear(gentity_t *spot)
+{
+	const vec3_t p = spot->s.origin + vec3_t{ 0.f, 0.f, 9.f };
+	return !gi.trace(p, PLAYER_MINS, PLAYER_MAXS, p, spot, CONTENTS_PLAYER | CONTENTS_MONSTER).startsolid;
+}
+
+static bool Horde_SpawnFarEnoughFromFighters(gentity_t *spot, float min_dist)
+{
+	for (auto ec : active_clients()) {
+		if (!ClientIsPlaying(ec->client) || ec->health <= 0 || ec->client->eliminated)
+			continue;
+
+		if ((spot->s.origin - ec->s.origin).length() < min_dist)
+			return false;
+	}
+
+	return true;
+}
+
 static bool Horde_SpawnSpotUsable(gentity_t *spot, vec3_t avoid_point)
 {
 	if (!spot || !spot->inuse)
@@ -342,6 +383,18 @@ static bool Horde_SpawnSpotUsable(gentity_t *spot, vec3_t avoid_point)
 	return true;
 }
 
+static bool Horde_TacticalSpawnSpotValid(gentity_t *spot, vec3_t avoid_point, float min_player_dist)
+{
+	if (!Horde_SpawnSpotUsable(spot, avoid_point))
+		return false;
+	if (!Horde_SpawnFarEnoughFromFighters(spot, min_player_dist))
+		return false;
+	if (!Horde_SpawnPointClear(spot))
+		return false;
+
+	return true;
+}
+
 static select_spawn_result_t Horde_SelectSpawnPoint(vec3_t avoid_point)
 {
 	if (!g_horde_ai_spawn_tactics->integer)
@@ -354,6 +407,7 @@ static select_spawn_result_t Horde_SelectSpawnPoint(vec3_t avoid_point)
 		float      z;
 	};
 
+	// Single-threaded reuse buffer (game DLL is not multi-threaded).
 	static std::vector<candidate_t> candidates;
 	candidates.clear();
 
@@ -373,8 +427,15 @@ static select_spawn_result_t Horde_SelectSpawnPoint(vec3_t avoid_point)
 
 	cluster /= static_cast<float>(fighters);
 
+	float cv_dist = g_dm_respawn_point_min_dist->value;
+	if (cv_dist > 512.f)
+		cv_dist = 512.f;
+	else if (cv_dist < 0.f)
+		cv_dist = 0.f;
+	const float min_player_dist = max(HORDE_AI_SPAWN_MIN_PLAYER_DIST, cv_dist);
+
 	auto try_add_spot = [&](gentity_t *spot) {
-		if (!Horde_SpawnSpotUsable(spot, avoid_point))
+		if (!Horde_TacticalSpawnSpotValid(spot, avoid_point, min_player_dist))
 			return;
 
 		const vec3_t delta = spot->s.origin - cluster;
@@ -419,7 +480,7 @@ static select_spawn_result_t Horde_SelectSpawnPoint(vec3_t avoid_point)
 	const float cluster_z = cluster[2];
 
 	gentity_t *best = nullptr;
-	float      best_score = -FLT_MAX;
+	float      best_score = std::numeric_limits<float>::lowest();
 
 	for (const auto &c : candidates) {
 		const float dist_penalty = -fabsf(c.dist - ideal_dist);
@@ -699,23 +760,22 @@ gentity_t *MM_Horde_PickTarget(gentity_t *from)
 	if (!g_horde_ai_target_spread->integer)
 		return FindClosestPlayerToPoint(origin);
 
-	static int monster_load[MAX_CLIENTS + 1];
-	Horde_CountMonstersTargetingPlayers(monster_load, q_countof(monster_load));
+	Horde_RefreshTargetLoadCache();
 
 	gentity_t *best = nullptr;
-	float      best_score = FLT_MAX;
+	float      best_score = std::numeric_limits<float>::max();
 
 	for (auto ec : active_clients()) {
 		if (!ClientIsPlaying(ec->client) || ec->health <= 0 || ec->client->eliminated)
 			continue;
 
 		const int slot = static_cast<int>(ec - g_entities);
-		if (slot < 0 || slot >= static_cast<int>(q_countof(monster_load)))
+		if (slot < 0 || slot >= static_cast<int>(q_countof(horde_target_load)))
 			continue;
 
 		const float distance = (ec->s.origin - origin).length();
 		const float score = MM_Horde_ComputeTargetLoadScore(
-			monster_load[slot], distance, HORDE_AI_TARGET_SPREAD_WEIGHT);
+			horde_target_load[slot], distance, HORDE_AI_TARGET_SPREAD_WEIGHT);
 
 		if (score < best_score) {
 			best_score = score;
@@ -1059,7 +1119,7 @@ int MM_Horde_WavePointBudget()
 	return max(1, static_cast<int>(budget * pmult * msmult));
 }
 
-static gtime_t Horde_SpawnInterval(bool warmup)
+static gtime_t Horde_SpawnInterval(bool warmup, float adaptive_mult)
 {
 	if (warmup)
 		return 5_sec;
@@ -1068,9 +1128,8 @@ static gtime_t Horde_SpawnInterval(bool warmup)
 	const float max_sec = max(min_sec, g_horde_spawn_interval_max->value);
 	gtime_t interval = random_time(gtime_t::from_sec(min_sec), gtime_t::from_sec(max_sec));
 
-	if (!warmup && g_horde_ai_adaptive->integer) {
-		const float mult = Horde_AdaptivePressureMult();
-		interval = gtime_t::from_ms(static_cast<int64_t>(interval.milliseconds() / max(mult, 0.1f)));
+	if (!warmup && g_horde_ai_adaptive->integer && adaptive_mult != 1.f) {
+		interval = gtime_t::from_ms(static_cast<int64_t>(interval.milliseconds() / max(adaptive_mult, 0.1f)));
 		interval = max(interval, gtime_t::from_ms(100));
 	}
 
@@ -1493,6 +1552,10 @@ void MM_Horde_RunSpawning()
 	if (!warmup && level.round_state != ROUND_IN_PROGRESS)
 		return;
 
+	Horde_RefreshTargetLoadCache();
+
+	const float adaptive_mult = (!warmup && g_horde_ai_adaptive->integer) ? Horde_AdaptivePressureMult() : 1.f;
+
 	const int warmup_cap = max(1, g_horde_warmup_cap->integer);
 	if (warmup && (level.total_monsters - level.killed_monsters >= warmup_cap))
 		return;
@@ -1504,10 +1567,8 @@ void MM_Horde_RunSpawning()
 	// spawns its full budget over time - only peak concurrency is bounded. 0 disables.
 	const int alive_cap = g_horde_max_alive->integer;
 	int effective_cap = alive_cap;
-	if (!warmup && alive_cap > 0 && g_horde_ai_adaptive->integer) {
-		const float mult = Horde_AdaptivePressureMult();
-		effective_cap = max(1, static_cast<int>(alive_cap * min(mult, 1.f)));
-	}
+	if (!warmup && alive_cap > 0 && g_horde_ai_adaptive->integer)
+		effective_cap = max(1, static_cast<int>(alive_cap * min(adaptive_mult, 1.f)));
 	if (!warmup && alive_cap > 0 && (level.total_monsters - level.killed_monsters >= effective_cap))
 		return;
 
@@ -1624,7 +1685,7 @@ void MM_Horde_RunSpawning()
 				level.horde_champion_pending = false;
 			}
 
-			level.horde_monster_spawn_time = level.time + Horde_SpawnInterval(warmup);
+			level.horde_monster_spawn_time = level.time + Horde_SpawnInterval(warmup, adaptive_mult);
 
 			e->enemy = MM_Horde_PickTarget(e);
 			if (e->enemy)
