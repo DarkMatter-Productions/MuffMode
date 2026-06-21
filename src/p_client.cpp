@@ -2255,6 +2255,18 @@ void ClientRespawn(gentity_t *ent) {
 
 //==============================================================
 
+// Map internal sess.team to engine team_index (1-indexed: 1 = team 1, 2 = team 2, 0 = none).
+static uint8_t P_EngineTeamIndex(team_t team) {
+	switch (team) {
+	case TEAM_RED:
+		return 1;
+	case TEAM_BLUE:
+		return 2;
+	default:
+		return 0;
+	}
+}
+
 // [Paril-KEX]
 // skinnum was historically used to pack data
 // so we're going to build onto that.
@@ -2274,7 +2286,7 @@ void P_AssignClientSkinnum(gentity_t *ent) {
 	if (InCoopStyle())
 		packed.team_index = 1; // all players are teamed in coop
 	else if (Teams())
-		packed.team_index = ent->client->sess.team;
+		packed.team_index = P_EngineTeamIndex(ent->client->sess.team);
 	else
 		packed.team_index = 0;
 
