@@ -2,7 +2,15 @@
 // Licensed under the GNU General Public License 2.0.
 
 #include "g_local.h"
+#include "muffmode/mm_command_contracts.h"
 #include "muffmode/mm_ghost.h"
+#include "muffmode/mm_parse.h"
+
+namespace {
+constexpr int GHOST_CODE_MIN = 10000;
+constexpr int GHOST_CODE_MAX_EXCLUSIVE = 100000;
+constexpr int GHOST_CODE_MAX = GHOST_CODE_MAX_EXCLUSIVE - 1;
+}
 
 /*
 ================
@@ -15,6 +23,9 @@ score with the "ghost" command if they lose connection mid-match.
 void MM_Ghost_Assign(gentity_t *ent) {
 	int ghost, i;
 
+	if (!ent || !ent->client)
+		return;
+
 	for (ghost = 0; ghost < MAX_CLIENTS_KEX; ghost++)
 		if (!level.ghosts[ghost].code)
 			break;
@@ -23,7 +34,7 @@ void MM_Ghost_Assign(gentity_t *ent) {
 	level.ghosts[ghost].team = ent->client->sess.team;
 	level.ghosts[ghost].score = 0;
 	for (;;) {
-		level.ghosts[ghost].code = irandom(10000, 100000);
+		level.ghosts[ghost].code = irandom(GHOST_CODE_MIN, GHOST_CODE_MAX_EXCLUSIVE);
 		for (i = 0; i < MAX_CLIENTS_KEX; i++)
 			if (i != ghost && level.ghosts[i].code == level.ghosts[ghost].code)
 				break;
@@ -44,6 +55,9 @@ MM_Ghost_DoAssign
 ================
 */
 void MM_Ghost_DoAssign(gentity_t *ent) {
+	if (!ent || !ent->client)
+		return;
+
 	// assign a ghost code
 	if (level.match_state == matchst_t::MATCH_IN_PROGRESS) {
 		if (ent->client->resp.ghost)
@@ -63,7 +77,10 @@ MM_CmdGhost
 void MM_CmdGhost(gentity_t *ent) {
 	int i, n;
 
-	if (gi.argc() < 2) {
+	if (!ent || !ent->client)
+		return;
+
+	if (!MM_IsExactArgcValid(gi.argc(), 2)) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "Usage: {} <code>\n", gi.argv(0));
 		return;
 	}
@@ -81,12 +98,18 @@ void MM_CmdGhost(gentity_t *ent) {
 		return;
 	}
 
-	n = atoi(gi.argv(1));
+	const auto code = MM_ParseIntArg(gi.argv(1));
+	if (!code || *code < GHOST_CODE_MIN || *code > GHOST_CODE_MAX) {
+		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid ghost code.\n");
+		return;
+	}
+	n = *code;
 
 	for (i = 0; i < MAX_CLIENTS_KEX; i++) {
 		if (level.ghosts[i].code && level.ghosts[i].code == n) {
 			gi.LocClient_Print(ent, PRINT_HIGH, "Ghost code accepted, your position has been reinstated.\n");
-			level.ghosts[i].ent->client->resp.ghost = nullptr;
+			if (level.ghosts[i].ent && level.ghosts[i].ent->client && level.ghosts[i].ent->client->resp.ghost == &level.ghosts[i])
+				level.ghosts[i].ent->client->resp.ghost = nullptr;
 			ent->client->sess.team = level.ghosts[i].team;
 			ent->client->resp.ghost = level.ghosts + i;
 			ent->client->resp.score = level.ghosts[i].score;

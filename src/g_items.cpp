@@ -6,6 +6,7 @@
 #include "muffmode/mm_captain.h"
 #include "muffmode/mm_items_rules.h"
 #include "muffmode/mm_ruleset.h"
+#include "muffmode/mm_skin.h"
 
 bool Pickup_Weapon(gentity_t *ent, gentity_t *other);
 void Use_Weapon(gentity_t *ent, gitem_t *inv);
@@ -770,10 +771,15 @@ static gentity_t *QuadHog_FindSpawn() {
 	return SelectDeathmatchSpawnPoint(nullptr, vec3_origin, SPAWN_FAR_HALF, true, true, false, true).spot;
 }
 
+static size_t ItemEntityCount() {
+	return min(static_cast<size_t>(globals.num_entities), static_cast<size_t>(game.maxentities));
+}
+
 static void QuadHod_ClearAll() {
 	gentity_t *ent;
+	gentity_t *end = &g_entities[ItemEntityCount()];
 
-	for (ent = g_entities; ent < &g_entities[globals.num_entities]; ent++) {
+	for (ent = g_entities; ent < end; ent++) {
 
 		if (!ent->inuse)
 			continue;
@@ -1041,9 +1047,10 @@ void Tech_SetupSpawn() {
 
 void Tech_Reset() {
 	gentity_t *ent;
-	uint32_t i;
+	size_t i;
+	const size_t entity_count = ItemEntityCount();
 
-	for (ent = g_entities + 1, i = 1; i < globals.num_entities; i++, ent++) {
+	for (ent = g_entities + 1, i = 1; i < entity_count; i++, ent++) {
 		if (ent->inuse)
 			if (ent->item && (ent->item->flags & IF_TECH))
 				G_FreeEntity(ent);
@@ -1407,9 +1414,15 @@ void SetRespawn(gentity_t *ent, gtime_t delay, bool hide_self) {
 
 	ent->nextthink = level.time + delay + t;
 
-	// 4x longer delay in horde
-	if (GT(GT_HORDE))
-		ent->nextthink += delay*3;
+	// In horde, non-weapon items respawn slower by g_horde_item_respawn_scale (default 4),
+	// so the effective time is base * g_dm_item_respawn_rate * g_horde_item_respawn_scale.
+	// Weapons are exempt: they use g_weapon_respawn_time directly so the configured value
+	// matches the real respawn time for server admins.
+	if (GT(GT_HORDE) && !((ent->item->flags & IF_WEAPON) && !(ent->item->flags & IF_AMMO))) {
+		float scale = g_horde_item_respawn_scale->value;
+		if (scale > 1.0f)
+			ent->nextthink += delay * (scale - 1.0f);
+	}
 
 	ent->think = RespawnItem;
 }
@@ -1538,6 +1551,9 @@ static bool Pickup_Powerup(gentity_t *ent, gentity_t *other) {
 			ec->client->follow_target = other;
 			ec->client->follow_update = true;
 			UpdateChaseCam(ec);
+
+			// [MuffMode] Auto-switched follow target; re-evaluate this viewer's skin overrides.
+			MM_RefreshSkinOverridesForViewer(ec);
 		}
 	}
 	/*
@@ -2429,14 +2445,32 @@ static void Drop_PowerArmor(gentity_t *ent, gitem_t *item) {
 
 //======================================================================
 
+static bool PlayerSlotIndex(const gentity_t *player, const size_t slot_count, size_t &index) {
+	if (player == nullptr || player->client == nullptr || !player->inuse || player->s.number == 0) {
+		return false;
+	}
+
+	index = player->s.number - 1;
+	return index < slot_count;
+}
+
 bool Entity_IsVisibleToPlayer(gentity_t *ent, gentity_t *player) {
+	if (ent == nullptr || player == nullptr || player->client == nullptr) {
+		return false;
+	}
+
 	// Q2Eaks make eyecam chase target invisible, but keep other client visible
 	if (g_eyecam->integer && player->client->follow_target && ent == player->client->follow_target)
 		return false;
 	else if (ent->client)
 		return true;
 
-	return !ent->item_picked_up_by[player->s.number - 1];
+	size_t player_index = 0;
+	if (!PlayerSlotIndex(player, ent->item_picked_up_by.size(), player_index)) {
+		return false;
+	}
+
+	return !ent->item_picked_up_by[player_index];
 }
 
 /*
@@ -2457,10 +2491,16 @@ TOUCH(Touch_Item) (gentity_t *ent, gentity_t *other, const trace_t &tr, bool oth
 		return; // not a grabbable item?
 
 	gitem_t *it = ent->item;
+	const bool use_coop_instanced_items = coop->integer && P_UseCoopInstancedItems();
+	size_t player_index = 0;
 
 	// already got this instanced item
-	if (coop->integer && P_UseCoopInstancedItems()) {
-		if (ent->item_picked_up_by[other->s.number - 1])
+	if (use_coop_instanced_items) {
+		if (!PlayerSlotIndex(other, ent->item_picked_up_by.size(), player_index)) {
+			return;
+		}
+
+		if (ent->item_picked_up_by[player_index])
 			return;
 	}
 
@@ -2497,10 +2537,8 @@ TOUCH(Touch_Item) (gentity_t *ent, gentity_t *other, const trace_t &tr, bool oth
 				gi.sound(other, CHAN_ITEM, gi.soundindex(it->pickup_sound), 1, ATTN_NORM, 0);
 			}
 		}
-		int32_t player_number = other->s.number - 1;
-
-		if (coop->integer && P_UseCoopInstancedItems() && !ent->item_picked_up_by[player_number]) {
-			ent->item_picked_up_by[player_number] = true;
+		if (use_coop_instanced_items && !ent->item_picked_up_by[player_index]) {
+			ent->item_picked_up_by[player_index] = true;
 
 			// [Paril-KEX] this is to fix a coop quirk where items
 			// that send a message on pick up will only print on the
@@ -3101,7 +3139,12 @@ static void Use_Flashlight(gentity_t *ent, gitem_t *inv) {
 constexpr size_t MAX_TEMP_POI_POINTS = 128;
 
 void Compass_Update(gentity_t *ent, bool first) {
-	vec3_t *&points = level.poi_points[ent->s.number - 1];
+	size_t player_index = 0;
+	if (!PlayerSlotIndex(ent, MAX_SPLIT_PLAYERS, player_index)) {
+		return;
+	}
+
+	vec3_t *&points = level.poi_points[player_index];
 
 	// deleted for some reason
 	if (!points)
@@ -3109,6 +3152,12 @@ void Compass_Update(gentity_t *ent, bool first) {
 
 	if (!ent->client->help_draw_points)
 		return;
+	if (ent->client->help_draw_count == 0 ||
+		ent->client->help_draw_count > MAX_TEMP_POI_POINTS + 1 ||
+		ent->client->help_draw_index >= ent->client->help_draw_count) {
+		ent->client->help_draw_points = false;
+		return;
+	}
 	if (ent->client->help_draw_time >= level.time)
 		return;
 
@@ -3145,6 +3194,10 @@ void Compass_Update(gentity_t *ent, bool first) {
 }
 
 static void Use_Compass(gentity_t *ent, gitem_t *inv) {
+	if (ent == nullptr || ent->client == nullptr) {
+		return;
+	}
+
 	// [MuffMode] Compass toggles ready status in deathmatch
 	if (deathmatch->integer) {
 		MM_CmdReadyUp(ent);
@@ -3161,7 +3214,13 @@ static void Use_Compass(gentity_t *ent, gitem_t *inv) {
 	ent->client->help_poi_location = level.current_poi;
 	ent->client->help_poi_image = level.current_poi_image;
 
-	vec3_t *&points = level.poi_points[ent->s.number - 1];
+	size_t player_index = 0;
+	if (!PlayerSlotIndex(ent, MAX_SPLIT_PLAYERS, player_index)) {
+		P_SendLevelPOI(ent);
+		return;
+	}
+
+	vec3_t *&points = level.poi_points[player_index];
 
 	if (!points)
 		points = (vec3_t *)gi.TagMalloc(sizeof(vec3_t) * (MAX_TEMP_POI_POINTS + 1), TAG_LEVEL);
@@ -3181,13 +3240,20 @@ static void Use_Compass(gentity_t *ent, gitem_t *inv) {
 	PathInfo info;
 
 	if (gi.GetPathToGoal(request, info)) {
-		// TODO: optimize points?
+		const size_t path_point_count = static_cast<size_t>(clamp(info.numPathPoints, 0, static_cast<int32_t>(MAX_TEMP_POI_POINTS)));
+
+		if (path_point_count == 0) {
+			P_SendLevelPOI(ent);
+			gi.local_sound(ent, CHAN_AUTO, gi.soundindex("misc/help_marker.wav"), 1.f, ATTN_NORM, 0, GetUnicastKey());
+			return;
+		}
+
 		ent->client->help_draw_points = true;
-		ent->client->help_draw_count = min((size_t)info.numPathPoints, MAX_TEMP_POI_POINTS);
+		ent->client->help_draw_count = path_point_count + 1;
 		ent->client->help_draw_index = 1;
 
 		// remove points too close to the player so they don't have to backtrack
-		for (int i = 1; i < 1 + ent->client->help_draw_count; i++) {
+		for (size_t i = 1; i < ent->client->help_draw_count; i++) {
 			float distance = (points[i] - ent->s.origin).length();
 			if (distance > 192) {
 				break;
@@ -3199,13 +3265,12 @@ static void Use_Compass(gentity_t *ent, gitem_t *inv) {
 		// create an extra point in front of us if we're facing away from the first real point
 		float d = ((*(points + ent->client->help_draw_index)) - ent->s.origin).normalized().dot(ent->client->v_forward);
 
-		if (d < 0.3f) {
+		if (d < 0.3f && ent->client->help_draw_index > 0) {
 			vec3_t p = ent->s.origin + (ent->client->v_forward * 64.f);
 
 			trace_t tr = gi.traceline(ent->s.origin + vec3_t{ 0.f, 0.f, (float)ent->viewheight }, p, nullptr, MASK_SOLID);
 
 			ent->client->help_draw_index--;
-			ent->client->help_draw_count++;
 
 			if (tr.fraction < 1.0f)
 				tr.endpos += tr.plane.normal * 8.f;

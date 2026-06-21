@@ -168,6 +168,7 @@ Use `callvote <command> [arg]` or `cv <command> [arg]`.
 | --- | --- | --- |
 | `g_allow_admin` | `1` | Allows admin powers. |
 | `g_allow_custom_skins` | `1` | Allows custom player models and skins. |
+| `g_allow_skin_overrides` | `1` | Allows players to re-skin enemies/teammates on their own screen via the `eskin`/`tskin` commands (team games only). |
 | `g_allow_forfeit` | `1` | Allows Duel forfeits. |
 | `g_allow_kill` | `1` | Allows the `kill` suicide command. |
 | `g_allow_mymap` | `1` | Allows MyMap queueing. |
@@ -184,6 +185,7 @@ Use `callvote <command> [arg]` or `cv <command> [arg]`.
 | Cvar | Default | Purpose |
 | --- | --- | --- |
 | `g_dm_allow_no_humans` | `1` | Allows matches with only bots. |
+| `g_dm_death_scoreboard` | `1` | Automatically opens the scoreboard when a player dies in deathmatch. |
 | `g_dm_do_warmup` | `1` | Enables match warmup. |
 | `g_dm_do_readyup` | `0` | Requires ready-up during warmup. |
 | `g_dm_force_join` | `0` | Forces players to join instead of staying spectator, depending on mode. |
@@ -234,6 +236,7 @@ Use `callvote <command> [arg]` or `cv <command> [arg]`.
 | `g_corpse_sink_time` | `15` | Seconds before corpses sink and disappear. |
 | `g_damage_scale` | `1` | Global damage scale. |
 | `g_dm_holdable_adrenaline` | `1` | Allows holdable Adrenaline in deathmatch. |
+| `g_dm_item_respawn_rate` | `1.0` | Global multiplier on every item's respawn time (weapons included). |
 | `g_dm_no_self_damage` | `0` | Disables self damage after knockback calculation. |
 | `g_dm_powerup_drop` | `1` | Drops carried powerups on death. |
 | `g_dm_powerups_minplayers` | `0` | Minimum players required for powerup pickup; `0` disables. |
@@ -254,7 +257,7 @@ Use `callvote <command> [arg]` or `cv <command> [arg]`.
 | `g_vampiric_health_max` | `9999` | Maximum health cap from vampiric damage. |
 | `g_vampiric_percentile` | `0.67f` | Health percentile bonus for vampiric damage. |
 | `g_weapon_projection` | `0` | Weapon projection offset mode. |
-| `g_weapon_respawn_time` | `30` | Weapon respawn time in seconds. |
+| `g_weapon_respawn_time` | `30` | Weapon respawn time in seconds. This is the literal time even in Horde — weapons are not affected by `g_horde_item_respawn_scale`. Effective time is `g_weapon_respawn_time` × `g_dm_item_respawn_rate`. |
 
 ## Interface And Debug Cvars
 
@@ -303,6 +306,18 @@ These files can contain any server commands, cvar settings, map lists, or other 
 
 An optional `gt-HORDE-endless.cfg` preset ships alongside `gt-HORDE.cfg`; `exec` it (or set `roundlimit 0`) to run endless Horde. See [Horde Late-Wave & Endless](#horde-late-wave--endless).
 
+## Horde Item Respawn
+
+In Horde, non-weapon items (health, ammo, armor, powerups) respawn slower than in other modes. The
+effective respawn time is `base × g_dm_item_respawn_rate × g_horde_item_respawn_scale`, where `base`
+is the item's built-in respawn time. **Weapons are exempt** from `g_horde_item_respawn_scale` — they
+respawn at exactly `g_weapon_respawn_time` (× `g_dm_item_respawn_rate`), so the configured value is the
+real in-game time. `gt-HORDE.cfg` ships `g_weapon_respawn_time 60` and `g_horde_item_respawn_scale 4`.
+
+| Cvar | Default | Purpose |
+| --- | --- | --- |
+| `g_horde_item_respawn_scale` | `4` | Multiplies non-weapon item respawn time in Horde. `1` disables the slowdown; values below `1` are treated as `1`. Weapons are unaffected. |
+
 ## Horde Late-Wave & Endless
 
 Horde waves 1-12 are tuned content. Past wave 12 — reached either by setting `roundlimit 0` (endless)
@@ -323,6 +338,15 @@ champions more frequent (early and late alike).
 | `g_horde_weight_floor` | `0.12` | Minimum monster spawn weight past the peak; keeps cheap chaff spendable. |
 | `g_horde_theme_min_monsters` | `2` | Minimum on-theme monsters required at a wave for that theme to roll. |
 | `g_horde_points_max` | `0` | Optional hard ceiling on the per-wave point budget; `0` disables (the taper handles growth). |
+
+## Horde Enhanced AI
+
+Master switch for experimental horde AI (Tier 0 orchestration in `mm_horde` plus Tier 1 vanilla hooks).
+Defaults to `1` (enabled); set to `0` to restore legacy horde monster targeting and pacing.
+
+| Cvar | Default | Purpose |
+| --- | --- | --- |
+| `g_horde_enhanced_ai` | `1` | Target spread, spawn tactics, adaptive pacing, per-spawn roles, retarget-on-kill, extended aggro, and attack stagger. |
 
 ## Debug-Only Weapon Balance Cvars
 

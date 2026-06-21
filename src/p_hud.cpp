@@ -3,6 +3,7 @@
 #include "g_local.h"
 #include "g_statusbar.h"
 #include "muffmode/mm_duel.h"
+#include "muffmode/mm_red_rover_rules.h"
 #include "muffmode/mm_vote_menu.h"
 
 /*
@@ -604,7 +605,7 @@ void DeathmatchScoreboardMessage(gentity_t *ent, gentity_t *killer) {
 	// rejects with "if with no matching endif" (a fatal C++ throw -> crash to desktop).
 	// Reserve room so the footer always survives. Red Rover makes this easy to hit because
 	// it draws a team-colour tag for every player row (see below), not just the local one.
-	const size_t footer_reserve = level.intermission_time ? 320 : 96;
+	const bool intermission = level.intermission_time != 0_sec;
 
 	for (size_t i = 0; i < total; i++) {
 		cl = &game.clients[level.sorted_clients[i]];
@@ -635,7 +636,7 @@ void DeathmatchScoreboardMessage(gentity_t *ent, gentity_t *killer) {
 			fmt::format_to(std::back_inserter(entry), FMT_STRING("xv {} yv {} picn {} "), x + 16, y + 16, "wheel/p_compass_selected");
 		}
 
-		if (string.length() + entry.length() > MAX_STRING_CHARS - footer_reserve)
+		if (!MM_ScoreboardCanAppend(string.length(), entry.length(), MAX_STRING_CHARS, intermission))
 			break;
 
 		string += entry;
@@ -646,7 +647,7 @@ void DeathmatchScoreboardMessage(gentity_t *ent, gentity_t *killer) {
 			FMT_STRING("client {} {} {} {} {} {} "),
 			x, y, level.sorted_clients[i], cl->resp.score, cl->ping, (int32_t)(level.time - cl->resp.entertime).minutes());
 
-		if (string.length() + entry.length() > MAX_STRING_CHARS - footer_reserve)
+		if (!MM_ScoreboardCanAppend(string.length(), entry.length(), MAX_STRING_CHARS, intermission))
 			break;
 
 		string += entry;
@@ -1297,8 +1298,8 @@ void G_SetStats(gentity_t *ent) {
 	}
 	ent->client->ps.stats[STAT_HEALTH] = ent->health;
 
-	// Set team_id for client-side team border display
-	ent->client->ps.team_id = (uint8_t)ent->client->sess.team;
+	// Engine team_id (1/2) for lobby say_team and client team border HUD
+	ent->client->ps.team_id = P_EngineTeamIndex(ent->client->sess.team);
 
 	// Red Rover: persistent team logo on the HUD (rendered top-centre by the
 	// statusbar) so the player always knows which side they're on after a defect.
@@ -1766,7 +1767,7 @@ void G_SetSpectatorStats(gentity_t *ent) {
 		G_SetStats(ent);
 	else
 		// Still set team_id even when following (in case we follow someone on a team)
-		cl->ps.team_id = (uint8_t)cl->sess.team;
+		cl->ps.team_id = P_EngineTeamIndex(cl->sess.team);
 
 	cl->ps.stats[STAT_SPECTATOR] = 1;
 

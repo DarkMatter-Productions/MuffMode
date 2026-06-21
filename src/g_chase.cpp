@@ -1,8 +1,12 @@
 // Copyright (c) ZeniMax Media Inc.
 // Licensed under the GNU General Public License 2.0.
+#include <cerrno>
+#include <limits>
+
 #include "g_local.h"
 // [MuffMode] Join menu lives in muffmode/mm_menu
 #include "muffmode/mm_menu.h"
+#include "muffmode/mm_skin.h"
 #include "muffmode/mm_team.h"
 
 void FreeFollower(gentity_t *ent) {
@@ -25,6 +29,9 @@ void FreeFollower(gentity_t *ent) {
 	ent->client->ps.screen_blend = {};
 	ent->client->ps.damage_blend = {};
 	ent->client->ps.rdflags = RDF_NONE;
+
+	// [MuffMode] No longer following anyone; restore canonical skins for this viewer.
+	MM_RefreshSkinOverridesForViewer(ent);
 }
 
 void FreeClientFollowers(gentity_t *ent) {
@@ -197,6 +204,24 @@ static void SanitizeString(const char *in, char *out) {
 	*out = '\0';
 }
 
+static bool ParseClientSlot(const char *s, uint32_t &idnum) {
+	if (!s || !*s) {
+		return false;
+	}
+
+	char *end = nullptr;
+	errno = 0;
+	const unsigned long value = strtoul(s, &end, 10);
+	if (end == s || *end != '\0' || errno == ERANGE ||
+		value > static_cast<unsigned long>(std::numeric_limits<uint32_t>::max()) ||
+		value >= static_cast<unsigned long>(game.maxclients)) {
+		return false;
+	}
+
+	idnum = static_cast<uint32_t>(value);
+	return true;
+}
+
 /*
 ==================
 ClientNumberFromString
@@ -210,12 +235,14 @@ static int ClientNumberFromString(gentity_t *to, char *s) {
 	uint32_t	idnum;
 	char		s2[MAX_STRING_CHARS];
 	char		n2[MAX_STRING_CHARS];
+
+	if (!s || !*s)
+		return -1;
 	
 	// numeric values are just slot numbers
 	if (s[0] >= '0' && s[0] <= '9') {
-		idnum = atoi(s);
-		if ((unsigned)idnum >= (unsigned)game.maxclients) {
-			gi.LocClient_Print(to, PRINT_HIGH, "Bad client slot: {}\n\"", idnum);
+		if (!ParseClientSlot(s, idnum)) {
+			gi.LocClient_Print(to, PRINT_HIGH, "Bad client slot: {}\n\"", s);
 			return -1;
 		}
 
@@ -266,6 +293,9 @@ void FollowNext(gentity_t *ent) {
 	ent->client->follow_target = e;
 	ent->client->follow_update = true;
 	ent->client->sess.spectator_state = SPECTATOR_FOLLOW;
+
+	// [MuffMode] Follow target changed; re-evaluate this viewer's skin overrides.
+	MM_RefreshSkinOverridesForViewer(ent);
 }
 
 void FollowPrev(gentity_t *ent) {
@@ -292,13 +322,20 @@ void FollowPrev(gentity_t *ent) {
 	ent->client->follow_target = e;
 	ent->client->follow_update = true;
 	ent->client->sess.spectator_state = SPECTATOR_FOLLOW;
+
+	// [MuffMode] Follow target changed; re-evaluate this viewer's skin overrides.
+	MM_RefreshSkinOverridesForViewer(ent);
 }
 
 void FollowCycle(gentity_t *ent, int dir) {
 	int			clientnum;
 	int			original;
+	const int	max_clients = static_cast<int>(game.maxclients);
 	gclient_t	*cl = ent->client;
 	gentity_t		*follow_ent = nullptr;
+
+	if (max_clients <= 0 || dir == 0)
+		return;
 
 	// if they are playing a duel game, count as a loss
 	if (GT(GT_DUEL) && ent->client->sess.team == TEAM_FREE)
@@ -308,14 +345,18 @@ void FollowCycle(gentity_t *ent, int dir) {
 	if (cl->sess.spectator_state == SPECTATOR_NOT && !cl->eliminated)
 		SetTeam(ent, TEAM_SPECTATOR, false, false, false);
 
-	clientnum = cl->sess.spectator_client;
+	clientnum = clamp(static_cast<int>(cl->sess.spectator_client), 0, max_clients - 1);
 	original = clientnum;
 	do {
-		clientnum = (clientnum + dir) % game.maxclients;
+		if (dir > 0)
+			clientnum = (clientnum + 1 >= max_clients) ? 0 : clientnum + 1;
+		else
+			clientnum = (clientnum <= 0) ? max_clients - 1 : clientnum - 1;
+
 		follow_ent = &g_entities[clientnum + 1];
 
 		// can only follow connected clients
-		if (!follow_ent->client->pers.connected)
+		if (!follow_ent->client || !follow_ent->client->pers.connected)
 			continue;
 		
 		// can't follow another spectator
@@ -337,6 +378,9 @@ void FollowCycle(gentity_t *ent, int dir) {
 		ent->client->follow_target = follow_ent;
 		ent->client->follow_update = true;
 
+		// [MuffMode] Follow target changed; re-evaluate this viewer's skin overrides.
+		MM_RefreshSkinOverridesForViewer(ent);
+
 		return;
 	} while (clientnum != original);
 
@@ -352,6 +396,9 @@ void GetFollowTarget(gentity_t *ent) {
 			ent->client->follow_update = true;
 			ent->client->sess.spectator_state = SPECTATOR_FOLLOW;
 			UpdateChaseCam(ent);
+
+			// [MuffMode] Acquired a follow target; re-evaluate this viewer's skin overrides.
+			MM_RefreshSkinOverridesForViewer(ent);
 			return;
 		}
 	}

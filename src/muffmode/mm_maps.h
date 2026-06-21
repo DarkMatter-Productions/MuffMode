@@ -6,6 +6,7 @@
 struct gentity_t;
 
 // [MuffMode] Map-list module entry points.
+bool MM_IsSafeMapToken(const char *mapname);
 void MM_ShuffleMapList();
 void MM_GametypeChangeMapFirst();
 bool MM_TryBeginIntermissionFromMapList();

@@ -4,6 +4,7 @@
 #include "g_local.h"
 #include "g_debug_log.h"
 #include "muffmode/mm_maps.h"
+#include "muffmode/mm_nav_bake.h"
 
 static void Svcmd_Test_f() {
 	gi.LocClient_Print(nullptr, PRINT_HIGH, "Svcmd_Test_f()\n");
@@ -30,6 +31,13 @@ static void SVCmd_GametypeChangeMapFirst_f() {
 	MM_GametypeChangeMapFirst();
 }
 
+// [MuffMode] Generate a walk-only bot nav file for the current map.
+// Usage: sv nav_bake [grid]  (grid = lattice spacing in units; default 96)
+static void SVCmd_NavBake_f() {
+	const float grid = gi.argc() > 2 ? (float)atof(gi.argv(2)) : 0.0f;
+	MM_NavBake(grid);
+}
+
 void ServerCommand() {
 	const char *cmd = gi.argv(1);
 
@@ -39,6 +47,8 @@ void ServerCommand() {
 		SVCmd_NextMap_f();
 	else if (Q_strcasecmp(cmd, "gt_changemap_first") == 0)
 		SVCmd_GametypeChangeMapFirst_f();
+	else if (Q_strcasecmp(cmd, "nav_bake") == 0)
+		SVCmd_NavBake_f();
 	else
 		gi.LocClient_Print(nullptr, PRINT_HIGH, "Unknown server command \"{}\"\n", cmd);
 }

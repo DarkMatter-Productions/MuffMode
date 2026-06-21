@@ -988,7 +988,8 @@ DIE(player_die) (gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 			TossClientItems(self);
 		Weapon_Grapple_DoReset(self->client);
 
-		if (deathmatch->integer && !self->client->showscores)
+		// [MuffMode] Optional auto-scoreboard on death (g_dm_death_scoreboard)
+		if (deathmatch->integer && g_dm_death_scoreboard->integer && !self->client->showscores)
 			Cmd_Help_f(self); // show scores
 
 		if (coop->integer && !P_UseCoopInstancedItems()) {
@@ -2213,23 +2214,27 @@ void ClientRespawn(gentity_t *ent) {
 
 		bool rr_defected = false;
 		if (GT(GT_RR) && level.match_state == matchst_t::MATCH_IN_PROGRESS) {
-			// Red Rover: defect to the opposing team on death. Only switch while a
-			// teammate remains behind, so the swap never empties a team (which would
-			// stall play, e.g. collapse a 1v1 onto a single team).
+			// Red Rover: defect to the opposing team on death.
 			team_t cur = ent->client->sess.team;
-			int teammates_left = 0;
+			team_t other = Teams_OtherTeam(cur);
+			int teammates_left = 0, opponents = 0;
 
 			for (auto ec : active_clients()) {
 				if (ec == ent || !ClientIsPlaying(ec->client))
 					continue;
 				if (ec->client->sess.team == cur)
 					teammates_left++;
+				else if (ec->client->sess.team == other)
+					opponents++;
 			}
 
-			// only a player on an actual team can defect; guard against a corrupt team
-			// value so Teams_OtherTeam() can never strand someone on spectator.
-			if (teammates_left > 0 && (cur == TEAM_RED || cur == TEAM_BLUE)) {
-				ent->client->sess.team = Teams_OtherTeam(cur);
+			// The last player on a team defects too - emptying the team is exactly what ends
+			// the round (see CheckDMRoundState) - as long as there's an opposing team to land
+			// on. The team check also guards against a corrupt team value so Teams_OtherTeam()
+			// can never strand someone on spectator.
+			if ((cur == TEAM_RED || cur == TEAM_BLUE) &&
+				(teammates_left > 0 || opponents > 0)) {
+				ent->client->sess.team = other;
 				G_AssignPlayerSkin(ent, ent->client->pers.skin);
 				rr_defected = true;
 			}
@@ -2269,7 +2274,7 @@ void P_AssignClientSkinnum(gentity_t *ent) {
 	if (InCoopStyle())
 		packed.team_index = 1; // all players are teamed in coop
 	else if (Teams())
-		packed.team_index = ent->client->sess.team;
+		packed.team_index = P_EngineTeamIndex(ent->client->sess.team);
 	else
 		packed.team_index = 0;
 
@@ -2279,6 +2284,8 @@ void P_AssignClientSkinnum(gentity_t *ent) {
 		packed.poi_icon = 0;
 
 	ent->s.skinnum = packed.skinnum;
+	ent->client->ps.team_id = packed.team_index;
+	ent->sv.team = packed.team_index;
 }
 
 // [Paril-KEX] send player level POI
@@ -3403,6 +3410,8 @@ bool ClientConnect(gentity_t *ent, char *userinfo, const char *social_id, bool i
 			ent->client->sess.pc.killbeep_num = 1;
 			ent->client->sess.pc.follow_killer = false;
 			ent->client->sess.pc.follow_powerup = false;
+			ent->client->sess.pc.enemy_skin[0] = 0;
+			ent->client->sess.pc.team_skin[0] = 0;
 
 			InitClientResp(ent->client);
 		}

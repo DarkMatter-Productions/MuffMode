@@ -3,16 +3,40 @@
 
 #include "g_local.h"
 #include "muffmode/mm_captain.h"
+#include "muffmode/mm_command_contracts.h"
 #include "muffmode/mm_duel.h"
+#include "muffmode/mm_gametype.h"
 #include "muffmode/mm_ghost.h"
 #include "muffmode/mm_horde.h"
 #include "muffmode/mm_match.h"
+#include "muffmode/mm_red_rover_rules.h"
 #include "muffmode/mm_team.h"
 #include "monsters/m_player.h"	// corpse frames on match reset
 
 extern cvar_t *g_horde_champions;
 extern cvar_t *g_horde_champion_max_per_run;
 extern cvar_t *g_horde_champion_chance;
+
+static gclient_t *MM_MatchSortedConnectedClient(size_t slot)
+{
+	if (slot >= q_countof(level.sorted_clients))
+		return nullptr;
+
+	const int client_num = level.sorted_clients[slot];
+	if (client_num < 0 || client_num >= (int)game.maxclients)
+		return nullptr;
+
+	gclient_t *client = &game.clients[client_num];
+	if (!client->pers.connected)
+		return nullptr;
+
+	return client;
+}
+
+static bool MM_IsConnectedClientEntity(gentity_t *ent)
+{
+	return ent && ent->inuse && ent->client && ent->client->pers.connected;
+}
 
 static void Monsters_KillAll() {
 	for (size_t i = 0; i < globals.max_entities; i++) {
@@ -294,7 +318,7 @@ Round_StartNew
 =============
 */
 static bool Round_StartNew() {
-	if (!(GTF(GTF_ROUNDS))) {
+	if (!MM_GametypeHasFlag(GTF_ROUNDS)) {
 		level.round_state = roundst_t::ROUND_NONE;
 		level.round_state_timer = 0_sec;
 		return false;
@@ -306,6 +330,11 @@ static bool Round_StartNew() {
 
 	if (!MM_Horde_ShouldSkipEntitiesReset())
 		Entities_Reset(true, false, false);
+
+	// Red Rover: re-split the teams evenly at the start of every round, so each round opens
+	// balanced after the previous one funnelled everyone onto one side.
+	if (GT(GT_RR))
+		TeamShuffle();
 
 	if (GT(GT_STRIKE)) {
 		// A "round" is a pair of turns: each team attacks once. strike_turn tracks which
@@ -351,7 +380,7 @@ Round_End
 */
 void Round_End() {
 	// reset if not round based
-	if (!(GTF(GTF_ROUNDS))) {
+	if (!MM_GametypeHasFlag(GTF_ROUNDS)) {
 		level.round_state = roundst_t::ROUND_NONE;
 		level.round_state_timer = 0_sec;
 		return;
@@ -439,6 +468,11 @@ void Match_Start() {
 		level.round_number = 0;
 	}
 
+	// Red Rover ends after roundlimit rounds, so the count must start at 0 each match
+	// (Horde manages its own starting wave; CA/Strike decide by team score, not this).
+	if (GT(GT_RR))
+		level.round_number = 0;
+
 	if (Round_StartNew())
 		return;
 
@@ -489,9 +523,9 @@ static bool CheckReady() {
 	if (!g_dm_do_readyup->integer)
 		return true;
 
-	uint8_t count_ready, count_humans, count_bots;
-
-	count_ready = count_humans = count_bots = 0;
+	int count_ready = 0;
+	int count_humans = 0;
+	int count_bots = 0;
 	for (auto ec : active_clients()) {
 		if (!ClientIsPlaying(ec->client))
 			continue;
@@ -522,10 +556,79 @@ static bool CheckReady() {
 		return false;
 
 	// start if over min ready percentile
-	if (((float)count_ready / (float)count_humans) * 100.0f >= g_warmup_ready_percentage->value * 100.0f)
+	const float ready_percentage = clamp(g_warmup_ready_percentage->value, 0.0f, 1.0f);
+	if (((float)count_ready / (float)count_humans) >= ready_percentage)
 		return true;
 
 	return false;
+}
+
+/*
+=============
+MM_CheckLastManStanding
+
+In the round team modes (Clan Arena, CaptureStrike, Red Rover) a player becomes the
+"last one standing" the moment their team is reduced to a single survivor - whether the
+others were eliminated (CA/Strike), defected (Red Rover), disconnected, or moved to
+spectator. Horde is co-op: the whole wave shares one side, so it fires for the last
+fighter still in the wave once everyone else has been eliminated. Polled each frame
+while the round is live; the survivor count is remembered so we only fire on the
+>1 -> 1 edge (not every frame, and not at round start for a side that began short-handed).
+The lone survivor gets a brief centerprint in the same slot as "FIGHT!";
+ClientEndServerFrame clears it after a few seconds.
+=============
+*/
+static void MM_CheckLastManStanding(void) {
+	if (notGT(GT_CA) && notGT(GT_STRIKE) && notGT(GT_RR) && notGT(GT_HORDE))
+		return;
+
+	auto announce_survivor = [](gentity_t *survivor) {
+		gi.LocClient_Print(survivor, PRINT_CENTER, "You are the last one standing!");
+		survivor->client->last_standing_clear_time = level.time + 3_sec;
+	};
+
+	// Horde is co-op survival: all fighters share one side against the monsters, so the
+	// "last one standing" is the final fighter still in the wave. Count fighters who have
+	// not been eliminated (out of lives) rather than current health - a fighter who is
+	// briefly dead but still has lives will respawn, so they are not yet the last survivor.
+	if (GT(GT_HORDE)) {
+		gentity_t *survivor = nullptr;
+		int count = 0;
+
+		for (auto ec : active_clients()) {
+			if (!ClientIsPlaying(ec->client) || ec->client->eliminated)
+				continue;
+			count++;
+			survivor = ec;
+		}
+
+		if (level.last_standing_count[TEAM_FREE] > 1 && count == 1 && survivor)
+			announce_survivor(survivor);
+
+		level.last_standing_count[TEAM_FREE] = count;
+		return;
+	}
+
+	for (team_t team : { TEAM_RED, TEAM_BLUE }) {
+		gentity_t *survivor = nullptr;
+		int count = 0;
+
+		for (auto ec : active_clients()) {
+			if (ec->client->sess.team != team || !ClientIsPlaying(ec->client))
+				continue;
+			// Red Rover keeps everyone currently on the team (death there defects rather
+			// than eliminates); CA/Strike count only living, non-eliminated round players.
+			if (GT(GT_RR) || (!ec->client->eliminated && ec->health > 0)) {
+				count++;
+				survivor = ec;
+			}
+		}
+
+		if (level.last_standing_count[team] > 1 && count == 1 && survivor)
+			announce_survivor(survivor);
+
+		level.last_standing_count[team] = count;
+	}
 }
 
 /*
@@ -534,7 +637,7 @@ CheckDMRoundState
 =============
 */
 static void CheckDMRoundState(void) {
-	if (!(GTF(GTF_ROUNDS)))
+	if (!MM_GametypeHasFlag(GTF_ROUNDS))
 		return;
 
 	if (level.match_state != matchst_t::MATCH_IN_PROGRESS)
@@ -557,6 +660,21 @@ static void CheckDMRoundState(void) {
 
 			level.round_state = roundst_t::ROUND_IN_PROGRESS;
 			level.round_state_timer = level.time + gtime_t::from_min(roundtimelimit->value);
+
+			// fresh round/wave: seed survivor counts to 0 so MM_CheckLastManStanding() doesn't
+			// fire for a side that simply starts with a single player.
+			for (int &c : level.last_standing_count)
+				c = 0;
+
+			// Red Rover: snapshot each player's score and clear their per-round damage so the
+			// round-end winner is whoever fragged the most *this* round (resp.score minus the
+			// snapshot), tie-broken by damage dealt this round. Frozen players can't score or
+			// deal damage during the countdown, so the baseline is accurate.
+			if (GT(GT_RR))
+				for (auto ec : active_clients()) {
+					ec->client->resp.round_start_score = ec->client->resp.score;
+					ec->client->resp.round_dmg = 0;
+				}
 
 			// Strike manages round_number/turn in Round_StartNew(); others advance it here.
 			if (GT(GT_HORDE))
@@ -583,12 +701,15 @@ static void CheckDMRoundState(void) {
 
 	// end round
 	if (level.round_state == roundst_t::ROUND_IN_PROGRESS) {
+		// announce a lone survivor (death/defection/disconnect/spectate all reduce the count)
+		MM_CheckLastManStanding();
+
 		auto is_living_round_player = [](gentity_t *ent) {
 			return ent->client && ClientIsPlaying(ent->client) &&
 				!ent->client->eliminated && ent->health > 0;
 		};
 
-		switch (g_gametype->integer) {
+		switch (MM_CurrentGametype()) {
 		case GT_CA:
 		case GT_STRIKE:
 		{
@@ -641,6 +762,58 @@ static void CheckDMRoundState(void) {
 			if (MM_Horde_UpdateRoundInProgress())
 				Round_End();
 			return;
+
+		case GT_RR:
+		{
+			// Red Rover: the round ends when the defect mechanic has funnelled everyone
+			// onto a single team. Frags are individual and already counted per kill, so
+			// no team score is awarded here - the round simply resets and reshuffles
+			// (Round_StartNew). It also ends if the round time limit expires.
+			int count_red = 0, count_blue = 0;
+
+			for (auto ec : active_clients()) {
+				if (!ClientIsPlaying(ec->client))
+					continue;
+				if (ec->client->sess.team == TEAM_RED)
+					count_red++;
+				else if (ec->client->sess.team == TEAM_BLUE)
+					count_blue++;
+			}
+
+				const bool team_cleared = MM_RedRoverRoundShouldEnd(count_red, count_blue);
+				const bool time_expired = roundtimelimit->value > 0 && level.time >= level.round_state_timer;
+				if (team_cleared || time_expired) {
+				// Round winner = whoever fragged the most this round (score gained since the
+				// round-start snapshot), tie-broken by damage dealt this round. Remaining
+				// ties resolve to the first one found.
+				gclient_t *top = nullptr;
+				int best_round_frags = 0, best_round_dmg = 0;
+				for (auto ec : active_clients()) {
+					if (!ClientIsPlaying(ec->client))
+						continue;
+					int round_frags = ec->client->resp.score - ec->client->resp.round_start_score;
+					int round_dmg = ec->client->resp.round_dmg;
+					if (!top || round_frags > best_round_frags ||
+						(round_frags == best_round_frags && round_dmg > best_round_dmg)) {
+						top = ec->client;
+						best_round_frags = round_frags;
+						best_round_dmg = round_dmg;
+					}
+				}
+
+				if (top)
+					gi.LocBroadcast_Print(PRINT_CENTER, "Round winner:\n{}\nwith {} {} ({} dmg)", top->resp.netname,
+						best_round_frags, best_round_frags == 1 ? "frag" : "frags", best_round_dmg);
+				else
+					gi.LocBroadcast_Print(PRINT_CENTER, "Round over.");
+				AnnouncerSound(world, "round_won", "ctf/flagcap.wav", true);
+
+				// Round_End() sets the shared 3s gate that holds the result on screen before
+				// the next round counts down - consistent with CA/Strike/Horde.
+				Round_End();
+			}
+			return;
+		}
 
 		}
 
@@ -734,9 +907,14 @@ static void CheckDMCountdown(void) {
 
 	gtime_t base = (level.round_state == roundst_t::ROUND_COUNTDOWN) ? level.round_state_timer : level.match_state_timer;
 	int t = (base + 1_sec - level.time).seconds<int>();
+	if (t <= 0) {
+		if (level.countdown_check)
+			level.countdown_check = 0_sec;
+		return;
+	}
 
 	if (!level.countdown_check || level.countdown_check.seconds<int>() > t) {
-		if (t > 0 && (!(t % 10) || t < 10)) {
+		if (!(t % 10) || t < 10) {
 			AnnouncerSound(world, nullptr, G_Fmt("world/{}{}.wav", t, t >= 20 ? "sec" : "").data(), false);
 			//gi.positioned_sound(world->s.origin, world, CHAN_AUTO | CHAN_RELIABLE, gi.soundindex(G_Fmt("world/{}{}.wav", t, t >= 20 ? "sec" : "").data()), 1, ATTN_NONE, 0);
 			if (t <= 3) {
@@ -754,7 +932,7 @@ CheckDMMatchEndWarning
 =============
 */
 static void CheckDMMatchEndWarning(void) {
-	if (GTF(GTF_ROUNDS))
+	if (MM_GametypeHasFlag(GTF_ROUNDS))
 		return;
 
 	if (level.match_state != matchst_t::MATCH_IN_PROGRESS || !timelimit->value) {
@@ -764,6 +942,11 @@ static void CheckDMMatchEndWarning(void) {
 	}
 
 	int t = (level.match_time + gtime_t::from_min(timelimit->value) - level.time).seconds<int>();	// +1;
+	if (t <= 0) {
+		if (level.matchendwarn_check)
+			level.matchendwarn_check = 0_sec;
+		return;
+	}
 
 	if (!level.matchendwarn_check || level.matchendwarn_check.seconds<int>() > t) {
 		if (t && (t == 30 || t == 20 || t <= 10)) {
@@ -849,7 +1032,7 @@ static void CheckDMWarmupState(void) {
 
 	// Red Rover: never let a connected client sit uninitialised (TEAM_NONE) during a
 	// live match - that strands them off every team (grey tag, missing from the
-	// scoreboard) and skews the counts the reshuffle relies on. Deliberate spectators
+	// scoreboard) and skews the per-team counts the round logic relies on. Deliberate spectators
 	// (TEAM_SPECTATOR) are left alone; leaving the match is allowed.
 	if (GT(GT_RR) && level.match_state == matchst_t::MATCH_IN_PROGRESS) {
 		for (auto ec : active_clients())
@@ -857,12 +1040,15 @@ static void CheckDMWarmupState(void) {
 				SetTeam(ec, PickTeam(-1), false, false, false);
 	}
 
-	// Red Rover: a disconnect (or any swap) can collapse everyone onto one team.
-	// Friendly fire is off, so no kills/defects can rebalance it — reshuffle live so
-	// play continues instead of stalemating until the timelimit.
-	if (GT(GT_RR) && level.match_state == matchst_t::MATCH_IN_PROGRESS &&
+	// Red Rover: a match ends with everyone funnelled onto one team, and that team
+	// assignment carries into warmup / the next map - leaving the other side empty so the
+	// next match can never reach the player/balance requirements and start. Reshuffle during
+	// warmup to restore balance. NOT during a live match: there an emptied team is the
+	// round-end trigger (CheckDMRoundState), and the next round reshuffles in Round_StartNew.
+	if (GT(GT_RR) && level.match_state < matchst_t::MATCH_IN_PROGRESS &&
 		level.num_playing_clients > 1 && (!level.num_playing_red || !level.num_playing_blue)) {
 		TeamShuffle();
+		CalculateRanks();
 	}
 
 	if (Teams()) {
@@ -994,9 +1180,10 @@ countdown:
 				level.match_state_timer = level.time + gtime_t::from_sec(g_warmup_countdown->integer);
 
 				// announce it
-				if ((GT(GT_DUEL) || (level.num_playing_clients == 2 && g_match_lock->integer)) &&
-						level.sorted_clients[0] >= 0 && level.sorted_clients[1] >= 0)
-					gi.LocBroadcast_Print(PRINT_CENTER, "{} vs {}\nBegins in...", game.clients[level.sorted_clients[0]].resp.netname, game.clients[level.sorted_clients[1]].resp.netname);
+				gclient_t *first = MM_MatchSortedConnectedClient(0);
+				gclient_t *second = MM_MatchSortedConnectedClient(1);
+				if ((GT(GT_DUEL) || (level.num_playing_clients == 2 && g_match_lock->integer)) && first && second)
+					gi.LocBroadcast_Print(PRINT_CENTER, "{} vs {}\nBegins in...", first->resp.netname, second->resp.netname);
 				else
 					gi.LocBroadcast_Print(PRINT_CENTER, "{}\nBegins in...", level.gametype_name);
 
@@ -1059,10 +1246,22 @@ Ends a timeout session.
 ==================
 */
 void MM_CmdTimeIn(gentity_t *ent) {
+	if (!MM_IsConnectedClientEntity(ent))
+		return;
+
+	if (!MM_IsExactArgcValid(gi.argc(), 1)) {
+		gi.LocClient_Print(ent, PRINT_HIGH, "Usage: {}\n", gi.argv(0));
+		return;
+	}
+
 	if (!level.timeout_in_place) {
 		gi.Client_Print(ent, PRINT_HIGH, "A timeout is not currently in effect.\n");
 		return;
 	}
+
+	if (level.timeout_ent && !MM_IsConnectedClientEntity(level.timeout_ent))
+		level.timeout_ent = nullptr;
+
 	if (!ent->client->sess.admin && level.timeout_ent != ent) {
 		gi.Client_Print(ent, PRINT_HIGH, "The timeout can only be ended by the timeout caller or an admin.\n");
 		return;
@@ -1080,7 +1279,16 @@ Calls a timeout session.
 ==================
 */
 void MM_CmdTimeOut(gentity_t *ent) {
-	if (g_dm_timeout_length->integer <= 0) {
+	if (!MM_IsConnectedClientEntity(ent))
+		return;
+
+	if (!MM_IsExactArgcValid(gi.argc(), 1)) {
+		gi.LocClient_Print(ent, PRINT_HIGH, "Usage: {}\n", gi.argv(0));
+		return;
+	}
+
+	const int timeout_seconds = MM_ClampTimeoutSeconds(g_dm_timeout_length->integer);
+	if (timeout_seconds <= 0) {
 		gi.Client_Print(ent, PRINT_HIGH, "Server has disabled timeouts.\n");
 		return;
 	}
@@ -1098,8 +1306,8 @@ void MM_CmdTimeOut(gentity_t *ent) {
 	}
 
 	level.timeout_ent = ent;
-	level.timeout_in_place = gtime_t::from_sec(g_dm_timeout_length->integer);
-	gi.LocBroadcast_Print(PRINT_CENTER, "{} called a timeout!\n{} has been granted.", ent->client->resp.netname, G_TimeString(g_dm_timeout_length->integer * 1000, false));
+	level.timeout_in_place = gtime_t::from_sec(timeout_seconds);
+	gi.LocBroadcast_Print(PRINT_CENTER, "{} called a timeout!\n{} has been granted.", ent->client->resp.netname, G_TimeString(timeout_seconds * 1000, false));
 	gi.positioned_sound(world->s.origin, world, CHAN_RELIABLE | CHAN_NO_PHS_ADD | CHAN_AUX, gi.soundindex("world/klaxon2.wav"), 1, ATTN_NONE, 0);
 	ent->client->pers.timeout_used = true;
 }

@@ -4,13 +4,16 @@
 #include "g_debug_log.h"
 #include "muffmode/mm_admin.h"
 #include "muffmode/mm_captain.h"
+#include "muffmode/mm_command_contracts.h"
 #include "muffmode/mm_duel.h"
 #include "muffmode/mm_ghost.h"
 #include "muffmode/mm_maps.h"
 #include "muffmode/mm_match.h"
 #include "muffmode/mm_menu.h"
 #include "muffmode/mm_motd.h"
+#include "muffmode/mm_parse.h"
 #include "muffmode/mm_pconfig.h"
+#include "muffmode/mm_skin.h"
 #include "muffmode/mm_team.h"
 #include "muffmode/mm_vote.h"
 #include "muffmode/mm_vote_menu.h"
@@ -74,6 +77,29 @@ static inline bool AdminOk(gentity_t *ent) {
 	}
 
 	return true;
+}
+
+static size_t CmdEntityCount() {
+	return min(static_cast<size_t>(globals.num_entities), static_cast<size_t>(game.maxentities));
+}
+
+static size_t CmdClientEntityCount() {
+	return min(CmdEntityCount(), static_cast<size_t>(game.maxclients) + 1);
+}
+
+static bool CmdClientIndexIsValid(int client_index) {
+	return client_index >= 0 && static_cast<size_t>(client_index) < game.maxclients;
+}
+
+static gentity_t *CmdEntityForClientIndex(int client_index) {
+	if (!CmdClientIndexIsValid(client_index))
+		return nullptr;
+
+	const size_t entity_index = static_cast<size_t>(client_index) + 1;
+	if (entity_index >= CmdClientEntityCount())
+		return nullptr;
+
+	return &g_entities[entity_index];
 }
 
 //=================================================================================
@@ -218,10 +244,16 @@ static void Cmd_Give_f(gentity_t *ent) {
 		give_all = false;
 
 	if (give_all || Q_strcasecmp(gi.argv(1), "health") == 0) {
-		if (gi.argc() == 3)
-			ent->health = atoi(gi.argv(2));
-		else
+		if (gi.argc() == 3) {
+			const auto health = MM_ParseIntArg(gi.argv(2));
+			if (!health) {
+				gi.LocClient_Print(ent, PRINT_HIGH, "Invalid health value.\n");
+				return;
+			}
+			ent->health = *health;
+		} else {
 			ent->health = ent->max_health;
+		}
 		if (!give_all)
 			return;
 	}
@@ -331,8 +363,15 @@ static void Cmd_Give_f(gentity_t *ent) {
 	it_ent = G_Spawn();
 	it_ent->classname = it->classname;
 	SpawnItem(it_ent, it);
-	if (it->flags & IF_AMMO && gi.argc() == 3)
-		it_ent->count = atoi(gi.argv(2));
+	if (it->flags & IF_AMMO && gi.argc() == 3) {
+		const auto count = MM_ParseIntArg(gi.argv(2));
+		if (!count) {
+			gi.LocClient_Print(ent, PRINT_HIGH, "Invalid item count.\n");
+			G_FreeEntity(it_ent);
+			return;
+		}
+		it_ent->count = *count;
+	}
 
 	// since some items don't actually spawn when you say to ..
 	if (!it_ent->inuse)
@@ -409,6 +448,16 @@ argv(3+n) "value"...
 =================
 */
 static void Cmd_Spawn_f(gentity_t *ent) {
+	const int argc = gi.argc();
+	if (!MM_IsSpawnArgcValid(argc)) {
+		gi.LocClient_Print(ent, PRINT_HIGH, "Usage: {} <classname> [<key> <value>]...\n", gi.argv(0));
+		if (argc >= 2)
+			gi.LocClient_Print(ent, PRINT_HIGH, "Spawn arguments must be key/value pairs.\n");
+		return;
+	}
+
+	const int tail_args = argc - 2;
+
 	solid_t backup = ent->solid;
 	ent->solid = SOLID_NOT;
 	gi.linkentity(ent);
@@ -421,8 +470,8 @@ static void Cmd_Spawn_f(gentity_t *ent) {
 
 	st = {};
 
-	if (gi.argc() > 3) {
-		for (int i = 2; i < gi.argc(); i += 2)
+	if (tail_args > 0) {
+		for (int i = 2; i < argc; i += 2)
 			ED_ParseField(gi.argv(i), gi.argv(i + 1), other);
 	}
 
@@ -477,27 +526,38 @@ argv(0) teleport
 argv(1) x
 argv(2) y
 argv(3) z
-argv(4) pitch
-argv(5) yaw
-argv(6) roll
+argv(4) optional pitch
+argv(5) optional yaw
+argv(6) optional roll
 =================
 */
 static void Cmd_Teleport_f(gentity_t *ent) {
-	if (gi.argc() < 4) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "Usage: {} <x> <y> <z> <pitch> <yaw> <roll>\n", gi.argv(0));
+	const int argc = gi.argc();
+	if (!MM_IsTeleportArgcValid(argc)) {
+		gi.LocClient_Print(ent, PRINT_HIGH, "Usage: {} <x> <y> <z> [<pitch> <yaw> <roll>]\n", gi.argv(0));
 		return;
 	}
 
-	ent->s.origin[0] = (float)atof(gi.argv(1));
-	ent->s.origin[1] = (float)atof(gi.argv(2));
-	ent->s.origin[2] = (float)atof(gi.argv(3));
+	const auto x = MM_ParseFloatArg(gi.argv(1));
+	const auto y = MM_ParseFloatArg(gi.argv(2));
+	const auto z = MM_ParseFloatArg(gi.argv(3));
+	if (!x || !y || !z) {
+		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid coordinate(s).\n");
+		return;
+	}
 
-	if (gi.argc() >= 4) {
-		float pitch = (float)atof(gi.argv(4));
-		float yaw = (float)atof(gi.argv(5));
-		float roll = (float)atof(gi.argv(6));
-		vec3_t ang{ pitch, yaw, roll };
+	ent->s.origin = vec3_t{ *x, *y, *z };
 
+	if (argc == 7) {
+		const auto pitch = MM_ParseFloatArg(gi.argv(4));
+		const auto yaw = MM_ParseFloatArg(gi.argv(5));
+		const auto roll = MM_ParseFloatArg(gi.argv(6));
+		if (!pitch || !yaw || !roll) {
+			gi.LocClient_Print(ent, PRINT_HIGH, "Invalid angle(s).\n");
+			return;
+		}
+
+		const vec3_t ang{ *pitch, *yaw, *roll };
 		ent->client->ps.pmove.delta_angles = (ang - ent->client->resp.cmd_angles);
 		ent->client->ps.viewangles = {};
 		ent->client->v_angle = {};
@@ -551,7 +611,9 @@ argv(0) alertall
 ==================
 */
 static void Cmd_AlertAll_f(gentity_t *ent) {
-	for (size_t i = 0; i < globals.num_entities; i++) {
+	const size_t entity_count = CmdEntityCount();
+
+	for (size_t i = 0; i < entity_count; i++) {
 		gentity_t *t = &g_entities[i];
 
 		if (!t->inuse || t->health <= 0 || !(t->svflags & SVF_MONSTER))
@@ -588,7 +650,12 @@ static void Cmd_Use_f(gentity_t *ent) {
 	const char	*cmd = gi.argv(0);
 
 	if (!Q_strcasecmp(cmd, "use_index") || !Q_strcasecmp(cmd, "use_index_only")) {
-		it = GetItemByIndex((item_id_t)atoi(s));
+		const auto item_index = MM_ParseIntArg(s);
+		if (!item_index) {
+			gi.LocClient_Print(ent, PRINT_HIGH, "Invalid item index.\n");
+			return;
+		}
+		it = GetItemByIndex((item_id_t)*item_index);
 	} else {
 		if (!strcmp(s, "holdable")) {
 			if (ent->client->pers.inventory[IT_AMMO_NUKE])
@@ -679,7 +746,12 @@ static void Cmd_Drop_f(gentity_t *ent) {
 	const char *cmd = gi.argv(0);
 
 	if (!Q_strcasecmp(cmd, "drop_index")) {
-		it = GetItemByIndex((item_id_t)atoi(s));
+		const auto item_index = MM_ParseIntArg(s);
+		if (!item_index) {
+			gi.LocClient_Print(ent, PRINT_HIGH, "Invalid item index.\n");
+			return;
+		}
+		it = GetItemByIndex((item_id_t)*item_index);
 	} else {
 		it = FindItem(s);
 	}
@@ -1042,8 +1114,8 @@ static void Cmd_Kill_AI_f(gentity_t *ent) {
 
 	looked_at = gi.traceline(start, end, ent, MASK_SHOT).ent;
 
-	const int numEntities = globals.num_entities;
-	for (int entnum = 1; entnum < numEntities; ++entnum) {
+	const size_t num_entities = CmdEntityCount();
+	for (size_t entnum = 1; entnum < num_entities; ++entnum) {
 		gentity_t *entity = &g_entities[entnum];
 		if (!entity->inuse || entity == looked_at) {
 			continue;
@@ -1085,7 +1157,9 @@ Cmd_Clear_AI_Enemy_f
 =================
 */
 static void Cmd_Clear_AI_Enemy_f(gentity_t *ent) {
-	for (size_t i = 1; i < globals.num_entities; i++) {
+	const size_t entity_count = CmdEntityCount();
+
+	for (size_t i = 1; i < entity_count; i++) {
 		gentity_t *entity = &g_entities[i];
 		if (!entity->inuse)
 			continue;
@@ -1124,17 +1198,47 @@ static void Cmd_PutAway_f(gentity_t *ent) {
 }
 
 static int PlayerSortByScore(const void *a, const void *b) {
-	int anum, bnum;
+	const int anum = *(const int *)a;
+	const int bnum = *(const int *)b;
 
-	anum = *(const int *)a;
-	bnum = *(const int *)b;
-
-	anum = game.clients[anum].resp.score;
-	bnum = game.clients[bnum].resp.score;
-
-	if (anum < bnum)
+	const bool a_valid = CmdClientIndexIsValid(anum);
+	const bool b_valid = CmdClientIndexIsValid(bnum);
+	if (!a_valid && !b_valid)
+		return 0;
+	if (!a_valid)
+		return 1;
+	if (!b_valid)
 		return -1;
-	if (anum > bnum)
+
+	const int a_score = game.clients[anum].resp.score;
+	const int b_score = game.clients[bnum].resp.score;
+
+	if (a_score < b_score)
+		return -1;
+	if (a_score > b_score)
+		return 1;
+	return 0;
+}
+
+static int PlayerSortByJoinTimeCmd(const void *a, const void *b) {
+	const int anum = *(const int *)a;
+	const int bnum = *(const int *)b;
+
+	const bool a_valid = CmdClientIndexIsValid(anum);
+	const bool b_valid = CmdClientIndexIsValid(bnum);
+	if (!a_valid && !b_valid)
+		return 0;
+	if (!a_valid)
+		return 1;
+	if (!b_valid)
+		return -1;
+
+	const auto a_join_time = game.clients[anum].sess.team_join_time.milliseconds();
+	const auto b_join_time = game.clients[bnum].sess.team_join_time.milliseconds();
+
+	if (a_join_time > b_join_time)
+		return -1;
+	if (a_join_time < b_join_time)
 		return 1;
 	return 0;
 }
@@ -1154,19 +1258,25 @@ static void PlayersList(gentity_t *ent, bool ranked) {
 
 	count = 0;
 	for (auto ec : active_clients()) {
-		index[count] = ec - g_entities - 1;
-		count++;
+		if (count >= q_countof(index))
+			break;
+
+		const ptrdiff_t client_index = ec - g_entities - 1;
+		if (client_index < 0 || static_cast<size_t>(client_index) >= game.maxclients)
+			continue;
+
+		index[count++] = static_cast<int>(client_index);
 	}
 
 	// sort by score
 	if (ranked)
 		qsort(index, count, sizeof(index[0]), PlayerSortByScore);
 
-	// print information
-	large[0] = 0;
-
 	if (count) {
 		for (i = 0; i < count; i++) {
+			if (!CmdClientIndexIsValid(index[i]))
+				continue;
+
 			gclient_t *cl = &game.clients[index[i]];
 
 			char value[MAX_INFO_VALUE] = { 0 };
@@ -1186,7 +1296,8 @@ static void PlayersList(gentity_t *ent, bool ranked) {
 		}
 
 		// remove the last newline
-		large.pop_back();
+		if (!large.empty())
+			large.pop_back();
 	}
 
 	gi.LocClient_Print(ent, PRINT_HIGH | PRINT_NO_NOTIFY, "\nclientnum id                               name                             time  ping score team\n");
@@ -1230,18 +1341,24 @@ static void Cmd_PlayersJoinTime_f(gentity_t *ent) {
 
 	count = 0;
 	for (auto ec : active_clients()) {
-		index[count] = ec - g_entities - 1;
-		count++;
+		if (count >= q_countof(index))
+			break;
+
+		const ptrdiff_t client_index = ec - g_entities - 1;
+		if (client_index < 0 || static_cast<size_t>(client_index) >= game.maxclients)
+			continue;
+
+		index[count++] = static_cast<int>(client_index);
 	}
 
-	// sort by score
-	qsort(index, count, sizeof(index[0]), PlayerSortByJoinTime);
-
-	// print information
-	large[0] = 0;
+	// sort by join time
+	qsort(index, count, sizeof(index[0]), PlayerSortByJoinTimeCmd);
 
 	if (count) {
 		for (i = 0; i < count; i++) {
+			if (!CmdClientIndexIsValid(index[i]))
+				continue;
+
 			gclient_t *cl = &game.clients[index[i]];
 
 			char value[MAX_INFO_VALUE] = { 0 };
@@ -1259,7 +1376,8 @@ static void Cmd_PlayersJoinTime_f(gentity_t *ent) {
 		}
 
 		// remove the last newline
-		large.pop_back();
+		if (!large.empty())
+			large.pop_back();
 	}
 
 	gi.LocClient_Print(ent, PRINT_HIGH | PRINT_NO_NOTIFY, "\nclientnum id                               name                             time  ping score team\n");
@@ -1305,7 +1423,15 @@ Cmd_Wave_f
 =================
 */
 static void Cmd_Wave_f(gentity_t *ent) {
-	int i = atoi(gi.argv(1));
+	int i = GESTURE_POINT;
+	if (gi.argc() > 1) {
+		const auto gesture = MM_ParseIntArg(gi.argv(1));
+		if (!gesture) {
+			gi.LocClient_Print(ent, PRINT_HIGH, "Invalid gesture value.\n");
+			return;
+		}
+		i = *gesture;
+	}
 
 	// no dead or noclip waving
 	if (ent->deadflag || ent->movetype == MOVETYPE_NOCLIP)
@@ -1485,7 +1611,7 @@ static void Cmd_Say_f(gentity_t *ent, bool arg0) {
 		p_in = gi.args();
 		size_t in_len = strlen(p_in);
 
-		if (p_in[0] == '\"' && p_in[in_len - 1] == '\"')
+		if (in_len >= 2 && p_in[0] == '\"' && p_in[in_len - 1] == '\"')
 			text += std::string_view(p_in + 1, in_len - 2);
 		else
 			text += p_in;
@@ -1501,7 +1627,8 @@ static void Cmd_Say_f(gentity_t *ent, bool arg0) {
 	if (g_dedicated->integer)
 		gi.Client_Print(nullptr, PRINT_CHAT, text.c_str());
 
-	for (uint32_t j = 1; j <= game.maxclients; j++) {
+	const size_t client_entity_count = CmdClientEntityCount();
+	for (size_t j = 1; j < client_entity_count; j++) {
 		other = &g_entities[j];
 		if (!other->inuse)
 			continue;
@@ -1529,14 +1656,18 @@ static void Cmd_Say_Team_f(gentity_t *who, const char *msg_in) {
 
 	char *msg = outmsg;
 
-	if (*msg == '\"') {
-		msg[strlen(msg) - 1] = 0;
+	const size_t msg_len = strlen(msg);
+	if (msg_len >= 2 && msg[0] == '\"' && msg[msg_len - 1] == '\"') {
+		msg[msg_len - 1] = 0;
 		msg++;
 	}
 
-	for (size_t i = 0; i < game.maxclients; i++) {
-		cl_ent = g_entities + 1 + i;
+	const size_t client_entity_count = CmdClientEntityCount();
+	for (size_t i = 1; i < client_entity_count; i++) {
+		cl_ent = &g_entities[i];
 		if (!cl_ent->inuse)
+			continue;
+		if (!cl_ent->client)
 			continue;
 		if (cl_ent->client->sess.team == who->client->sess.team)
 			gi.LocClient_Print(cl_ent, PRINT_CHAT, "({}): {}\n",
@@ -1552,30 +1683,43 @@ Cmd_ListEntities_f
 */
 static void Cmd_ListEntities_f(gentity_t *ent) {
 	int count = 0;
+	const size_t entity_count = CmdEntityCount();
 
-	for (size_t i = 1; i < game.maxentities; i++) {
+	for (size_t i = 1; i < entity_count; i++) {
 		gentity_t *e = &g_entities[i];
 
 		if (!e || !e->inuse)
 			continue;
 		
 		if (gi.argc() > 1) {
-			if (!strstr(e->classname, gi.argv(1)))
-				continue;
-		}
-		if (gi.argc() > 2) {
-			float num = atof(gi.argv(3));
-			if (e->s.origin[0] != num)
+			if (!e->classname || !strstr(e->classname, gi.argv(1)))
 				continue;
 		}
 		if (gi.argc() > 3) {
-			float num = atof(gi.argv(4));
-			if (e->s.origin[1] != num)
+			const auto num = MM_ParseFloatArg(gi.argv(3));
+			if (!num) {
+				gi.LocClient_Print(ent, PRINT_HIGH, "Invalid X filter.\n");
+				return;
+			}
+			if (e->s.origin[0] != *num)
 				continue;
 		}
 		if (gi.argc() > 4) {
-			float num = atof(gi.argv(5));
-			if (e->s.origin[2] != num)
+			const auto num = MM_ParseFloatArg(gi.argv(4));
+			if (!num) {
+				gi.LocClient_Print(ent, PRINT_HIGH, "Invalid Y filter.\n");
+				return;
+			}
+			if (e->s.origin[1] != *num)
+				continue;
+		}
+		if (gi.argc() > 5) {
+			const auto num = MM_ParseFloatArg(gi.argv(5));
+			if (!num) {
+				gi.LocClient_Print(ent, PRINT_HIGH, "Invalid Z filter.\n");
+				return;
+			}
+			if (e->s.origin[2] != *num)
 				continue;
 		}
 
@@ -1686,6 +1830,15 @@ static void Cmd_KillBeep_f(gentity_t *ent) {
 	MM_CmdKillBeep(ent);
 }
 
+// [MuffMode] Per-viewer skin override bodies live in muffmode/mm_skin
+static void Cmd_EnemySkin_f(gentity_t *ent) {
+	MM_CmdEnemySkin(ent);
+}
+
+static void Cmd_TeamSkin_f(gentity_t *ent) {
+	MM_CmdTeamSkin(ent);
+}
+
 // [MuffMode] Ghost rejoin body lives in muffmode/mm_ghost
 static void Cmd_Ghost_f(gentity_t *ent) {
 	MM_CmdGhost(ent);
@@ -1782,6 +1935,11 @@ static void Cmd_Boot_f(gentity_t *ent) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "You cannot kick the lobby owner.\n");
 		return;
 	}
+
+	if (!targ->inuse || !targ->client) {
+		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid client number.\n");
+		return;
+	}
 	
 	if (targ->client->sess.admin) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "You cannot kick an admin.\n");
@@ -1856,7 +2014,7 @@ static void Cmd_Follow_f(gentity_t *ent) {
 
 	gentity_t *follow_ent = ClientEntFromString(gi.argv(1));
 
-	if (!follow_ent || !follow_ent->inuse) {
+	if (!follow_ent || !follow_ent->inuse || !follow_ent->client) {
 		gi.Client_Print(ent, PRINT_HIGH, "Invalid client specified.\n");
 		return;
 	}
@@ -1869,6 +2027,9 @@ static void Cmd_Follow_f(gentity_t *ent) {
 	ent->client->follow_target = follow_ent;
 	ent->client->follow_update = true;
 	UpdateChaseCam(ent);
+
+	// [MuffMode] Follow target changed; re-evaluate this viewer's skin overrides.
+	MM_RefreshSkinOverridesForViewer(ent);
 }
 
 /*
@@ -1889,8 +2050,11 @@ Cmd_FollowLeader_f
 static void Cmd_FollowLeader_f(gentity_t *ent) {
 	ent->client->sess.pc.follow_leader ^= true;
 
+	gentity_t *leader = nullptr;
+
 	if (ent->client->sess.pc.follow_leader) {
-		if (!level.num_playing_clients || level.sorted_clients[0] < 0) {
+		leader = CmdEntityForClientIndex(level.sorted_clients[0]);
+		if (!level.num_playing_clients || !leader || !leader->inuse || !leader->client || !ClientIsPlaying(leader->client)) {
 			ent->client->sess.pc.follow_leader = false;
 			gi.Client_Print(ent, PRINT_HIGH, "No leader available to follow.\n");
 			gi.LocClient_Print(ent, PRINT_HIGH, "Auto-follow leader: OFF\n");
@@ -1898,13 +2062,15 @@ static void Cmd_FollowLeader_f(gentity_t *ent) {
 		}
 	}
 
-	gentity_t *leader = &g_entities[level.sorted_clients[0] + 1];
 	gi.LocClient_Print(ent, PRINT_HIGH, "Auto-follow leader: {}\n", ent->client->sess.pc.follow_leader ? "ON" : "OFF");
 
 	if (!ClientIsPlaying(ent->client) && ent->client->sess.pc.follow_leader && ent->client->follow_target != leader) {
 		ent->client->follow_target = leader;
 		ent->client->follow_update = true;
 		UpdateChaseCam(ent);
+
+		// [MuffMode] Follow target changed; re-evaluate this viewer's skin overrides.
+		MM_RefreshSkinOverridesForViewer(ent);
 	}
 }
 
@@ -2084,6 +2250,8 @@ cmds_t client_cmds[] = {
 	{"drop_index", 		Cmd_Drop_f,				CF_NONE},
 	{"doctor", 			Cmd_Doctor_f,			CF_ADMIN_ONLY | CF_ALLOW_INT | CF_ALLOW_SPEC},
 	{"endmatch", 		Cmd_EndMatch_f,			CF_ADMIN_ONLY | CF_ALLOW_INT | CF_ALLOW_SPEC},
+	{"enemyskin",		Cmd_EnemySkin_f,		CF_ALLOW_SPEC | CF_ALLOW_DEAD},
+	{"eskin",			Cmd_EnemySkin_f,		CF_ALLOW_SPEC | CF_ALLOW_DEAD},
 	{"fm", 				Cmd_FragMessages_f,		CF_ALLOW_SPEC | CF_ALLOW_DEAD},
 	{"follow",			Cmd_Follow_f,			CF_ALLOW_SPEC | CF_ALLOW_DEAD},
 	{"followkiller",	Cmd_FollowKiller_f,		CF_ALLOW_SPEC | CF_ALLOW_DEAD},
@@ -2091,7 +2259,7 @@ cmds_t client_cmds[] = {
 	{"followpowerup",	Cmd_FollowPowerup_f,	CF_ALLOW_SPEC | CF_ALLOW_DEAD},
 	{"forcevote",		Cmd_ForceVote_f,		CF_ADMIN_ONLY | CF_ALLOW_INT | CF_ALLOW_SPEC},
 	{"forfeit",			Cmd_Forfeit_f,			CF_ALLOW_DEAD},
-	{"gametype",		Cmd_Gametype_f,			CF_ADMIN_ONLY | CF_ALLOW_INT | CF_ALLOW_SPEC},
+	{"gametype",		Cmd_Gametype_f,			CF_ALLOW_DEAD | CF_ALLOW_INT | CF_ALLOW_SPEC},	// listing is open to all; changing is gated to admins inside the handler
 	{"ghost",			Cmd_Ghost_f,			CF_ALLOW_DEAD | CF_ALLOW_INT | CF_ALLOW_SPEC},
 	{"give",			Cmd_Give_f,				CF_ALLOW_SPEC | CF_CHEAT_PROTECT},
 	{"god",				Cmd_God_f,				CF_ALLOW_SPEC | CF_CHEAT_PROTECT},
@@ -2145,6 +2313,8 @@ cmds_t client_cmds[] = {
 	{"stats",			Cmd_Stats_f,			CF_ALLOW_INT | CF_ALLOW_SPEC},
 	{"target",			Cmd_Target_f,			CF_ALLOW_DEAD | CF_ALLOW_SPEC | CF_CHEAT_PROTECT},
 	{"team",			Cmd_Team_f,				CF_ALLOW_DEAD | CF_ALLOW_SPEC},
+	{"teamskin",		Cmd_TeamSkin_f,			CF_ALLOW_SPEC | CF_ALLOW_DEAD},
+	{"tskin",			Cmd_TeamSkin_f,			CF_ALLOW_SPEC | CF_ALLOW_DEAD},
 	{"teleport",		Cmd_Teleport_f,			CF_ALLOW_SPEC | CF_CHEAT_PROTECT},
 	{"time-out",		Cmd_TimeOut_f,			CF_ALLOW_DEAD | CF_ALLOW_SPEC},
 	{"time-in",			Cmd_TimeIn_f,			CF_ALLOW_DEAD | CF_ALLOW_SPEC},

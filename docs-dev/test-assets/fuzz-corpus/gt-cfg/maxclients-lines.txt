@@ -1,0 +1,7 @@
+set maxclients 4
+seta maxclients "4"
+sets maxclients 16
+cvar_set maxclients "8"
+cvar_forceset maxclients 64
+set maxclients nope
+kexmultiplayer 1

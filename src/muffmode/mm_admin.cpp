@@ -3,17 +3,106 @@
 
 #include "g_local.h"
 #include "muffmode/mm_admin.h"
+#include "muffmode/mm_command_contracts.h"
 #include "muffmode/mm_gametype.h"
+#include "muffmode/mm_maps.h"
 #include "muffmode/mm_match.h"
 #include "muffmode/mm_vote.h"
 
+#include <string>
+
+namespace {
+
+int MM_AdminCvarInteger(cvar_t *cvar)
+{
+	return cvar ? cvar->integer : 0;
+}
+
+float MM_AdminCvarValue(cvar_t *cvar)
+{
+	return cvar ? cvar->value : 0.f;
+}
+
+const char *MM_AdminCvarString(cvar_t *cvar)
+{
+	return (cvar && cvar->string) ? cvar->string : "";
+}
+
+bool MM_AdminCvarEnabled(cvar_t *cvar)
+{
+	return MM_AdminCvarInteger(cvar) != 0;
+}
+
+void MM_AdminForceSetInteger(const char *name, int value)
+{
+	const std::string text = fmt::format("{}", value);
+	gi.cvar_forceset(name, text.c_str());
+}
+
+bool MM_AdminQueueGamemap(const char *mapname)
+{
+	if (!MM_IsSafeMapToken(mapname))
+		return false;
+
+	const std::string command = fmt::format("gamemap \"{}\"\n", mapname);
+	gi.AddCommandString(command.c_str());
+	return true;
+}
+
+bool MM_AdminParseYesNo(const char *arg, bool *out)
+{
+	if (!arg || !out)
+		return false;
+
+	if (!Q_strcasecmp(arg, "yes") || !Q_strcasecmp(arg, "y") || !strcmp(arg, "1")) {
+		*out = true;
+		return true;
+	}
+
+	if (!Q_strcasecmp(arg, "no") || !Q_strcasecmp(arg, "n") || !strcmp(arg, "0")) {
+		*out = false;
+		return true;
+	}
+
+	return false;
+}
+
+bool MM_RequireExactCommandArgc(gentity_t *ent, int expected, const char *usage)
+{
+	if (!ent || !ent->client)
+		return false;
+
+	if (MM_IsExactArgcValid(gi.argc(), expected))
+		return true;
+
+	gi.LocClient_Print(ent, PRINT_HIGH, "Usage: {}\n", usage);
+	return false;
+}
+
+bool MM_RequireNoCommandArgs(gentity_t *ent)
+{
+	return MM_RequireExactCommandArgc(ent, 1, gi.argv(0));
+}
+
+gametype_t MM_CurrentGametypeForAdminDisplay()
+{
+	return (gametype_t)clamp(MM_AdminCvarInteger(g_gametype), (int)GT_FIRST, (int)GT_LAST);
+}
+
+ruleset_t MM_CurrentRulesetForAdminDisplay()
+{
+	return (ruleset_t)clamp((int)game.ruleset, (int)RS_NONE + 1, (int)RS_NUM_RULESETS - 1);
+}
+
+} // namespace
+
 void MM_CmdDoctor(gentity_t *ent)
 {
-	if (gi.argc() > 1)
-	{
-		gi.LocClient_Print(ent, PRINT_HIGH, "Usage: {}\n", gi.argv(0));
+	if (!ent || !ent->client)
 		return;
-	}
+
+	if (!MM_RequireNoCommandArgs(ent))
+		return;
 
 	int errors = 0;
 	int warnings = 0;
@@ -34,86 +123,96 @@ void MM_CmdDoctor(gentity_t *ent)
 			gi.LocClient_Print(ent, PRINT_HIGH | PRINT_NO_NOTIFY, "      Suggestion: {}\n", fix);
 	};
 
-	if (g_dm_do_readyup->integer && !g_dm_do_warmup->integer)
+	const bool readyup_enabled = MM_AdminCvarEnabled(g_dm_do_readyup);
+	const float warmup_ready_percentage = MM_AdminCvarValue(g_warmup_ready_percentage);
+	const int min_players = MM_AdminCvarInteger(minplayers);
+	const int max_players = MM_AdminCvarInteger(maxplayers);
+	const bool voting_enabled = MM_AdminCvarEnabled(g_allow_voting);
+	const int vote_limit = MM_AdminCvarInteger(g_vote_limit);
+	const int round_limit = MM_AdminCvarInteger(roundlimit);
+	const int round_countdown = MM_AdminCvarInteger(g_round_countdown);
+	const float round_time_limit = MM_AdminCvarValue(roundtimelimit);
+
+	if (readyup_enabled && !MM_AdminCvarEnabled(g_dm_do_warmup))
 	{
 		report("ERROR",
 			"g_dm_do_readyup is enabled while g_dm_do_warmup is disabled.",
 			"set g_dm_do_warmup 1");
 	}
 
-	if (g_dm_do_readyup->integer && (g_warmup_ready_percentage->value <= 0.f || g_warmup_ready_percentage->value > 1.f))
+	if (readyup_enabled && (warmup_ready_percentage <= 0.f || warmup_ready_percentage > 1.f))
 	{
 		report("ERROR",
 			"g_warmup_ready_percentage must be in range (0.0, 1.0] when readyup is enabled.",
 			"set g_warmup_ready_percentage 0.51");
 	}
 
-	if (minplayers->integer > maxplayers->integer)
+	if (min_players > 0 && max_players > 0 && min_players > max_players)
 	{
 		report("ERROR",
 			"minplayers is greater than maxplayers.",
 			"set minplayers <= maxplayers");
 	}
 
-	if (maxplayers->integer <= 0)
+	if (maxplayers && max_players <= 0)
 	{
 		report("ERROR",
 			"maxplayers must be greater than zero.",
 			"set maxplayers 2");
 	}
 
-	if (g_vote_limit->integer < 0)
+	if (vote_limit < 0)
 	{
 		report("ERROR",
 			"g_vote_limit cannot be negative.",
 			"set g_vote_limit 0");
 	}
 
-	if (!g_allow_voting->integer && g_allow_spec_vote->integer)
+	if (!voting_enabled && MM_AdminCvarEnabled(g_allow_spec_vote))
 	{
 		report("WARN",
 			"g_allow_spec_vote is enabled while voting is globally disabled.",
 			"set g_allow_voting 1 or set g_allow_spec_vote 0");
 	}
 
-	if (!g_allow_voting->integer && g_allow_vote_midgame->integer)
+	if (!voting_enabled && MM_AdminCvarEnabled(g_allow_vote_midgame))
 	{
 		report("WARN",
 			"g_allow_vote_midgame is enabled while voting is globally disabled.",
 			"set g_allow_voting 1 or set g_allow_vote_midgame 0");
 	}
 
-	if (g_dm_do_readyup->integer && g_warmup_ready_percentage->value >= 0.99f)
+	if (readyup_enabled && warmup_ready_percentage >= 0.99f)
 	{
 		report("WARN",
 			"g_warmup_ready_percentage is very high; matches may stall waiting for nearly all players.",
 			"set g_warmup_ready_percentage between 0.50 and 0.80");
 	}
 
-	if (g_dm_overtime->integer > 0 && (GT(GT_DUEL) == 0))
+	if (MM_AdminCvarInteger(g_dm_overtime) > 0 && (GT(GT_DUEL) == 0))
 	{
 		report("INFO",
 			"g_dm_overtime is set but currently only applies to Duel.",
 			"Switch to Duel or leave as a preset for later.");
 	}
 
-	if ((GTF(GTF_ROUNDS) & GTF_ROUNDS) == 0)
+	if (!MM_GametypeHasFlag(GTF_ROUNDS))
 	{
-		if (roundlimit->integer != 8)
+		if (round_limit != 8)
 		{
 			report("INFO",
 				"roundlimit is non-default in a non-round gametype.",
 				"No action needed unless this was unintended.");
 		}
 
-		if (roundtimelimit->integer != 2)
+		if (round_time_limit != 2.f)
 		{
 			report("INFO",
 				"roundtimelimit is non-default in a non-round gametype.",
 				"No action needed unless this was unintended.");
 		}
 
-		if (g_round_countdown->integer != 10)
+		if (round_countdown != 10)
 		{
 			report("INFO",
 				"g_round_countdown is non-default in a non-round gametype.",
@@ -122,7 +221,7 @@ void MM_CmdDoctor(gentity_t *ent)
 	}
 	else
 	{
-		if (roundlimit->integer <= 0)
+		if (round_limit <= 0)
 		{
 			if (GT(GT_HORDE))
 			{
@@ -138,14 +237,14 @@ void MM_CmdDoctor(gentity_t *ent)
 			}
 		}
 
-		if (roundtimelimit->value <= 0.f)
+		if (round_time_limit <= 0.f)
 		{
 			report("WARN",
 				"roundtimelimit is <= 0 in a round-based gametype.",
 				"set roundtimelimit 2");
 		}
 
-		if (g_round_countdown->integer < 0)
+		if (round_countdown < 0)
 		{
 			report("WARN",
 				"g_round_countdown is negative.",
@@ -153,7 +252,7 @@ void MM_CmdDoctor(gentity_t *ent)
 		}
 	}
 
-	if (!g_allow_voting->integer && (g_vote_flags->integer != 0 || g_vote_limit->integer != 3))
+	if (!voting_enabled && (MM_AdminCvarInteger(g_vote_flags) != 0 || vote_limit != 3))
 	{
 		report("INFO",
 			"Vote restriction cvars are customized while voting is disabled.",
@@ -170,16 +269,28 @@ void MM_CmdDoctor(gentity_t *ent)
 
 void MM_CmdGametype(gentity_t *ent)
 {
-	if (!deathmatch->integer)
+	if (!ent || !ent->client)
 		return;
 
-	if (gi.argc() < 2)
+	if (!MM_AdminCvarEnabled(deathmatch))
+		return;
+
+	if (!MM_IsExactArgcValid(gi.argc(), 2))
 	{
+		const gametype_t current_gt = MM_CurrentGametypeForAdminDisplay();
 		const std::string enabled_list = MM_GetEnabledGametypesList();
 		if (!enabled_list.empty())
-			gi.LocClient_Print(ent, PRINT_HIGH, "Usage: {} <{}>\nChanges current gametype. Current gametype is {} ({}).\n", gi.argv(0), enabled_list.c_str(), gt_long_name[g_gametype->integer], g_gametype->integer);
+			gi.LocClient_Print(ent, PRINT_HIGH, "Usage: {} <{}>\nChanges current gametype. Current gametype is {} ({}).\n", gi.argv(0), enabled_list.c_str(), gt_long_name[(int)current_gt], gt_short_name[(int)current_gt]);
 		else
-			gi.LocClient_Print(ent, PRINT_HIGH, "Usage: {} <gametype>\nChanges current gametype. Current gametype is {} ({}).\n", gi.argv(0), gt_long_name[g_gametype->integer], g_gametype->integer);
+			gi.LocClient_Print(ent, PRINT_HIGH, "Usage: {} <gametype>\nChanges current gametype. Current gametype is {} ({}).\n", gi.argv(0), gt_long_name[(int)current_gt], gt_short_name[(int)current_gt]);
+		return;
+	}
+
+	// Listing the available gametypes (the no-argument path above) is open to everyone so
+	// players can see what's on offer; actually changing the gametype stays admin-only.
+	if (!MM_AdminCvarEnabled(g_allow_admin) || !ent->client->sess.admin)
+	{
+		gi.LocClient_Print(ent, PRINT_HIGH, "Only admins can change the gametype.\n");
 		return;
 	}
 
@@ -201,7 +312,7 @@ void MM_CmdGametype(gentity_t *ent)
 		return;
 	}
 
-	if (g_votable_gametypes->string[0] && !MM_IsGametypeVotable(gt))
+	if (MM_AdminCvarString(g_votable_gametypes)[0] && !MM_IsGametypeVotable(gt))
 		gi.LocClient_Print(ent, PRINT_HIGH, "Warning: This gametype is not in the votable list, but setting it anyway (admin override).\n");
 
 	// force_cfg = true: admin gametype changes always (re-)exec the gt-cfg, even
@@ -214,12 +325,16 @@ void MM_CmdGametype(gentity_t *ent)
 
 void MM_CmdRuleset(gentity_t *ent)
 {
-	if (!deathmatch->integer)
+	if (!ent || !ent->client)
 		return;
 
-	if (gi.argc() < 2)
+	if (!MM_AdminCvarEnabled(deathmatch))
+		return;
+
+	if (!MM_IsExactArgcValid(gi.argc(), 2))
 	{
-		gi.LocClient_Print(ent, PRINT_HIGH, "Usage: {} <q2re|mm|q3a|q2reb|qc>\nChanges current ruleset. Current ruleset is {} ({}).\n", gi.argv(0), rs_long_name[(int)game.ruleset], (int)game.ruleset);
+		const ruleset_t current_rs = MM_CurrentRulesetForAdminDisplay();
+		gi.LocClient_Print(ent, PRINT_HIGH, "Usage: {} <q2re|mm|q3a|q2reb|qc>\nChanges current ruleset. Current ruleset is {} ({}).\n", gi.argv(0), rs_long_name[(int)current_rs], (int)current_rs);
 		return;
 	}
 
@@ -230,14 +345,17 @@ void MM_CmdRuleset(gentity_t *ent)
 		return;
 	}
 
-	gi.cvar_forceset("g_ruleset", G_Fmt("{}", (int)rs).data());
+	MM_AdminForceSetInteger("g_ruleset", (int)rs);
 }
 
 void MM_CmdSetMap(gentity_t *ent)
 {
-	if (gi.argc() < 2)
+	if (!ent || !ent->client)
+		return;
+
+	if (!MM_IsExactArgcValid(gi.argc(), 2))
 	{
-		gi.LocClient_Print(ent, PRINT_HIGH, "Usage: {} [mapname]\nChanges to a map within the map pool or list.", gi.argv(0));
+		gi.LocClient_Print(ent, PRINT_HIGH, "Usage: {} <mapname>\nChanges to a map within the map pool or list.\n", gi.argv(0));
 		return;
 	}
 
@@ -247,8 +365,12 @@ void MM_CmdSetMap(gentity_t *ent)
 		return;
 	}
 
+	if (!MM_AdminQueueGamemap(gi.argv(1))) {
+		gi.Client_Print(ent, PRINT_HIGH, "Map name is not safe to queue.\n");
+		return;
+	}
+
 	gi.LocBroadcast_Print(PRINT_HIGH, "[ADMIN]: Changing map to {}\n", gi.argv(1));
-	gi.AddCommandString(G_Fmt("gamemap \"{}\"\n", gi.argv(1)).data());
 }
 
 // [MuffMode] Admin match-control and session command bodies (moved from g_cmds.cpp).
@@ -258,6 +380,12 @@ MM_CmdStartMatch
 =================
 */
 void MM_CmdStartMatch(gentity_t *ent) {
+	if (!ent || !ent->client)
+		return;
+
+	if (!MM_RequireNoCommandArgs(ent))
+		return;
+
 	if (level.match_state > matchst_t::MATCH_WARMUP_READYUP) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "Match has already started.\n");
 		return;
@@ -273,6 +401,12 @@ MM_CmdEndMatch
 =================
 */
 void MM_CmdEndMatch(gentity_t *ent) {
+	if (!ent || !ent->client)
+		return;
+
+	if (!MM_RequireNoCommandArgs(ent))
+		return;
+
 	if (level.match_state < matchst_t::MATCH_IN_PROGRESS) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "Match has not yet begun.\n");
 		return;
@@ -290,6 +424,12 @@ MM_CmdResetMatch
 =================
 */
 void MM_CmdResetMatch(gentity_t *ent) {
+	if (!ent || !ent->client)
+		return;
+
+	if (!MM_RequireNoCommandArgs(ent))
+		return;
+
 	if (level.match_state < matchst_t::MATCH_IN_PROGRESS) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "Match has not yet begun.\n");
 		return;
@@ -309,22 +449,27 @@ MM_CmdForceVote
 =================
 */
 void MM_CmdForceVote(gentity_t *ent) {
-	if (!deathmatch->integer)
+	if (!ent || !ent->client)
 		return;
 
-	if (gi.argc() < 2) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "Usage: {} <yes|no>\n", gi.argv(0));
+	if (!MM_AdminCvarEnabled(deathmatch))
 		return;
-	}
+
+	if (!MM_RequireExactCommandArgc(ent, 2, G_Fmt("{} <yes|no>", gi.argv(0)).data()))
+		return;
 
 	if (level.vote_state.state == VoteState::IDLE) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "No vote in progress.\n");
 		return;
 	}
 
-	const char *arg = gi.argv(1);
+	bool force_yes = false;
+	if (!MM_AdminParseYesNo(gi.argv(1), &force_yes)) {
+		gi.LocClient_Print(ent, PRINT_HIGH, "Usage: {} <yes|no>\n", gi.argv(0));
+		return;
+	}
 
-	if (arg[0] == 'y' || arg[0] == 'Y' || arg[0] == '1') {
+	if (force_yes) {
 		gi.Broadcast_Print(PRINT_HIGH, "[ADMIN]: Passed the vote.\n");
 		if (level.vote_state.state == VoteState::ACTIVE) {
 			TransitionVoteState(VoteState::PASSED);
@@ -340,41 +485,66 @@ void MM_CmdForceVote(gentity_t *ent) {
 
 extern void ClearWorldEntities();
 void MM_CmdMapRestart(gentity_t *ent) {
+	if (!ent || !ent->client)
+		return;
+
+	if (!MM_RequireNoCommandArgs(ent))
+		return;
+
+	if (!MM_IsSafeMapToken(level.mapname)) {
+		gi.Client_Print(ent, PRINT_HIGH, "Current map name is not safe to restart.\n");
+		return;
+	}
+
 	gi.Broadcast_Print(PRINT_HIGH, "[ADMIN]: Session reset.\n");
 
 	//TODO: reset match variables, clear world entities, reload world entities
 	//SpawnEntities(level.mapname, level.entstring.c_str(), nullptr);
 	//Match_Reset();
 	//ClearWorldEntities();
-	gi.AddCommandString(G_Fmt("gamemap {}\n", level.mapname).data());
+	MM_AdminQueueGamemap(level.mapname);
 }
 
 void MM_CmdNextMap(gentity_t *ent) {
+	if (!ent || !ent->client)
+		return;
+
+	if (!MM_RequireNoCommandArgs(ent))
+		return;
+
 	gi.Broadcast_Print(PRINT_HIGH, "[ADMIN]: Changing to next map.\n");
 	Match_End();
 	level.intermission_exit = true;
 }
 
 void MM_CmdAdmin(gentity_t *ent) {
-	if (!g_allow_admin->integer) {
+	if (!ent || !ent->client)
+		return;
+
+	if (!MM_AdminCvarEnabled(g_allow_admin)) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "Administration is disabled\n");
 		return;
 	}
-	
-	if (gi.argc() > 1) {
-		if (ent->client->sess.admin) {
-			gi.Client_Print(ent, PRINT_HIGH, "You already have administrative rights.\n");
-			return;
-		}
-		if (admin_password->string && *admin_password->string && Q_strcasecmp(admin_password->string, gi.argv(1)) == 0) {
-			if (!ent->client->sess.admin) {
-				ent->client->sess.admin = true;
-				gi.LocBroadcast_Print(PRINT_HIGH, "{} has become an admin.\n", ent->client->resp.netname);
-			}
-			return;
-		}
-	}
-	
-	// run command if valid...
 
+	if (ent->client->sess.admin) {
+		gi.Client_Print(ent, PRINT_HIGH, "You already have administrative rights.\n");
+		return;
+	}
+
+	const char *password = MM_AdminCvarString(admin_password);
+	if (!password[0]) {
+		gi.Client_Print(ent, PRINT_HIGH, "Administration password is not configured.\n");
+		return;
+	}
+
+	if (!MM_RequireExactCommandArgc(ent, 2, G_Fmt("{} <password>", gi.argv(0)).data()))
+		return;
+
+	if (Q_strcasecmp(password, gi.argv(1)) != 0) {
+		gi.Client_Print(ent, PRINT_HIGH, "Invalid administration password.\n");
+		return;
+	}
+
+	ent->client->sess.admin = true;
+	gi.LocBroadcast_Print(PRINT_HIGH, "{} has become an admin.\n", ent->client->resp.netname);
 }

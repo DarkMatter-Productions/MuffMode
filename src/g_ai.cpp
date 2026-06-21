@@ -3,6 +3,10 @@
 // g_ai.c
 
 #include "g_local.h"
+#include "muffmode/mm_horde.h"
+#include "muffmode/mm_profile.h"
+
+extern cvar_t *g_horde_enhanced_ai;
 
 bool FindTarget(gentity_t *self);
 bool ai_checkattack(gentity_t *self, float dist);
@@ -28,8 +32,8 @@ gentity_t *AI_GetSightClient(gentity_t *self) {
 	if (level.intermission_time)
 		return nullptr;
 
-	gentity_t **visible_players = (gentity_t **)alloca(sizeof(gentity_t *) * game.maxclients);
-	size_t num_visible = 0;
+	gentity_t *visible_players[MAX_CLIENTS_KEX] = {};
+	int32_t num_visible = 0;
 
 	for (auto player : active_clients()) {
 		if (player->health <= 0 || player->deadflag || !player->solid)
@@ -42,6 +46,9 @@ gentity_t *AI_GetSightClient(gentity_t *self) {
 			if ((!(self->monsterinfo.aiflags & AI_THIRD_EYE) && !infront(self, player)) || !visible(self, player))
 				continue;
 		}
+
+		if (num_visible >= static_cast<int32_t>(q_countof(visible_players)))
+			break;
 
 		visible_players[num_visible++] = player; // got one
 	}
@@ -334,6 +341,9 @@ returns 1 if the entity is visible to self, even if not infront ()
 =============
 */
 bool visible(gentity_t *self, gentity_t *other, bool through_glass) {
+	MM_PROFILE_ZONE("visible");
+	MM_PROFILE_INC(los_visible_calls);
+
 	// never visible
 	if (other->flags & FL_NOVISIBLE)
 		return false;
@@ -374,6 +384,7 @@ bool visible(gentity_t *self, gentity_t *other, bool through_glass) {
 	if (!through_glass)
 		mask |= CONTENTS_WINDOW;
 
+	MM_PROFILE_INC(los_visible_traces);
 	trace = gi.traceline(spot1, spot2, self, mask);
 	return trace.fraction == 1.0f || trace.ent == other; // PGM
 }
@@ -439,6 +450,10 @@ void FoundTarget(gentity_t *self) {
 	// give easy/medium a little more reaction time (aggressive horde champions stay sharp regardless of skill)
 	if (self->monsterinfo.champion_damage_scale <= 1.25f)
 		self->monsterinfo.attack_finished += skill->integer == 0 ? 400_ms : skill->integer == 1 ? 200_ms : 0_ms;
+
+	// [MuffMode] horde: stagger first-shot timing so swarms don't alpha-strike together
+	if (GT(GT_HORDE) && g_horde_enhanced_ai->integer)
+		self->monsterinfo.attack_finished += gtime_t::from_ms(irandom(0, 400));
 
 	self->monsterinfo.last_sighting = self->monsterinfo.saved_goal = self->enemy->s.origin;
 	self->monsterinfo.trail_time = level.time;
@@ -691,7 +706,9 @@ bool FindTarget(gentity_t *self) {
 		// this is where we would check invisibility
 		float r = range_to(self, client);
 
-		if (r > RANGE_MID)
+		const bool horde_wide_aggro = GT(GT_HORDE) && g_horde_enhanced_ai->integer;
+
+		if (!horde_wide_aggro && r > RANGE_MID)
 			return false;
 
 		// Paril: revised so that monsters can be woken up
@@ -700,6 +717,12 @@ bool FindTarget(gentity_t *self) {
 		bool is_visible =
 			((r <= RANGE_NEAR && client->show_hostile >= level.time && !(self->spawnflags & SPAWNFLAG_MONSTER_AMBUSH)) ||
 				(visible(self, client) && (r <= RANGE_MELEE || (self->monsterinfo.aiflags & AI_THIRD_EYE) || infront(self, client))));
+
+		// [MuffMode] horde: re-acquire living fighters across the map via PHS when line-of-sight is lost
+		if (!is_visible && horde_wide_aggro && client->client && ClientIsPlaying(client->client) &&
+			client->health > 0 && !client->client->eliminated &&
+			gi.inPHS(self->s.origin, client->s.origin, true))
+			is_visible = true;
 
 		if (!is_visible)
 			return false;
@@ -1122,6 +1145,15 @@ bool ai_checkattack(gentity_t *self, float dist) {
 		}
 
 		else {
+			// [MuffMode] horde: pick next fighter instead of idling after a kill
+			if (GT(GT_HORDE) && g_horde_enhanced_ai->integer) {
+				if (gentity_t *t = MM_Horde_PickTarget(self)) {
+					self->enemy = t;
+					FoundTarget(self);
+					return true;
+				}
+			}
+
 			if (self->movetarget && !(self->monsterinfo.aiflags & AI_STAND_GROUND)) {
 				self->goalentity = self->movetarget;
 				self->monsterinfo.walk(self);

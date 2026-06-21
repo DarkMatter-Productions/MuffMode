@@ -5,9 +5,15 @@
 #include "g_local.h"
 #include "g_debug_log.h"
 // [MuffMode] Team management lives in muffmode/mm_team
+#include "muffmode/mm_profile.h"
+#include "muffmode/mm_skin.h"
 #include "muffmode/mm_team.h"
 #include <cerrno>
 #include <ctime>
+
+static size_t G_EntitySearchLimit() {
+	return min(static_cast<size_t>(globals.num_entities), static_cast<size_t>(game.maxentities));
+}
 
 /*
 =============
@@ -25,7 +31,11 @@ gentity_t *G_Find(gentity_t *from, std::function<bool(gentity_t *e)> matcher) {
 	else
 		from++;
 
-	for (; from < &g_entities[globals.num_entities]; from++) {
+	gentity_t *end = &g_entities[G_EntitySearchLimit()];
+	if (from >= end)
+		return nullptr;
+
+	for (; from < end; from++) {
 		if (!from->inuse)
 			continue;
 		if (matcher(from))
@@ -75,7 +85,12 @@ gentity_t *findradius(gentity_t *from, const vec3_t &org, float rad) {
 		from = g_entities;
 	else
 		from++;
-	for (; from < &g_entities[globals.num_entities]; from++) {
+
+	gentity_t *end = &g_entities[G_EntitySearchLimit()];
+	if (from >= end)
+		return nullptr;
+
+	for (; from < end; from++) {
 		if (!from->inuse)
 			continue;
 		if (from->solid == SOLID_NOT)
@@ -384,10 +399,12 @@ angles and bad trails.
 =================
 */
 gentity_t *G_Spawn() {
-	gentity_t *e = &g_entities[game.maxclients + 1];
 	size_t i;
+	const size_t first_spawn_entity = min(static_cast<size_t>(game.maxclients) + 1, static_cast<size_t>(game.maxentities));
+	const size_t entity_limit = G_EntitySearchLimit();
 
-	for (i = game.maxclients + 1; i < globals.num_entities; i++, e++) {
+	for (i = first_spawn_entity; i < entity_limit; i++) {
+		gentity_t *e = &g_entities[i];
 		// the first couple seconds of server time can involve a lot of
 		// freeing and allocating, so relax the replacement policy
 		if (!e->inuse && (e->freetime < 2_sec || level.time - e->freetime > 500_ms)) {
@@ -396,10 +413,12 @@ gentity_t *G_Spawn() {
 		}
 	}
 
-	if (i == game.maxentities)
+	i = max(i, first_spawn_entity);
+	if (i >= static_cast<size_t>(game.maxentities))
 		gi.Com_ErrorFmt("{}: no free entities.", __FUNCTION__);
 
-	globals.num_entities++;
+	gentity_t *e = &g_entities[i];
+	globals.num_entities = static_cast<uint32_t>(i + 1);
 	G_InitGentity(e);
 	//gi.Com_PrintFmt("{}: total:{}\n", __FUNCTION__, i);
 	return e;
@@ -453,6 +472,9 @@ G_TouchTriggers
 ============
 */
 void G_TouchTriggers(gentity_t *ent) {
+	MM_PROFILE_ZONE("G_TouchTriggers");
+	MM_PROFILE_INC(trigger_touch_calls);
+
 	int				num;
 	static gentity_t	*touch[MAX_ENTITIES];
 	gentity_t			*hit;
@@ -463,6 +485,7 @@ void G_TouchTriggers(gentity_t *ent) {
 		return;
 
 	num = gi.BoxEntities(ent->absmin, ent->absmax, touch, MAX_ENTITIES, AREA_TRIGGERS, G_TouchTriggers_BoxFilter, nullptr);
+	MM_PROFILE_ADD(trigger_box_entities, num);
 
 	// be careful, it is possible to have an entity in this
 	// list removed before we get to it (killtriggered)
@@ -476,6 +499,7 @@ void G_TouchTriggers(gentity_t *ent) {
 			if (!strstr(hit->classname, "teleport"))
 				continue;
 
+		MM_PROFILE_INC(trigger_touch_dispatches);
 		hit->touch(hit, ent, null_trace, true);
 	}
 }
@@ -483,14 +507,18 @@ void G_TouchTriggers(gentity_t *ent) {
 // [Paril-KEX] scan for projectiles between our movement positions
 // to see if we need to collide against them
 void G_TouchProjectiles(gentity_t *ent, vec3_t previous_origin) {
+	MM_PROFILE_ZONE("G_TouchProjectiles");
+	MM_PROFILE_INC(projectile_touch_calls);
+
 	struct skipped_projectile {
 		gentity_t *projectile;
 		int32_t		spawn_count;
 	};
-	// a bit ugly, but we'll store projectiles we are ignoring here.
-	static std::vector<skipped_projectile> skipped;
+	static skipped_projectile skipped[MAX_ENTITIES];
+	size_t skipped_count = 0;
 
 	while (true) {
+		MM_PROFILE_INC(projectile_traces);
 		trace_t tr = gi.trace(previous_origin, ent->mins, ent->maxs, ent->s.origin, ent, ent->clipmask | CONTENTS_PROJECTILE);
 
 		if (tr.fraction == 1.0f)
@@ -500,21 +528,28 @@ void G_TouchProjectiles(gentity_t *ent, vec3_t previous_origin) {
 
 		// always skip this projectile since certain conditions may cause the projectile
 		// to not disappear immediately
+		if (skipped_count == ARRAY_LEN(skipped)) {
+			MM_PROFILE_INC(projectile_skip_overflows);
+			break;
+		}
+
 		tr.ent->svflags &= ~SVF_PROJECTILE;
-		skipped.push_back({ tr.ent, tr.ent->spawn_count });
+		skipped[skipped_count++] = { tr.ent, tr.ent->spawn_count };
+		MM_PROFILE_INC(projectile_skipped);
 
 		// if we're both players and it's coop, allow the projectile to "pass" through
 		if (ent->client && tr.ent->owner && tr.ent->owner->client && !G_ShouldPlayersCollide(true))
 			continue;
 
+		MM_PROFILE_INC(projectile_impacts);
 		G_Impact(ent, tr);
 	}
 
-	for (auto &skip : skipped)
-		if (skip.projectile->inuse && skip.projectile->spawn_count == skip.spawn_count)
-			skip.projectile->svflags |= SVF_PROJECTILE;
+	MM_PROFILE_MAX(projectile_max_skipped_per_call, skipped_count);
 
-	skipped.clear();
+	for (size_t i = 0; i < skipped_count; i++)
+		if (skipped[i].projectile->inuse && skipped[i].projectile->spawn_count == skipped[i].spawn_count)
+			skipped[i].projectile->svflags |= SVF_PROJECTILE;
 }
 
 /*
@@ -542,6 +577,9 @@ BoxEntitiesResult_t KillBox_BoxFilter(gentity_t *hit, void *) {
 }
 
 bool KillBox(gentity_t *ent, bool from_spawning, mod_id_t mod, bool bsp_clipping) {
+	MM_PROFILE_ZONE("KillBox");
+	MM_PROFILE_INC(killbox_calls);
+
 	// don't telefrag as spectator or noclip player...
 	if (ent->movetype == MOVETYPE_NOCLIP || ent->movetype == MOVETYPE_FREECAM)
 		return true;
@@ -557,6 +595,7 @@ bool KillBox(gentity_t *ent, bool from_spawning, mod_id_t mod, bool bsp_clipping
 	gentity_t *hit;
 
 	num = gi.BoxEntities(ent->absmin, ent->absmax, touch, MAX_ENTITIES, AREA_SOLID, KillBox_BoxFilter, nullptr);
+	MM_PROFILE_ADD(killbox_box_entities, num);
 
 	if (num > 0)
 		MuffModeLog("TELEFRAG", "KillBox: %d entities in box (spawner=%s, from_spawning=%d, mod=%d)",
@@ -596,6 +635,7 @@ bool KillBox(gentity_t *ent, bool from_spawning, mod_id_t mod, bool bsp_clipping
 				hit->client->pers.netname,
 				(int)mod, (int)from_spawning);
 
+		MM_PROFILE_INC(killbox_damage_events);
 		T_Damage(hit, ent, ent, vec3_origin, ent->s.origin, vec3_origin, 100000, 0, DAMAGE_NO_PROTECTION, mod);
 	}
 
@@ -674,6 +714,13 @@ void G_AssignPlayerSkin(gentity_t *ent, const char *s) {
 	}
 
 	gi.configstring(CS_PLAYERSKINS + playernum, t.data());
+
+	// [MuffMode] The canonical broadcast above clobbers any per-viewer skin
+	// override of this player, and a team change here can flip enemy/teammate
+	// relationships, so re-send overrides both for this player as a target and
+	// as a viewer.
+	MM_RefreshSkinOverridesForTarget(ent);
+	MM_RefreshSkinOverridesForViewer(ent);
 
 	//	gi.LocClient_Print(ent, PRINT_HIGH, "$g_assigned_team", ent->client->resp.netname);
 }
@@ -870,6 +917,25 @@ bool Teams() {
 
 /*
 =============
+P_EngineTeamIndex
+
+Map internal sess.team to engine team identifiers (skinnum team_index,
+player_state.team_id, sv.team): 1 = team 1, 2 = team 2, 0 = none.
+=============
+*/
+uint8_t P_EngineTeamIndex(team_t team) {
+	switch (team) {
+	case TEAM_RED:
+		return 1;
+	case TEAM_BLUE:
+		return 2;
+	default:
+		return 0;
+	}
+}
+
+/*
+=============
 G_TimeString
 
 Format a match timer string with minute precision.
@@ -1043,14 +1109,20 @@ Resolve a client entity from a name or validated numeric identifier string.
 =============
 */
 gentity_t *ClientEntFromString(const char *in) {
+	if (!in || !*in)
+		return nullptr;
+
 	for (auto ec : active_clients())
 		if (!strcmp(in, ec->client->resp.netname))
 			return ec;
 
+	if (*in == '-' || *in == '+')
+		return nullptr;
+
 	char *end = nullptr;
 	errno = 0;
 	const unsigned long num = strtoul(in, &end, 10);
-	if (errno == ERANGE || !end || *end != '\0')
+	if (errno == ERANGE || !end || end == in || *end != '\0')
 		return nullptr;
 	if (num >= static_cast<unsigned long>(game.maxclients))
 		return nullptr;

@@ -2,6 +2,8 @@
 // Licensed under the GNU General Public License 2.0.
 #include "cg_local.h"
 
+#include <limits>
+
 constexpr int32_t STAT_MINUS = 10;  // num frame for '-' stats digit
 constexpr const char *sb_nums[2][11] =
 {
@@ -83,6 +85,27 @@ static inline bool CG_HudHidden(const player_state_t *ps) {
 
 layout_flags_t CG_LayoutFlags(const player_state_t *ps) {
 	return (layout_flags_t)ps->stats[STAT_LAYOUTS];
+}
+
+static int32_t CG_ParseLayoutInt(const char *token, const int32_t fallback = 0) {
+	if (token == nullptr || token[0] == '\0') {
+		return fallback;
+	}
+
+	char *end = nullptr;
+	const long value = strtol(token, &end, 10);
+	if (end == token || *end != '\0') {
+		return fallback;
+	}
+
+	return static_cast<int32_t>(clamp(value,
+		static_cast<long>(std::numeric_limits<int32_t>::min()),
+		static_cast<long>(std::numeric_limits<int32_t>::max())));
+}
+
+static bool CG_TryLayoutStatIndex(const char *token, int32_t &stat) {
+	stat = CG_ParseLayoutInt(token, -1);
+	return stat >= 0 && stat < MAX_STATS;
 }
 
 #include <optional>
@@ -842,12 +865,15 @@ static void CG_ExecuteLayoutString(const char *s, vrect_t hud_vrect, vrect_t hud
 		if (!strcmp(token, "pic")) {   // draw a pic from a stat number
 			token = COM_Parse(&s);
 			if (!skip_depth) {
-				int16_t stat = atoi(token);
+				int32_t stat = 0;
 				bool skip = false;
 
+				if (!CG_TryLayoutStatIndex(token, stat))
+					cgi.Com_Error("Bad pic stat index");
+
 				value = ps->stats[stat];
-				if (value >= MAX_IMAGES)
-					cgi.Com_Error("Pic >= MAX_IMAGES");
+				if (value < 0 || value >= MAX_IMAGES)
+					cgi.Com_Error("Pic outside image range");
 
 				//muff: client-side hacky hacks - don't show vitals if spectating
 				if ((ps->stats[STAT_SPECTATOR] && !ps->stats[STAT_CHASE]) && (stat == STAT_HEALTH_ICON || stat == STAT_AMMO_ICON || stat == STAT_ARMOR_ICON))
@@ -997,10 +1023,13 @@ static void CG_ExecuteLayoutString(const char *s, vrect_t hud_vrect, vrect_t hud
 		if (!strcmp(token, "num")) {   // draw a number
 			token = COM_Parse(&s);
 			if (!skip_depth)
-				width = atoi(token);
+				width = CG_ParseLayoutInt(token);
 			token = COM_Parse(&s);
 			if (!skip_depth) {
-				int32_t stat = atoi(token);
+				int32_t stat = 0;
+				if (!CG_TryLayoutStatIndex(token, stat))
+					cgi.Com_Error("Bad num stat index");
+
 				value = ps->stats[stat];
 				//muff: little hacky hack to conditionally hide text for muffmode connoisseurs
 				if (value != -999) {
@@ -1017,9 +1046,14 @@ static void CG_ExecuteLayoutString(const char *s, vrect_t hud_vrect, vrect_t hud
 		else if (!strcmp(token, "lives_num")) {
 			token = COM_Parse(&s);
 			if (!skip_depth) {
-				value = ps->stats[atoi(token)];
+				int32_t stat = 0;
+				if (!CG_TryLayoutStatIndex(token, stat))
+					cgi.Com_Error("Bad lives_num stat index");
+
+				value = ps->stats[stat];
 				CG_DrawField(x, y, value <= 2 ? flash_frame : 0, 1, max(0, value - 2), scale);
 			}
+			continue;
 		}
 
 		//muff: client-side hacky hacks - don't show vitals if spectating
@@ -1207,7 +1241,8 @@ static void CG_ExecuteLayoutString(const char *s, vrect_t hud_vrect, vrect_t hud
 			if_depth++;
 
 			// skip to endif
-			if (!skip_depth && !ps->stats[atoi(token)]) {
+			int32_t stat = 0;
+			if (!skip_depth && (!CG_TryLayoutStatIndex(token, stat) || !ps->stats[stat])) {
 				skip_depth = true;
 				endif_depth = if_depth;
 			}
@@ -1218,14 +1253,14 @@ static void CG_ExecuteLayoutString(const char *s, vrect_t hud_vrect, vrect_t hud
 		if (!strcmp(token, "ifbit")) {
 			// if (stats[stat] & mask) stmt
 			token = COM_Parse(&s);
-			index = atoi(token);
+			const bool has_stat = CG_TryLayoutStatIndex(token, index);
 			token = COM_Parse(&s);
-			int mask = atoi(token);
+			int mask = CG_ParseLayoutInt(token);
 
 			if_depth++;
 
 			// skip to endif if the bit isn't set
-			if (!skip_depth && (index < 0 || index >= MAX_STATS || !(ps->stats[index] & mask))) {
+			if (!skip_depth && (!has_stat || !(ps->stats[index] & mask))) {
 				skip_depth = true;
 				endif_depth = if_depth;
 			}
@@ -1756,12 +1791,9 @@ static void CG_DrawInventory(const player_state_t *ps, const std::array<int16_t,
 
 extern uint64_t cgame_init_time;
 
-// Team ID constants (matching g_local.h enum team_t)
-constexpr uint8_t TEAM_NONE = 0;
-constexpr uint8_t TEAM_SPECTATOR = 1;
-constexpr uint8_t TEAM_FREE = 2;
-constexpr uint8_t TEAM_RED = 3;
-constexpr uint8_t TEAM_BLUE = 4;
+// Engine player_state.team_id values (matches vanilla ctf_team / P_EngineTeamIndex)
+constexpr uint8_t ENGINE_TEAM_RED = 1;
+constexpr uint8_t ENGINE_TEAM_BLUE = 2;
 
 // Game type constants (matching g_local.h enum gametype_t)
 constexpr int GT_TDM = 3;
@@ -1781,7 +1813,7 @@ static void CG_DrawTeamBorder(const player_state_t *ps, vrect_t hud_vrect, int32
 		return;
 
 	// Only draw if player is on a team
-	if (ps->team_id != TEAM_RED && ps->team_id != TEAM_BLUE)
+	if (ps->team_id != ENGINE_TEAM_RED && ps->team_id != ENGINE_TEAM_BLUE)
 		return;
 
 	// Don't draw if HUD is hidden
@@ -1796,7 +1828,7 @@ static void CG_DrawTeamBorder(const player_state_t *ps, vrect_t hud_vrect, int32
 	rgba_t team_red_color{ 255, 50, 50, alpha };
 	rgba_t team_blue_color{ 50, 100, 255, alpha };
 
-	rgba_t border_color = (ps->team_id == TEAM_RED) ? team_red_color : team_blue_color;
+	rgba_t border_color = (ps->team_id == ENGINE_TEAM_RED) ? team_red_color : team_blue_color;
 
 	// Calculate screen dimensions
 	int32_t x = hud_vrect.x * scale;

@@ -8,6 +8,8 @@ struct ruleset_pickup_tuning_t {
 	int slug_pickup_quantity;
 };
 
+namespace {
+
 static constexpr ruleset_pickup_tuning_t k_ruleset_pickup_tuning[RS_NUM_RULESETS] = {
 	/* RS_NONE */			{ 10 },
 	/* RS_Q2RE */			{ 10 },
@@ -18,9 +20,16 @@ static constexpr ruleset_pickup_tuning_t k_ruleset_pickup_tuning[RS_NUM_RULESETS
 	/* RS_QC */				{ 10 },
 };
 
+ruleset_t MM_CurrentRulesetForWeaponTuning()
+{
+	return (ruleset_t)clamp((int)game.ruleset, (int)RS_NONE, (int)RS_NUM_RULESETS - 1);
+}
+
+} // namespace
+
 int MM_Ruleset_SlugPickupQuantity()
 {
-	int ruleset = clamp((int)game.ruleset, 0, (int)RS_NUM_RULESETS - 1);
+	int ruleset = (int)MM_CurrentRulesetForWeaponTuning();
 	return k_ruleset_pickup_tuning[ruleset].slug_pickup_quantity;
 }
 
@@ -48,10 +57,11 @@ void MM_Ruleset_MachinegunSpread(int &hspread, int &vspread)
 
 int MM_Ruleset_ChaingunDamage(gentity_t *ent)
 {
-	if (RS(RS_QC) && deathmatch->integer)
+	if ((RS(RS_QC) || RS(RS_VANILLA_PLUS)) && deathmatch->integer) {
+		if (!ent || !ent->client)
+			return 4;
 		return 4 + (ent->client->chaingun_shots++ & 1);
-	if (RS(RS_VANILLA_PLUS) && deathmatch->integer)
-		return 4 + (ent->client->chaingun_shots++ & 1);
+	}
 	if (RS(RS_QC))
 		return 6;
 	return deathmatch->integer ? 6 : 8;
@@ -64,7 +74,7 @@ constexpr int k_q2re_rl_splash_knockback = 120;
 void MM_Ruleset_RocketLauncherDefaults(int &damage, int &splash_damage, float &splash_radius, int &speed, int &splash_knockback)
 {
 	splash_knockback = 0; // default: knockback derived from splash_damage
-	switch (game.ruleset) {
+	switch (MM_CurrentRulesetForWeaponTuning()) {
 	case RS_MM:
 		damage = 100;
 		splash_radius = 120;
@@ -108,7 +118,7 @@ void MM_Ruleset_RocketLauncherDefaults(int &damage, int &splash_damage, float &s
 void MM_Ruleset_RocketLauncherDefaultsForCustomDamage(int damage, int &splash_damage, float &splash_radius, int &speed, int &splash_knockback)
 {
 	splash_knockback = 0; // default: knockback derived from splash_damage
-	switch (game.ruleset) {
+	switch (MM_CurrentRulesetForWeaponTuning()) {
 	case RS_MM:
 		splash_radius = 120;
 		splash_damage = damage;
@@ -190,7 +200,7 @@ void MM_Ruleset_BFGDefaults(int &damage, float &splash_radius, int &speed)
 
 void MM_Ruleset_PlasmaBeamDefaults(int &damage, int &kick)
 {
-	switch (game.ruleset) {
+	switch (MM_CurrentRulesetForWeaponTuning()) {
 	case RS_MM:
 	case RS_VANILLA_PLUS:
 	case RS_QC:
@@ -267,11 +277,17 @@ bool MM_Ruleset_Q3AHeavyAmmo(item_id_t ammo_id)
 
 int MM_Ruleset_WeaponPickupAmmoQuantity(const gentity_t *ent, const gentity_t *other, const gitem_t *ammo)
 {
-	if (ent->count)
+	if (!ammo)
+		return 0;
+
+	if (ent && ent->count)
 		return ent->count;
 
 	if (RS(RS_Q3A)) {
 		int quantity = MM_Ruleset_Q3AHeavyAmmo(ammo->id) ? 10 : ammo->quantity;
+
+		if (!other || !other->client)
+			return quantity;
 
 		if (other->client->pers.inventory[ammo->id] < quantity)
 			return quantity - other->client->pers.inventory[ammo->id];
@@ -287,6 +303,9 @@ int MM_Ruleset_WeaponPickupAmmoQuantity(const gentity_t *ent, const gentity_t *o
 
 int MM_Ruleset_WeaponDropAmmoQuantity(const gitem_t *item, const gitem_t *ammo)
 {
+	if (!item || !ammo)
+		return 0;
+
 	if (item->id == IT_WEAPON_RAILGUN)
 		return MM_Ruleset_SlugPickupQuantity();
 

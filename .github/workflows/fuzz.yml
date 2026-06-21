@@ -1,0 +1,40 @@
+name: Fuzz Targets
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "41 5 * * 3"
+
+permissions:
+  contents: read
+
+jobs:
+  libfuzzer-smoke:
+    name: libFuzzer Smoke
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 45
+    continue-on-error: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install LLVM if needed
+        shell: pwsh
+        run: |
+          if (-not (Get-Command clang-cl -ErrorAction SilentlyContinue)) {
+            choco install llvm --yes --no-progress
+          }
+          $env:Path = "C:\Program Files\LLVM\bin;$env:Path"
+          clang-cl --version
+
+      - name: Build libFuzzer targets
+        shell: pwsh
+        run: ./scripts/ci/build-fuzz-targets.ps1 -AllowUnsupported
+
+      - name: Upload fuzz build outputs
+        uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: fuzz-targets
+          path: build/fuzz/*

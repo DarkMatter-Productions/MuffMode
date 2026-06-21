@@ -1,0 +1,69 @@
+{
+  "suite": "red-rover-0.36.04-regressions",
+  "branch": "muffdev",
+  "sourceCommits": [
+    "0e4ec722549ce54f5d3ebf32fe2ad5972f1955e4",
+    "9c13a5f6c46ce1a201d36eff700d25292b6c3df4"
+  ],
+  "scenarios": [
+    {
+      "id": "frag-warning-lower-bound",
+      "kind": "pure-helper",
+      "input": {
+        "fraglimit": 10,
+        "leaderScores": [7, 8, 9, 10, 11]
+      },
+      "expected": {
+        "warningIndexes": [2, 1, 0, null, null],
+        "neverIndexesBelowZero": true
+      }
+    },
+    {
+      "id": "scorelimit-uses-individual-rr-score",
+      "kind": "pure-helper",
+      "input": {
+        "teams": true,
+        "redRover": true
+      },
+      "expected": {
+        "useTeamScoreLimit": false
+      }
+    },
+    {
+      "id": "manual-team-switch-blocked-in-progress",
+      "kind": "pure-helper",
+      "input": {
+        "currentTeam": "red",
+        "desiredTeam": "blue",
+        "spectatorTeam": "spectator",
+        "redRover": true,
+        "matchInProgress": true
+      },
+      "expected": {
+        "blocked": true,
+        "spectatorJoinAllowed": true,
+        "leaveToSpectatorAllowed": true
+      }
+    },
+    {
+      "id": "scoreboard-footer-reserve",
+      "kind": "pure-helper",
+      "input": {
+        "maxStringChars": 1400,
+        "warmupFooterReserve": 96,
+        "intermissionFooterReserve": 320
+      },
+      "expected": {
+        "footerSurvivesPlayerRows": true
+      }
+    },
+    {
+      "id": "spectator-join-during-in-progress-match",
+      "kind": "headless-scenario",
+      "expected": {
+        "joinFromSpectatorAllowed": true,
+        "manualSideSwitchBlocked": true
+      }
+    }
+  ]
+}

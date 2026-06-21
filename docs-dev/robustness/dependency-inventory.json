@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "generated_on": "2026-06-15",
+  "project": {
+    "name": "MuffMode",
+    "license_spdx": "GPL-2.0-only",
+    "license_file": "LICENSE",
+    "license_notes": "Project-owned game-module source follows the GPL-2.0 source headers and upstream Quake II Rerelease DLL licensing position.",
+    "upstream": {
+      "name": "id-Software/quake2-rerelease-dll",
+      "url": "https://github.com/id-Software/quake2-rerelease-dll",
+      "license_spdx": "GPL-2.0-only"
+    }
+  },
+  "dependency_policy": {
+    "manifest": "src/vcpkg.json",
+    "vcpkg_baseline": "000d1bda1ffa95a73e0b40334fa4103d6f4d3d48",
+    "vcpkg_triplet": "x64-windows-static",
+    "notice_file": "THIRD_PARTY_NOTICES.md",
+    "policy_doc": "docs/dependencies.md",
+    "model": "vcpkg manifest is authoritative for restore/baseline; vendored headers are compatibility mirrors and must stay version-aligned."
+  },
+  "packages": [
+    {
+      "name": "fmt",
+      "display_name": "{fmt}",
+      "version": "10.1.1",
+      "license_spdx": "MIT",
+      "homepage": "https://github.com/fmtlib/fmt",
+      "vcpkg_dependency": "fmt",
+      "vendored_paths": [
+        "src/fmt",
+        "src/fmt.cc",
+        "src/format.cc",
+        "src/os.cc"
+      ],
+      "version_evidence": [
+        "src/fmt/core.h FMT_VERSION",
+        "vcpkg SPDX package metadata when vcpkg restore has run"
+      ],
+      "notice_obligations": [
+        "Preserve copyright notice and MIT license text in source redistributions.",
+        "Carry notice text in THIRD_PARTY_NOTICES.md for release packages."
+      ]
+    },
+    {
+      "name": "jsoncpp",
+      "display_name": "JsonCpp",
+      "version": "1.9.5",
+      "license_spdx": "MIT OR LicenseRef-Public-Domain",
+      "homepage": "https://github.com/open-source-parsers/jsoncpp",
+      "vcpkg_dependency": "jsoncpp",
+      "vendored_paths": [
+        "src/json"
+      ],
+      "version_evidence": [
+        "src/json/version.h JSONCPP_VERSION_STRING",
+        "vcpkg SPDX package metadata when vcpkg restore has run"
+      ],
+      "notice_obligations": [
+        "Preserve JsonCpp public-domain/MIT license notice in source redistributions.",
+        "Carry notice text in THIRD_PARTY_NOTICES.md for release packages."
+      ]
+    }
+  ],
+  "review": {
+    "owner": "Maintainer",
+    "required_on_changes": [
+      "src/vcpkg.json",
+      "src/fmt/**",
+      "src/json/**",
+      "src/fmt.cc",
+      "src/format.cc",
+      "src/os.cc",
+      "THIRD_PARTY_NOTICES.md",
+      "LICENSE",
+      "scripts/release.ps1"
+    ]
+  }
+}

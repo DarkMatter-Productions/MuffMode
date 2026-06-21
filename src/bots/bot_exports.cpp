@@ -4,21 +4,41 @@
 #include "../g_local.h"
 #include "bot_exports.h"
 
+namespace {
+
+bool Entity_IsUsable(const gentity_t *entity) {
+	return entity != nullptr && entity->inuse;
+}
+
+bool Entity_IsUsableBot(const gentity_t *entity) {
+	return Entity_IsUsable(entity) && (entity->svflags & SVF_BOT) != 0;
+}
+
+gclient_t *Bot_GetClient(gentity_t *bot) {
+	if (!Entity_IsUsableBot(bot)) {
+		return nullptr;
+	}
+
+	return bot->client;
+}
+
+bool ItemId_IsUsable(const int32_t itemID) {
+	return itemID > IT_NULL && itemID < IT_TOTAL;
+}
+
+} // namespace
+
 /*
 ================
 Bot_SetWeapon
 ================
 */
 void Bot_SetWeapon(gentity_t *bot, const int weaponIndex, const bool instantSwitch) {
-	if (weaponIndex <= IT_NULL || weaponIndex > IT_TOTAL) {
+	if (!ItemId_IsUsable(weaponIndex)) {
 		return;
 	}
 
-	if ((bot->svflags & SVF_BOT) == 0) {
-		return;
-	}
-
-	gclient_t *client = bot->client;
+	gclient_t *client = Bot_GetClient(bot);
 	if (client == nullptr || !client->pers.inventory[weaponIndex]) {
 		return;
 	}
@@ -66,11 +86,7 @@ Bot_TriggerEntity
 ================
 */
 void Bot_TriggerEntity(gentity_t *bot, gentity_t *entity) {
-	if (!bot->inuse || !entity->inuse) {
-		return;
-	}
-
-	if ((bot->svflags & SVF_BOT) == 0) {
+	if (!Entity_IsUsableBot(bot) || !Entity_IsUsable(entity)) {
 		return;
 	}
 
@@ -78,7 +94,7 @@ void Bot_TriggerEntity(gentity_t *bot, gentity_t *entity) {
 		entity->use(entity, bot, bot);
 	}
 
-	trace_t unUsed;
+	trace_t unUsed{};
 	if (entity->touch) {
 		entity->touch(entity, bot, unUsed, true);
 	}
@@ -90,35 +106,32 @@ Bot_UseItem
 ================
 */
 void Bot_UseItem(gentity_t *bot, const int32_t itemID) {
-	if (!bot->inuse) {
-		return;
-	}
-
-	if ((bot->svflags & SVF_BOT) == 0) {
+	gclient_t *client = Bot_GetClient(bot);
+	if (client == nullptr || !ItemId_IsUsable(itemID)) {
 		return;
 	}
 
 	const item_id_t desiredItemID = item_id_t(itemID);
-	bot->client->pers.selected_item = desiredItemID;
+	client->pers.selected_item = desiredItemID;
 
 	ValidateSelectedItem(bot);
 
-	if (bot->client->pers.selected_item == IT_NULL) {
+	if (client->pers.selected_item == IT_NULL) {
 		return;
 	}
 
-	if (bot->client->pers.selected_item != desiredItemID) {
+	if (client->pers.selected_item != desiredItemID) {
 		return;
 	} // the itemID changed on us - don't use it!
 
-	gitem_t *item = &itemlist[bot->client->pers.selected_item];
-	bot->client->pers.selected_item = IT_NULL;
+	gitem_t *item = &itemlist[client->pers.selected_item];
+	client->pers.selected_item = IT_NULL;
 
 	if (item->use == nullptr) {
 		return;
 	}
 
-	bot->client->no_weapon_chains = true;
+	client->no_weapon_chains = true;
 	item->use(bot, item);
 }
 
@@ -156,6 +169,10 @@ Entity_ForceLookAtPoint
 ================
 */
 void Entity_ForceLookAtPoint(gentity_t *entity, gvec3_cref_t point) {
+	if (!Entity_IsUsable(entity)) {
+		return;
+	}
+
 	vec3_t viewOrigin = entity->s.origin;
 	if (entity->client != nullptr) {
 		viewOrigin += entity->client->ps.viewoffset;
@@ -184,5 +201,13 @@ Check if the given bot has picked up the given item or not.
 ================
 */
 bool Bot_PickedUpItem(gentity_t *bot, gentity_t *item) {
-	return item->item_picked_up_by[(bot->s.number - 1)];
+	if (!Entity_IsUsableBot(bot) || !Entity_IsUsable(item) || item->item == nullptr) {
+		return false;
+	}
+
+	if (bot->s.number == 0 || bot->s.number > MAX_CLIENTS) {
+		return false;
+	}
+
+	return item->item_picked_up_by[bot->s.number - 1];
 }

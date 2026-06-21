@@ -47,11 +47,13 @@ If you are joining someone else's server, they control most match settings. Your
 | Command | What it does |
 | --- | --- |
 | `announcer` | Toggle Quake Live style match announcer event support. |
+| `eskin <model/skin>` or `eskin off` | In team games, re-skin all enemies to the chosen model on your screen only (e.g. `eskin male/grunt`). No argument shows the current setting. |
 | `fm` | Toggle frag messages. |
 | `help` | Toggle help text drawing. |
 | `id` | Toggle crosshair player identification. |
 | `kb` | Toggle kill beeps. |
 | `timer` | Toggle the match timer. |
+| `tskin <model/skin>` or `tskin off` | In team games, re-skin all teammates to the chosen model on your screen only. No argument shows the current setting. |
 
 ## Gameplay Commands
 

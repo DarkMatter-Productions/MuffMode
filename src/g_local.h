@@ -11,7 +11,7 @@
 constexpr const char *GAMEVERSION = "baseq2";
 
 constexpr const char *GAMEMOD_TITLE = "Muff Mode";
-constexpr const char *GAMEMOD_VERSION = "0.36.5";
+constexpr const char *GAMEMOD_VERSION = "0.36.43";
 
 //==================================================================
 
@@ -377,10 +377,6 @@ struct local_game_import_t : game_import_t {
 	inline local_game_import_t(const game_import_t &imports) :
 		game_import_t(imports) {}
 
-private:
-	// shared buffer for wrappers below
-	static char print_buffer[0x10000];
-
 public:
 #ifdef USE_CPP20_FORMAT
 	template<typename... Args>
@@ -393,6 +389,7 @@ public:
 	inline void Com_PrintFmt_(const S &format_str, Args &&... args)
 #endif
 	{
+		char print_buffer[0x10000];
 		G_FmtTo_(print_buffer, format_str, std::forward<Args>(args)...);
 		Com_Print(print_buffer);
 	}
@@ -408,6 +405,7 @@ public:
 	inline void Com_ErrorFmt_(const S &format_str, Args &&... args)
 #endif
 	{
+		char print_buffer[0x10000];
 		G_FmtTo_(print_buffer, format_str, std::forward<Args>(args)...);
 		Com_Error(print_buffer);
 	}
@@ -429,15 +427,14 @@ private:
 			Com_Error("invalid loc argument");
 	}
 
-	static std::array<char[MAX_INFO_STRING], MAX_LOCALIZATION_ARGS> buffers;
-	static std::array<const char *, MAX_LOCALIZATION_ARGS> buffer_ptrs;
-
 public:
 	template<typename... Args>
 	inline void LocClient_Print(gentity_t *e, print_type_t level, const char *base, Args&& ...args) {
 		static_assert(sizeof...(args) < MAX_LOCALIZATION_ARGS, "too many arguments to gi.LocClient_Print");
 		static_assert(((is_valid_loc_embed_v<Args>) && ...), "invalid argument passed to gi.LocClient_Print");
 
+		std::array<char[MAX_INFO_STRING], MAX_LOCALIZATION_ARGS> buffers;
+		std::array<const char *, MAX_LOCALIZATION_ARGS> buffer_ptrs{};
 		size_t n = 0;
 		((loc_embed(args, buffers[n], buffer_ptrs[n]), ++n), ...);
 
@@ -449,6 +446,8 @@ public:
 		static_assert(sizeof...(args) < MAX_LOCALIZATION_ARGS, "too many arguments to gi.LocBroadcast_Print");
 		static_assert(((is_valid_loc_embed_v<Args>) && ...), "invalid argument passed to gi.LocBroadcast_Print");
 
+		std::array<char[MAX_INFO_STRING], MAX_LOCALIZATION_ARGS> buffers;
+		std::array<const char *, MAX_LOCALIZATION_ARGS> buffer_ptrs{};
 		size_t n = 0;
 		((loc_embed(args, buffers[n], buffer_ptrs[n]), ++n), ...);
 
@@ -460,6 +459,8 @@ public:
 		static_assert(sizeof...(args) < MAX_LOCALIZATION_ARGS, "too many arguments to gi.LocCenter_Print");
 		static_assert(((is_valid_loc_embed_v<Args>) && ...), "invalid argument passed to gi.LocCenter_Print");
 
+		std::array<char[MAX_INFO_STRING], MAX_LOCALIZATION_ARGS> buffers;
+		std::array<const char *, MAX_LOCALIZATION_ARGS> buffer_ptrs{};
 		size_t n = 0;
 		((loc_embed(args, buffers[n], buffer_ptrs[n]), ++n), ...);
 
@@ -1659,6 +1660,8 @@ struct level_locals_t {
 
 	int			count_living[TEAM_NUM_TEAMS];
 
+	int			last_standing_count[TEAM_NUM_TEAMS];	// round team modes: survivors per team last poll, to fire "last one standing" only on the >1 -> 1 edge
+
 	bool		locked[TEAM_NUM_TEAMS];
 	gentity_t	*captain[TEAM_NUM_TEAMS];	// team captains (nullptr = no captain)
 
@@ -2360,6 +2363,7 @@ extern cvar_t *run_roll;
 extern cvar_t *g_airaccelerate;
 extern cvar_t *g_allow_admin;
 extern cvar_t *g_allow_custom_skins;
+extern cvar_t *g_allow_skin_overrides;
 extern cvar_t *g_team_force_models;
 extern cvar_t *g_team_red_model;
 extern cvar_t *g_team_blue_model;
@@ -2381,6 +2385,7 @@ extern cvar_t *g_coop_instanced_items;
 extern cvar_t *g_coop_num_lives;
 extern cvar_t *g_horde_lives;
 extern cvar_t *g_horde_start_chainsaw;
+extern cvar_t *g_horde_item_respawn_scale;
 extern cvar_t *g_coop_player_collision;
 extern cvar_t *g_coop_squad_respawn;
 extern cvar_t *g_corpse_sink_time;
@@ -2393,6 +2398,7 @@ extern cvar_t *g_dm_allow_exit;
 extern cvar_t *g_dm_allow_no_humans;
 extern cvar_t *g_dm_auto_join;
 extern cvar_t *g_dm_crosshair_id;
+extern cvar_t *g_dm_death_scoreboard;
 extern cvar_t *g_dm_do_readyup;
 extern cvar_t *g_dm_do_warmup;
 extern cvar_t *g_dm_exec_level_cfg;
@@ -2653,6 +2659,7 @@ const char *Teams_TeamName(team_t team);
 const char *Teams_OtherTeamName(team_t team);
 team_t Teams_OtherTeam(team_t team);
 bool Teams();
+uint8_t P_EngineTeamIndex(team_t team);
 void G_AdjustPlayerScore(gclient_t *cl, int32_t offset, bool adjust_team, int32_t team_offset);
 void G_SetPlayerScore(gclient_t *cl, int32_t value);
 void G_AdjustTeamScore(team_t team, int32_t offset);
@@ -3411,6 +3418,11 @@ struct client_config_t {
 	bool			follow_powerup;
 
 	bool			use_expanded;
+
+	// [MuffMode] Per-viewer skin overrides (eskin/tskin): how this player sees
+	// enemies and teammates on their own screen. Empty = no override.
+	char			enemy_skin[MAX_QPATH];
+	char			team_skin[MAX_QPATH];
 };
 
 // client data that stays across deathmatch level changes, handled differently to client_persistent_t
@@ -3447,6 +3459,8 @@ struct client_respawn_t {
 	gtime_t				entertime;	  // level.time the client entered the game
 	int32_t				score;		  // frags, etc
 	int32_t				old_score;		// track changes in score
+	int32_t				round_start_score;	// Red Rover: snapshot of score at round start, to find that round's top fragger
+	int32_t				round_dmg;			// Red Rover: enemy damage dealt this round (reset each round); tie-breaks the round winner. Tracked directly (not match-stats) so it counts bots.
 	vec3_t				cmd_angles;	  // angles sent over in the last command
 
 	bool				spectator; // client is a spectator
@@ -3605,6 +3619,8 @@ struct gclient_t {
 
 	gtime_t respawn_min_time; // can't respawn before time > this
 	gtime_t respawn_time; // can respawn when time > this
+
+	gtime_t last_standing_clear_time; // round team modes: clear the "last one standing" centerprint at this time (0 = none)
 
 	gentity_t *follow_queued_target;
 	gtime_t	follow_queued_time;

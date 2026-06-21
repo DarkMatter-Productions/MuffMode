@@ -155,19 +155,26 @@
     <ClInclude Include="monsters\m_widow2.h" />
     <ClInclude Include="muffmode\mm_admin.h" />
     <ClInclude Include="muffmode\mm_captain.h" />
+    <ClInclude Include="muffmode\mm_command_contracts.h" />
     <ClInclude Include="muffmode\mm_debug.h" />
     <ClInclude Include="muffmode\mm_duel.h" />
     <ClInclude Include="muffmode\mm_gametype.h" />
     <ClInclude Include="muffmode\mm_ghost.h" />
     <ClInclude Include="muffmode\mm_horde.h" />
+    <ClInclude Include="muffmode\mm_horde_ai_rules.h" />
     <ClInclude Include="muffmode\mm_items_rules.h" />
     <ClInclude Include="muffmode\mm_maps.h" />
     <ClInclude Include="muffmode\mm_match.h" />
     <ClInclude Include="muffmode\mm_menu.h" />
     <ClInclude Include="muffmode\mm_motd.h" />
+    <ClInclude Include="muffmode\mm_nav_bake.h" />
+    <ClInclude Include="muffmode\mm_parse.h" />
     <ClInclude Include="muffmode\mm_pconfig.h" />
+    <ClInclude Include="muffmode\mm_profile.h" />
+    <ClInclude Include="muffmode\mm_red_rover_rules.h" />
     <ClInclude Include="muffmode\mm_ruleset.h" />
     <ClInclude Include="muffmode\mm_ruleset_weapons.h" />
+    <ClInclude Include="muffmode\mm_skin.h" />
     <ClInclude Include="muffmode\mm_spawn_filter.h" />
     <ClInclude Include="muffmode\mm_spawn_loadout.h" />
     <ClInclude Include="muffmode\mm_statusbar.h" />
@@ -254,9 +261,11 @@
     <ClCompile Include="muffmode\mm_match.cpp" />
     <ClCompile Include="muffmode\mm_menu.cpp" />
     <ClCompile Include="muffmode\mm_motd.cpp" />
+    <ClCompile Include="muffmode\mm_nav_bake.cpp" />
     <ClCompile Include="muffmode\mm_pconfig.cpp" />
     <ClCompile Include="muffmode\mm_ruleset.cpp" />
     <ClCompile Include="muffmode\mm_ruleset_weapons.cpp" />
+    <ClCompile Include="muffmode\mm_skin.cpp" />
     <ClCompile Include="muffmode\mm_spawn_filter.cpp" />
     <ClCompile Include="muffmode\mm_spawn_loadout.cpp" />
     <ClCompile Include="muffmode\mm_statusbar.cpp" />
@@ -272,6 +281,7 @@
     <ClCompile Include="p_weapon.cpp" />
     <ClCompile Include="q_std.cpp" />
   </ItemGroup>
+  <Import Project="ci.analysis.props" Condition="exists('ci.analysis.props')" />
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
