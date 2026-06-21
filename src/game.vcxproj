@@ -161,6 +161,7 @@
     <ClInclude Include="muffmode\mm_gametype.h" />
     <ClInclude Include="muffmode\mm_ghost.h" />
     <ClInclude Include="muffmode\mm_horde.h" />
+    <ClInclude Include="muffmode\mm_horde_ai_rules.h" />
     <ClInclude Include="muffmode\mm_items_rules.h" />
     <ClInclude Include="muffmode\mm_maps.h" />
     <ClInclude Include="muffmode\mm_match.h" />

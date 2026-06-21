@@ -141,6 +141,12 @@
     <ClInclude Include="muffmode\mm_ghost.h">
       <Filter>muffmode</Filter>
     </ClInclude>
+    <ClInclude Include="muffmode\mm_horde.h">
+      <Filter>muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="muffmode\mm_horde_ai_rules.h">
+      <Filter>muffmode</Filter>
+    </ClInclude>
     <ClInclude Include="muffmode\mm_command_contracts.h">
       <Filter>muffmode</Filter>
     </ClInclude>

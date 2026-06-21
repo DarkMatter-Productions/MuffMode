@@ -6,6 +6,7 @@
 #include <cstdint>
 
 struct gclient_t;
+struct gentity_t;
 
 // [MuffMode] GT_HORDE wave spawning, scoring, and round/match orchestration.
 void MM_Horde_Init();
@@ -41,3 +42,6 @@ bool MM_Horde_CheckMatchEnd();
 
 bool MM_Horde_SkipFragScoreLimit();
 bool MM_Horde_SkipMercyLimit();
+
+// Least-burdened living fighter for horde monster targeting (Tier 0/1).
+gentity_t *MM_Horde_PickTarget(gentity_t *from);

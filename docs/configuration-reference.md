@@ -339,6 +339,18 @@ champions more frequent (early and late alike).
 | `g_horde_theme_min_monsters` | `2` | Minimum on-theme monsters required at a wave for that theme to roll. |
 | `g_horde_points_max` | `0` | Optional hard ceiling on the per-wave point budget; `0` disables (the taper handles growth). |
 
+## Horde AI Orchestration (Tier 0)
+
+Experimental horde AI improvements driven entirely from `mm_horde` (no vanilla AI edits).
+Each cvar defaults to `1` (enabled); set to `0` to restore the previous behavior for that feature.
+
+| Cvar | Default | Purpose |
+| --- | --- | --- |
+| `g_horde_ai_target_spread` | `1` | Spread monster targets across living fighters by load + distance instead of always picking the nearest player at spawn. |
+| `g_horde_ai_spawn_tactics` | `1` | Bias spawn placement toward flank/surround bearings (and themed close/aerial spots) instead of always using farthest spawn. |
+| `g_horde_ai_adaptive` | `1` | Modulate spawn cadence, concurrency cap, and next-wave budget from live player health, deaths, and wave clear rate. |
+| `g_horde_ai_roles` | `1` | Apply per-spawn role tuning (mixed combat style, blindfire) to appropriate ranged monsters. |
+
 ## Debug-Only Weapon Balance Cvars
 
 These cvars are available only in debug builds:

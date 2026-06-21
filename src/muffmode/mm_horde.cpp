@@ -3,14 +3,20 @@
 
 #include "g_local.h"
 #include "muffmode/mm_horde.h"
+#include "muffmode/mm_horde_ai_rules.h"
 
 #include <climits>
+#include <vector>
 
 // Late-wave tuning cvars are referenced by helpers defined before the main extern block below.
 extern cvar_t *g_horde_content_peak_wave;
 extern cvar_t *g_horde_late_wave_factor;
 extern cvar_t *g_horde_weight_floor;
 extern cvar_t *g_horde_theme_min_monsters;
+extern cvar_t *g_horde_ai_target_spread;
+extern cvar_t *g_horde_ai_spawn_tactics;
+extern cvar_t *g_horde_ai_adaptive;
+extern cvar_t *g_horde_ai_roles;
 
 namespace {
 // Themed-wave categories. A monster row may carry several (bitwise OR); 0 = no theme.
@@ -203,6 +209,277 @@ gentity_t *FindClosestPlayerToPoint(vec3_t point)
 	}
 
 	return closest;
+}
+
+constexpr float HORDE_AI_TARGET_SPREAD_WEIGHT = 512.f;
+
+struct horde_adaptive_state_t {
+	int     wave = -1;
+	int     wave_budget_start = 0;
+	int     player_deaths_wave = 0;
+	int     monsters_killed_at_start = 0;
+	gtime_t wave_start_time = 0_ms;
+};
+
+static horde_adaptive_state_t horde_adaptive;
+static float                  horde_adaptive_last_wave_pressure = 1.f;
+
+static void Horde_CountMonstersTargetingPlayers(int *counts, int count_capacity)
+{
+	if (!counts || count_capacity <= 0)
+		return;
+
+	for (int i = 0; i < count_capacity; i++)
+		counts[i] = 0;
+
+	for (size_t i = 1; i < globals.num_entities; i++) {
+		gentity_t *ent = &g_entities[i];
+
+		if (!ent->inuse || !(ent->svflags & SVF_MONSTER))
+			continue;
+		if (ent->health <= 0 || ent->deadflag || (ent->svflags & SVF_DEADMONSTER))
+			continue;
+		if (ent->monsterinfo.aiflags & AI_DO_NOT_COUNT)
+			continue;
+		if (!ent->enemy || !ent->enemy->client)
+			continue;
+
+		const int slot = static_cast<int>(ent->enemy - g_entities);
+		if (slot < 1 || slot >= count_capacity)
+			continue;
+
+		counts[slot]++;
+	}
+}
+
+static float Horde_FighterHealthFraction()
+{
+	float health_sum = 0.f;
+	float max_sum = 0.f;
+	int   fighters = 0;
+
+	for (auto ec : active_clients()) {
+		if (!ClientIsPlaying(ec->client) || ec->health <= 0 || ec->client->eliminated)
+			continue;
+
+		health_sum += static_cast<float>(max(ec->health, 0));
+		max_sum += static_cast<float>(max(ec->max_health, 1));
+		fighters++;
+	}
+
+	if (fighters <= 0 || max_sum <= 0.f)
+		return 1.f;
+
+	return health_sum / max_sum;
+}
+
+static float Horde_AdaptivePressureMult()
+{
+	if (!g_horde_ai_adaptive->integer)
+		return 1.f;
+
+	const float health_frac = Horde_FighterHealthFraction();
+	const int   fighters = max(1, MM_Horde_CountFighters());
+	const float death_pressure = static_cast<float>(horde_adaptive.player_deaths_wave) / static_cast<float>(fighters);
+
+	const int killed = max(0, level.killed_monsters - horde_adaptive.monsters_killed_at_start);
+	const float elapsed = (level.time - horde_adaptive.wave_start_time).seconds();
+	const float clear_rate = elapsed > 0.f ? static_cast<float>(killed) / elapsed : 0.f;
+	const float expected_rate = horde_adaptive.wave_budget_start > 0
+		? static_cast<float>(horde_adaptive.wave_budget_start) / 90.f
+		: 0.f;
+	const float clear_ratio = expected_rate > 0.f ? clear_rate / expected_rate : 1.f;
+
+	return MM_Horde_ComputeAdaptiveSpawnMult(health_frac, death_pressure, clear_ratio);
+}
+
+static void Horde_Adaptive_BeginWave()
+{
+	if (!g_horde_ai_adaptive->integer) {
+		horde_adaptive = {};
+		horde_adaptive_last_wave_pressure = 1.f;
+		return;
+	}
+
+	const float budget_mult = MM_Horde_ComputeAdaptiveBudgetMult(horde_adaptive_last_wave_pressure);
+	if (budget_mult != 1.f)
+		level.horde_spawn_points_remaining =
+			max(1, static_cast<int>(level.horde_spawn_points_remaining * budget_mult));
+
+	horde_adaptive.wave = level.round_number;
+	horde_adaptive.wave_budget_start = level.horde_spawn_points_remaining;
+	horde_adaptive.player_deaths_wave = 0;
+	horde_adaptive.monsters_killed_at_start = level.killed_monsters;
+	horde_adaptive.wave_start_time = level.time;
+	horde_adaptive_last_wave_pressure = 1.f;
+}
+
+static void Horde_Adaptive_RecordWaveEnd()
+{
+	if (!g_horde_ai_adaptive->integer)
+		return;
+
+	horde_adaptive_last_wave_pressure = Horde_AdaptivePressureMult();
+}
+
+static bool Horde_SpawnSpotUsable(gentity_t *spot, vec3_t avoid_point)
+{
+	if (!spot || !spot->inuse)
+		return false;
+
+	float cv_dist = g_dm_respawn_point_min_dist->value;
+	if (cv_dist > 512.f)
+		cv_dist = 512.f;
+	else if (cv_dist < 0.f)
+		cv_dist = 0.f;
+
+	if (avoid_point && cv_dist > 0.f) {
+		const vec3_t delta = spot->s.origin - avoid_point;
+		if (delta.length() <= cv_dist)
+			return false;
+	}
+
+	return true;
+}
+
+static select_spawn_result_t Horde_SelectSpawnPoint(vec3_t avoid_point)
+{
+	if (!g_horde_ai_spawn_tactics->integer)
+		return SelectDeathmatchSpawnPoint(nullptr, avoid_point, SPAWN_FARTHEST, false, true, false, false);
+
+	struct candidate_t {
+		gentity_t *spot;
+		float      dist;
+		float      bearing;
+		float      z;
+	};
+
+	static std::vector<candidate_t> candidates;
+	candidates.clear();
+
+	vec3_t cluster = vec3_origin;
+	int    fighters = 0;
+
+	for (auto ec : active_clients()) {
+		if (!ClientIsPlaying(ec->client) || ec->health <= 0 || ec->client->eliminated)
+			continue;
+
+		cluster += ec->s.origin;
+		fighters++;
+	}
+
+	if (fighters < 1)
+		return SelectDeathmatchSpawnPoint(nullptr, avoid_point, SPAWN_FARTHEST, false, true, false, false);
+
+	cluster /= static_cast<float>(fighters);
+
+	auto try_add_spot = [&](gentity_t *spot) {
+		if (!Horde_SpawnSpotUsable(spot, avoid_point))
+			return;
+
+		const vec3_t delta = spot->s.origin - cluster;
+		candidates.push_back({
+			spot,
+			delta.length(),
+			atan2f(delta.y, delta.x),
+			spot->s.origin[2],
+		});
+	};
+
+	gentity_t *spot = nullptr;
+	while ((spot = G_FindByString<&gentity_t::classname>(spot, "info_player_deathmatch")) != nullptr)
+		try_add_spot(spot);
+
+	if (candidates.empty()) {
+		spot = nullptr;
+		while ((spot = G_FindByString<&gentity_t::classname>(spot, "info_player_team_red")) != nullptr)
+			try_add_spot(spot);
+		spot = nullptr;
+		while ((spot = G_FindByString<&gentity_t::classname>(spot, "info_player_team_blue")) != nullptr)
+			try_add_spot(spot);
+	}
+
+	if (candidates.size() <= 1)
+		return SelectDeathmatchSpawnPoint(nullptr, avoid_point, SPAWN_FARTHEST, false, true, false, false);
+
+	std::sort(candidates.begin(), candidates.end(), [](const candidate_t &a, const candidate_t &b) {
+		return a.dist < b.dist;
+	});
+
+	const float min_dist = candidates.front().dist;
+	const float max_dist = candidates.back().dist;
+	const float dist_span = max(1.f, max_dist - min_dist);
+
+	const uint32_t theme = Horde_ActiveThemeCategory();
+	const bool     prefer_close = !!(theme & (HCAT_MELEE | HCAT_INFEST));
+	const bool     prefer_aerial = !!(theme & HCAT_AERIAL);
+
+	const float ideal_t = prefer_close ? 0.25f : (prefer_aerial ? 0.75f : 0.55f);
+	const float ideal_dist = min_dist + dist_span * ideal_t;
+	const float cluster_z = cluster[2];
+
+	gentity_t *best = nullptr;
+	float      best_score = -FLT_MAX;
+
+	for (const auto &c : candidates) {
+		const float dist_penalty = -fabsf(c.dist - ideal_dist);
+		const float aerial_bonus = prefer_aerial ? (c.z - cluster_z) * 0.25f : 0.f;
+		const float flank_bonus = (1.f - fabsf(c.dist - ideal_dist) / dist_span) * 128.f;
+		const float bearing_variety = fabsf(sinf(c.bearing)) * 32.f;
+		const float score = dist_penalty + aerial_bonus + flank_bonus + bearing_variety + frandom() * 16.f;
+
+		if (score > best_score) {
+			best_score = score;
+			best = c.spot;
+		}
+	}
+
+	if (best)
+		return { best, true };
+
+	return SelectDeathmatchSpawnPoint(nullptr, avoid_point, SPAWN_FARTHEST, false, true, false, false);
+}
+
+static bool Horde_IsRangedGruntClassname(const char *classname)
+{
+	if (!classname)
+		return false;
+
+	return !Q_strcasecmp(classname, "monster_soldier") ||
+		!Q_strcasecmp(classname, "monster_soldier_light") ||
+		!Q_strcasecmp(classname, "monster_soldier_ss") ||
+		!Q_strcasecmp(classname, "monster_soldier_hypergun") ||
+		!Q_strcasecmp(classname, "monster_soldier_lasergun") ||
+		!Q_strcasecmp(classname, "monster_soldier_ripper") ||
+		!Q_strcasecmp(classname, "monster_infantry") ||
+		!Q_strcasecmp(classname, "monster_gunner");
+}
+
+static bool Horde_SupportsBlindfireClassname(const char *classname)
+{
+	if (!classname)
+		return false;
+
+	return !Q_strcasecmp(classname, "monster_gunner") ||
+		!Q_strcasecmp(classname, "monster_chick") ||
+		!Q_strcasecmp(classname, "monster_chick_heat") ||
+		!Q_strcasecmp(classname, "monster_guncmdr") ||
+		!Q_strcasecmp(classname, "monster_infantry") ||
+		!Q_strcasecmp(classname, "monster_soldier_hypergun") ||
+		!Q_strcasecmp(classname, "monster_soldier_lasergun") ||
+		!Q_strcasecmp(classname, "monster_soldier_ripper");
+}
+
+static void Horde_ApplySpawnRoleTuning(gentity_t *ent, const char *classname)
+{
+	if (!g_horde_ai_roles->integer || !ent || !classname)
+		return;
+
+	if (Horde_IsRangedGruntClassname(classname))
+		ent->monsterinfo.combat_style = COMBAT_MIXED;
+
+	if (Horde_SupportsBlindfireClassname(classname))
+		ent->monsterinfo.blindfire = true;
 }
 
 gitem_t *Horde_PickItem()
@@ -414,6 +691,40 @@ static const char *Horde_PickMonsterForWave(weighted_item_t const **out_row, int
 	return fallback;
 }
 } // namespace
+
+gentity_t *MM_Horde_PickTarget(gentity_t *from)
+{
+	const vec3_t origin = from ? from->s.origin : vec3_origin;
+
+	if (!g_horde_ai_target_spread->integer)
+		return FindClosestPlayerToPoint(origin);
+
+	static int monster_load[MAX_CLIENTS + 1];
+	Horde_CountMonstersTargetingPlayers(monster_load, q_countof(monster_load));
+
+	gentity_t *best = nullptr;
+	float      best_score = FLT_MAX;
+
+	for (auto ec : active_clients()) {
+		if (!ClientIsPlaying(ec->client) || ec->health <= 0 || ec->client->eliminated)
+			continue;
+
+		const int slot = static_cast<int>(ec - g_entities);
+		if (slot < 0 || slot >= static_cast<int>(q_countof(monster_load)))
+			continue;
+
+		const float distance = (ec->s.origin - origin).length();
+		const float score = MM_Horde_ComputeTargetLoadScore(
+			monster_load[slot], distance, HORDE_AI_TARGET_SPREAD_WEIGHT);
+
+		if (score < best_score) {
+			best_score = score;
+			best = ec;
+		}
+	}
+
+	return best ? best : FindClosestPlayerToPoint(origin);
+}
 
 extern cvar_t *g_horde_starting_wave;
 extern cvar_t *g_horde_points_base;
@@ -755,7 +1066,15 @@ static gtime_t Horde_SpawnInterval(bool warmup)
 
 	const float min_sec = max(0.05f, g_horde_spawn_interval_min->value);
 	const float max_sec = max(min_sec, g_horde_spawn_interval_max->value);
-	return random_time(gtime_t::from_sec(min_sec), gtime_t::from_sec(max_sec));
+	gtime_t interval = random_time(gtime_t::from_sec(min_sec), gtime_t::from_sec(max_sec));
+
+	if (!warmup && g_horde_ai_adaptive->integer) {
+		const float mult = Horde_AdaptivePressureMult();
+		interval = gtime_t::from_ms(static_cast<int64_t>(interval.milliseconds() / max(mult, 0.1f)));
+		interval = max(interval, gtime_t::from_ms(100));
+	}
+
+	return interval;
 }
 
 bool MM_Horde_ShouldSkipEntitiesReset()
@@ -838,6 +1157,9 @@ void MM_Horde_OnPlayerDeath(gentity_t *ent)
 	if (ent->client->pers.lives > 0)
 		ent->client->pers.lives--;
 
+	if (g_horde_ai_adaptive->integer)
+		horde_adaptive.player_deaths_wave++;
+
 	if (ent->client->pers.lives <= 0) {
 		ClientSetEliminated(ent);
 		ent->client->respawn_time = level.time + 1_sec;
@@ -909,6 +1231,7 @@ void MM_Horde_OnRoundEnd()
 	if (notGT(GT_HORDE))
 		return;
 
+	Horde_Adaptive_RecordWaveEnd();
 	level.horde_all_spawned = false;
 	MM_Horde_CleanWaveTransition();
 }
@@ -1125,6 +1448,8 @@ void MM_Horde_BeginWave()
 		level.horde_spawn_points_remaining =
 			max(1, static_cast<int>(level.horde_spawn_points_remaining * theme->budget_mult));
 
+	Horde_Adaptive_BeginWave();
+
 	const int delay_ms = max(0, g_horde_wave_spawn_delay_ms->integer);
 	level.horde_monster_spawn_time = level.time + gtime_t::from_ms(delay_ms);
 }
@@ -1178,7 +1503,12 @@ void MM_Horde_RunSpawning()
 	// Spawning pauses while at the cap and resumes as monsters die, so the wave still
 	// spawns its full budget over time - only peak concurrency is bounded. 0 disables.
 	const int alive_cap = g_horde_max_alive->integer;
-	if (!warmup && alive_cap > 0 && (level.total_monsters - level.killed_monsters >= alive_cap))
+	int effective_cap = alive_cap;
+	if (!warmup && alive_cap > 0 && g_horde_ai_adaptive->integer) {
+		const float mult = Horde_AdaptivePressureMult();
+		effective_cap = max(1, static_cast<int>(alive_cap * min(mult, 1.f)));
+	}
+	if (!warmup && alive_cap > 0 && (level.total_monsters - level.killed_monsters >= effective_cap))
 		return;
 
 	if (level.horde_all_spawned)
@@ -1203,7 +1533,7 @@ void MM_Horde_RunSpawning()
 
 		gentity_t *e = G_Spawn();
 		e->classname = monster_class;
-		select_spawn_result_t result = SelectDeathmatchSpawnPoint(nullptr, vec3_origin, SPAWN_FARTHEST, false, true, false, false);
+		select_spawn_result_t result = Horde_SelectSpawnPoint(vec3_origin);
 
 		if (result.any_valid && result.spot) {
 			// Validate spawn point fits a large monster (tank commander is the worst-case hull).
@@ -1214,7 +1544,7 @@ void MM_Horde_RunSpawning()
 			if (!Horde_ValidateSpawnOrigin(spawn_origin, horde_check_mins, horde_check_maxs)) {
 				// Try a different candidate by excluding the failed spot from selection.
 				// avoid_point is honoured when g_dm_respawn_point_min_dist > 0 (default 256).
-				select_spawn_result_t retry = SelectDeathmatchSpawnPoint(nullptr, result.spot->s.origin, SPAWN_FARTHEST, false, true, false, false);
+				select_spawn_result_t retry = Horde_SelectSpawnPoint(result.spot->s.origin);
 				bool retry_ok = false;
 				if (retry.any_valid && retry.spot && retry.spot != result.spot) {
 					spawn_origin = retry.spot->s.origin;
@@ -1256,6 +1586,8 @@ void MM_Horde_RunSpawning()
 				return;
 			}
 
+			Horde_ApplySpawnRoleTuning(e, monster_class);
+
 			if (is_champion) {
 				// natural = full health after spawn (already includes the 3x mult and any co-op scaling).
 				const int natural = e->health;
@@ -1294,7 +1626,7 @@ void MM_Horde_RunSpawning()
 
 			level.horde_monster_spawn_time = level.time + Horde_SpawnInterval(warmup);
 
-			e->enemy = FindClosestPlayerToPoint(e->s.origin);
+			e->enemy = MM_Horde_PickTarget(e);
 			if (e->enemy)
 				FoundTarget(e);
 
