@@ -6,9 +6,7 @@
 #include "muffmode/mm_horde.h"
 #include "muffmode/mm_profile.h"
 
-extern cvar_t *g_horde_ai_retarget;
-extern cvar_t *g_horde_ai_aggro_range;
-extern cvar_t *g_horde_ai_stagger;
+extern cvar_t *g_horde_enhanced_ai;
 
 bool FindTarget(gentity_t *self);
 bool ai_checkattack(gentity_t *self, float dist);
@@ -454,7 +452,7 @@ void FoundTarget(gentity_t *self) {
 		self->monsterinfo.attack_finished += skill->integer == 0 ? 400_ms : skill->integer == 1 ? 200_ms : 0_ms;
 
 	// [MuffMode] horde: stagger first-shot timing so swarms don't alpha-strike together
-	if (GT(GT_HORDE) && g_horde_ai_stagger->integer)
+	if (GT(GT_HORDE) && g_horde_enhanced_ai->integer)
 		self->monsterinfo.attack_finished += gtime_t::from_ms(irandom(0, 400));
 
 	self->monsterinfo.last_sighting = self->monsterinfo.saved_goal = self->enemy->s.origin;
@@ -708,7 +706,7 @@ bool FindTarget(gentity_t *self) {
 		// this is where we would check invisibility
 		float r = range_to(self, client);
 
-		const bool horde_wide_aggro = GT(GT_HORDE) && g_horde_ai_aggro_range->integer;
+		const bool horde_wide_aggro = GT(GT_HORDE) && g_horde_enhanced_ai->integer;
 
 		if (!horde_wide_aggro && r > RANGE_MID)
 			return false;
@@ -1148,7 +1146,7 @@ bool ai_checkattack(gentity_t *self, float dist) {
 
 		else {
 			// [MuffMode] horde: pick next fighter instead of idling after a kill
-			if (GT(GT_HORDE) && g_horde_ai_retarget->integer) {
+			if (GT(GT_HORDE) && g_horde_enhanced_ai->integer) {
 				if (gentity_t *t = MM_Horde_PickTarget(self)) {
 					self->enemy = t;
 					FoundTarget(self);

@@ -339,27 +339,14 @@ champions more frequent (early and late alike).
 | `g_horde_theme_min_monsters` | `2` | Minimum on-theme monsters required at a wave for that theme to roll. |
 | `g_horde_points_max` | `0` | Optional hard ceiling on the per-wave point budget; `0` disables (the taper handles growth). |
 
-## Horde AI Orchestration (Tier 0)
+## Horde Enhanced AI
 
-Experimental horde AI improvements driven entirely from `mm_horde` (no vanilla AI edits).
-Each cvar defaults to `1` (enabled); set to `0` to restore the previous behavior for that feature.
-
-| Cvar | Default | Purpose |
-| --- | --- | --- |
-| `g_horde_ai_target_spread` | `1` | Spread monster targets across living fighters by load + distance instead of always picking the nearest player at spawn. |
-| `g_horde_ai_spawn_tactics` | `1` | Bias spawn placement toward flank/surround bearings (and themed close/aerial spots) instead of always using farthest spawn. |
-| `g_horde_ai_adaptive` | `1` | Modulate spawn cadence, concurrency cap, and next-wave budget from live player health, deaths, and wave clear rate. |
-| `g_horde_ai_roles` | `1` | Apply per-spawn role tuning (mixed combat style, blindfire) to appropriate ranged monsters. |
-
-## Horde AI Hooks (Tier 1)
-
-Thin vanilla hooks in monster think / AI (gated per cvar; default `1`).
+Master switch for experimental horde AI (Tier 0 orchestration in `mm_horde` plus Tier 1 vanilla hooks).
+Defaults to `1` (enabled); set to `0` to restore legacy horde monster targeting and pacing.
 
 | Cvar | Default | Purpose |
 | --- | --- | --- |
-| `g_horde_ai_retarget` | `1` | Re-acquire the least-burdened living fighter (not player slot 1) on spawn think and after killing an enemy, instead of idling. |
-| `g_horde_ai_aggro_range` | `1` | Relax `FindTarget` range and visibility so horde monsters re-acquire fighters across the map via PHS. |
-| `g_horde_ai_stagger` | `1` | Add a small random delay to `attack_finished` when a monster first spots a target, reducing swarm alpha-strikes. |
+| `g_horde_enhanced_ai` | `1` | Target spread, spawn tactics, adaptive pacing, per-spawn roles, retarget-on-kill, extended aggro, and attack stagger. |
 
 ## Debug-Only Weapon Balance Cvars
 

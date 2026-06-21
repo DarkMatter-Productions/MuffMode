@@ -5,7 +5,7 @@
 // [MuffMode] Horde kill scoring hook
 #include "muffmode/mm_horde.h"
 
-extern cvar_t *g_horde_ai_retarget;
+extern cvar_t *g_horde_enhanced_ai;
 
 //
 // monster weapons
@@ -906,7 +906,7 @@ THINK(monster_think) (gentity_t *self) -> void {
 		return;
 
 	// [MuffMode] horde: re-acquire least-burdened living player instead of slot 1
-	if (GT(GT_HORDE) && g_horde_ai_retarget->integer) {
+	if (GT(GT_HORDE) && g_horde_enhanced_ai->integer) {
 		if (!self->enemy) {
 			if (gentity_t *t = MM_Horde_PickTarget(self)) {
 				self->enemy = t;
