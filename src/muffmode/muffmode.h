@@ -16,6 +16,7 @@
 #include "mm_match.h"
 #include "mm_menu.h"
 #include "mm_motd.h"
+#include "mm_nav_bake.h"
 #include "mm_pconfig.h"
 #include "mm_ruleset.h"
 #include "mm_ruleset_weapons.h"

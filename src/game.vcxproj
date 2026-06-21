@@ -167,6 +167,7 @@
     <ClInclude Include="muffmode\mm_match.h" />
     <ClInclude Include="muffmode\mm_menu.h" />
     <ClInclude Include="muffmode\mm_motd.h" />
+    <ClInclude Include="muffmode\mm_nav_bake.h" />
     <ClInclude Include="muffmode\mm_parse.h" />
     <ClInclude Include="muffmode\mm_pconfig.h" />
     <ClInclude Include="muffmode\mm_profile.h" />
@@ -260,6 +261,7 @@
     <ClCompile Include="muffmode\mm_match.cpp" />
     <ClCompile Include="muffmode\mm_menu.cpp" />
     <ClCompile Include="muffmode\mm_motd.cpp" />
+    <ClCompile Include="muffmode\mm_nav_bake.cpp" />
     <ClCompile Include="muffmode\mm_pconfig.cpp" />
     <ClCompile Include="muffmode\mm_ruleset.cpp" />
     <ClCompile Include="muffmode\mm_ruleset_weapons.cpp" />
