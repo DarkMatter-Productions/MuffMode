@@ -1791,12 +1791,9 @@ static void CG_DrawInventory(const player_state_t *ps, const std::array<int16_t,
 
 extern uint64_t cgame_init_time;
 
-// Team ID constants (matching g_local.h enum team_t)
-constexpr uint8_t TEAM_NONE = 0;
-constexpr uint8_t TEAM_SPECTATOR = 1;
-constexpr uint8_t TEAM_FREE = 2;
-constexpr uint8_t TEAM_RED = 3;
-constexpr uint8_t TEAM_BLUE = 4;
+// Engine player_state.team_id values (matches vanilla ctf_team / P_EngineTeamIndex)
+constexpr uint8_t ENGINE_TEAM_RED = 1;
+constexpr uint8_t ENGINE_TEAM_BLUE = 2;
 
 // Game type constants (matching g_local.h enum gametype_t)
 constexpr int GT_TDM = 3;
@@ -1816,7 +1813,7 @@ static void CG_DrawTeamBorder(const player_state_t *ps, vrect_t hud_vrect, int32
 		return;
 
 	// Only draw if player is on a team
-	if (ps->team_id != TEAM_RED && ps->team_id != TEAM_BLUE)
+	if (ps->team_id != ENGINE_TEAM_RED && ps->team_id != ENGINE_TEAM_BLUE)
 		return;
 
 	// Don't draw if HUD is hidden
@@ -1831,7 +1828,7 @@ static void CG_DrawTeamBorder(const player_state_t *ps, vrect_t hud_vrect, int32
 	rgba_t team_red_color{ 255, 50, 50, alpha };
 	rgba_t team_blue_color{ 50, 100, 255, alpha };
 
-	rgba_t border_color = (ps->team_id == TEAM_RED) ? team_red_color : team_blue_color;
+	rgba_t border_color = (ps->team_id == ENGINE_TEAM_RED) ? team_red_color : team_blue_color;
 
 	// Calculate screen dimensions
 	int32_t x = hud_vrect.x * scale;

@@ -2659,6 +2659,7 @@ const char *Teams_TeamName(team_t team);
 const char *Teams_OtherTeamName(team_t team);
 team_t Teams_OtherTeam(team_t team);
 bool Teams();
+uint8_t P_EngineTeamIndex(team_t team);
 void G_AdjustPlayerScore(gclient_t *cl, int32_t offset, bool adjust_team, int32_t team_offset);
 void G_SetPlayerScore(gclient_t *cl, int32_t value);
 void G_AdjustTeamScore(team_t team, int32_t offset);

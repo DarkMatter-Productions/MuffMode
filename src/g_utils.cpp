@@ -917,6 +917,25 @@ bool Teams() {
 
 /*
 =============
+P_EngineTeamIndex
+
+Map internal sess.team to engine team identifiers (skinnum team_index,
+player_state.team_id, sv.team): 1 = team 1, 2 = team 2, 0 = none.
+=============
+*/
+uint8_t P_EngineTeamIndex(team_t team) {
+	switch (team) {
+	case TEAM_RED:
+		return 1;
+	case TEAM_BLUE:
+		return 2;
+	default:
+		return 0;
+	}
+}
+
+/*
+=============
 G_TimeString
 
 Format a match timer string with minute precision.

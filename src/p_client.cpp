@@ -2255,18 +2255,6 @@ void ClientRespawn(gentity_t *ent) {
 
 //==============================================================
 
-// Map internal sess.team to engine team_index (1-indexed: 1 = team 1, 2 = team 2, 0 = none).
-static uint8_t P_EngineTeamIndex(team_t team) {
-	switch (team) {
-	case TEAM_RED:
-		return 1;
-	case TEAM_BLUE:
-		return 2;
-	default:
-		return 0;
-	}
-}
-
 // [Paril-KEX]
 // skinnum was historically used to pack data
 // so we're going to build onto that.
@@ -2296,6 +2284,8 @@ void P_AssignClientSkinnum(gentity_t *ent) {
 		packed.poi_icon = 0;
 
 	ent->s.skinnum = packed.skinnum;
+	ent->client->ps.team_id = packed.team_index;
+	ent->sv.team = packed.team_index;
 }
 
 // [Paril-KEX] send player level POI
