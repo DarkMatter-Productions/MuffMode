@@ -6,7 +6,9 @@
 #include "muffmode/mm_gametype.h"
 #include "muffmode/mm_statusbar.h"
 
-static int MM_StatusbarDigitChars(int value)
+namespace muffmode::statusbar {
+
+int DigitChars(int value)
 {
 	if (value < 0)
 		value = 0;
@@ -15,6 +17,8 @@ static int MM_StatusbarDigitChars(int value)
 
 	return value > 99 ? 3 : value > 9 ? 2 : 1;
 }
+
+} // namespace muffmode::statusbar
 
 void MM_InitStatusbar()
 {
@@ -59,11 +63,11 @@ void MM_InitStatusbar()
 			int num, chars;
 
 			num = level.round_number;
-			chars = MM_StatusbarDigitChars(num);
+			chars = muffmode::statusbar::DigitChars(num);
 			sb.ifstat(STAT_ROUND_NUMBER).xr(-32 - (16 * chars)).yt(y += 10).num(3, STAT_ROUND_NUMBER).xr(0).yt(y += text_adj).loc_rstring("Wave").endifstat();
 
 			num = level.total_monsters - level.killed_monsters;
-			chars = MM_StatusbarDigitChars(num);
+			chars = muffmode::statusbar::DigitChars(num);
 			sb.ifstat(STAT_MONSTER_COUNT).xr(-32 - (16 * chars)).yt(y += 10).num(3, STAT_MONSTER_COUNT).xr(0).yt(y += text_adj).loc_rstring("Monsters").endifstat();
 		}
 	}
@@ -99,7 +103,7 @@ void MM_InitStatusbar()
 		// plus this player's attack/defend role, unpacked from STAT_MONSTER_COUNT via ifbit.
 		if (GT(GT_STRIKE)) {
 			int num = level.round_number;
-			int chars = MM_StatusbarDigitChars(num);
+			int chars = muffmode::statusbar::DigitChars(num);
 			sb.ifstat(STAT_ROUND_NUMBER).xr(-32 - (16 * chars)).yt(2).num(3, STAT_ROUND_NUMBER).xr(0).yt(2 + 26).loc_rstring("Round").endifstat();
 			sb.ifbit(STAT_MONSTER_COUNT, STRIKE_HUD_ATTACKING).xr(0).yt(2 + 48).loc_rstring("ATTACK").endifstat();
 			sb.ifbit(STAT_MONSTER_COUNT, STRIKE_HUD_DEFENDING).xr(0).yt(2 + 48).loc_rstring("DEFEND").endifstat();

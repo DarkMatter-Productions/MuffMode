@@ -177,6 +177,9 @@
     <ClInclude Include="muffmode\mm_vote_menu.h">
       <Filter>muffmode</Filter>
     </ClInclude>
+    <ClInclude Include="muffmode\mm_util.h">
+      <Filter>muffmode</Filter>
+    </ClInclude>
     <ClInclude Include="muffmode\mm_vote_types.h">
       <Filter>muffmode</Filter>
     </ClInclude>
@@ -192,25 +195,40 @@
     <ClCompile Include="g_cmds.cpp" />
     <ClCompile Include="g_combat.cpp" />
     <ClCompile Include="g_func.cpp" />
+    <ClCompile Include="g_func_secret_doors.cpp" />
+    <ClCompile Include="g_func_specials.cpp" />
+    <ClCompile Include="g_func_train.cpp" />
+    <ClCompile Include="g_itemlist.cpp" />
+    <ClCompile Include="g_item_powerups.cpp" />
     <ClCompile Include="g_items.cpp" />
     <ClCompile Include="g_main.cpp" />
+    <ClCompile Include="g_misc_gibs.cpp" />
     <ClCompile Include="g_misc.cpp" />
+    <ClCompile Include="g_misc_vehicles.cpp" />
     <ClCompile Include="g_monster.cpp" />
     <ClCompile Include="g_phys.cpp" />
     <ClCompile Include="g_save.cpp" />
     <ClCompile Include="g_spawn.cpp" />
+    <ClCompile Include="g_spawn_table.cpp" />
     <ClCompile Include="g_svcmds.cpp" />
     <ClCompile Include="g_target.cpp" />
+    <ClCompile Include="g_target_player.cpp" />
+    <ClCompile Include="g_target_shooters.cpp" />
     <ClCompile Include="g_trigger.cpp" />
     <ClCompile Include="g_turret.cpp" />
     <ClCompile Include="g_utils.cpp" />
     <ClCompile Include="g_weapon.cpp" />
+    <ClCompile Include="g_weapon_prox.cpp" />
+    <ClCompile Include="g_weapon_tesla.cpp" />
     <ClCompile Include="p_client.cpp" />
+    <ClCompile Include="p_client_death.cpp" />
+    <ClCompile Include="p_client_spawn.cpp" />
     <ClCompile Include="p_hud.cpp" />
     <ClCompile Include="p_move.cpp" />
     <ClCompile Include="p_trail.cpp" />
     <ClCompile Include="p_view.cpp" />
     <ClCompile Include="p_weapon.cpp" />
+    <ClCompile Include="p_weapon_grapple.cpp" />
     <ClCompile Include="q_std.cpp" />
     <ClCompile Include="bots\bot_debug.cpp">
       <Filter>bots</Filter>

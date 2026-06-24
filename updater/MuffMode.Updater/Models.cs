@@ -8,19 +8,26 @@ internal sealed class AppSettings
 {
     public string? InstallPath { get; set; }
     public bool AutoLaunchAfterUpdate { get; set; } = true;
+    public bool IncludePrereleases { get; set; }
 }
 
 internal sealed record ReleaseInfo(
     SemanticVersion Version,
+    long ReleaseId,
     string TagName,
+    string Channel,
     string Name,
     string Changelog,
     string HtmlUrl,
     bool IsPrerelease,
     DateTimeOffset? PublishedAt,
+    long AssetId,
     string AssetName,
     string AssetDownloadUrl,
-    long? AssetSize);
+    long? AssetSize,
+    string? AssetContentType,
+    DateTimeOffset? AssetUpdatedAt,
+    string? AssetDigest);
 
 internal sealed record LocalInstallVersion(SemanticVersion? Version, string DisplayText, string Source);
 
@@ -34,10 +41,30 @@ internal sealed record UpdaterProgress(string Message, int? Percentage = null, b
 internal sealed class InstalledVersionMarker
 {
     public string Version { get; set; } = "";
+    public long ReleaseId { get; set; }
     public string? TagName { get; set; }
+    public string? Channel { get; set; }
     public string? ReleaseUrl { get; set; }
+    public bool ReleaseIsPrerelease { get; set; }
+    public DateTimeOffset? ReleasePublishedAt { get; set; }
+    public long AssetId { get; set; }
     public string? AssetName { get; set; }
-    public string Repository { get; set; } = GitHubReleaseClient.Repository;
+    public long? AssetSize { get; set; }
+    public string? AssetContentType { get; set; }
+    public DateTimeOffset? AssetUpdatedAt { get; set; }
+    public string? AssetDigest { get; set; }
+    public string? PackageRootName { get; set; }
+    public string? BackupFileName { get; set; }
+    public string? BackupGameDllSha256 { get; set; }
+    public string? PackageSha256 { get; set; }
+    public DateTimeOffset? PackagedAtUtc { get; set; }
+    public string? InstalledGameDllSha256 { get; set; }
+    public string? InstalledManifestSha256 { get; set; }
+    public string? InstalledDestinationManifestSha256 { get; set; }
+    public int InstalledFileCount { get; set; }
+    public long InstalledBytes { get; set; }
+    public string Repository { get; set; } = "";
+    public string? InstalledByUpdaterVersion { get; set; }
     public DateTimeOffset InstalledAtUtc { get; set; }
 }
 
@@ -93,6 +120,9 @@ internal readonly partial record struct SemanticVersion(int Major, int Minor, in
 
 internal sealed class GitHubReleaseDto
 {
+    [JsonPropertyName("id")]
+    public long? Id { get; set; }
+
     [JsonPropertyName("tag_name")]
     public string? TagName { get; set; }
 
@@ -120,6 +150,9 @@ internal sealed class GitHubReleaseDto
 
 internal sealed class GitHubAssetDto
 {
+    [JsonPropertyName("id")]
+    public long? Id { get; set; }
+
     [JsonPropertyName("name")]
     public string? Name { get; set; }
 
@@ -128,4 +161,16 @@ internal sealed class GitHubAssetDto
 
     [JsonPropertyName("size")]
     public long? Size { get; set; }
+
+    [JsonPropertyName("content_type")]
+    public string? ContentType { get; set; }
+
+    [JsonPropertyName("state")]
+    public string? State { get; set; }
+
+    [JsonPropertyName("updated_at")]
+    public DateTimeOffset? UpdatedAt { get; set; }
+
+    [JsonPropertyName("digest")]
+    public string? Digest { get; set; }
 }

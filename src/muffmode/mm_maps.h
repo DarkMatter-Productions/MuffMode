@@ -3,7 +3,18 @@
 
 #pragma once
 
+#include <string>
+#include <vector>
+
 struct gentity_t;
+
+namespace muffmode::maps {
+
+// Typed helpers for internal MuffMode systems that need the sanitized map pool/list.
+std::vector<std::string> CollectConfiguredMaps();
+bool ContainsConfiguredMap(const char *mapname);
+
+} // namespace muffmode::maps
 
 // [MuffMode] Map-list module entry points.
 bool MM_IsSafeMapToken(const char *mapname);

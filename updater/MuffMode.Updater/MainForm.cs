@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Text;
 
 namespace MuffMode.Updater;
@@ -21,10 +22,13 @@ internal sealed class MainForm : Form
     private readonly Label _localVersionLabel;
     private readonly TextBox _changelogTextBox;
     private readonly CheckBox _autoLaunchCheckBox;
+    private readonly CheckBox _includePrereleaseCheckBox;
     private readonly ProgressBar _progressBar;
     private readonly Button _updateButton;
     private readonly Button _refreshButton;
+    private readonly Button _releasePageButton;
     private readonly Button _shortcutsButton;
+    private readonly Button _diagnosticsButton;
     private readonly Button _launchButton;
     private readonly Button _quitButton;
 
@@ -123,6 +127,23 @@ internal sealed class MainForm : Form
         };
         _autoLaunchCheckBox.CheckedChanged += (_, _) => SaveCurrentSettings();
 
+        _includePrereleaseCheckBox = new CheckBox
+        {
+            AutoSize = true,
+            Text = "Include prereleases",
+            Checked = _settings.IncludePrereleases,
+            ForeColor = Color.FromArgb(235, 238, 232),
+            Margin = new Padding(22, 0, 0, 0)
+        };
+        _includePrereleaseCheckBox.CheckedChanged += async (_, _) =>
+        {
+            SaveCurrentSettings();
+            if (!_busy)
+            {
+                await RefreshReleaseAsync();
+            }
+        };
+
         _progressBar = new ProgressBar
         {
             Dock = DockStyle.Fill,
@@ -137,8 +158,14 @@ internal sealed class MainForm : Form
         _refreshButton = CreateButton("Refresh", Color.FromArgb(72, 88, 96));
         _refreshButton.Click += async (_, _) => await RefreshReleaseAsync();
 
+        _releasePageButton = CreateButton("Release", Color.FromArgb(74, 86, 104));
+        _releasePageButton.Click += (_, _) => OpenReleasePage();
+
         _shortcutsButton = CreateButton("Shortcuts", Color.FromArgb(84, 88, 105));
         _shortcutsButton.Click += (_, _) => OfferShortcutCreation();
+
+        _diagnosticsButton = CreateButton("Diagnostics", Color.FromArgb(74, 82, 92));
+        _diagnosticsButton.Click += (_, _) => OpenDiagnosticsLog();
 
         _launchButton = CreateButton("Launch", Color.FromArgb(140, 94, 57));
         _launchButton.Click += (_, _) => LaunchGame();
@@ -255,7 +282,15 @@ internal sealed class MainForm : Form
         };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 58));
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 42));
-        layout.Controls.Add(_autoLaunchCheckBox, 0, 0);
+        var options = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = false
+        };
+        options.Controls.Add(_autoLaunchCheckBox);
+        options.Controls.Add(_includePrereleaseCheckBox);
+        layout.Controls.Add(options, 0, 0);
         layout.Controls.Add(_progressBar, 1, 0);
         return layout;
     }
@@ -271,7 +306,9 @@ internal sealed class MainForm : Form
 
         layout.Controls.Add(_quitButton);
         layout.Controls.Add(_launchButton);
+        layout.Controls.Add(_diagnosticsButton);
         layout.Controls.Add(_shortcutsButton);
+        layout.Controls.Add(_releasePageButton);
         layout.Controls.Add(_refreshButton);
         layout.Controls.Add(_updateButton);
         return layout;
@@ -466,6 +503,7 @@ internal sealed class MainForm : Form
         }
         catch (Exception ex)
         {
+            UpdaterLog.WriteException("Shortcut creation failed.", ex);
             SetStatus("Could not create shortcuts.");
             ShowMessage(ex.Message, "Shortcut creation failed", MessageBoxIcon.Error);
         }
@@ -489,16 +527,20 @@ internal sealed class MainForm : Form
         _operationCancellation?.Dispose();
         _operationCancellation = new CancellationTokenSource();
         var cancellationToken = _operationCancellation.Token;
-        SetBusy(true, "Checking GitHub for the latest Muff Mode release...");
+        var includePrereleases = _includePrereleaseCheckBox.Checked;
+        SetBusy(true, includePrereleases
+            ? "Checking GitHub for the latest Muff Mode release, including prereleases..."
+            : "Checking GitHub for the latest stable Muff Mode release...");
         _progressBar.Value = 0;
 
         try
         {
-            _latestRelease = await _releaseClient.GetLatestReleaseAsync(cancellationToken);
+            _latestRelease = await _releaseClient.GetLatestReleaseAsync(includePrereleases, cancellationToken);
             _changelogTextBox.Text = BuildChangelogText(_latestRelease);
             UpdateLocalInstallState();
             UpdateVersionLabels();
             SetStatus(GetReleaseStatusText());
+            UpdaterLog.WriteInfo($"Selected release {_latestRelease.Version} ({_latestRelease.AssetName}, prerelease={_latestRelease.IsPrerelease}).");
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -507,6 +549,7 @@ internal sealed class MainForm : Form
         catch (Exception ex)
         {
             _latestRelease = null;
+            UpdaterLog.WriteException("Could not check GitHub releases.", ex);
             _changelogTextBox.Text = BuildErrorText("Could not check GitHub releases.", ex.Message);
             UpdateVersionLabels();
             SetStatus("Could not check GitHub releases.");
@@ -527,8 +570,8 @@ internal sealed class MainForm : Form
             return;
         }
 
-        var installPath = _installPathTextBox.Text.Trim();
-        if (!InstallationManager.IsValidInstallPath(installPath))
+        var installPath = GetResolvedInstallPathForOperation();
+        if (installPath is null || !InstallationManager.IsValidInstallPath(installPath))
         {
             ShowMessage(
                 "Select the Quake 2 installation folder, its rerelease folder, or its baseq2 folder.",
@@ -537,11 +580,17 @@ internal sealed class MainForm : Form
             return;
         }
 
+        if (IsSameVersionReinstall() && !ConfirmReinstall())
+        {
+            SetStatus("Reinstall cancelled.");
+            return;
+        }
+
         SaveCurrentSettings();
         _operationCancellation?.Dispose();
         _operationCancellation = new CancellationTokenSource();
         var cancellationToken = _operationCancellation.Token;
-        SetBusy(true, $"Preparing to install Muff Mode {_latestRelease.Version}...");
+        SetBusy(true, GetInstallPreparationStatusText(_latestRelease));
         _progressBar.Value = 0;
 
         var downloadDirectory = Path.Combine(Path.GetTempPath(), "MuffModeUpdater", "downloads");
@@ -556,6 +605,7 @@ internal sealed class MainForm : Form
             UpdateLocalInstallState();
             UpdateVersionLabels();
             SetStatus($"Updated Muff Mode to {_latestRelease.Version}.");
+            UpdaterLog.WriteInfo($"Installed Muff Mode {_latestRelease.Version} from {_latestRelease.AssetName}.");
 
             if (_autoLaunchCheckBox.Checked && !_closeAfterOperation)
             {
@@ -568,6 +618,7 @@ internal sealed class MainForm : Form
         }
         catch (Exception ex)
         {
+            UpdaterLog.WriteException("Muff Mode update failed.", ex);
             SetStatus("Update failed.");
             ShowMessage(ex.Message, "Muff Mode update failed", MessageBoxIcon.Error);
         }
@@ -595,7 +646,7 @@ internal sealed class MainForm : Form
             return;
         }
 
-        _installPathTextBox.Text = dialog.SelectedPath;
+        _installPathTextBox.Text = InstallationManager.ResolveInstallRoot(dialog.SelectedPath) ?? dialog.SelectedPath;
         SaveCurrentSettings();
         UpdateLocalInstallState();
         UpdateVersionLabels();
@@ -606,12 +657,57 @@ internal sealed class MainForm : Form
     {
         try
         {
+            var installPath = GetResolvedInstallPathForOperation() ?? _installPathTextBox.Text.Trim();
             SaveCurrentSettings();
-            InstallationManager.LaunchGame(_installPathTextBox.Text.Trim());
+            var launchedTarget = InstallationManager.LaunchGame(installPath);
+            SetStatus($"Launched {Path.GetFileName(launchedTarget)}.");
+            UpdaterLog.WriteInfo($"Launched Quake II target: {launchedTarget}");
         }
         catch (Exception ex)
         {
+            UpdaterLog.WriteException("Could not launch Quake II.", ex);
             ShowMessage(ex.Message, "Could not launch Quake II", MessageBoxIcon.Error);
+        }
+    }
+
+    private void OpenDiagnosticsLog()
+    {
+        try
+        {
+            UpdaterLog.WriteInfo("Opening updater diagnostics.");
+            Process.Start(new ProcessStartInfo(UpdaterLog.LogPath)
+            {
+                UseShellExecute = true
+            });
+            SetStatus("Opened updater diagnostics.");
+        }
+        catch (Exception ex)
+        {
+            UpdaterLog.WriteException("Could not open updater diagnostics.", ex);
+            ShowMessage(ex.Message, "Could not open diagnostics", MessageBoxIcon.Error);
+        }
+    }
+
+    private void OpenReleasePage()
+    {
+        if (_latestRelease is null)
+        {
+            return;
+        }
+
+        try
+        {
+            Process.Start(new ProcessStartInfo(_latestRelease.HtmlUrl)
+            {
+                UseShellExecute = true
+            });
+            SetStatus("Opened release page.");
+            UpdaterLog.WriteInfo($"Opened release page: {_latestRelease.HtmlUrl}");
+        }
+        catch (Exception ex)
+        {
+            UpdaterLog.WriteException("Could not open release page.", ex);
+            ShowMessage(ex.Message, "Could not open release page", MessageBoxIcon.Error);
         }
     }
 
@@ -625,7 +721,7 @@ internal sealed class MainForm : Form
     {
         _latestVersionLabel.Text = _latestRelease is null
             ? "Latest: not checked"
-            : $"Latest: {_latestRelease.Version} ({_latestRelease.TagName})";
+            : $"Latest: {_latestRelease.Version} ({_latestRelease.Channel}{(_latestRelease.IsPrerelease ? ", prerelease" : "")})";
 
         _localVersionLabel.Text = string.IsNullOrWhiteSpace(_localVersion.Source)
             ? $"Local: {_localVersion.DisplayText}"
@@ -658,13 +754,13 @@ internal sealed class MainForm : Form
 
         if (compare == 0)
         {
-            return $"Muff Mode {_latestRelease.Version} is already installed.";
+            return $"Muff Mode {_latestRelease.Version} is already installed. Reinstall is available for repair.";
         }
 
         return $"Local Muff Mode {_localVersion.Version} is newer than GitHub release {_latestRelease.Version}.";
     }
 
-    private bool IsUpdateRequired()
+    private bool IsInstallAllowed()
     {
         if (_latestRelease is null)
         {
@@ -672,7 +768,51 @@ internal sealed class MainForm : Form
         }
 
         return _localVersion.Version is null
-            || _latestRelease.Version.CompareTo(_localVersion.Version.Value) > 0;
+            || _latestRelease.Version.CompareTo(_localVersion.Version.Value) >= 0;
+    }
+
+    private string GetInstallButtonText()
+    {
+        if (_latestRelease is null || _localVersion.Version is null)
+        {
+            return "Update";
+        }
+
+        return _latestRelease.Version.CompareTo(_localVersion.Version.Value) == 0
+            ? "Reinstall"
+            : "Update";
+    }
+
+    private string GetInstallPreparationStatusText(ReleaseInfo release)
+    {
+        if (_localVersion.Version is not null && release.Version.CompareTo(_localVersion.Version.Value) == 0)
+        {
+            return $"Preparing to reinstall Muff Mode {release.Version}...";
+        }
+
+        return $"Preparing to install Muff Mode {release.Version}...";
+    }
+
+    private bool IsSameVersionReinstall()
+    {
+        return _latestRelease is not null
+            && _localVersion.Version is not null
+            && _latestRelease.Version.CompareTo(_localVersion.Version.Value) == 0;
+    }
+
+    private bool ConfirmReinstall()
+    {
+        if (_latestRelease is null)
+        {
+            return false;
+        }
+
+        return MessageBox.Show(
+            this,
+            $"Reinstall Muff Mode {_latestRelease.Version}? This will redownload the package and rewrite the installed files.",
+            "Confirm reinstall",
+            MessageBoxButtons.OKCancel,
+            MessageBoxIcon.Question) == DialogResult.OK;
     }
 
     private void SetBusy(bool busy, string? status = null)
@@ -693,6 +833,7 @@ internal sealed class MainForm : Form
         _installPathTextBox.Enabled = !busy;
         _browseButton.Enabled = !busy;
         _autoLaunchCheckBox.Enabled = !busy;
+        _includePrereleaseCheckBox.Enabled = !busy;
         UseWaitCursor = busy;
         UpdateButtonStates();
     }
@@ -700,9 +841,12 @@ internal sealed class MainForm : Form
     private void UpdateButtonStates()
     {
         var validInstallPath = InstallationManager.IsValidInstallPath(_installPathTextBox.Text.Trim());
-        _updateButton.Enabled = !_busy && validInstallPath && IsUpdateRequired();
+        _updateButton.Text = GetInstallButtonText();
+        _updateButton.Enabled = !_busy && validInstallPath && IsInstallAllowed();
         _refreshButton.Enabled = !_busy;
+        _releasePageButton.Enabled = !_busy && _latestRelease is not null;
         _shortcutsButton.Enabled = !_busy;
+        _diagnosticsButton.Enabled = !_busy;
         _launchButton.Enabled = !_busy && validInstallPath;
         if (_busy)
         {
@@ -737,12 +881,27 @@ internal sealed class MainForm : Form
             _settings.InstallPath = InstallationManager.ResolveInstallRoot(_installPathTextBox.Text.Trim())
                 ?? _installPathTextBox.Text.Trim();
             _settings.AutoLaunchAfterUpdate = _autoLaunchCheckBox.Checked;
+            _settings.IncludePrereleases = _includePrereleaseCheckBox.Checked;
             InstallationManager.SaveSettings(_settings);
         }
         catch (Exception ex)
         {
+            UpdaterLog.WriteException("Could not save updater settings.", ex);
             SetStatus($"Could not save settings: {ex.Message}");
         }
+    }
+
+    private string? GetResolvedInstallPathForOperation()
+    {
+        var rawInstallPath = _installPathTextBox.Text.Trim();
+        var resolvedInstallPath = InstallationManager.ResolveInstallRoot(rawInstallPath);
+        if (!string.IsNullOrWhiteSpace(resolvedInstallPath)
+            && !string.Equals(rawInstallPath, resolvedInstallPath, StringComparison.OrdinalIgnoreCase))
+        {
+            _installPathTextBox.Text = resolvedInstallPath;
+        }
+
+        return resolvedInstallPath;
     }
 
     private void RequestCancelOrClose()
@@ -801,8 +960,11 @@ internal sealed class MainForm : Form
         {
             release.Name,
             release.HtmlUrl,
-            release.IsPrerelease ? "Prerelease" : "Release",
+            $"Channel: {release.Channel}{(release.IsPrerelease ? " prerelease" : "")}",
             release.PublishedAt is null ? "" : $"Published: {release.PublishedAt:yyyy-MM-dd HH:mm} UTC",
+            $"Package: {release.AssetName}{(release.AssetSize is > 0 ? $" ({FormatByteCount(release.AssetSize.Value)})" : "")}",
+            release.AssetUpdatedAt is null ? "" : $"Package updated: {release.AssetUpdatedAt:yyyy-MM-dd HH:mm} UTC",
+            string.IsNullOrWhiteSpace(release.AssetDigest) ? "" : $"Package digest: {release.AssetDigest}",
             "",
             changelog
         };
@@ -870,9 +1032,16 @@ internal sealed class MainForm : Form
 
     private void ShowMessage(string message, string caption, MessageBoxIcon icon)
     {
-        var displayMessage = string.IsNullOrWhiteSpace(message)
+        var detail = string.IsNullOrWhiteSpace(message)
             ? "No details were provided."
-            : TruncateForDisplay(message.Trim(), MaxDialogMessageCharacters, "[Message truncated.]");
+            : message.Trim();
+
+        if (icon == MessageBoxIcon.Error && File.Exists(UpdaterLog.LogPath))
+        {
+            detail = $"{detail}{Environment.NewLine}{Environment.NewLine}Log: {UpdaterLog.LogPath}";
+        }
+
+        var displayMessage = TruncateForDisplay(detail, MaxDialogMessageCharacters, "[Message truncated.]");
 
         MessageBox.Show(this, displayMessage, caption, MessageBoxButtons.OK, icon);
     }
@@ -882,6 +1051,22 @@ internal sealed class MainForm : Form
         return text.Length <= maxCharacters
             ? text
             : $"{text[..maxCharacters]}{Environment.NewLine}{Environment.NewLine}{truncationNotice}";
+    }
+
+    private static string FormatByteCount(long bytes)
+    {
+        var units = new[] { "bytes", "KB", "MB", "GB" };
+        var value = (double)bytes;
+        var unitIndex = 0;
+        while (value >= 1024 && unitIndex < units.Length - 1)
+        {
+            value /= 1024;
+            unitIndex++;
+        }
+
+        return unitIndex == 0
+            ? $"{bytes:N0} {units[unitIndex]}"
+            : $"{value:N1} {units[unitIndex]}";
     }
 
     private static string CollapseWhitespace(string text)

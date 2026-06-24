@@ -576,28 +576,37 @@ void T_Damage(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, const 
 		if ((knockback) && (targ->movetype != MOVETYPE_NONE) && (targ->movetype != MOVETYPE_BOUNCE) &&
 			(targ->movetype != MOVETYPE_PUSH) && (targ->movetype != MOVETYPE_STOP)) {
 			vec3_t normalized = dir.normalized();
-			vec3_t kvel;
-			float  mass;
+			vec3_t kvel = {};
 
-			if (targ->mass < 50)
-				mass = 50;
-			else
-				mass = (float)targ->mass;
+			if (RS(RS_Q3A)) {
+				if (targ->client)
+					kvel = normalized * (1000.0f * knockback / 200.0f);
+			} else {
+				float  mass;
 
-			if (targ->client && attacker == targ)
-				kvel = normalized * (1600.0f * knockback / mass); // the rocket jump hack...
-			else
-				kvel = normalized * (500.0f * knockback / mass);
+				if (targ->mass < 50)
+					mass = 50;
+				else
+					mass = (float)targ->mass;
+
+				if (targ->client && attacker == targ)
+					kvel = normalized * (1600.0f * knockback / mass); // the rocket jump hack...
+				else
+					kvel = normalized * (500.0f * knockback / mass);
+			}
 
 			kvel *= g_knockback_scale->value;
 
 			// arena gives a bit more knockback
-			if (GTF(GTF_ARENA))
+			if (!RS(RS_Q3A) && GTF(GTF_ARENA))
 				kvel *= 1.25f;
 
 			targ->velocity += kvel;
 		}
 	}
+
+	if (RS(RS_Q3A) && targ == attacker && damage > 0)
+		damage = max(1, (int)(damage * 0.5f));
 
 	if (targ != attacker && attacker->client && !OnSameTeam(targ, attacker)) {
 		if ((!inflictor->skip && (dflags & DAMAGE_STAT_ONCE)) || !(dflags & DAMAGE_STAT_ONCE)) {
@@ -884,6 +893,45 @@ void T_RadiusDamage(gentity_t *inflictor, gentity_t *attacker, float damage, gen
 	vec3_t   inflictor_center;
 
 	inflictor_center = inflictor->linked ? ((inflictor->absmax + inflictor->absmin) * 0.5f) : inflictor->s.origin;
+
+	if (RS(RS_Q3A)) {
+		size_t entity_count = min(static_cast<size_t>(globals.num_entities), static_cast<size_t>(game.maxentities));
+		for (size_t entnum = 1; entnum < entity_count; entnum++) {
+			ent = &g_entities[entnum];
+			if (!ent->inuse)
+				continue;
+			if (ent == ignore)
+				continue;
+			if (!ent->takedamage)
+				continue;
+
+			for (int i = 0; i < 3; i++) {
+				if (inflictor_center[i] < ent->absmin[i])
+					v[i] = ent->absmin[i] - inflictor_center[i];
+				else if (inflictor_center[i] > ent->absmax[i])
+					v[i] = inflictor_center[i] - ent->absmax[i];
+				else
+					v[i] = 0;
+			}
+
+			float dist = v.length();
+			if (dist >= radius)
+				continue;
+
+			points = damage * (1.0f - (dist / radius));
+			if (points <= 0)
+				continue;
+
+			if (CanDamage(ent, inflictor)) {
+				dir = ent->s.origin - inflictor_center;
+				dir[2] += 24;
+				vec3_t normal = dir.normalized();
+				T_Damage(ent, inflictor, attacker, dir, closest_point_to_box(inflictor_center, ent->absmin, ent->absmax), normal, (int)points, (int)points, dflags | DAMAGE_RADIUS, mod);
+			}
+		}
+
+		return;
+	}
 
 	while ((ent = findradius(ent, inflictor_center, radius)) != nullptr) {
 		if (ent == ignore)

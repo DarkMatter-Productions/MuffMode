@@ -29,7 +29,12 @@ internal static class ShortcutManager
             throw new InvalidOperationException("Could not determine the updater and launcher executable path.");
         }
 
-        var workingDirectory = Path.GetDirectoryName(executablePath) ?? AppContext.BaseDirectory;
+        var workingDirectory = NormalizeDirectoryPath(Path.GetDirectoryName(executablePath) ?? AppContext.BaseDirectory);
+        if (!IsSafeWorkingDirectory(workingDirectory))
+        {
+            throw new InvalidOperationException("Could not determine a safe updater and launcher working folder.");
+        }
+
         if (desktop)
         {
             CreateShortcut(DesktopShortcutPath, executablePath, workingDirectory);
@@ -45,9 +50,11 @@ internal static class ShortcutManager
     {
         ValidateShortcutPath(shortcutPath);
         var shortcutExisted = File.Exists(shortcutPath);
+        var originalAttributes = PrepareExistingShortcutForReplace(shortcutPath);
         var shortcutDirectory = Path.GetDirectoryName(shortcutPath);
         if (!string.IsNullOrWhiteSpace(shortcutDirectory))
         {
+            EnsureDirectoryPathHasNoReparsePoints(shortcutDirectory, "shortcut folder");
             Directory.CreateDirectory(shortcutDirectory);
             ValidateShortcutDirectory(shortcutDirectory);
         }
@@ -75,9 +82,12 @@ internal static class ShortcutManager
             SetShortcutProperty(shortcut, "Description", ShortcutDescription);
             SetShortcutProperty(shortcut, "IconLocation", $"{targetPath},0");
             shortcut.GetType().InvokeMember("Save", BindingFlags.InvokeMethod, null, shortcut, null);
+            VerifyShortcutObject(shortcut, targetPath, workingDirectory);
+            VerifyShortcutFileWritten(shortcutPath);
         }
         catch
         {
+            RestoreShortcutAttributes(shortcutPath, originalAttributes);
             if (!shortcutExisted)
             {
                 TryDeleteShortcut(shortcutPath);
@@ -90,6 +100,8 @@ internal static class ShortcutManager
             ReleaseComObject(shortcut);
             ReleaseComObject(shell);
         }
+
+        RestoreShortcutAttributes(shortcutPath, originalAttributes);
     }
 
     private static string NormalizeExecutablePath(string? executablePath)
@@ -99,6 +111,20 @@ internal static class ShortcutManager
             return string.IsNullOrWhiteSpace(executablePath)
                 ? ""
                 : Path.GetFullPath(executablePath);
+        }
+        catch
+        {
+            return "";
+        }
+    }
+
+    private static string NormalizeDirectoryPath(string? directoryPath)
+    {
+        try
+        {
+            return string.IsNullOrWhiteSpace(directoryPath)
+                ? ""
+                : Path.GetFullPath(directoryPath);
         }
         catch
         {
@@ -118,6 +144,24 @@ internal static class ShortcutManager
             var attributes = File.GetAttributes(executablePath);
             return (attributes & (FileAttributes.Directory | FileAttributes.ReparsePoint)) == 0
                 && string.Equals(Path.GetExtension(executablePath), ".exe", StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool IsSafeWorkingDirectory(string workingDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(workingDirectory) || !Path.IsPathFullyQualified(workingDirectory))
+        {
+            return false;
+        }
+
+        try
+        {
+            var attributes = File.GetAttributes(workingDirectory);
+            return (attributes & (FileAttributes.Directory | FileAttributes.ReparsePoint)) == FileAttributes.Directory;
         }
         catch
         {
@@ -155,9 +199,101 @@ internal static class ShortcutManager
 
     private static void ValidateShortcutDirectory(string shortcutDirectory)
     {
+        EnsureDirectoryPathHasNoReparsePoints(shortcutDirectory, "shortcut folder");
         if (Directory.Exists(shortcutDirectory) && IsReparsePoint(shortcutDirectory))
         {
             throw new InvalidOperationException("The shortcut folder is a reparse point.");
+        }
+    }
+
+    private static FileAttributes? PrepareExistingShortcutForReplace(string shortcutPath)
+    {
+        if (!File.Exists(shortcutPath))
+        {
+            return null;
+        }
+
+        var attributes = File.GetAttributes(shortcutPath);
+        if ((attributes & FileAttributes.ReadOnly) != 0)
+        {
+            File.SetAttributes(shortcutPath, attributes & ~FileAttributes.ReadOnly);
+        }
+
+        return attributes;
+    }
+
+    private static void VerifyShortcutFileWritten(string shortcutPath)
+    {
+        if (!File.Exists(shortcutPath)
+            || Directory.Exists(shortcutPath)
+            || IsReparsePoint(shortcutPath)
+            || !string.Equals(Path.GetExtension(shortcutPath), ".lnk", StringComparison.OrdinalIgnoreCase)
+            || new FileInfo(shortcutPath).Length == 0)
+        {
+            throw new IOException("Windows shortcut support did not write a usable shortcut file.");
+        }
+    }
+
+    private static void VerifyShortcutObject(object shortcut, string expectedTargetPath, string expectedWorkingDirectory)
+    {
+        var targetPath = GetShortcutStringProperty(shortcut, "TargetPath");
+        if (!string.Equals(targetPath, expectedTargetPath, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new IOException("Windows shortcut support wrote an unexpected shortcut target.");
+        }
+
+        var workingDirectory = GetShortcutStringProperty(shortcut, "WorkingDirectory");
+        if (!string.Equals(workingDirectory, expectedWorkingDirectory, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new IOException("Windows shortcut support wrote an unexpected shortcut working directory.");
+        }
+    }
+
+    private static void RestoreShortcutAttributes(string shortcutPath, FileAttributes? attributes)
+    {
+        if (attributes is null || !File.Exists(shortcutPath))
+        {
+            return;
+        }
+
+        try
+        {
+            File.SetAttributes(shortcutPath, attributes.Value);
+        }
+        catch
+        {
+            // Attribute restoration is best-effort after shortcut creation.
+        }
+    }
+
+    private static void EnsureDirectoryPathHasNoReparsePoints(string directoryPath, string description)
+    {
+        try
+        {
+            var current = Path.GetFullPath(directoryPath);
+            while (!string.IsNullOrWhiteSpace(current))
+            {
+                if (Directory.Exists(current) && IsReparsePoint(current))
+                {
+                    throw new IOException($"The {description} contains a reparse point: {current}");
+                }
+
+                var parent = Directory.GetParent(current);
+                if (parent is null)
+                {
+                    break;
+                }
+
+                current = parent.FullName;
+            }
+        }
+        catch (IOException)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            throw new IOException($"The {description} path was invalid.", ex);
         }
     }
 
@@ -168,11 +304,62 @@ internal static class ShortcutManager
             return File.Exists(shortcutPath)
                 && !Directory.Exists(shortcutPath)
                 && !IsReparsePoint(shortcutPath)
-                && string.Equals(Path.GetExtension(shortcutPath), ".lnk", StringComparison.OrdinalIgnoreCase);
+                && string.Equals(Path.GetExtension(shortcutPath), ".lnk", StringComparison.OrdinalIgnoreCase)
+                && new FileInfo(shortcutPath).Length > 0
+                && ShortcutTargetsCurrentExecutable(shortcutPath);
         }
         catch
         {
             return false;
+        }
+    }
+
+    private static bool ShortcutTargetsCurrentExecutable(string shortcutPath)
+    {
+        var executablePath = NormalizeExecutablePath(Environment.ProcessPath ?? Application.ExecutablePath);
+        if (!IsSafeExecutableTarget(executablePath))
+        {
+            return false;
+        }
+
+        var shellType = Type.GetTypeFromProgID("WScript.Shell");
+        if (shellType is null)
+        {
+            return false;
+        }
+
+        object? shell = null;
+        object? shortcut = null;
+        try
+        {
+            shell = Activator.CreateInstance(shellType);
+            if (shell is null)
+            {
+                return false;
+            }
+
+            shortcut = shellType.InvokeMember(
+                "CreateShortcut",
+                BindingFlags.InvokeMethod,
+                null,
+                shell,
+                [shortcutPath]);
+            if (shortcut is null)
+            {
+                return false;
+            }
+
+            var targetPath = NormalizeExecutablePath(GetShortcutStringProperty(shortcut, "TargetPath"));
+            return string.Equals(targetPath, executablePath, StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
+        finally
+        {
+            ReleaseComObject(shortcut);
+            ReleaseComObject(shell);
         }
     }
 
@@ -211,6 +398,16 @@ internal static class ShortcutManager
             null,
             shortcut,
             [value]);
+    }
+
+    private static string GetShortcutStringProperty(object shortcut, string propertyName)
+    {
+        return shortcut.GetType().InvokeMember(
+            propertyName,
+            BindingFlags.GetProperty,
+            null,
+            shortcut,
+            null) as string ?? "";
     }
 
     private static void ReleaseComObject(object? comObject)

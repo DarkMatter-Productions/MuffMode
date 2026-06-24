@@ -1,6 +1,7 @@
 // Copyright (c) ZeniMax Media Inc.
 // Licensed under the GNU General Public License 2.0.
 #include "g_local.h"
+#include "muffmode/mm_ruleset_weapons.h"
 
 static size_t WeaponEntityCount() {
 	return min(static_cast<size_t>(globals.num_entities), static_cast<size_t>(game.maxentities));
@@ -238,7 +239,7 @@ fire_lead
 This is an internal support routine used for bullet/pellet based weapons.
 =================
 */
-static void fire_lead(gentity_t *self, const vec3_t &start, const vec3_t &aimdir, int damage, int kick, int te_impact, int hspread, int vspread, mod_t mod) {
+static void fire_lead(gentity_t *self, const vec3_t &start, const vec3_t &aimdir, int damage, int kick, int te_impact, int hspread, int vspread, mod_t mod, bool circular_spread = false) {
 	fire_lead_pierce_t args = {
 		self,
 		start,
@@ -277,8 +278,15 @@ static void fire_lead(gentity_t *self, const vec3_t &start, const vec3_t &aimdir
 		dir = vectoangles(aimdir);
 		AngleVectors(dir, forward, right, up);
 
-		float r = crandom() * hspread;
-		float u = crandom() * vspread;
+		float r, u;
+		if (circular_spread) {
+			float angle = frandom(2 * PIf);
+			r = cosf(angle) * crandom() * hspread;
+			u = sinf(angle) * crandom() * hspread;
+		} else {
+			r = crandom() * hspread;
+			u = crandom() * vspread;
+		}
 		end = start + (forward * 8192);
 		end += (right * r);
 		end += (up * u);
@@ -318,7 +326,8 @@ pistols, rifles, etc....
 =================
 */
 void fire_bullet(gentity_t *self, const vec3_t &start, const vec3_t &aimdir, int damage, int kick, int hspread, int vspread, mod_t mod) {
-	fire_lead(self, start, aimdir, damage, kick, mod.id == MOD_TESLA ? -1 : TE_GUNSHOT, hspread, vspread, mod);
+	bool circular_spread = RS(RS_Q3A) && (mod.id == MOD_MACHINEGUN || mod.id == MOD_CHAINGUN);
+	fire_lead(self, start, aimdir, damage, kick, mod.id == MOD_TESLA ? -1 : TE_GUNSHOT, hspread, vspread, mod, circular_spread);
 }
 
 /*
@@ -401,13 +410,13 @@ void fire_blaster(gentity_t *self, const vec3_t &start, const vec3_t &dir, int d
 	bolt->touch = blaster_touch;
 	bolt->style = mod.id;
 	
-	bolt->nextthink = level.time + 2_sec;
+	bolt->nextthink = level.time + ((RS(RS_Q3A) && mod.id == MOD_HYPERBLASTER) ? 10_sec : 2_sec);
 	bolt->think = G_FreeEntity;
 	bolt->dmg = damage;
 	if (RS(RS_Q3A) && mod.id == MOD_HYPERBLASTER) {
 		bolt->s.scale = 100;
-		bolt->splash_radius = 30;		//20;
-		bolt->splash_damage = 20;			//15;
+		bolt->splash_radius = 20;
+		bolt->splash_damage = 15;
 	}
 	bolt->classname = "bolt";
 	gi.linkentity(bolt);
@@ -570,7 +579,7 @@ constexpr spawnflags_t SPAWNFLAG_GRENADE_HELD = 2_spawnflag;
 fire_grenade
 =================
 */
-static THINK(Grenade_Explode) (gentity_t *ent) -> void {
+THINK(Grenade_Explode) (gentity_t *ent) -> void {
 	vec3_t origin;
 	mod_t  mod;
 
@@ -846,7 +855,7 @@ gentity_t *fire_rocket(gentity_t *self, const vec3_t &start, const vec3_t &dir, 
 	rocket->s.modelindex = gi.modelindex("models/objects/rocket/tris.md2");
 	rocket->owner = self;
 	rocket->touch = rocket_touch;
-	rocket->nextthink = level.time + gtime_t::from_sec(8000.f / speed);
+	rocket->nextthink = level.time + (RS(RS_Q3A) ? 15_sec : gtime_t::from_sec(8000.f / speed));
 	rocket->think = G_FreeEntity;
 	rocket->dmg = damage;
 	rocket->splash_damage = radius_damage;
@@ -1131,6 +1140,26 @@ static TOUCH(bfg_touch) (gentity_t *self, gentity_t *other, const trace_t &tr, b
 	if (self->owner->client)
 		PlayerNoise(self->owner, self->s.origin, PNOISE_IMPACT);
 
+	if (MM_Ruleset_BFGUsesQ3Style()) {
+		if (other->takedamage) {
+			T_Damage(other, self, self->owner, self->velocity, self->s.origin, tr.plane.normal, self->dmg, 0, DAMAGE_ENERGY | DAMAGE_STAT_ONCE, MOD_BFG_BLAST);
+
+			if (self->owner && self->owner->client)
+				MS_Adjust(self->owner->client, MSTAT_HITS, 1);
+		}
+
+		T_RadiusDamage(self, self->owner, (float)self->splash_damage, other, self->splash_radius, DAMAGE_ENERGY | DAMAGE_STAT_ONCE, MOD_BFG_BLAST);
+
+		gi.sound(self, CHAN_VOICE, gi.soundindex("weapons/bfg__x1b.wav"), 1, ATTN_NORM, 0);
+		gi.WriteByte(svc_temp_entity);
+		gi.WriteByte(TE_BFG_BIGEXPLOSION);
+		gi.WritePosition(self->s.origin);
+		gi.multicast(self->s.origin, MULTICAST_PHS, false);
+
+		G_FreeEntity(self);
+		return;
+	}
+
 	// core explosion - prevents firing it into the wall/floor
 	if (other->takedamage)
 		T_Damage(other, self, self->owner, self->velocity, self->s.origin, tr.plane.normal, 200, 0, DAMAGE_ENERGY, MOD_BFG_BLAST);
@@ -1274,17 +1303,20 @@ void fire_bfg(gentity_t *self, const vec3_t &start, const vec3_t &dir, int damag
 	bfg->s.modelindex = gi.modelindex("sprites/s_bfg1.sp2");
 	bfg->owner = self;
 	bfg->touch = bfg_touch;
-	bfg->nextthink = level.time + gtime_t::from_sec(8000.f / speed);
+	bfg->nextthink = level.time + (MM_Ruleset_BFGUsesQ3Style() ? 10_sec : gtime_t::from_sec(8000.f / speed));
 	bfg->think = G_FreeEntity;
+	bfg->dmg = damage;
 	bfg->splash_damage = damage;
 	bfg->splash_radius = damage_radius;
 	bfg->classname = "bfg blast";
 	bfg->s.sound = gi.soundindex("weapons/bfg__l1a.wav");
 
-	bfg->think = bfg_think;
-	bfg->nextthink = level.time + FRAME_TIME_S;
-	bfg->teammaster = bfg;
-	bfg->teamchain = nullptr;
+	if (!MM_Ruleset_BFGUsesQ3Style()) {
+		bfg->think = bfg_think;
+		bfg->nextthink = level.time + FRAME_TIME_S;
+		bfg->teammaster = bfg;
+		bfg->teamchain = nullptr;
+	}
 
 	gi.linkentity(bfg);
 }
@@ -1351,7 +1383,7 @@ static void fire_beams(gentity_t *self, const vec3_t &start, const vec3_t &aimdi
 	dir = vectoangles(aimdir);
 	AngleVectors(dir, forward, right, up);
 
-	float dist = (RS(RS_MM) || RS(RS_VANILLA_PLUS) || RS(RS_QC)) ? 768 : 8192;
+	float dist = MM_Ruleset_PlasmaBeamRange();
 	end = start + (forward * dist);
 
 	if (gi.pointcontents(start) & MASK_WATER) {
@@ -1718,378 +1750,7 @@ void fire_flechette(gentity_t *self, const vec3_t &start, const vec3_t &dir, int
 	}
 }
 
-// **************************
-// PROX
-// **************************
-
-constexpr gtime_t PROX_TIME_TO_LIVE = 45_sec;
-constexpr gtime_t PROX_TIME_DELAY = 500_ms;
-constexpr float	  PROX_BOUND_SIZE = 96;
-constexpr float	  PROX_DAMAGE_RADIUS = 192;
-constexpr int32_t PROX_HEALTH = 20;
-constexpr int32_t PROX_DAMAGE = 90;
-
-static THINK(Prox_Explode) (gentity_t *ent) -> void {
-	vec3_t	 origin;
-	gentity_t *owner;
-
-	// free the trigger field
-
-	// PMM - changed teammaster to "mover" .. owner of the field is the prox
-	if (ent->teamchain && ent->teamchain->owner == ent)
-		G_FreeEntity(ent->teamchain);
-
-	owner = ent;
-	if (ent->teammaster) {
-		owner = ent->teammaster;
-		PlayerNoise(owner, ent->s.origin, PNOISE_IMPACT);
-	}
-
-	// play quad sound if appopriate
-	if (ent->dmg > PROX_DAMAGE)
-		gi.sound(ent, CHAN_ITEM, gi.soundindex("items/damage3.wav"), 1, ATTN_NORM, 0);
-
-	ent->takedamage = false;
-	T_RadiusDamage(ent, owner, (float)ent->dmg, ent, PROX_DAMAGE_RADIUS, DAMAGE_NONE, MOD_PROX);
-
-	origin = ent->s.origin + (ent->velocity * -0.02f);
-	gi.WriteByte(svc_temp_entity);
-	if (ent->groundentity)
-		gi.WriteByte(TE_GRENADE_EXPLOSION);
-	else
-		gi.WriteByte(TE_ROCKET_EXPLOSION);
-	gi.WritePosition(origin);
-	gi.multicast(ent->s.origin, MULTICAST_PHS, false);
-
-	G_FreeEntity(ent);
-}
-
-static DIE(prox_die) (gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int damage, const vec3_t &point, const mod_t &mod) -> void {
-	// if set off by another prox, delay a little (chained explosions)
-	if (strcmp(inflictor->classname, "prox_mine")) {
-		self->takedamage = false;
-		Prox_Explode(self);
-	} else {
-		self->takedamage = false;
-		self->think = Prox_Explode;
-		self->nextthink = level.time + FRAME_TIME_S;
-	}
-}
-
-static TOUCH(Prox_Field_Touch) (gentity_t *ent, gentity_t *other, const trace_t &tr, bool other_touching_self) -> void {
-	gentity_t *prox;
-
-	if (deathmatch->integer && IsCombatDisabled())
-		return;
-
-	if (!(other->svflags & SVF_MONSTER) && !other->client)
-		return;
-
-	// trigger the prox mine if it's still there, and still mine.
-	prox = ent->owner;
-
-	// teammate avoidance
-	if (CheckTeamDamage(prox->teammaster, other))
-		return;
-
-	if (!deathmatch->integer && other->client)
-		return;
-
-	if (other == prox) // don't set self off
-		return;
-
-	if (prox->think == Prox_Explode) // we're set to blow!
-		return;
-
-	if (prox->teamchain == ent) {
-		gi.sound(ent, CHAN_VOICE, gi.soundindex("weapons/proxwarn.wav"), 1, ATTN_NORM, 0);
-		prox->think = Prox_Explode;
-		prox->nextthink = level.time + PROX_TIME_DELAY;
-		return;
-	}
-
-	ent->solid = SOLID_NOT;
-	G_FreeEntity(ent);
-}
-
-static THINK(prox_seek) (gentity_t *ent) -> void {
-	if (level.time > gtime_t::from_sec(ent->wait)) {
-		Prox_Explode(ent);
-	} else {
-		ent->s.frame++;
-		if (ent->s.frame > 13)
-			ent->s.frame = 9;
-		ent->think = prox_seek;
-		ent->nextthink = level.time + 10_hz;
-	}
-}
-
-static THINK(prox_open) (gentity_t *ent) -> void {
-	gentity_t *search;
-
-	search = nullptr;
-
-	if (ent->s.frame == 9) // end of opening animation
-	{
-		// set the owner to nullptr so the owner can walk through it.  needs to be done here so the owner
-		// doesn't get stuck on it while it's opening if fired at point blank wall
-		ent->s.sound = 0;
-
-		if (deathmatch->integer)
-			ent->owner = nullptr;
-
-		if (ent->teamchain)
-			ent->teamchain->touch = Prox_Field_Touch;
-		while ((search = findradius(search, ent->s.origin, PROX_DAMAGE_RADIUS + 10)) != nullptr) {
-			if (!search->classname) // tag token and other weird shit
-				continue;
-
-			// teammate avoidance
-			if (CheckTeamDamage(search, ent->teammaster))
-				continue;
-
-			// if it's a monster or player with health > 0
-			// or it's a player start point
-			// and we can see it
-			// blow up
-			if (
-				search != ent &&
-				(
-					(((search->svflags & SVF_MONSTER) || (deathmatch->integer && (search->client || (search->classname && !strcmp(search->classname, "prox_mine"))))) && (search->health > 0)) ||
-					(deathmatch->integer &&
-						((!strncmp(search->classname, "info_player_", 12)) ||
-							(!strcmp(search->classname, "misc_teleporter_dest")) ||
-							(!strncmp(search->classname, "item_flag_", 10))))) &&
-				(visible(search, ent))) {
-				gi.sound(ent, CHAN_VOICE, gi.soundindex("weapons/proxwarn.wav"), 1, ATTN_NORM, 0);
-				Prox_Explode(ent);
-				return;
-			}
-		}
-
-		if (g_dm_strong_mines->integer)
-			ent->wait = (level.time + PROX_TIME_TO_LIVE).seconds();
-		else {
-			switch (ent->dmg / PROX_DAMAGE) {
-			case 1:
-				ent->wait = (level.time + PROX_TIME_TO_LIVE).seconds();
-				break;
-			case 2:
-				ent->wait = (level.time + 30_sec).seconds();
-				break;
-			case 4:
-				ent->wait = (level.time + 15_sec).seconds();
-				break;
-			case 8:
-				ent->wait = (level.time + 10_sec).seconds();
-				break;
-			default:
-				ent->wait = (level.time + PROX_TIME_TO_LIVE).seconds();
-				break;
-			}
-		}
-
-		ent->think = prox_seek;
-		ent->nextthink = level.time + 200_ms;
-	} else {
-		if (ent->s.frame == 0)
-			gi.sound(ent, CHAN_VOICE, gi.soundindex("weapons/proxopen.wav"), 1, ATTN_NORM, 0);
-		ent->s.frame++;
-		ent->think = prox_open;
-		ent->nextthink = level.time + 10_hz;
-	}
-}
-
-static TOUCH(prox_land) (gentity_t *ent, gentity_t *other, const trace_t &tr, bool other_touching_self) -> void {
-	gentity_t *field;
-	vec3_t	   dir;
-	vec3_t	   forward, right, up;
-	movetype_t movetype = MOVETYPE_NONE;
-	int		   stick_ok = 0;
-	vec3_t	   land_point;
-
-	// must turn off owner so owner can shoot it and set it off
-	// moved to prox_open so owner can get away from it if fired at pointblank range into
-	// wall
-	if (tr.surface && (tr.surface->flags & SURF_SKY)) {
-		G_FreeEntity(ent);
-		return;
-	}
-
-	if (tr.plane.normal) {
-		land_point = ent->s.origin + (tr.plane.normal * -10.0f);
-		if (gi.pointcontents(land_point) & (CONTENTS_SLIME | CONTENTS_LAVA)) {
-			Prox_Explode(ent);
-			return;
-		}
-	}
-
-	constexpr float PROX_STOP_EPSILON = 0.1f;
-
-	if (!tr.plane.normal || (other->svflags & SVF_MONSTER) || other->client || (other->flags & FL_DAMAGEABLE)) {
-		if (other != ent->teammaster)
-			Prox_Explode(ent);
-
-		return;
-	} else if (other != world) {
-		// Here we need to check to see if we can stop on this entity.
-		// Note that plane can be nullptr
-
-		// PMM - code stolen from g_phys (ClipVelocity)
-		vec3_t out;
-		float  backoff, change;
-		int	   i;
-
-		if ((other->movetype == MOVETYPE_PUSH) && (tr.plane.normal[2] > 0.7f))
-			stick_ok = 1;
-		else
-			stick_ok = 0;
-
-		backoff = ent->velocity.dot(tr.plane.normal) * 1.5f;
-		for (i = 0; i < 3; i++) {
-			change = tr.plane.normal[i] * backoff;
-			out[i] = ent->velocity[i] - change;
-			if (out[i] > -PROX_STOP_EPSILON && out[i] < PROX_STOP_EPSILON)
-				out[i] = 0;
-		}
-
-		if (out[2] > 60)
-			return;
-
-		movetype = MOVETYPE_BOUNCE;
-
-		// if we're here, we're going to stop on an entity
-		if (stick_ok) { // it's a happy entity
-			ent->velocity = {};
-			ent->avelocity = {};
-		} else // no-stick.  teflon time
-		{
-			if (tr.plane.normal[2] > 0.7f) {
-				Prox_Explode(ent);
-				return;
-			}
-			return;
-		}
-	} else if (other->s.modelindex != MODELINDEX_WORLD)
-		return;
-
-	dir = vectoangles(tr.plane.normal);
-	AngleVectors(dir, forward, right, up);
-
-	if (gi.pointcontents(ent->s.origin) & (CONTENTS_LAVA | CONTENTS_SLIME)) {
-		Prox_Explode(ent);
-		return;
-	}
-
-	ent->svflags &= ~SVF_PROJECTILE;
-
-	field = G_Spawn();
-
-	field->s.origin = ent->s.origin;
-	field->mins = { -PROX_BOUND_SIZE, -PROX_BOUND_SIZE, -PROX_BOUND_SIZE };
-	field->maxs = { PROX_BOUND_SIZE, PROX_BOUND_SIZE, PROX_BOUND_SIZE };
-	field->movetype = MOVETYPE_NONE;
-	field->solid = SOLID_TRIGGER;
-	field->owner = ent;
-	field->classname = "prox_field";
-	field->teammaster = ent;
-	gi.linkentity(field);
-
-	ent->velocity = {};
-	ent->avelocity = {};
-	// rotate to vertical
-	dir[PITCH] = dir[PITCH] + 90;
-	ent->s.angles = dir;
-	ent->takedamage = true;
-	ent->movetype = movetype; // either bounce or none, depending on whether we stuck to something
-	ent->die = prox_die;
-	ent->teamchain = field;
-	ent->health = PROX_HEALTH;
-	ent->nextthink = level.time;
-	ent->think = prox_open;
-	ent->touch = nullptr;
-	ent->solid = SOLID_BBOX;
-
-	gi.linkentity(ent);
-}
-
-static THINK(Prox_Think) (gentity_t *self) -> void {
-	if (self->timestamp <= level.time) {
-		Prox_Explode(self);
-		return;
-	}
-
-	self->s.angles = vectoangles(self->velocity.normalized());
-	self->s.angles[PITCH] -= 90;
-	self->nextthink = level.time;
-}
-
-void fire_prox(gentity_t *self, const vec3_t &start, const vec3_t &aimdir, int prox_damage_multiplier, int speed) {
-	gentity_t *prox;
-	vec3_t	 dir;
-	vec3_t	 forward, right, up;
-
-	dir = vectoangles(aimdir);
-	AngleVectors(dir, forward, right, up);
-
-	prox = G_Spawn();
-	prox->s.origin = start;
-	prox->velocity = aimdir * speed;
-
-	float gravityAdjustment = level.gravity / 800.f;
-
-	prox->velocity += up * (200 + crandom() * 10.0f) * gravityAdjustment;
-	prox->velocity += right * (crandom() * 10.0f);
-
-	prox->s.angles = dir;
-	prox->s.angles[PITCH] -= 90;
-	prox->movetype = MOVETYPE_BOUNCE;
-	prox->solid = SOLID_BBOX;
-	prox->svflags |= SVF_PROJECTILE;
-	prox->s.effects |= EF_GRENADE;
-	prox->flags |= (FL_DODGE | FL_TRAP);
-	prox->clipmask = MASK_PROJECTILE | CONTENTS_LAVA | CONTENTS_SLIME;
-
-	// [Paril-KEX]
-	if (self->client && !G_ShouldPlayersCollide(true))
-		prox->clipmask &= ~CONTENTS_PLAYER;
-
-	prox->s.renderfx |= RF_IR_VISIBLE;
-	// FIXME - this needs to be bigger.  Has other effects, though.  Maybe have to change origin to compensate
-	//  so it sinks in correctly.  Also in lavacheck, might have to up the distance
-	prox->mins = { -6, -6, -6 };
-	prox->maxs = { 6, 6, 6 };
-	prox->s.modelindex = gi.modelindex("models/weapons/g_prox/tris.md2");
-	prox->owner = self;
-	prox->teammaster = self;
-	prox->touch = prox_land;
-	prox->think = Prox_Think;
-	prox->nextthink = level.time;
-	prox->dmg = PROX_DAMAGE * prox_damage_multiplier;
-	prox->classname = "prox_mine";
-	prox->flags |= FL_DAMAGEABLE;
-	prox->flags |= FL_MECHANICAL;
-
-	switch (prox_damage_multiplier) {
-	case 1:
-		prox->timestamp = level.time + PROX_TIME_TO_LIVE;
-		break;
-	case 2:
-		prox->timestamp = level.time + 30_sec;
-		break;
-	case 4:
-		prox->timestamp = level.time + 15_sec;
-		break;
-	case 8:
-		prox->timestamp = level.time + 10_sec;
-		break;
-	default:
-		prox->timestamp = level.time + PROX_TIME_TO_LIVE;
-		break;
-	}
-
-	gi.linkentity(prox);
-}
+// Proximity mine projectile behavior lives in g_weapon_prox.cpp.
 
 // *************************
 // MELEE WEAPONS
@@ -2165,11 +1826,11 @@ bool fire_player_melee(gentity_t *self, const vec3_t &start, const vec3_t &aim, 
 		if (hit->svflags & SVF_MONSTER)
 			hit->pain_debounce_time -= random_time(5_ms, 75_ms);
 
-		if (mod.id == MOD_CHAINFIST)
-			T_Damage(hit, self, self, aim, closest_point_to_check, -aim, damage, kick / 2,
-				DAMAGE_DESTROY_ARMOR | DAMAGE_NO_KNOCKBACK, mod);
-		else
-			T_Damage(hit, self, self, aim, closest_point_to_check, -aim, damage, kick / 2, DAMAGE_NO_KNOCKBACK, mod);
+		damageflags_t dflags = (mod.id == MOD_CHAINFIST) ? DAMAGE_DESTROY_ARMOR : DAMAGE_NONE;
+		if (!(RS(RS_Q3A) && mod.id == MOD_CHAINFIST))
+			dflags |= DAMAGE_NO_KNOCKBACK;
+
+		T_Damage(hit, self, self, aim, closest_point_to_check, -aim, damage, kick / 2, dflags, mod);
 
 		was_hit = true;
 	}
@@ -2391,307 +2052,7 @@ void fire_nuke(gentity_t *self, const vec3_t &start, const vec3_t &aimdir, int s
 	gi.linkentity(nuke);
 }
 
-// *************************
-// TESLA
-// *************************
-
-constexpr gtime_t TESLA_TIME_TO_LIVE = 30_sec;
-constexpr float	  TESLA_DAMAGE_RADIUS = 128;
-constexpr int32_t TESLA_DAMAGE = 3;
-constexpr int32_t TESLA_KNOCKBACK = 8;
-
-constexpr gtime_t TESLA_ACTIVATE_TIME = 3_sec;
-
-constexpr int32_t TESLA_EXPLOSION_DAMAGE_MULT = 50; // this is the amount the damage is multiplied by for underwater explosions
-constexpr float	  TESLA_EXPLOSION_RADIUS = 200;
-
-static void tesla_remove(gentity_t *self) {
-	gentity_t *cur, *next;
-
-	self->takedamage = false;
-	if (self->teamchain) {
-		cur = self->teamchain;
-		while (cur) {
-			next = cur->teamchain;
-			G_FreeEntity(cur);
-			cur = next;
-		}
-	} else if (self->air_finished)
-		gi.Com_Print("tesla_mine without a field!\n");
-
-	self->owner = self->teammaster; // Going away, set the owner correctly.
-	// grenade explode does damage to self->enemy
-	self->enemy = nullptr;
-
-	// play quad sound if quadded and an underwater explosion
-	if ((self->splash_radius) && (self->dmg > (TESLA_DAMAGE * TESLA_EXPLOSION_DAMAGE_MULT)))
-		gi.sound(self, CHAN_ITEM, gi.soundindex("items/damage3.wav"), 1, ATTN_NORM, 0);
-
-	Grenade_Explode(self);
-}
-
-static DIE(tesla_die) (gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int damage, const vec3_t &point, const mod_t &mod) -> void {
-	tesla_remove(self);
-}
-
-static void tesla_blow(gentity_t *self) {
-	self->dmg *= TESLA_EXPLOSION_DAMAGE_MULT;
-	self->splash_radius = TESLA_EXPLOSION_RADIUS;
-	tesla_remove(self);
-}
-
-static TOUCH(tesla_zap) (gentity_t *self, gentity_t *other, const trace_t &tr, bool other_touching_self) -> void {}
-
-static BoxEntitiesResult_t tesla_think_active_BoxFilter(gentity_t *check, void *data) {
-	gentity_t *self = (gentity_t *)data;
-
-	if (!check->inuse)
-		return BoxEntitiesResult_t::Skip;
-	if (check == self)
-		return BoxEntitiesResult_t::Skip;
-	if (check->health < 1)
-		return BoxEntitiesResult_t::Skip;
-	// don't hit teammates
-	if (check->client) {
-		if (!deathmatch->integer)
-			return BoxEntitiesResult_t::Skip;
-		else if (CheckTeamDamage(check, self->teammaster))
-			return BoxEntitiesResult_t::Skip;
-	}
-	if (!(check->svflags & SVF_MONSTER) && !(check->flags & FL_DAMAGEABLE) && !check->client)
-		return BoxEntitiesResult_t::Skip;
-
-	// don't hit other teslas in SP/coop
-	if (!deathmatch->integer && check->classname && (check->flags & FL_TRAP))
-		return BoxEntitiesResult_t::Skip;
-
-	return BoxEntitiesResult_t::Keep;
-}
-
-static THINK(tesla_think_active) (gentity_t *self) -> void {
-	size_t	 num;
-	static gentity_t *touch[MAX_ENTITIES];
-	gentity_t *hit;
-	vec3_t	 dir, start;
-	trace_t	 tr;
-
-	if (level.time > self->air_finished) {
-		tesla_remove(self);
-		return;
-	}
-
-	if (deathmatch->integer && IsCombatDisabled())
-		return;
-
-	start = self->s.origin;
-	start[2] += 16;
-
-	num = gi.BoxEntities(self->teamchain->absmin, self->teamchain->absmax, touch, MAX_ENTITIES, AREA_SOLID, tesla_think_active_BoxFilter, self);
-	for (size_t i = 0; i < num; i++) {
-		// if the tesla died while zapping things, stop zapping.
-		if (!(self->inuse))
-			break;
-
-		hit = touch[i];
-		if (!hit->inuse)
-			continue;
-		if (hit == self)
-			continue;
-		if (hit->health < 1)
-			continue;
-		// don't hit teammates
-		if (hit->client) {
-			if (!deathmatch->integer)
-				continue;
-			else if (CheckTeamDamage(hit, self->teamchain->owner))
-				continue;
-		}
-		if (!(hit->svflags & SVF_MONSTER) && !(hit->flags & FL_DAMAGEABLE) && !hit->client)
-			continue;
-
-		tr = gi.traceline(start, hit->s.origin, self, MASK_PROJECTILE);
-		if (tr.fraction == 1 || tr.ent == hit) {
-			dir = hit->s.origin - start;
-
-			// PMM - play quad sound if it's above the "normal" damage
-			if (self->dmg > TESLA_DAMAGE)
-				gi.sound(self, CHAN_ITEM, gi.soundindex("items/damage3.wav"), 1, ATTN_NORM, 0);
-
-			// PGM - don't do knockback to walking monsters
-			if ((hit->svflags & SVF_MONSTER) && !(hit->flags & (FL_FLY | FL_SWIM)))
-				T_Damage(hit, self, self->teammaster, dir, tr.endpos, tr.plane.normal,
-					self->dmg, 0, DAMAGE_NONE | DAMAGE_STAT_ONCE, MOD_TESLA);
-			else
-				T_Damage(hit, self, self->teammaster, dir, tr.endpos, tr.plane.normal,
-					self->dmg, TESLA_KNOCKBACK, DAMAGE_NONE | DAMAGE_STAT_ONCE, MOD_TESLA);
-
-			gi.WriteByte(svc_temp_entity);
-			gi.WriteByte(TE_LIGHTNING);
-			gi.WriteEntity(self);	// source entity
-			gi.WriteEntity(hit); // destination entity
-			gi.WritePosition(start);
-			gi.WritePosition(tr.endpos);
-			gi.multicast(start, MULTICAST_PVS, false);
-		}
-	}
-
-	if (self->inuse) {
-		self->think = tesla_think_active;
-		self->nextthink = level.time + 10_hz;
-	}
-}
-
-static THINK(tesla_activate) (gentity_t *self) -> void {
-	gentity_t *trigger, *search;
-
-	if (gi.pointcontents(self->s.origin) & (CONTENTS_SLIME | CONTENTS_LAVA | CONTENTS_WATER)) {
-		tesla_blow(self);
-		return;
-	}
-
-	// only check for spawn points in deathmatch
-	if (deathmatch->integer) {
-		search = nullptr;
-		while ((search = findradius(search, self->s.origin, 1.5f * TESLA_DAMAGE_RADIUS)) != nullptr) {
-			// [Paril-KEX] don't allow traps to be placed near flags or teleporters
-			// if it's a monster or player with health > 0
-			// or it's a player start point
-			// and we can see it
-			// blow up
-			if (search->classname && ((deathmatch->integer &&
-				((!strncmp(search->classname, "info_player_", 12)) ||
-					(!strcmp(search->classname, "misc_teleporter_dest")) ||
-					(!strncmp(search->classname, "item_flag_", 10))))) &&
-				(visible(search, self))) {
-				BecomeExplosion1(self);
-				return;
-			}
-		}
-	}
-
-	trigger = G_Spawn();
-	trigger->s.origin = self->s.origin;
-	trigger->mins = { -TESLA_DAMAGE_RADIUS, -TESLA_DAMAGE_RADIUS, self->mins[2] };
-	trigger->maxs = { TESLA_DAMAGE_RADIUS, TESLA_DAMAGE_RADIUS, TESLA_DAMAGE_RADIUS };
-	trigger->movetype = MOVETYPE_NONE;
-	trigger->solid = SOLID_TRIGGER;
-	trigger->owner = self;
-	trigger->touch = tesla_zap;
-	trigger->classname = "tesla trigger";
-	// doesn't need to be marked as a teamslave since the move code for bounce looks for teamchains
-	gi.linkentity(trigger);
-
-	self->s.angles = {};
-	// clear the owner if in deathmatch
-	if (deathmatch->integer)
-		self->owner = nullptr;
-	self->teamchain = trigger;
-	self->think = tesla_think_active;
-	self->nextthink = level.time + FRAME_TIME_S;
-	self->air_finished = level.time + TESLA_TIME_TO_LIVE;
-}
-
-static THINK(tesla_think) (gentity_t *ent) -> void {
-	if (gi.pointcontents(ent->s.origin) & (CONTENTS_SLIME | CONTENTS_LAVA)) {
-		tesla_remove(ent);
-		return;
-	}
-
-	ent->s.angles = {};
-
-	if (!(ent->s.frame))
-		gi.sound(ent, CHAN_VOICE, gi.soundindex("weapons/teslaopen.wav"), 1, ATTN_NORM, 0);
-
-	ent->s.frame++;
-	if (ent->s.frame > 14) {
-		ent->s.frame = 14;
-		ent->think = tesla_activate;
-		ent->nextthink = level.time + 10_hz;
-	} else {
-		if (ent->s.frame > 9) {
-			if (ent->s.frame == 10) {
-				if (ent->owner && ent->owner->client) {
-					PlayerNoise(ent->owner, ent->s.origin, PNOISE_WEAPON);
-				}
-				ent->s.skinnum = 1;
-			} else if (ent->s.frame == 12)
-				ent->s.skinnum = 2;
-			else if (ent->s.frame == 14)
-				ent->s.skinnum = 3;
-		}
-		ent->think = tesla_think;
-		ent->nextthink = level.time + 10_hz;
-	}
-}
-
-static TOUCH(tesla_lava) (gentity_t *ent, gentity_t *other, const trace_t &tr, bool other_touching_self) -> void {
-	if (tr.contents & (CONTENTS_SLIME | CONTENTS_LAVA)) {
-		tesla_blow(ent);
-		return;
-	}
-
-	if (ent->velocity) {
-		if (frandom() > 0.5f)
-			gi.sound(ent, CHAN_VOICE, gi.soundindex("weapons/hgrenb1a.wav"), 1, ATTN_NORM, 0);
-		else
-			gi.sound(ent, CHAN_VOICE, gi.soundindex("weapons/hgrenb2a.wav"), 1, ATTN_NORM, 0);
-	}
-}
-
-void fire_tesla(gentity_t *self, const vec3_t &start, const vec3_t &aimdir, int tesla_damage_multiplier, int speed) {
-	gentity_t *tesla;
-	vec3_t	 dir;
-	vec3_t	 forward, right, up;
-
-	dir = vectoangles(aimdir);
-	AngleVectors(dir, forward, right, up);
-
-	tesla = G_Spawn();
-	tesla->s.origin = start;
-	tesla->velocity = aimdir * speed;
-
-	float gravityAdjustment = level.gravity / 800.f;
-
-	tesla->velocity += up * (200 + crandom() * 10.0f) * gravityAdjustment;
-	tesla->velocity += right * (crandom() * 10.0f);
-
-	tesla->s.angles = {};
-	tesla->movetype = MOVETYPE_BOUNCE;
-	tesla->solid = SOLID_BBOX;
-	tesla->s.effects |= EF_GRENADE;
-	tesla->s.renderfx |= RF_IR_VISIBLE;
-	tesla->mins = { -12, -12, 0 };
-	tesla->maxs = { 12, 12, 20 };
-	tesla->s.modelindex = gi.modelindex("models/weapons/g_tesla/tris.md2");
-
-	tesla->owner = self; // PGM - we don't want it owned by self YET.
-	tesla->teammaster = self;
-
-	tesla->wait = (level.time + TESLA_TIME_TO_LIVE).seconds();
-	tesla->think = tesla_think;
-	tesla->nextthink = level.time + TESLA_ACTIVATE_TIME;
-
-	// blow up on contact with lava & slime code
-	tesla->touch = tesla_lava;
-
-	tesla->health = deathmatch->integer ? 20 : 50;
-
-	tesla->takedamage = true;
-	tesla->die = tesla_die;
-	tesla->dmg = TESLA_DAMAGE * tesla_damage_multiplier;
-	tesla->classname = "tesla_mine";
-	tesla->flags |= (FL_DAMAGEABLE | FL_TRAP);
-	tesla->clipmask = (MASK_PROJECTILE | CONTENTS_SLIME | CONTENTS_LAVA) & ~CONTENTS_DEADMONSTER;
-
-	// [Paril-KEX]
-	if (self->client && !G_ShouldPlayersCollide(true))
-		tesla->clipmask &= ~CONTENTS_PLAYER;
-
-	tesla->flags |= FL_MECHANICAL;
-
-	gi.linkentity(tesla);
-}
-
+// Tesla mine projectile behavior lives in g_weapon_tesla.cpp.
 
 /*
 =================
@@ -2740,7 +2101,7 @@ void fire_ionripper(gentity_t *self, const vec3_t &start, const vec3_t &dir, int
 	ion->s.old_origin = start;
 	ion->s.angles = vectoangles(dir);
 	ion->velocity = dir * speed;
-	ion->movetype = MOVETYPE_WALLBOUNCE;
+	ion->movetype = RS(RS_Q3A) ? MOVETYPE_FLYMISSILE : MOVETYPE_WALLBOUNCE;
 	ion->clipmask = MASK_PROJECTILE;
 
 	// [Paril-KEX]
@@ -2756,10 +2117,10 @@ void fire_ionripper(gentity_t *self, const vec3_t &start, const vec3_t &dir, int
 	ion->s.sound = gi.soundindex("misc/lasfly.wav");
 	ion->owner = self;
 	ion->touch = ionripper_touch;
-	ion->nextthink = level.time + 3_sec;
-	ion->think = ionripper_sparks;
+	ion->nextthink = level.time + (RS(RS_Q3A) ? 10_sec : 3_sec);
+	ion->think = RS(RS_Q3A) ? G_FreeEntity : ionripper_sparks;
 	ion->dmg = damage;
-	ion->splash_radius = 100;
+	ion->splash_radius = RS(RS_Q3A) ? 0 : 100;
 	gi.linkentity(ion);
 
 	tr = gi.traceline(self->s.origin, ion->s.origin, ion, ion->clipmask);

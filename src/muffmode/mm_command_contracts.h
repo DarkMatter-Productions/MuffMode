@@ -30,3 +30,13 @@ inline int MM_ClampTimeoutSeconds(int seconds) {
 		return MM_MAX_TIMEOUT_SECONDS;
 	return seconds;
 }
+
+inline int MM_ClampResumeCountdownSeconds(int seconds) {
+	constexpr int MM_MAX_RESUME_COUNTDOWN_SECONDS = 120;
+
+	if (seconds < 0)
+		return 0;
+	if (seconds > MM_MAX_RESUME_COUNTDOWN_SECONDS)
+		return MM_MAX_RESUME_COUNTDOWN_SECONDS;
+	return seconds;
+}

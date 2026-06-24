@@ -17,6 +17,10 @@ jobs:
         shell: pwsh
         run: ./scripts/ci/check-generated-artifacts.ps1
 
+      - name: Check changelog ledger
+        shell: pwsh
+        run: ./scripts/ci/check-changelog.ps1
+
       - name: Check phase-zero asset seeds
         shell: pwsh
         run: ./scripts/ci/check-test-assets.ps1 -RepoOnly

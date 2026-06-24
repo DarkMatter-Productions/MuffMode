@@ -9,48 +9,58 @@
 #include "muffmode/mm_parse.h"
 #include "muffmode/mm_vote.h"
 #include "muffmode/mm_vote_menu.h"
+#include "muffmode/mm_util.h"
 
-#include <cstdlib>
-#include <cstring>
+#include <algorithm>
+#include <array>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
 
-namespace {
-static const int cvmenu_map = 3;
+namespace muffmode::vote_menu {
+constexpr int cvmenu_map = 3;
 
-void G_Menu_CallVote_Map(gentity_t *ent, menu_hnd_t *p);
-void G_Menu_CallVote_NextMap(gentity_t *ent, menu_hnd_t *p);
-void G_Menu_CallVote_Restart(gentity_t *ent, menu_hnd_t *p);
-void G_Menu_CallVote_GameType(gentity_t *ent, menu_hnd_t *p);
-void G_Menu_CallVote_GameType_Update(gentity_t *ent);
-void G_Menu_CallVote_GameType_Selection(gentity_t *ent, menu_hnd_t *p);
-void G_Menu_CallVote_Ruleset(gentity_t *ent, menu_hnd_t *p);
-void G_Menu_CallVote_Ruleset_Update(gentity_t *ent);
-void G_Menu_CallVote_Ruleset_Selection(gentity_t *ent, menu_hnd_t *p);
-void G_Menu_CallVote_TimeLimit_Update(gentity_t *ent);
-void G_Menu_CallVote_TimeLimit(gentity_t *ent, menu_hnd_t *p);
-void G_Menu_CallVote_TimeLimit_Selection(gentity_t *ent, menu_hnd_t *p);
-void G_Menu_CallVote_ScoreLimit_Update(gentity_t *ent);
-void G_Menu_CallVote_ScoreLimit(gentity_t *ent, menu_hnd_t *p);
-void G_Menu_CallVote_ScoreLimit_Selection(gentity_t *ent, menu_hnd_t *p);
-void G_Menu_CallVote_ShuffleTeams(gentity_t *ent, menu_hnd_t *p);
-void G_Menu_CallVote_BalanceTeams(gentity_t *ent, menu_hnd_t *p);
-void G_Menu_CallVote_Powerups(gentity_t *ent, menu_hnd_t *p);
-void G_Menu_CallVote_Powerups_Update(gentity_t *ent);
-void G_Menu_CallVote_Powerups_Selection(gentity_t *ent, menu_hnd_t *p);
-void G_Menu_CallVote_Techs(gentity_t *ent, menu_hnd_t *p);
-void G_Menu_CallVote_Techs_Update(gentity_t *ent);
-void G_Menu_CallVote_Techs_Selection(gentity_t *ent, menu_hnd_t *p);
-void G_Menu_CallVote_FriendlyFire(gentity_t *ent, menu_hnd_t *p);
-void G_Menu_CallVote_FriendlyFire_Update(gentity_t *ent);
-void G_Menu_CallVote_FriendlyFire_Selection(gentity_t *ent, menu_hnd_t *p);
-void G_Menu_CallVote_Cointoss(gentity_t *ent, menu_hnd_t *p);
-void G_Menu_CallVote_ReadyAll(gentity_t *ent, menu_hnd_t *p);
-void G_Menu_CallVote_Map_Selection(gentity_t *ent, menu_hnd_t *p);
-void G_Menu_CallVote_Update(gentity_t *ent);
+void OpenMap(gentity_t *ent, menu_hnd_t *p);
+void OpenGameType(gentity_t *ent, menu_hnd_t *p);
+void UpdateGameType(gentity_t *ent);
+void SelectGameType(gentity_t *ent, menu_hnd_t *p);
+void OpenRuleset(gentity_t *ent, menu_hnd_t *p);
+void UpdateRuleset(gentity_t *ent);
+void SelectRuleset(gentity_t *ent, menu_hnd_t *p);
+void UpdateTimeLimit(gentity_t *ent);
+void OpenTimeLimit(gentity_t *ent, menu_hnd_t *p);
+void SelectTimeLimit(gentity_t *ent, menu_hnd_t *p);
+void UpdateScoreLimit(gentity_t *ent);
+void OpenScoreLimit(gentity_t *ent, menu_hnd_t *p);
+void SelectScoreLimit(gentity_t *ent, menu_hnd_t *p);
+void StartShuffleTeamsVote(gentity_t *ent, menu_hnd_t *p);
+void OpenPowerups(gentity_t *ent, menu_hnd_t *p);
+void UpdatePowerups(gentity_t *ent);
+void SelectPowerups(gentity_t *ent, menu_hnd_t *p);
+void OpenTechs(gentity_t *ent, menu_hnd_t *p);
+void UpdateTechs(gentity_t *ent);
+void SelectTechs(gentity_t *ent, menu_hnd_t *p);
+void OpenFriendlyFire(gentity_t *ent, menu_hnd_t *p);
+void UpdateFriendlyFire(gentity_t *ent);
+void SelectFriendlyFire(gentity_t *ent, menu_hnd_t *p);
+void StartReadyAllVote(gentity_t *ent, menu_hnd_t *p);
+void SelectMap(gentity_t *ent, menu_hnd_t *p);
+void UpdateCallVote(gentity_t *ent);
+void OpenCallVoteMenu(gentity_t *ent);
+void MenuVote_Initiate(gentity_t *ent, const char *cmd_name, const char *arg);
 
-const menu_t pmcallvotemenu[] = {
+void MenuVote_SetText(menu_t &entry, std::string_view text)
+{
+	CopyString(entry.text, text);
+}
+
+void MenuVote_SetArg(menu_t &entry, std::string_view arg)
+{
+	CopyString(entry.text_arg1, arg);
+}
+
+const menu_t kCallVoteMenuTemplate[] = {
 	{ "Call a Vote", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_LEFT, nullptr },
@@ -71,95 +81,74 @@ const menu_t pmcallvotemenu[] = {
 	{ "$g_pc_return", MENU_ALIGN_LEFT, G_Menu_ReturnToMain }
 };
 
-const menu_t pmcallvotemenu_map[] = {
+const menu_t kMapMenuTemplate[] = {
 	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_CENTER, nullptr },
-	{ "", MENU_ALIGN_LEFT, G_Menu_CallVote_Map_Selection },
-	{ "", MENU_ALIGN_LEFT, G_Menu_CallVote_Map_Selection },
-	{ "", MENU_ALIGN_LEFT, G_Menu_CallVote_Map_Selection },
-	{ "", MENU_ALIGN_LEFT, G_Menu_CallVote_Map_Selection },
-	{ "", MENU_ALIGN_LEFT, G_Menu_CallVote_Map_Selection },
-	{ "", MENU_ALIGN_LEFT, G_Menu_CallVote_Map_Selection },
-	{ "", MENU_ALIGN_LEFT, G_Menu_CallVote_Map_Selection },
-	{ "", MENU_ALIGN_LEFT, G_Menu_CallVote_Map_Selection },
-	{ "", MENU_ALIGN_LEFT, G_Menu_CallVote_Map_Selection },
-	{ "", MENU_ALIGN_LEFT, G_Menu_CallVote_Map_Selection },
-	{ "", MENU_ALIGN_LEFT, G_Menu_CallVote_Map_Selection },
-	{ "", MENU_ALIGN_LEFT, G_Menu_CallVote_Map_Selection },
-	{ "", MENU_ALIGN_LEFT, G_Menu_CallVote_Map_Selection },
-	{ "", MENU_ALIGN_LEFT, G_Menu_CallVote_Map_Selection },
-	{ "", MENU_ALIGN_LEFT, G_Menu_CallVote_Map_Selection },
+	{ "", MENU_ALIGN_LEFT, SelectMap },
+	{ "", MENU_ALIGN_LEFT, SelectMap },
+	{ "", MENU_ALIGN_LEFT, SelectMap },
+	{ "", MENU_ALIGN_LEFT, SelectMap },
+	{ "", MENU_ALIGN_LEFT, SelectMap },
+	{ "", MENU_ALIGN_LEFT, SelectMap },
+	{ "", MENU_ALIGN_LEFT, SelectMap },
+	{ "", MENU_ALIGN_LEFT, SelectMap },
+	{ "", MENU_ALIGN_LEFT, SelectMap },
+	{ "", MENU_ALIGN_LEFT, SelectMap },
+	{ "", MENU_ALIGN_LEFT, SelectMap },
+	{ "", MENU_ALIGN_LEFT, SelectMap },
+	{ "", MENU_ALIGN_LEFT, SelectMap },
+	{ "", MENU_ALIGN_LEFT, SelectMap },
+	{ "", MENU_ALIGN_LEFT, SelectMap },
 	{ "$g_pc_return", MENU_ALIGN_LEFT, G_Menu_ReturnToCallVote }
 };
 
-const menu_t pmcallvotemenu_gametype[] = {
+const menu_t kGameTypeMenuTemplate[] = {
 	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_CENTER, nullptr },
-	{ "", MENU_ALIGN_LEFT, G_Menu_CallVote_GameType_Selection },
-	{ "", MENU_ALIGN_LEFT, G_Menu_CallVote_GameType_Selection },
-	{ "", MENU_ALIGN_LEFT, G_Menu_CallVote_GameType_Selection },
-	{ "", MENU_ALIGN_LEFT, G_Menu_CallVote_GameType_Selection },
-	{ "", MENU_ALIGN_LEFT, G_Menu_CallVote_GameType_Selection },
-	{ "", MENU_ALIGN_LEFT, G_Menu_CallVote_GameType_Selection },
-	{ "", MENU_ALIGN_LEFT, G_Menu_CallVote_GameType_Selection },
-	{ "", MENU_ALIGN_LEFT, G_Menu_CallVote_GameType_Selection },
-	{ "", MENU_ALIGN_LEFT, G_Menu_CallVote_GameType_Selection },
-	{ "", MENU_ALIGN_LEFT, G_Menu_CallVote_GameType_Selection },
-	{ "", MENU_ALIGN_LEFT, G_Menu_CallVote_GameType_Selection },
-	{ "", MENU_ALIGN_LEFT, G_Menu_CallVote_GameType_Selection },
-	{ "", MENU_ALIGN_LEFT, G_Menu_CallVote_GameType_Selection },
-	{ "", MENU_ALIGN_LEFT, G_Menu_CallVote_GameType_Selection },
-	{ "", MENU_ALIGN_LEFT, G_Menu_CallVote_GameType_Selection },
+	{ "", MENU_ALIGN_LEFT, SelectGameType },
+	{ "", MENU_ALIGN_LEFT, SelectGameType },
+	{ "", MENU_ALIGN_LEFT, SelectGameType },
+	{ "", MENU_ALIGN_LEFT, SelectGameType },
+	{ "", MENU_ALIGN_LEFT, SelectGameType },
+	{ "", MENU_ALIGN_LEFT, SelectGameType },
+	{ "", MENU_ALIGN_LEFT, SelectGameType },
+	{ "", MENU_ALIGN_LEFT, SelectGameType },
+	{ "", MENU_ALIGN_LEFT, SelectGameType },
+	{ "", MENU_ALIGN_LEFT, SelectGameType },
+	{ "", MENU_ALIGN_LEFT, SelectGameType },
+	{ "", MENU_ALIGN_LEFT, SelectGameType },
+	{ "", MENU_ALIGN_LEFT, SelectGameType },
+	{ "", MENU_ALIGN_LEFT, SelectGameType },
+	{ "", MENU_ALIGN_LEFT, SelectGameType },
 	{ "$g_pc_return", MENU_ALIGN_LEFT, G_Menu_ReturnToCallVote }
 };
 
-const menu_t pmcallvotemenu_ruleset[] = {
+const menu_t kRulesetMenuTemplate[] = {
 	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_CENTER, nullptr },
-	{ "", MENU_ALIGN_LEFT, G_Menu_CallVote_Ruleset_Selection },
-	{ "", MENU_ALIGN_LEFT, G_Menu_CallVote_Ruleset_Selection },
-	{ "", MENU_ALIGN_LEFT, G_Menu_CallVote_Ruleset_Selection },
-	{ "", MENU_ALIGN_LEFT, G_Menu_CallVote_Ruleset_Selection },
-	{ "", MENU_ALIGN_LEFT, G_Menu_CallVote_Ruleset_Selection },
-	{ "", MENU_ALIGN_LEFT, G_Menu_CallVote_Ruleset_Selection },
-	{ "", MENU_ALIGN_LEFT, G_Menu_CallVote_Ruleset_Selection },
-	{ "", MENU_ALIGN_LEFT, G_Menu_CallVote_Ruleset_Selection },
-	{ "", MENU_ALIGN_LEFT, G_Menu_CallVote_Ruleset_Selection },
-	{ "", MENU_ALIGN_LEFT, G_Menu_CallVote_Ruleset_Selection },
-	{ "", MENU_ALIGN_LEFT, G_Menu_CallVote_Ruleset_Selection },
-	{ "", MENU_ALIGN_LEFT, G_Menu_CallVote_Ruleset_Selection },
-	{ "", MENU_ALIGN_LEFT, G_Menu_CallVote_Ruleset_Selection },
-	{ "", MENU_ALIGN_LEFT, G_Menu_CallVote_Ruleset_Selection },
-	{ "", MENU_ALIGN_LEFT, G_Menu_CallVote_Ruleset_Selection },
+	{ "", MENU_ALIGN_LEFT, SelectRuleset },
+	{ "", MENU_ALIGN_LEFT, SelectRuleset },
+	{ "", MENU_ALIGN_LEFT, SelectRuleset },
+	{ "", MENU_ALIGN_LEFT, SelectRuleset },
+	{ "", MENU_ALIGN_LEFT, SelectRuleset },
+	{ "", MENU_ALIGN_LEFT, SelectRuleset },
+	{ "", MENU_ALIGN_LEFT, SelectRuleset },
+	{ "", MENU_ALIGN_LEFT, SelectRuleset },
+	{ "", MENU_ALIGN_LEFT, SelectRuleset },
+	{ "", MENU_ALIGN_LEFT, SelectRuleset },
+	{ "", MENU_ALIGN_LEFT, SelectRuleset },
+	{ "", MENU_ALIGN_LEFT, SelectRuleset },
+	{ "", MENU_ALIGN_LEFT, SelectRuleset },
+	{ "", MENU_ALIGN_LEFT, SelectRuleset },
+	{ "", MENU_ALIGN_LEFT, SelectRuleset },
 	{ "$g_pc_return", MENU_ALIGN_LEFT, G_Menu_ReturnToCallVote }
 };
 
-const menu_t pmcallvotemenu_powerups[] = {
+const menu_t kPowerupsMenuTemplate[] = {
 	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_CENTER, nullptr },
-	{ "ON",  MENU_ALIGN_LEFT, G_Menu_CallVote_Powerups_Selection },
-	{ "OFF", MENU_ALIGN_LEFT, G_Menu_CallVote_Powerups_Selection },
-	{ "", MENU_ALIGN_LEFT, nullptr },
-	{ "", MENU_ALIGN_LEFT, nullptr },
-	{ "", MENU_ALIGN_LEFT, nullptr },
-	{ "", MENU_ALIGN_LEFT, nullptr },
-	{ "", MENU_ALIGN_LEFT, nullptr },
-	{ "", MENU_ALIGN_LEFT, nullptr },
-	{ "", MENU_ALIGN_LEFT, nullptr },
-	{ "", MENU_ALIGN_LEFT, nullptr },
-	{ "", MENU_ALIGN_LEFT, nullptr },
-	{ "", MENU_ALIGN_LEFT, nullptr },
-	{ "", MENU_ALIGN_LEFT, nullptr },
-	{ "", MENU_ALIGN_LEFT, nullptr },
-	{ "", MENU_ALIGN_LEFT, nullptr },
-	{ "$g_pc_return", MENU_ALIGN_LEFT, G_Menu_ReturnToCallVote }
-};
-
-const menu_t pmcallvotemenu_techs[] = {
-	{ "", MENU_ALIGN_CENTER, nullptr },
-	{ "", MENU_ALIGN_CENTER, nullptr },
-	{ "ON",  MENU_ALIGN_LEFT, G_Menu_CallVote_Techs_Selection },
-	{ "OFF", MENU_ALIGN_LEFT, G_Menu_CallVote_Techs_Selection },
+	{ "ON",  MENU_ALIGN_LEFT, SelectPowerups },
+	{ "OFF", MENU_ALIGN_LEFT, SelectPowerups },
 	{ "", MENU_ALIGN_LEFT, nullptr },
 	{ "", MENU_ALIGN_LEFT, nullptr },
 	{ "", MENU_ALIGN_LEFT, nullptr },
@@ -176,11 +165,11 @@ const menu_t pmcallvotemenu_techs[] = {
 	{ "$g_pc_return", MENU_ALIGN_LEFT, G_Menu_ReturnToCallVote }
 };
 
-const menu_t pmcallvotemenu_friendlyfire[] = {
+const menu_t kTechsMenuTemplate[] = {
 	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_CENTER, nullptr },
-	{ "ON",  MENU_ALIGN_LEFT, G_Menu_CallVote_FriendlyFire_Selection },
-	{ "OFF", MENU_ALIGN_LEFT, G_Menu_CallVote_FriendlyFire_Selection },
+	{ "ON",  MENU_ALIGN_LEFT, SelectTechs },
+	{ "OFF", MENU_ALIGN_LEFT, SelectTechs },
 	{ "", MENU_ALIGN_LEFT, nullptr },
 	{ "", MENU_ALIGN_LEFT, nullptr },
 	{ "", MENU_ALIGN_LEFT, nullptr },
@@ -197,16 +186,16 @@ const menu_t pmcallvotemenu_friendlyfire[] = {
 	{ "$g_pc_return", MENU_ALIGN_LEFT, G_Menu_ReturnToCallVote }
 };
 
-const menu_t pmcallvotemenu_timelimit[] = {
+const menu_t kFriendlyFireMenuTemplate[] = {
 	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_CENTER, nullptr },
-	{ "0",  MENU_ALIGN_LEFT, G_Menu_CallVote_TimeLimit_Selection },
-	{ "5",  MENU_ALIGN_LEFT, G_Menu_CallVote_TimeLimit_Selection },
-	{ "10", MENU_ALIGN_LEFT, G_Menu_CallVote_TimeLimit_Selection },
-	{ "15", MENU_ALIGN_LEFT, G_Menu_CallVote_TimeLimit_Selection },
-	{ "20", MENU_ALIGN_LEFT, G_Menu_CallVote_TimeLimit_Selection },
-	{ "25", MENU_ALIGN_LEFT, G_Menu_CallVote_TimeLimit_Selection },
-	{ "30", MENU_ALIGN_LEFT, G_Menu_CallVote_TimeLimit_Selection },
+	{ "ON",  MENU_ALIGN_LEFT, SelectFriendlyFire },
+	{ "OFF", MENU_ALIGN_LEFT, SelectFriendlyFire },
+	{ "", MENU_ALIGN_LEFT, nullptr },
+	{ "", MENU_ALIGN_LEFT, nullptr },
+	{ "", MENU_ALIGN_LEFT, nullptr },
+	{ "", MENU_ALIGN_LEFT, nullptr },
+	{ "", MENU_ALIGN_LEFT, nullptr },
 	{ "", MENU_ALIGN_LEFT, nullptr },
 	{ "", MENU_ALIGN_LEFT, nullptr },
 	{ "", MENU_ALIGN_LEFT, nullptr },
@@ -218,17 +207,17 @@ const menu_t pmcallvotemenu_timelimit[] = {
 	{ "$g_pc_return", MENU_ALIGN_LEFT, G_Menu_ReturnToCallVote }
 };
 
-const menu_t pmcallvotemenu_scorelimit[] = {
+const menu_t kTimeLimitMenuTemplate[] = {
 	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_CENTER, nullptr },
-	{ "0", MENU_ALIGN_LEFT, G_Menu_CallVote_ScoreLimit_Selection },
-	{ "5", MENU_ALIGN_LEFT, G_Menu_CallVote_ScoreLimit_Selection },
-	{ "10", MENU_ALIGN_LEFT, G_Menu_CallVote_ScoreLimit_Selection },
-	{ "20", MENU_ALIGN_LEFT, G_Menu_CallVote_ScoreLimit_Selection },
-	{ "30", MENU_ALIGN_LEFT, G_Menu_CallVote_ScoreLimit_Selection },
-	{ "40", MENU_ALIGN_LEFT, G_Menu_CallVote_ScoreLimit_Selection },
-	{ "50", MENU_ALIGN_LEFT, G_Menu_CallVote_ScoreLimit_Selection },
-	{ "100", MENU_ALIGN_LEFT, G_Menu_CallVote_ScoreLimit_Selection },
+	{ "0",  MENU_ALIGN_LEFT, SelectTimeLimit },
+	{ "5",  MENU_ALIGN_LEFT, SelectTimeLimit },
+	{ "10", MENU_ALIGN_LEFT, SelectTimeLimit },
+	{ "15", MENU_ALIGN_LEFT, SelectTimeLimit },
+	{ "20", MENU_ALIGN_LEFT, SelectTimeLimit },
+	{ "25", MENU_ALIGN_LEFT, SelectTimeLimit },
+	{ "30", MENU_ALIGN_LEFT, SelectTimeLimit },
+	{ "", MENU_ALIGN_LEFT, nullptr },
 	{ "", MENU_ALIGN_LEFT, nullptr },
 	{ "", MENU_ALIGN_LEFT, nullptr },
 	{ "", MENU_ALIGN_LEFT, nullptr },
@@ -239,62 +228,62 @@ const menu_t pmcallvotemenu_scorelimit[] = {
 	{ "$g_pc_return", MENU_ALIGN_LEFT, G_Menu_ReturnToCallVote }
 };
 
-inline std::vector<std::string> str_split(const std::string_view &str, char by)
+const menu_t kScoreLimitMenuTemplate[] = {
+	{ "", MENU_ALIGN_CENTER, nullptr },
+	{ "", MENU_ALIGN_CENTER, nullptr },
+	{ "0", MENU_ALIGN_LEFT, SelectScoreLimit },
+	{ "5", MENU_ALIGN_LEFT, SelectScoreLimit },
+	{ "10", MENU_ALIGN_LEFT, SelectScoreLimit },
+	{ "20", MENU_ALIGN_LEFT, SelectScoreLimit },
+	{ "30", MENU_ALIGN_LEFT, SelectScoreLimit },
+	{ "40", MENU_ALIGN_LEFT, SelectScoreLimit },
+	{ "50", MENU_ALIGN_LEFT, SelectScoreLimit },
+	{ "100", MENU_ALIGN_LEFT, SelectScoreLimit },
+	{ "", MENU_ALIGN_LEFT, nullptr },
+	{ "", MENU_ALIGN_LEFT, nullptr },
+	{ "", MENU_ALIGN_LEFT, nullptr },
+	{ "", MENU_ALIGN_LEFT, nullptr },
+	{ "", MENU_ALIGN_LEFT, nullptr },
+	{ "", MENU_ALIGN_LEFT, nullptr },
+	{ "", MENU_ALIGN_LEFT, nullptr },
+	{ "$g_pc_return", MENU_ALIGN_LEFT, G_Menu_ReturnToCallVote }
+};
+
+std::optional<std::string> MenuVote_ReadSelection(gentity_t *ent, menu_hnd_t *p)
 {
-	std::vector<std::string> out;
-	size_t start = 0;
-
-	while (true)
-	{
-		start = str.find_first_not_of(by, start);
-		if (start == std::string_view::npos)
-			break;
-
-		size_t end = str.find(by, start);
-		if (end == std::string_view::npos)
-		{
-			out.emplace_back(str.substr(start));
-			break;
-		}
-
-		out.emplace_back(str.substr(start, end - start));
-		start = end + 1;
-	}
-
-	return out;
-}
-
-static bool MenuVote_ReadSelection(gentity_t *ent, menu_hnd_t *p, char *out, size_t out_size)
-{
-	if (!out || out_size == 0)
-		return false;
-
-	out[0] = '\0';
-
 	if (!ent || !ent->client)
-		return false;
+		return std::nullopt;
 
 	if (!p || !p->entries || p->cur < 0 || p->cur >= p->num)
-		return false;
+		return std::nullopt;
 
 	UpdateFunc_t saved = p->UpdateFunc;
 	p->UpdateFunc = nullptr;
-	Q_strlcpy(out, p->entries[p->cur].text_arg1, out_size);
+	std::string value = p->entries[p->cur].text_arg1;
 	p->UpdateFunc = saved;
 
-	if (!out[0])
-		return false;
+	if (value.empty())
+		return std::nullopt;
 
 	P_Menu_Close(ent);
-	return true;
+	return value;
 }
 
-struct menu_vote_view_t {
+void MenuVote_InitiateSelection(gentity_t *ent, menu_hnd_t *p, const char *cmd_name)
+{
+	const auto value = MenuVote_ReadSelection(ent, p);
+	if (!value)
+		return;
+
+	MenuVote_Initiate(ent, cmd_name, value->c_str());
+}
+
+struct MenuVoteView {
 	menu_t *entries = nullptr;
 	int num = 0;
 };
 
-static bool MenuVote_View(gentity_t *ent, menu_vote_view_t &view)
+bool MenuVote_View(gentity_t *ent, MenuVoteView &view)
 {
 	if (!ent || !ent->client || !ent->client->menu || !ent->client->menu->entries || ent->client->menu->num <= 0)
 		return false;
@@ -304,9 +293,9 @@ static bool MenuVote_View(gentity_t *ent, menu_vote_view_t &view)
 	return true;
 }
 
-static menu_t *MenuVote_Entries(gentity_t *ent, int *num = nullptr)
+menu_t *MenuVote_Entries(gentity_t *ent, int *num = nullptr)
 {
-	menu_vote_view_t view;
+	MenuVoteView view;
 	if (!MenuVote_View(ent, view))
 		return nullptr;
 
@@ -315,33 +304,163 @@ static menu_t *MenuVote_Entries(gentity_t *ent, int *num = nullptr)
 	return view.entries;
 }
 
-static bool MenuVote_HasIndex(const menu_vote_view_t &view, int index)
+bool MenuVote_HasIndex(const MenuVoteView &view, int index)
 {
 	return index >= 0 && index < view.num;
 }
 
-static void MenuVote_ClearEntry(menu_t &entry)
+void MenuVote_ClearEntry(menu_t &entry)
 {
-	entry.text[0] = '\0';
-	entry.text_arg1[0] = '\0';
+	MenuVote_SetText(entry, "");
+	MenuVote_SetArg(entry, "");
 	entry.SelectFunc = nullptr;
 }
 
-static void MenuVote_ClearRange(const menu_vote_view_t &view, int first, int last_exclusive)
+void MenuVote_ClearRange(const MenuVoteView &view, int first, int last_exclusive)
 {
-	first = max(first, 0);
-	last_exclusive = min(last_exclusive, view.num);
-	for (int i = first; i < last_exclusive; ++i)
+	const int begin = std::clamp(first, 0, view.num);
+	const int end = std::clamp(last_exclusive, 0, view.num);
+	for (int i = begin; i < end; ++i)
 		MenuVote_ClearEntry(view.entries[i]);
 }
 
-static int MenuVote_ContentLimit(const menu_vote_view_t &view)
+void MenuVote_SetToggleChoices(menu_t *entries, std::string_view title)
+{
+	MenuVote_SetText(entries[0], title);
+	MenuVote_SetText(entries[2], "ON");
+	MenuVote_SetArg(entries[2], "1");
+	MenuVote_SetText(entries[3], "OFF");
+	MenuVote_SetArg(entries[3], "0");
+}
+
+struct ToggleVoteOption {
+	const char *title;
+	const char *command;
+	const char *invalid_selection_message;
+	const char *already_selected_message;
+	bool (*is_enabled)();
+};
+
+bool PowerupsEnabled()
+{
+	return muffmode::CvarInteger(g_no_powerups) == 0;
+}
+
+bool TechsEnabled()
+{
+	return AllowTechs();
+}
+
+bool FriendlyFireEnabled()
+{
+	return muffmode::CvarEnabled(g_friendly_fire);
+}
+
+const ToggleVoteOption kPowerupsVote {
+	"Powerups",
+	"powerups",
+	"Invalid powerups selection.\n",
+	"Powerups are already {}.\n",
+	PowerupsEnabled
+};
+
+const ToggleVoteOption kTechsVote {
+	"Techs",
+	"techs",
+	"Invalid techs selection.\n",
+	"Techs are already {}.\n",
+	TechsEnabled
+};
+
+const ToggleVoteOption kFriendlyFireVote {
+	"Friendly Fire",
+	"friendlyfire",
+	"Invalid friendly fire selection.\n",
+	"Friendly fire is already {}.\n",
+	FriendlyFireEnabled
+};
+
+void UpdateToggleVoteMenu(gentity_t *ent, const ToggleVoteOption &option)
+{
+	MenuVoteView view;
+	if (!MenuVote_View(ent, view) || !MenuVote_HasIndex(view, 3))
+		return;
+
+	MenuVote_SetToggleChoices(view.entries, option.title);
+}
+
+void SelectToggleVote(gentity_t *ent, menu_hnd_t *p, const ToggleVoteOption &option)
+{
+	const auto value = MenuVote_ReadSelection(ent, p);
+	if (!value)
+		return;
+
+	const auto parsed = MM_ParseNonNegativeIntArg(value->c_str());
+	if (!parsed || (*parsed != 0 && *parsed != 1)) {
+		gi.LocClient_Print(ent, PRINT_HIGH, option.invalid_selection_message);
+		return;
+	}
+
+	const bool requested_enabled = *parsed == 1;
+	if (option.is_enabled && option.is_enabled() == requested_enabled) {
+		gi.LocClient_Print(ent, PRINT_HIGH, option.already_selected_message, requested_enabled ? "ENABLED" : "DISABLED");
+		return;
+	}
+
+	MenuVote_Initiate(ent, option.command, value->c_str());
+}
+
+struct FixedChoiceVoteOption {
+	const char *title;
+	const char *command;
+};
+
+int MenuVote_ContentLimit(const MenuVoteView &view);
+
+constexpr int kFixedChoiceFirstIndex = 2;
+
+const FixedChoiceVoteOption kTimeLimitVote {
+	"Select Time Limit (mins)",
+	"timelimit"
+};
+
+const FixedChoiceVoteOption kScoreLimitVote {
+	"Select Score Limit",
+	"scorelimit"
+};
+
+template <size_t N>
+void UpdateFixedChoiceVoteMenu(gentity_t *ent, const FixedChoiceVoteOption &option, const std::array<const char *, N> &values)
+{
+	MenuVoteView view;
+	if (!MenuVote_View(ent, view) || !MenuVote_HasIndex(view, 0))
+		return;
+
+	menu_t *entries = view.entries;
+	const int content_limit = MenuVote_ContentLimit(view);
+	MenuVote_SetText(entries[0], option.title);
+
+	for (int i = 0; i < static_cast<int>(values.size()); ++i) {
+		const int index = kFixedChoiceFirstIndex + i;
+		if (index >= content_limit)
+			break;
+		MenuVote_SetText(entries[index], values[i]);
+		MenuVote_SetArg(entries[index], values[i]);
+	}
+}
+
+void SelectFixedChoiceVote(gentity_t *ent, menu_hnd_t *p, const FixedChoiceVoteOption &option)
+{
+	MenuVote_InitiateSelection(ent, p, option.command);
+}
+
+int MenuVote_ContentLimit(const MenuVoteView &view)
 {
 	// Reserve the final row for "return" entries in these menu definitions.
 	return max(0, view.num - 1);
 }
 
-static menu_hnd_t *MenuVote_OpenMenu(gentity_t *ent, const menu_t *entries, int num, void *arg, UpdateFunc_t update)
+menu_hnd_t *MenuVote_OpenMenu(gentity_t *ent, const menu_t *entries, int num, void *arg, UpdateFunc_t update)
 {
 	if (!ent || !ent->client || !entries || num <= 0)
 		return nullptr;
@@ -350,13 +469,13 @@ static menu_hnd_t *MenuVote_OpenMenu(gentity_t *ent, const menu_t *entries, int 
 	return P_Menu_Open(ent, entries, -1, num, arg, update);
 }
 
-const char *G_Menu_CallVoteCurrentRulesetName()
+const char *CurrentRulesetName()
 {
 	const int ruleset = clamp((int)game.ruleset, (int)RS_NONE + 1, (int)RS_NUM_RULESETS - 1);
 	return rs_long_name[ruleset];
 }
 
-static void MenuVote_Initiate(gentity_t *ent, const char *cmd_name, const char *arg)
+void MenuVote_Initiate(gentity_t *ent, const char *cmd_name, const char *arg)
 {
 	if (!ent || !ent->client)
 		return;
@@ -379,7 +498,7 @@ static void MenuVote_Initiate(gentity_t *ent, const char *cmd_name, const char *
 	MM_VoteCommandStore(ent);
 }
 
-static void MenuVote_CloseAndInitiate(gentity_t *ent, const char *cmd_name, const char *arg)
+void MenuVote_CloseAndInitiate(gentity_t *ent, const char *cmd_name, const char *arg)
 {
 	if (!ent || !ent->client)
 		return;
@@ -388,237 +507,201 @@ static void MenuVote_CloseAndInitiate(gentity_t *ent, const char *cmd_name, cons
 	MenuVote_Initiate(ent, cmd_name, arg);
 }
 
-struct map_menu_page_t {
-	int offset;
+struct MapMenuPage {
+	int offset = 0;
 };
 
-static constexpr int MAPS_PER_PAGE = 12;
-static constexpr int MAP_MENU_FIRST_ITEM = 2;
+constexpr int kMapsPerPage = 12;
+constexpr int kMapMenuFirstItem = 2;
 
-static int MenuVote_MapPageSize(int menu_entries)
+int MapPageSize(int menu_entries)
 {
 	const int content_limit = max(0, menu_entries - 1);
 	const int prev_index = content_limit - 3;
-	return min(MAPS_PER_PAGE, max(0, prev_index - MAP_MENU_FIRST_ITEM));
+	return min(kMapsPerPage, max(0, prev_index - kMapMenuFirstItem));
 }
 
-static int MenuVote_MapPrevIndex(int menu_entries)
+int MapPrevIndex(int menu_entries)
 {
-	return max(MAP_MENU_FIRST_ITEM, max(0, menu_entries - 1) - 3);
+	return max(kMapMenuFirstItem, max(0, menu_entries - 1) - 3);
 }
 
-static int MenuVote_MapNextIndex(int menu_entries)
+int MapNextIndex(int menu_entries)
 {
-	return max(MAP_MENU_FIRST_ITEM, max(0, menu_entries - 1) - 2);
+	return max(kMapMenuFirstItem, max(0, menu_entries - 1) - 2);
 }
 
-void G_Menu_CallVote_Map_Selection(gentity_t *ent, menu_hnd_t *p)
+int ClampMapPageOffset(int offset, int total_maps, int page_size)
 {
-	char value[MAX_QPATH];
-	if (!MenuVote_ReadSelection(ent, p, value, sizeof(value)))
+	if (offset < 0)
+		return 0;
+	if (offset < total_maps)
+		return offset;
+	return total_maps > 0 ? ((total_maps - 1) / page_size) * page_size : 0;
+}
+
+void SelectMap(gentity_t *ent, menu_hnd_t *p)
+{
+	const auto value = MenuVote_ReadSelection(ent, p);
+	if (!value)
 		return;
 
-	if (!MM_IsSafeMapToken(value))
+	if (!MM_IsSafeMapToken(value->c_str()))
 	{
 		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid characters in map name.\n");
 		return;
 	}
 
-	MenuVote_Initiate(ent, "map", value);
+	MenuVote_Initiate(ent, "map", value->c_str());
 }
 
-void G_Menu_CallVote_Map_PrevPage(gentity_t *ent, menu_hnd_t *p)
+void PreviousMapPage(gentity_t *ent, menu_hnd_t *p)
 {
 	if (!ent || !ent->client || !p)
 		return;
 
-	const int page_size = MenuVote_MapPageSize(p->num);
+	const int page_size = MapPageSize(p->num);
 	if (page_size <= 0)
 		return;
 
-	map_menu_page_t *page = (map_menu_page_t *)p->arg;
+	MapMenuPage *page = static_cast<MapMenuPage *>(p->arg);
 	if (page && page->offset > 0)
 	{
 		page->offset -= page_size;
-		if (page->offset < 0)
-			page->offset = 0;
+		page->offset = max(0, page->offset);
 	}
 	P_Menu_Update(ent);
 }
 
-void G_Menu_CallVote_Map_NextPage(gentity_t *ent, menu_hnd_t *p)
+void NextMapPage(gentity_t *ent, menu_hnd_t *p)
 {
 	if (!ent || !ent->client || !p)
 		return;
 
-	const int page_size = MenuVote_MapPageSize(p->num);
+	const int page_size = MapPageSize(p->num);
 	if (page_size <= 0)
 		return;
 
-	map_menu_page_t *page = (map_menu_page_t *)p->arg;
+	MapMenuPage *page = static_cast<MapMenuPage *>(p->arg);
 	if (page)
 		page->offset += page_size;
 	P_Menu_Update(ent);
 }
 
-void G_Menu_CallVote_Map_Update(gentity_t *ent)
+void UpdateMap(gentity_t *ent)
 {
-	menu_vote_view_t view;
+	MenuVoteView view;
 	if (!MenuVote_View(ent, view) || !MenuVote_HasIndex(view, 0) || !MenuVote_HasIndex(view, 1))
 		return;
 
 	menu_t *entries = view.entries;
-	const int page_size = MenuVote_MapPageSize(view.num);
-	const int prev_index = MenuVote_MapPrevIndex(view.num);
-	const int next_index = MenuVote_MapNextIndex(view.num);
+	const int page_size = MapPageSize(view.num);
+	const int prev_index = MapPrevIndex(view.num);
+	const int next_index = MapNextIndex(view.num);
 	const int content_limit = MenuVote_ContentLimit(view);
 	if (page_size <= 0 || prev_index >= content_limit || next_index >= content_limit)
 		return;
 
 	MenuVote_ClearEntry(entries[1]);
 
-	std::vector<std::string> values;
-	auto map_exists = [&values](const std::string &map) -> bool
-	{
-		for (const auto &existing : values)
-		{
-			if (!Q_strcasecmp(existing.c_str(), map.c_str()))
-				return true;
-		}
-		return false;
-	};
+	std::vector<std::string> values = muffmode::maps::CollectConfiguredMaps();
 
-	if (g_map_pool->string[0])
-	{
-		auto pool_values = str_split(g_map_pool->string, ' ');
-		for (const auto &map : pool_values)
-		{
-			if (MM_IsSafeMapToken(map.c_str()) && !map_exists(map))
-				values.push_back(map);
-		}
-	}
+	if (values.size() > 1)
+		std::sort(values.begin(), values.end(), muffmode::CStringLessI);
 
-	if (g_map_list->string[0])
-	{
-		auto list_values = str_split(g_map_list->string, ' ');
-		for (const auto &map : list_values)
-		{
-			if (MM_IsSafeMapToken(map.c_str()) && !map_exists(map))
-				values.push_back(map);
-		}
-	}
-
-	if (values.size() > 0)
-	{
-		std::sort(values.begin(), values.end(), [](const std::string &a, const std::string &b)
-		{
-			return Q_strcasecmp(a.c_str(), b.c_str()) < 0;
-		});
-	}
-
-	map_menu_page_t *page = (map_menu_page_t *)ent->client->menu->arg;
+	MapMenuPage *page = static_cast<MapMenuPage *>(ent->client->menu->arg);
 	int offset = page ? page->offset : 0;
-	int total_maps = (int)values.size();
+	const int total_maps = static_cast<int>(values.size());
 
-	if (offset < 0)
-		offset = 0;
-	if (offset >= total_maps)
-		offset = (total_maps > 0) ? ((total_maps - 1) / page_size) * page_size : 0;
+	offset = ClampMapPageOffset(offset, total_maps, page_size);
 	if (page)
 		page->offset = offset;
 
 	int total_pages = (total_maps + page_size - 1) / page_size;
 	if (total_pages < 1)
 		total_pages = 1;
-	int current_page = (offset / page_size) + 1;
+	const int current_page = (offset / page_size) + 1;
 
 	if (total_pages > 1)
-		Q_strlcpy(entries[0].text, G_Fmt("Choose a Map ({}/{})", current_page, total_pages).data(), sizeof(entries[0].text));
+		MenuVote_SetText(entries[0], G_Fmt("Choose a Map ({}/{})", current_page, total_pages).data());
 	else
-		Q_strlcpy(entries[0].text, "Choose a Map", sizeof(entries[0].text));
+		MenuVote_SetText(entries[0], "Choose a Map");
 
-	MenuVote_ClearRange(view, MAP_MENU_FIRST_ITEM, content_limit);
+	MenuVote_ClearRange(view, kMapMenuFirstItem, content_limit);
 
-	int menu_index = MAP_MENU_FIRST_ITEM;
-	for (int i = offset; i < total_maps && menu_index < (MAP_MENU_FIRST_ITEM + page_size); i++)
+	int menu_index = kMapMenuFirstItem;
+	for (int i = offset; i < total_maps && menu_index < (kMapMenuFirstItem + page_size); i++)
 	{
-		Q_strlcpy(entries[menu_index].text_arg1, values[i].c_str(), sizeof(entries[menu_index].text_arg1));
-		Q_strlcpy(entries[menu_index].text, values[i].c_str(), sizeof(entries[menu_index].text));
-		entries[menu_index].SelectFunc = G_Menu_CallVote_Map_Selection;
+		MenuVote_SetArg(entries[menu_index], values[i]);
+		MenuVote_SetText(entries[menu_index], values[i]);
+		entries[menu_index].SelectFunc = SelectMap;
 		menu_index++;
 	}
 
 	if (offset > 0)
 	{
-		Q_strlcpy(entries[prev_index].text, "< Prev Page", sizeof(entries[prev_index].text));
-		entries[prev_index].SelectFunc = G_Menu_CallVote_Map_PrevPage;
+		MenuVote_SetText(entries[prev_index], "< Prev Page");
+		entries[prev_index].SelectFunc = PreviousMapPage;
 	}
 
 	if (offset + page_size < total_maps)
 	{
-		Q_strlcpy(entries[next_index].text, "> Next Page", sizeof(entries[next_index].text));
-		entries[next_index].SelectFunc = G_Menu_CallVote_Map_NextPage;
+		MenuVote_SetText(entries[next_index], "> Next Page");
+		entries[next_index].SelectFunc = NextMapPage;
 	}
 }
 
-void G_Menu_CallVote_Map(gentity_t *ent, menu_hnd_t *p)
+void OpenMap(gentity_t *ent, menu_hnd_t *)
 {
 	if (!ent || !ent->client)
 		return;
 
-	map_menu_page_t *page = (map_menu_page_t *)gi.TagMalloc(sizeof(map_menu_page_t), TAG_LEVEL);
-	page->offset = 0;
-	MenuVote_OpenMenu(ent, pmcallvotemenu_map, (int)q_countof(pmcallvotemenu_map), page, G_Menu_CallVote_Map_Update);
+	MapMenuPage *page = static_cast<MapMenuPage *>(gi.TagMalloc(sizeof(MapMenuPage), TAG_LEVEL));
+	if (!page)
+		return;
+
+	*page = {};
+	MenuVote_OpenMenu(ent, kMapMenuTemplate, muffmode::CountAsInt(kMapMenuTemplate), page, UpdateMap);
 }
 
-void G_Menu_CallVote_NextMap(gentity_t *ent, menu_hnd_t *p)
+void UpdateGameType(gentity_t *ent)
 {
-	MenuVote_CloseAndInitiate(ent, "nextmap", nullptr);
-}
-
-void G_Menu_CallVote_Restart(gentity_t *ent, menu_hnd_t *p)
-{
-	MenuVote_CloseAndInitiate(ent, "restart", nullptr);
-}
-
-void G_Menu_CallVote_GameType_Update(gentity_t *ent)
-{
-	menu_vote_view_t view;
+	MenuVoteView view;
 	if (!MenuVote_View(ent, view) || !MenuVote_HasIndex(view, 0))
 		return;
 
 	menu_t *entries = view.entries;
 	const int content_limit = MenuVote_ContentLimit(view);
-	if (content_limit <= 2)
+	if (content_limit <= kFixedChoiceFirstIndex)
 		return;
 
-	Q_strlcpy(entries[0].text, "Select Gametype", sizeof(entries[0].text));
+	MenuVote_SetText(entries[0], "Select Gametype");
 
-	MenuVote_ClearRange(view, 2, content_limit);
+	MenuVote_ClearRange(view, kFixedChoiceFirstIndex, content_limit);
 
-	int menu_index = 2;
-	for (int i = (int)GT_FIRST; i <= (int)GT_LAST && menu_index < content_limit; i++)
+	int menu_index = kFixedChoiceFirstIndex;
+	for (int i = static_cast<int>(GT_FIRST); i <= static_cast<int>(GT_LAST) && menu_index < content_limit; i++)
 	{
-		gametype_t gt = (gametype_t)i;
+		const gametype_t gt = static_cast<gametype_t>(i);
 		if (gt == GT_NONE)
 			continue;
 		if (!MM_IsGametypeVotable(gt))
 			continue;
 
-		Q_strlcpy(entries[menu_index].text_arg1, gt_short_name[i], sizeof(entries[menu_index].text_arg1));
-		Q_strlcpy(entries[menu_index].text, gt_long_name[i], sizeof(entries[menu_index].text));
-		entries[menu_index].SelectFunc = G_Menu_CallVote_GameType_Selection;
+		MenuVote_SetArg(entries[menu_index], gt_short_name[i]);
+		MenuVote_SetText(entries[menu_index], gt_long_name[i]);
+		entries[menu_index].SelectFunc = SelectGameType;
 		menu_index++;
 	}
 }
 
-void G_Menu_CallVote_GameType_Selection(gentity_t *ent, menu_hnd_t *p)
+void SelectGameType(gentity_t *ent, menu_hnd_t *p)
 {
-	char value[64];
-	if (!MenuVote_ReadSelection(ent, p, value, sizeof(value)))
+	const auto value = MenuVote_ReadSelection(ent, p);
+	if (!value)
 		return;
 
-	gametype_t gt = GT_IndexFromString(value);
+	const gametype_t gt = GT_IndexFromString(value->c_str());
 	if (gt == GT_NONE)
 	{
 		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid gametype selected.\n");
@@ -630,168 +713,121 @@ void G_Menu_CallVote_GameType_Selection(gentity_t *ent, menu_hnd_t *p)
 		return;
 	}
 
-	MenuVote_Initiate(ent, "gametype", value);
+	MenuVote_Initiate(ent, "gametype", value->c_str());
 }
 
-void G_Menu_CallVote_GameType(gentity_t *ent, menu_hnd_t *p)
+void OpenGameType(gentity_t *ent, menu_hnd_t *)
 {
-	MenuVote_OpenMenu(ent, pmcallvotemenu_gametype, (int)q_countof(pmcallvotemenu_gametype), nullptr, G_Menu_CallVote_GameType_Update);
+	MenuVote_OpenMenu(ent, kGameTypeMenuTemplate, muffmode::CountAsInt(kGameTypeMenuTemplate), nullptr, UpdateGameType);
 }
 
-void G_Menu_CallVote_Ruleset_Update(gentity_t *ent)
+void UpdateRuleset(gentity_t *ent)
 {
-	menu_vote_view_t view;
+	MenuVoteView view;
 	if (!MenuVote_View(ent, view) || !MenuVote_HasIndex(view, 0))
 		return;
 
 	menu_t *entries = view.entries;
 	const int content_limit = MenuVote_ContentLimit(view);
-	if (content_limit <= 2)
+	if (content_limit <= kFixedChoiceFirstIndex)
 		return;
 
-	Q_strlcpy(entries[0].text, "Select Ruleset", sizeof(entries[0].text));
+	MenuVote_SetText(entries[0], "Select Ruleset");
 
-	MenuVote_ClearRange(view, 2, content_limit);
+	MenuVote_ClearRange(view, kFixedChoiceFirstIndex, content_limit);
 
-	int menu_index = 2;
-	for (int i = (int)RS_NONE + 1; i < (int)RS_NUM_RULESETS && menu_index < content_limit; i++)
+	int menu_index = kFixedChoiceFirstIndex;
+	for (int i = static_cast<int>(RS_NONE) + 1; i < static_cast<int>(RS_NUM_RULESETS) && menu_index < content_limit; i++)
 	{
-		ruleset_t rs = (ruleset_t)i;
+		const ruleset_t rs = static_cast<ruleset_t>(i);
 		if (rs == RS_NONE)
 			continue;
 		if (!MM_IsRulesetVotable(rs))
 			continue;
 
-		Q_strlcpy(entries[menu_index].text_arg1, rs_short_name[i], sizeof(entries[menu_index].text_arg1));
-		Q_strlcpy(entries[menu_index].text, rs_long_name[i], sizeof(entries[menu_index].text));
-		entries[menu_index].SelectFunc = G_Menu_CallVote_Ruleset_Selection;
+		MenuVote_SetArg(entries[menu_index], rs_short_name[i]);
+		MenuVote_SetText(entries[menu_index], rs_long_name[i]);
+		entries[menu_index].SelectFunc = SelectRuleset;
 		menu_index++;
 	}
 }
 
-void G_Menu_CallVote_Ruleset_Selection(gentity_t *ent, menu_hnd_t *p)
+void SelectRuleset(gentity_t *ent, menu_hnd_t *p)
 {
-	char value[64];
-	if (!MenuVote_ReadSelection(ent, p, value, sizeof(value)))
+	const auto value = MenuVote_ReadSelection(ent, p);
+	if (!value)
 		return;
 
-	ruleset_t rs = RS_IndexFromString(value);
+	const ruleset_t rs = RS_IndexFromString(value->c_str());
 	if (rs == ruleset_t::RS_NONE)
 	{
 		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid ruleset selected.\n");
 		return;
 	}
-	if ((int)rs == game.ruleset)
+	if (static_cast<int>(rs) == game.ruleset)
 	{
 		gi.LocClient_Print(ent, PRINT_HIGH, "Ruleset is already active.\n");
 		return;
 	}
 
-	MenuVote_Initiate(ent, "ruleset", value);
+	MenuVote_Initiate(ent, "ruleset", value->c_str());
 }
 
-void G_Menu_CallVote_Ruleset(gentity_t *ent, menu_hnd_t *p)
+void OpenRuleset(gentity_t *ent, menu_hnd_t *)
 {
-	MenuVote_OpenMenu(ent, pmcallvotemenu_ruleset, (int)q_countof(pmcallvotemenu_ruleset), nullptr, G_Menu_CallVote_Ruleset_Update);
+	MenuVote_OpenMenu(ent, kRulesetMenuTemplate, muffmode::CountAsInt(kRulesetMenuTemplate), nullptr, UpdateRuleset);
 }
 
-void G_Menu_CallVote_TimeLimit_Update(gentity_t *ent)
+void UpdateTimeLimit(gentity_t *ent)
 {
-	menu_vote_view_t view;
-	if (!MenuVote_View(ent, view) || !MenuVote_HasIndex(view, 0))
-		return;
-
-	menu_t *entries = view.entries;
-	const int content_limit = MenuVote_ContentLimit(view);
-	Q_strlcpy(entries[0].text, "Select Time Limit (mins)", sizeof(entries[0].text));
-
-	static const char *time_values[] = { "0", "5", "10", "15", "20", "25", "30" };
-	const int first_index = 2;
-	const int num_values = (int)(sizeof(time_values) / sizeof(time_values[0]));
-
-	for (int i = 0; i < num_values; ++i)
-	{
-		int idx = first_index + i;
-		if (idx >= content_limit)
-			break;
-		Q_strlcpy(entries[idx].text, time_values[i], sizeof(entries[idx].text));
-		Q_strlcpy(entries[idx].text_arg1, time_values[i], sizeof(entries[idx].text_arg1));
-	}
+	static constexpr std::array<const char *, 7> time_values = { "0", "5", "10", "15", "20", "25", "30" };
+	UpdateFixedChoiceVoteMenu(ent, kTimeLimitVote, time_values);
 }
 
-void G_Menu_CallVote_TimeLimit_Selection(gentity_t *ent, menu_hnd_t *p)
+void SelectTimeLimit(gentity_t *ent, menu_hnd_t *p)
 {
-	char value[64];
-	if (!MenuVote_ReadSelection(ent, p, value, sizeof(value)))
-		return;
-	MenuVote_Initiate(ent, "timelimit", value);
+	SelectFixedChoiceVote(ent, p, kTimeLimitVote);
 }
 
-void G_Menu_CallVote_TimeLimit(gentity_t *ent, menu_hnd_t *p)
+void OpenTimeLimit(gentity_t *ent, menu_hnd_t *)
 {
-	MenuVote_OpenMenu(ent, pmcallvotemenu_timelimit, (int)q_countof(pmcallvotemenu_timelimit), nullptr, G_Menu_CallVote_TimeLimit_Update);
+	MenuVote_OpenMenu(ent, kTimeLimitMenuTemplate, muffmode::CountAsInt(kTimeLimitMenuTemplate), nullptr, UpdateTimeLimit);
 }
 
-void G_Menu_CallVote_ScoreLimit_Update(gentity_t *ent)
+void UpdateScoreLimit(gentity_t *ent)
 {
-	menu_vote_view_t view;
-	if (!MenuVote_View(ent, view) || !MenuVote_HasIndex(view, 0))
-		return;
-
-	menu_t *entries = view.entries;
-	const int content_limit = MenuVote_ContentLimit(view);
-	Q_strlcpy(entries[0].text, "Select Score Limit", sizeof(entries[0].text));
-
-	static const char *score_values[] = { "0", "5", "10", "20", "30", "40", "50", "100" };
-	const int first_index = 2;
-	const int num_values = (int)(sizeof(score_values) / sizeof(score_values[0]));
-
-	for (int i = 0; i < num_values; ++i)
-	{
-		int idx = first_index + i;
-		if (idx >= content_limit)
-			break;
-		Q_strlcpy(entries[idx].text, score_values[i], sizeof(entries[idx].text));
-		Q_strlcpy(entries[idx].text_arg1, score_values[i], sizeof(entries[idx].text_arg1));
-	}
+	static constexpr std::array<const char *, 8> score_values = { "0", "5", "10", "20", "30", "40", "50", "100" };
+	UpdateFixedChoiceVoteMenu(ent, kScoreLimitVote, score_values);
 }
 
-void G_Menu_CallVote_ScoreLimit_Selection(gentity_t *ent, menu_hnd_t *p)
+void SelectScoreLimit(gentity_t *ent, menu_hnd_t *p)
 {
-	char value[64];
-	if (!MenuVote_ReadSelection(ent, p, value, sizeof(value)))
-		return;
-	MenuVote_Initiate(ent, "scorelimit", value);
+	SelectFixedChoiceVote(ent, p, kScoreLimitVote);
 }
 
-void G_Menu_CallVote_ScoreLimit(gentity_t *ent, menu_hnd_t *p)
+void OpenScoreLimit(gentity_t *ent, menu_hnd_t *)
 {
-	MenuVote_OpenMenu(ent, pmcallvotemenu_scorelimit, (int)q_countof(pmcallvotemenu_scorelimit), nullptr, G_Menu_CallVote_ScoreLimit_Update);
+	MenuVote_OpenMenu(ent, kScoreLimitMenuTemplate, muffmode::CountAsInt(kScoreLimitMenuTemplate), nullptr, UpdateScoreLimit);
 }
 
-void G_Menu_CallVote_ShuffleTeams(gentity_t *ent, menu_hnd_t *p)
+void StartShuffleTeamsVote(gentity_t *ent, menu_hnd_t *)
 {
 	MenuVote_CloseAndInitiate(ent, "shuffle", nullptr);
 }
 
-void G_Menu_CallVote_BalanceTeams(gentity_t *ent, menu_hnd_t *p)
-{
-	MenuVote_CloseAndInitiate(ent, "balance", nullptr);
-}
-
-void G_Menu_CallVote_Cointoss(gentity_t *ent, menu_hnd_t *p)
-{
-	MenuVote_CloseAndInitiate(ent, "cointoss", nullptr);
-}
-
-void G_Menu_CallVote_ReadyAll(gentity_t *ent, menu_hnd_t *p)
+void StartReadyAllVote(gentity_t *ent, menu_hnd_t *)
 {
 	MenuVote_CloseAndInitiate(ent, "readyall", nullptr);
 }
 
-void G_Menu_CallVote_Update(gentity_t *ent)
+void OpenCallVoteMenu(gentity_t *ent)
 {
-	menu_vote_view_t view;
+	MenuVote_OpenMenu(ent, kCallVoteMenuTemplate, muffmode::CountAsInt(kCallVoteMenuTemplate), nullptr, UpdateCallVote);
+}
+
+void UpdateCallVote(gentity_t *ent)
+{
+	MenuVoteView view;
 	if (!MenuVote_View(ent, view))
 		return;
 
@@ -803,227 +839,144 @@ void G_Menu_CallVote_Update(gentity_t *ent)
 
 	MenuVote_ClearRange(view, 0, content_limit);
 
-	Q_strlcpy(entries[0].text, "Call a Vote", sizeof(entries[0].text));
+	MenuVote_SetText(entries[0], "Call a Vote");
 
 	int gametype_index = cvmenu_map;
-	entries[gametype_index].SelectFunc = G_Menu_CallVote_GameType;
-	Q_strlcpy(entries[gametype_index].text, G_Fmt("Gametype: {}", level.gametype_name).data(), sizeof(entries[gametype_index].text));
+	entries[gametype_index].SelectFunc = OpenGameType;
+	MenuVote_SetText(entries[gametype_index], G_Fmt("Gametype: {}", level.gametype_name).data());
 
 	int ruleset_index = gametype_index + 1;
-	entries[ruleset_index].SelectFunc = G_Menu_CallVote_Ruleset;
-	Q_strlcpy(entries[ruleset_index].text, G_Fmt("Ruleset: {}", G_Menu_CallVoteCurrentRulesetName()).data(), sizeof(entries[ruleset_index].text));
+	entries[ruleset_index].SelectFunc = OpenRuleset;
+	MenuVote_SetText(entries[ruleset_index], G_Fmt("Ruleset: {}", CurrentRulesetName()).data());
 
 	int map_index = ruleset_index + 1;
-	entries[map_index].SelectFunc = G_Menu_CallVote_Map;
+	entries[map_index].SelectFunc = OpenMap;
 	if (level.mapname[0])
-		Q_strlcpy(entries[map_index].text, G_Fmt("Map:\t\t {}", level.mapname).data(), sizeof(entries[map_index].text));
+		MenuVote_SetText(entries[map_index], G_Fmt("Map:\t\t {}", level.mapname).data());
 	else
-		Q_strlcpy(entries[map_index].text, "Map", sizeof(entries[map_index].text));
+		MenuVote_SetText(entries[map_index], "Map");
 
 	int blank1_index = map_index + 1;
 	entries[blank1_index].SelectFunc = nullptr;
-	entries[blank1_index].text[0] = '\0';
+	MenuVote_SetText(entries[blank1_index], "");
 
 	int scorelimit_index = blank1_index + 1;
-	entries[scorelimit_index].SelectFunc = G_Menu_CallVote_ScoreLimit;
+	entries[scorelimit_index].SelectFunc = OpenScoreLimit;
 	int current_scorelimit = GT_ScoreLimit();
 	if (current_scorelimit > 0)
-		Q_strlcpy(entries[scorelimit_index].text, G_Fmt("Scorelimit: {}", current_scorelimit).data(), sizeof(entries[scorelimit_index].text));
+		MenuVote_SetText(entries[scorelimit_index], G_Fmt("Scorelimit: {}", current_scorelimit).data());
 	else
-		Q_strlcpy(entries[scorelimit_index].text, "Scorelimit: 0", sizeof(entries[scorelimit_index].text));
+		MenuVote_SetText(entries[scorelimit_index], "Scorelimit: 0");
 
 	int timelimit_index = scorelimit_index + 1;
-	entries[timelimit_index].SelectFunc = G_Menu_CallVote_TimeLimit;
+	entries[timelimit_index].SelectFunc = OpenTimeLimit;
 	int current_timelimit = (int)timelimit->value;
 	if (current_timelimit > 0)
-		Q_strlcpy(entries[timelimit_index].text, G_Fmt("Timelimit: {} min", current_timelimit).data(), sizeof(entries[timelimit_index].text));
+		MenuVote_SetText(entries[timelimit_index], G_Fmt("Timelimit: {} min", current_timelimit).data());
 	else
-		Q_strlcpy(entries[timelimit_index].text, "Timelimit: 0", sizeof(entries[timelimit_index].text));
+		MenuVote_SetText(entries[timelimit_index], "Timelimit: 0");
 
 	int blank2_index = timelimit_index + 1;
 	entries[blank2_index].SelectFunc = nullptr;
-	entries[blank2_index].text[0] = '\0';
+	MenuVote_SetText(entries[blank2_index], "");
 
 	int powerups_index = blank2_index + 1;
-	entries[powerups_index].SelectFunc = G_Menu_CallVote_Powerups;
-	bool powerups_enabled = g_no_powerups->integer == 0;
-	Q_strlcpy(entries[powerups_index].text, G_Fmt("Powerups: {}", powerups_enabled ? "ON" : "OFF").data(), sizeof(entries[powerups_index].text));
+	entries[powerups_index].SelectFunc = OpenPowerups;
+	MenuVote_SetText(entries[powerups_index], G_Fmt("Powerups: {}", PowerupsEnabled() ? "ON" : "OFF").data());
 
 	int techs_index = powerups_index + 1;
 	if (GT(GT_FFA) || GT(GT_TDM) || GT(GT_CTF))
 	{
-		entries[techs_index].SelectFunc = G_Menu_CallVote_Techs;
-		Q_strlcpy(entries[techs_index].text, G_Fmt("Techs: {}", AllowTechs() ? "ON" : "OFF").data(), sizeof(entries[techs_index].text));
+		entries[techs_index].SelectFunc = OpenTechs;
+		MenuVote_SetText(entries[techs_index], G_Fmt("Techs: {}", TechsEnabled() ? "ON" : "OFF").data());
 	}
 	else
 	{
 		entries[techs_index].SelectFunc = nullptr;
-		Q_strlcpy(entries[techs_index].text, "Techs: N/A", sizeof(entries[techs_index].text));
+		MenuVote_SetText(entries[techs_index], "Techs: N/A");
 	}
 
 	int friendlyfire_index = techs_index + 1;
 	if (Teams())
 	{
-		entries[friendlyfire_index].SelectFunc = G_Menu_CallVote_FriendlyFire;
-		bool ff_enabled = g_friendly_fire->integer != 0;
-		Q_strlcpy(entries[friendlyfire_index].text, G_Fmt("Friendly Fire: {}", ff_enabled ? "ON" : "OFF").data(), sizeof(entries[friendlyfire_index].text));
+		entries[friendlyfire_index].SelectFunc = OpenFriendlyFire;
+		MenuVote_SetText(entries[friendlyfire_index], G_Fmt("Friendly Fire: {}", FriendlyFireEnabled() ? "ON" : "OFF").data());
 	}
 	else
 	{
 		entries[friendlyfire_index].SelectFunc = nullptr;
-		Q_strlcpy(entries[friendlyfire_index].text, "Friendly Fire: N/A", sizeof(entries[friendlyfire_index].text));
+		MenuVote_SetText(entries[friendlyfire_index], "Friendly Fire: N/A");
 	}
 
 	int shuffle_index = friendlyfire_index + 1;
 	if (Teams())
 	{
-		entries[shuffle_index].SelectFunc = G_Menu_CallVote_ShuffleTeams;
-		Q_strlcpy(entries[shuffle_index].text, "Shuffle Teams", sizeof(entries[shuffle_index].text));
+		entries[shuffle_index].SelectFunc = StartShuffleTeamsVote;
+		MenuVote_SetText(entries[shuffle_index], "Shuffle Teams");
 	}
 	else
 	{
 		entries[shuffle_index].SelectFunc = nullptr;
-		Q_strlcpy(entries[shuffle_index].text, "Shuffle Teams: N/A", sizeof(entries[shuffle_index].text));
+		MenuVote_SetText(entries[shuffle_index], "Shuffle Teams: N/A");
 	}
 
 	if (g_dm_do_readyup->integer && level.match_state == matchst_t::MATCH_WARMUP_READYUP)
 	{
-		entries[readyall_index].SelectFunc = G_Menu_CallVote_ReadyAll;
-		Q_strlcpy(entries[readyall_index].text, "Ready All", sizeof(entries[readyall_index].text));
+		entries[readyall_index].SelectFunc = StartReadyAllVote;
+		MenuVote_SetText(entries[readyall_index], "Ready All");
 	}
 	else
 	{
 		entries[readyall_index].SelectFunc = nullptr;
-		Q_strlcpy(entries[readyall_index].text, "Ready All: N/A", sizeof(entries[readyall_index].text));
+		MenuVote_SetText(entries[readyall_index], "Ready All: N/A");
 	}
 
 	MenuVote_ClearRange(view, readyall_index + 1, content_limit);
 }
 
-void G_Menu_CallVote_Powerups_Update(gentity_t *ent)
+void UpdatePowerups(gentity_t *ent)
 {
-	menu_vote_view_t view;
-	if (!MenuVote_View(ent, view) || !MenuVote_HasIndex(view, 3))
-		return;
-
-	menu_t *entries = view.entries;
-	Q_strlcpy(entries[0].text, "Powerups", sizeof(entries[0].text));
-	Q_strlcpy(entries[2].text, "ON", sizeof(entries[2].text));
-	Q_strlcpy(entries[2].text_arg1, "1", sizeof(entries[2].text_arg1));
-	Q_strlcpy(entries[3].text, "OFF", sizeof(entries[3].text));
-	Q_strlcpy(entries[3].text_arg1, "0", sizeof(entries[3].text_arg1));
+	UpdateToggleVoteMenu(ent, kPowerupsVote);
 }
 
-void G_Menu_CallVote_Powerups_Selection(gentity_t *ent, menu_hnd_t *p)
+void SelectPowerups(gentity_t *ent, menu_hnd_t *p)
 {
-	char value[64];
-	if (!MenuVote_ReadSelection(ent, p, value, sizeof(value)))
-		return;
-
-	const auto parsed = MM_ParseNonNegativeIntArg(value);
-	if (!parsed || (*parsed != 0 && *parsed != 1)) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid powerups selection.\n");
-		return;
-	}
-
-	const int v = *parsed;
-	bool currently_enabled = g_no_powerups->integer == 0;
-	if (currently_enabled == (v == 1))
-	{
-		gi.LocClient_Print(ent, PRINT_HIGH, "Powerups are already {}.\n", v ? "ENABLED" : "DISABLED");
-		return;
-	}
-
-	MenuVote_Initiate(ent, "powerups", value);
+	SelectToggleVote(ent, p, kPowerupsVote);
 }
 
-void G_Menu_CallVote_Techs_Update(gentity_t *ent)
+void UpdateTechs(gentity_t *ent)
 {
-	menu_vote_view_t view;
-	if (!MenuVote_View(ent, view) || !MenuVote_HasIndex(view, 3))
-		return;
-
-	menu_t *entries = view.entries;
-	Q_strlcpy(entries[0].text, "Techs", sizeof(entries[0].text));
-	Q_strlcpy(entries[2].text, "ON", sizeof(entries[2].text));
-	Q_strlcpy(entries[2].text_arg1, "1", sizeof(entries[2].text_arg1));
-	Q_strlcpy(entries[3].text, "OFF", sizeof(entries[3].text));
-	Q_strlcpy(entries[3].text_arg1, "0", sizeof(entries[3].text_arg1));
+	UpdateToggleVoteMenu(ent, kTechsVote);
 }
 
-void G_Menu_CallVote_Techs_Selection(gentity_t *ent, menu_hnd_t *p)
+void SelectTechs(gentity_t *ent, menu_hnd_t *p)
 {
-	char value[64];
-	if (!MenuVote_ReadSelection(ent, p, value, sizeof(value)))
-		return;
-
-	const auto parsed = MM_ParseNonNegativeIntArg(value);
-	if (!parsed || (*parsed != 0 && *parsed != 1)) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid techs selection.\n");
-		return;
-	}
-
-	const int v = *parsed;
-	bool currently_enabled = AllowTechs();
-	if (currently_enabled == (v == 1))
-	{
-		gi.LocClient_Print(ent, PRINT_HIGH, "Techs are already {}.\n", v ? "ENABLED" : "DISABLED");
-		return;
-	}
-
-	MenuVote_Initiate(ent, "techs", value);
+	SelectToggleVote(ent, p, kTechsVote);
 }
 
-void G_Menu_CallVote_Techs(gentity_t *ent, menu_hnd_t *p)
+void OpenTechs(gentity_t *ent, menu_hnd_t *)
 {
-	MenuVote_OpenMenu(ent, pmcallvotemenu_techs, (int)q_countof(pmcallvotemenu_techs), nullptr, G_Menu_CallVote_Techs_Update);
+	MenuVote_OpenMenu(ent, kTechsMenuTemplate, muffmode::CountAsInt(kTechsMenuTemplate), nullptr, UpdateTechs);
 }
 
-void G_Menu_CallVote_Powerups(gentity_t *ent, menu_hnd_t *p)
+void OpenPowerups(gentity_t *ent, menu_hnd_t *)
 {
-	MenuVote_OpenMenu(ent, pmcallvotemenu_powerups, (int)q_countof(pmcallvotemenu_powerups), nullptr, G_Menu_CallVote_Powerups_Update);
+	MenuVote_OpenMenu(ent, kPowerupsMenuTemplate, muffmode::CountAsInt(kPowerupsMenuTemplate), nullptr, UpdatePowerups);
 }
 
-void G_Menu_CallVote_FriendlyFire_Update(gentity_t *ent)
+void UpdateFriendlyFire(gentity_t *ent)
 {
-	menu_vote_view_t view;
-	if (!MenuVote_View(ent, view) || !MenuVote_HasIndex(view, 3))
-		return;
-
-	menu_t *entries = view.entries;
-	Q_strlcpy(entries[0].text, "Friendly Fire", sizeof(entries[0].text));
-	Q_strlcpy(entries[2].text, "ON", sizeof(entries[2].text));
-	Q_strlcpy(entries[2].text_arg1, "1", sizeof(entries[2].text_arg1));
-	Q_strlcpy(entries[3].text, "OFF", sizeof(entries[3].text));
-	Q_strlcpy(entries[3].text_arg1, "0", sizeof(entries[3].text_arg1));
+	UpdateToggleVoteMenu(ent, kFriendlyFireVote);
 }
 
-void G_Menu_CallVote_FriendlyFire_Selection(gentity_t *ent, menu_hnd_t *p)
+void SelectFriendlyFire(gentity_t *ent, menu_hnd_t *p)
 {
-	char value[64];
-	if (!MenuVote_ReadSelection(ent, p, value, sizeof(value)))
-		return;
-
-	const auto parsed = MM_ParseNonNegativeIntArg(value);
-	if (!parsed || (*parsed != 0 && *parsed != 1)) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid friendly fire selection.\n");
-		return;
-	}
-
-	const int v = *parsed;
-	bool currently_enabled = g_friendly_fire->integer != 0;
-	if (currently_enabled == (v == 1))
-	{
-		gi.LocClient_Print(ent, PRINT_HIGH, "Friendly fire is already {}.\n", v ? "ENABLED" : "DISABLED");
-		return;
-	}
-
-	MenuVote_Initiate(ent, "friendlyfire", value);
+	SelectToggleVote(ent, p, kFriendlyFireVote);
 }
 
-void G_Menu_CallVote_FriendlyFire(gentity_t *ent, menu_hnd_t *p)
+void OpenFriendlyFire(gentity_t *ent, menu_hnd_t *)
 {
-	MenuVote_OpenMenu(ent, pmcallvotemenu_friendlyfire, (int)q_countof(pmcallvotemenu_friendlyfire), nullptr, G_Menu_CallVote_FriendlyFire_Update);
+	MenuVote_OpenMenu(ent, kFriendlyFireMenuTemplate, muffmode::CountAsInt(kFriendlyFireMenuTemplate), nullptr, UpdateFriendlyFire);
 }
 
 void G_Menu_Vote_Yes(gentity_t *ent, menu_hnd_t *p)
@@ -1129,7 +1082,7 @@ void G_Menu_Vote_Update(gentity_t *ent)
 		return;
 	}
 	MuffModeLog("DEBUG", "G_Menu_Vote_Update: writing caller name '%s'", level.vote_state.caller->resp.netname);
-	Q_strlcpy(entries[i].text, G_Fmt("{} called a vote:", level.vote_state.caller->resp.netname).data(), sizeof(entries[i].text));
+	MenuVote_SetText(entries[i], G_Fmt("{} called a vote:", level.vote_state.caller->resp.netname).data());
 
 	i = 4;
 	if (!level.vote_state.command)
@@ -1139,32 +1092,32 @@ void G_Menu_Vote_Update(gentity_t *ent)
 	}
 	MuffModeLog("DEBUG", "G_Menu_Vote_Update: writing command '%s' arg '%s' (arg_ptr=%p)",
 		level.vote_state.command->name, level.vote_state.arg.c_str(), (void *)level.vote_state.arg.c_str());
-	Q_strlcpy(entries[i].text, G_Fmt("{} {}", level.vote_state.command->name, level.vote_state.arg).data(), sizeof(entries[i].text));
+	MenuVote_SetText(entries[i], G_Fmt("{} {}", level.vote_state.command->name, level.vote_state.arg).data());
 
 	if (level.vote_state.start_time + 3_sec > level.time)
 	{
 		i = 7;
-		Q_strlcpy(entries[i].text, "GET READY TO VOTE!", sizeof(entries[i].text));
+		MenuVote_SetText(entries[i], "GET READY TO VOTE!");
 		entries[i].SelectFunc = nullptr;
 
 		i = 8;
 		int time = 3 - (level.time - level.vote_state.start_time).seconds<int>();
-		Q_strlcpy(entries[i].text, G_Fmt("{}...", time).data(), sizeof(entries[i].text));
+		MenuVote_SetText(entries[i], G_Fmt("{}...", time).data());
 		entries[i].SelectFunc = nullptr;
 		return;
 	}
 
 	i = 7;
-	Q_strlcpy(entries[i].text, "[ YES ]", sizeof(entries[i].text));
+	MenuVote_SetText(entries[i], "[ YES ]");
 	entries[i].SelectFunc = G_Menu_Vote_Yes;
 	i = 8;
-	Q_strlcpy(entries[i].text, "[ NO ]", sizeof(entries[i].text));
+	MenuVote_SetText(entries[i], "[ NO ]");
 	entries[i].SelectFunc = G_Menu_Vote_No;
 
 	i = 16;
-	Q_strlcpy(entries[i].text, G_Fmt("{}", timeout).data(), sizeof(entries[i].text));
+	MenuVote_SetText(entries[i], G_Fmt("{}", timeout).data());
 }
-} // namespace
+} // namespace muffmode::vote_menu
 
 bool Vote_Menu_Active(gentity_t *ent)
 {
@@ -1194,7 +1147,7 @@ void G_Menu_CallVote(gentity_t *ent, menu_hnd_t *p)
 		return;
 	}
 
-	MenuVote_OpenMenu(ent, pmcallvotemenu, (int)q_countof(pmcallvotemenu), nullptr, G_Menu_CallVote_Update);
+	muffmode::vote_menu::OpenCallVoteMenu(ent);
 }
 
 void G_Menu_ReturnToCallVote(gentity_t *ent, menu_hnd_t *p)
@@ -1202,7 +1155,7 @@ void G_Menu_ReturnToCallVote(gentity_t *ent, menu_hnd_t *p)
 	if (!ent || !ent->client)
 		return;
 
-	MenuVote_OpenMenu(ent, pmcallvotemenu, (int)q_countof(pmcallvotemenu), nullptr, G_Menu_CallVote_Update);
+	muffmode::vote_menu::OpenCallVoteMenu(ent);
 	gi.local_sound(ent, CHAN_AUTO, gi.soundindex("misc/menu3.wav"), 1, ATTN_NONE, 0);
 }
 
@@ -1211,5 +1164,6 @@ void G_Menu_Vote_Open(gentity_t *ent)
 	if (!ent || !ent->client)
 		return;
 
-	P_Menu_Open(ent, votemenu, -1, sizeof(votemenu) / sizeof(menu_t), nullptr, G_Menu_Vote_Update);
+	P_Menu_Open(ent, muffmode::vote_menu::votemenu, -1, muffmode::CountAsInt(muffmode::vote_menu::votemenu),
+		nullptr, muffmode::vote_menu::G_Menu_Vote_Update);
 }

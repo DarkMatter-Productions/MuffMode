@@ -5,7 +5,10 @@
 #include "muffmode/mm_command_contracts.h"
 #include "muffmode/mm_pconfig.h"
 #include "muffmode/mm_parse.h"
+#include "muffmode/mm_util.h"
 
+#include <array>
+#include <cstdio>
 #include <filesystem>
 #include <string>
 
@@ -13,15 +16,17 @@
 // PLAYER CONFIGS
 //=======================================================================
 
-namespace {
-constexpr long MM_MAX_PLAYER_CONFIG_FILE_LENGTH = 0x40000;
+namespace muffmode::pconfig {
 
-bool MM_IsSafeSocialIdChar(char c) {
+constexpr long k_max_player_config_file_length = 0x40000;
+
+bool IsSafeSocialIdChar(char c)
+{
 	return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
 		(c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.';
 }
 
-int MM_ClientSlotNumber(const gentity_t *ent)
+int ClientSlotNumber(const gentity_t *ent)
 {
 	const uint32_t max_clients = static_cast<uint32_t>(game.maxclients);
 	if (!ent || ent->s.number < 1 || ent->s.number > max_clients)
@@ -30,67 +35,61 @@ int MM_ClientSlotNumber(const gentity_t *ent)
 	return static_cast<int>(ent->s.number - 1);
 }
 
-std::string MM_FallbackSocialId(const char *prefix, const gentity_t *ent)
+std::string FallbackSocialId(const char *prefix, const gentity_t *ent)
 {
-	return fmt::format("{}_{}", prefix && *prefix ? prefix : "client", MM_ClientSlotNumber(ent));
+	return fmt::format("{}_{}", prefix && *prefix ? prefix : "client", ClientSlotNumber(ent));
 }
 
-bool MM_IsReservedWindowsDeviceName(const char *name)
+bool IsReservedWindowsDeviceName(const char *name)
 {
 	if (!name || !*name)
 		return false;
 
-	char stem[MAX_INFO_VALUE]{ 0 };
-	size_t length = 0;
-	for (const char *p = name; *p && *p != '.' && length + 1 < sizeof(stem); p++)
-		stem[length++] = *p;
-	stem[length] = '\0';
+	std::string stem;
+	stem.reserve(MAX_INFO_VALUE - 1);
+	for (const char *p = name; *p && *p != '.' && stem.size() < MAX_INFO_VALUE - 1; p++)
+		stem += *p;
 
-	if (!stem[0])
+	if (stem.empty())
 		return false;
 
-	static constexpr const char *reserved_names[] = {
+	static constexpr std::array<const char *, 22> reserved_names = {{
 		"CON", "PRN", "AUX", "NUL",
 		"COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
 		"LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"
-	};
+	}};
 
 	for (const char *reserved : reserved_names) {
-		if (!Q_strcasecmp(stem, reserved))
+		if (muffmode::CStringEqualsI(stem.c_str(), reserved))
 			return true;
 	}
 
 	return false;
 }
 
-void MM_SanitizeSocialId(const char *src, char *dst, size_t dst_size)
+std::string SanitizeSocialId(const char *src)
 {
-	if (!dst || !dst_size)
-		return;
-
-	dst[0] = '\0';
 	if (!src)
-		return;
+		return {};
 
-	char *out = dst;
-	size_t remaining = dst_size - 1;
+	std::string out;
+	out.reserve(MAX_INFO_VALUE - 1);
 
-	while (*src && remaining > 0) {
-		char c = *src++;
+	for (const char *cursor = src; *cursor && out.size() < MAX_INFO_VALUE - 1; cursor++) {
+		const char c = *cursor;
 		// Allow alphanumeric, dash, underscore, and common ID characters.
 		// Skip leading dots to avoid ambiguous Windows device/path spellings.
-		if (MM_IsSafeSocialIdChar(c) && (c != '.' || out != dst)) {
-			*out++ = c;
-			remaining--;
-		}
+		if (IsSafeSocialIdChar(c) && (c != '.' || !out.empty()))
+			out += c;
 	}
 
-	while (out > dst && out[-1] == '.')
-		out--;
-	*out = '\0';
+	while (!out.empty() && out.back() == '.')
+		out.pop_back();
+
+	return out;
 }
 
-std::string MM_SanitizeConfigCommentText(const char *text)
+std::string SanitizeConfigCommentText(const char *text)
 {
 	if (!text || !*text)
 		return "Player";
@@ -112,7 +111,7 @@ std::string MM_SanitizeConfigCommentText(const char *text)
 	return out.empty() ? "Player" : out;
 }
 
-bool MM_RequirePConfigCommandArgc(gentity_t *ent, int min_expected, int max_expected, const char *usage)
+bool RequireCommandArgc(gentity_t *ent, int min_expected, int max_expected, const char *usage)
 {
 	if (!ent || !ent->client)
 		return false;
@@ -124,12 +123,12 @@ bool MM_RequirePConfigCommandArgc(gentity_t *ent, int min_expected, int max_expe
 	return false;
 }
 
-bool MM_RequireNoPConfigCommandArgs(gentity_t *ent)
+bool RequireNoCommandArgs(gentity_t *ent)
 {
-	return MM_RequirePConfigCommandArgc(ent, 1, 1, gi.argv(0));
+	return RequireCommandArgc(ent, 1, 1, gi.argv(0));
 }
 
-bool MM_EnsurePConfigDirectory()
+bool EnsureDirectory()
 {
 	const std::filesystem::path dir("baseq2/pcfg");
 	std::error_code error;
@@ -148,7 +147,30 @@ bool MM_EnsurePConfigDirectory()
 
 	return true;
 }
-} // namespace
+
+bool ValidateReadableConfig(FILE *file)
+{
+	if (std::fseek(file, 0, SEEK_END) != 0)
+		return false;
+
+	const long file_length = std::ftell(file);
+	if (file_length < 0 || file_length > k_max_player_config_file_length)
+		return false;
+
+	if (std::fseek(file, 0, SEEK_SET) != 0)
+		return false;
+
+	std::string buffer(static_cast<size_t>(file_length), '\0');
+	if (!buffer.empty()) {
+		const size_t read_length = std::fread(&buffer[0], 1, buffer.size(), file);
+		if (read_length != buffer.size())
+			return false;
+	}
+
+	return true;
+}
+
+} // namespace muffmode::pconfig
 
 /*
 =============
@@ -157,105 +179,50 @@ MM_ClientInitPConfig
 Load or create the player's configuration file on connect.
 =============
 */
-void MM_ClientInitPConfig(gentity_t *ent) {
+void MM_ClientInitPConfig(gentity_t *ent)
+{
 	bool file_exists = false;
-	bool cfg_valid = true;
 
-	if (!ent || !ent->client) return;
-	if (ent->svflags & SVF_BOT) return;
+	if (!ent || !ent->client)
+		return;
+	if (ent->svflags & SVF_BOT)
+		return;
 
 	// Validate and sanitize social_id for filesystem use
 	// This prevents crashes from empty or malicious social_id values
-	char safe_social_id[MAX_INFO_VALUE] = {0};
-	if (!ent->client->pers.social_id[0]) {
-		// Empty social_id - use a fallback based on client number
-		const std::string fallback = MM_FallbackSocialId("unknown", ent);
-		Q_strlcpy(safe_social_id, fallback.c_str(), sizeof(safe_social_id));
-	} else {
-		// Sanitize: remove path separators and other dangerous characters
-		MM_SanitizeSocialId(ent->client->pers.social_id, safe_social_id, sizeof(safe_social_id));
+	std::string safe_social_id = ent->client->pers.social_id[0]
+		? muffmode::pconfig::SanitizeSocialId(ent->client->pers.social_id)
+		: muffmode::pconfig::FallbackSocialId("unknown", ent);
 
-		// If sanitization removed everything, use fallback
-		if (!safe_social_id[0] || MM_IsReservedWindowsDeviceName(safe_social_id)) {
-			const std::string fallback = MM_FallbackSocialId("invalid", ent);
-			Q_strlcpy(safe_social_id, fallback.c_str(), sizeof(safe_social_id));
-		}
-	}
+	if (safe_social_id.empty() || muffmode::pconfig::IsReservedWindowsDeviceName(safe_social_id.c_str()))
+		safe_social_id = muffmode::pconfig::FallbackSocialId("invalid", ent);
 
-	const std::string path = std::string(G_Fmt("baseq2/pcfg/{}.cfg", safe_social_id));
+	const std::string path = fmt::format("baseq2/pcfg/{}.cfg", safe_social_id);
 	const char *name = path.c_str();
 
-	if (!MM_EnsurePConfigDirectory())
+	if (!muffmode::pconfig::EnsureDirectory())
 		return;
 
-	FILE *f = fopen(name, "rb");
-	char *buffer = nullptr;
-	if (f != NULL) {
-		size_t length = 0;
-
-		if (fseek(f, 0, SEEK_END) != 0) {
-			cfg_valid = false;
-		}
-
-		const long file_length = cfg_valid ? ftell(f) : -1;
-		if (cfg_valid && file_length < 0) {
-			cfg_valid = false;
-		} else if (cfg_valid && file_length > MM_MAX_PLAYER_CONFIG_FILE_LENGTH) {
-			cfg_valid = false;
-		}
-
-		if (cfg_valid) {
-			length = static_cast<size_t>(file_length);
-			if (fseek(f, 0, SEEK_SET) != 0)
-				cfg_valid = false;
-		}
-
-		if (cfg_valid) {
-			buffer = (char *)gi.TagMalloc(length + 1, TAG_LEVEL);
-			if (!buffer) {
-				cfg_valid = false;
-			}
-		}
-
-		if (cfg_valid) {
-			if (length) {
-				const size_t read_length = fread(buffer, 1, length, f);
-
-				if (length != read_length) {
-					cfg_valid = false;
-				}
-			}
-
-			buffer[length] = '\0';
-		}
+	auto existing_file = muffmode::OpenFile(name, "rb");
+	if (existing_file) {
 		file_exists = true;
-		fclose(f);
 
-		if (!cfg_valid) {
-			if (buffer) {
-				gi.TagFree(buffer);
-			}
+		if (!muffmode::pconfig::ValidateReadableConfig(existing_file.get())) {
 			gi.Com_PrintFmt("{}: Player config load error for \"{}\", discarding.\n", __FUNCTION__, name);
 			return;
-		}
-
-		if (buffer) {
-			gi.TagFree(buffer);
-			buffer = nullptr;
 		}
 	}
 
 	if (!file_exists) {
-		f = fopen(name, "wb");
-		if (f) {
+		auto new_file = muffmode::OpenFile(name, "wb");
+		if (new_file) {
 			const std::string header = fmt::format("// {}'s Player Config\n// Generated by Muff Mode\n",
-				MM_SanitizeConfigCommentText(ent->client->resp.netname));
+				muffmode::pconfig::SanitizeConfigCommentText(ent->client->resp.netname));
 
-			if (fwrite(header.c_str(), 1, header.length(), f) == header.length())
+			if (std::fwrite(header.data(), 1, header.size(), new_file.get()) == header.size())
 				gi.Com_PrintFmt("{}: Player config written to: \"{}\"\n", __FUNCTION__, name);
 			else
 				gi.Com_PrintFmt("{}: Player config write error: \"{}\"\n", __FUNCTION__, name);
-			fclose(f);
 		} else {
 			gi.Com_PrintFmt("{}: Cannot save player config: {}\n", __FUNCTION__, name);
 		}
@@ -269,8 +236,9 @@ void MM_ClientInitPConfig(gentity_t *ent) {
 MM_CmdCrosshairID
 =================
 */
-void MM_CmdCrosshairID(gentity_t *ent) {
-	if (!MM_RequireNoPConfigCommandArgs(ent))
+void MM_CmdCrosshairID(gentity_t *ent)
+{
+	if (!muffmode::pconfig::RequireNoCommandArgs(ent))
 		return;
 
 	ent->client->sess.pc.show_id ^= true;
@@ -282,8 +250,9 @@ void MM_CmdCrosshairID(gentity_t *ent) {
 MM_CmdTimer
 =================
 */
-void MM_CmdTimer(gentity_t *ent) {
-	if (!MM_RequireNoPConfigCommandArgs(ent))
+void MM_CmdTimer(gentity_t *ent)
+{
+	if (!muffmode::pconfig::RequireNoCommandArgs(ent))
 		return;
 
 	ent->client->sess.pc.show_timer ^= true;
@@ -295,8 +264,9 @@ void MM_CmdTimer(gentity_t *ent) {
 MM_CmdFragMessages
 =================
 */
-void MM_CmdFragMessages(gentity_t *ent) {
-	if (!MM_RequireNoPConfigCommandArgs(ent))
+void MM_CmdFragMessages(gentity_t *ent)
+{
+	if (!muffmode::pconfig::RequireNoCommandArgs(ent))
 		return;
 
 	ent->client->sess.pc.show_fragmessages ^= true;
@@ -308,8 +278,9 @@ void MM_CmdFragMessages(gentity_t *ent) {
 MM_CmdAnnouncer
 =================
 */
-void MM_CmdAnnouncer(gentity_t *ent) {
-	if (!MM_RequireNoPConfigCommandArgs(ent))
+void MM_CmdAnnouncer(gentity_t *ent)
+{
+	if (!muffmode::pconfig::RequireNoCommandArgs(ent))
 		return;
 
 	ent->client->sess.pc.use_expanded ^= true;
@@ -321,8 +292,9 @@ void MM_CmdAnnouncer(gentity_t *ent) {
 MM_CmdKillBeep
 =================
 */
-void MM_CmdKillBeep(gentity_t *ent) {
-	if (!MM_RequirePConfigCommandArgc(ent, 1, 2, G_Fmt("{} [0-4]", gi.argv(0)).data()))
+void MM_CmdKillBeep(gentity_t *ent)
+{
+	if (!muffmode::pconfig::RequireCommandArgc(ent, 1, 2, G_Fmt("{} [0-4]", gi.argv(0)).data()))
 		return;
 
 	int num = 0;
@@ -336,7 +308,7 @@ void MM_CmdKillBeep(gentity_t *ent) {
 	} else {
 		num = (ent->client->sess.pc.killbeep_num + 1) % 5;
 	}
-	const char *sb[5] = { "off", "clang", "beep-boop", "insane", "tang-tang" };
+	constexpr std::array<const char *, 5> kill_beep_names = { "off", "clang", "beep-boop", "insane", "tang-tang" };
 	ent->client->sess.pc.killbeep_num = num;
-	gi.LocClient_Print(ent, PRINT_HIGH, "Kill beep changed to: {}\n", sb[num]);
+	gi.LocClient_Print(ent, PRINT_HIGH, "Kill beep changed to: {}\n", kill_beep_names[num]);
 }

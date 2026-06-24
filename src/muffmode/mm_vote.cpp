@@ -9,10 +9,15 @@
 #include "muffmode/mm_match.h"
 #include "muffmode/mm_parse.h"
 #include "muffmode/mm_team.h"
+#include "muffmode/mm_util.h"
 #include "muffmode/mm_vote.h"
 #include "muffmode/mm_vote_menu.h"
 
-namespace {
+#include <algorithm>
+#include <string>
+#include <vector>
+
+namespace muffmode::vote {
 bool s_vote_validation_context_active = false;
 vcmds_t *s_vote_validation_cmd = nullptr;
 std::string s_vote_validation_arg;
@@ -118,13 +123,13 @@ bool MM_ParseVoteChoice(const char *arg, int &vote)
 	if (!arg || !arg[0])
 		return false;
 
-	if (!Q_strcasecmp(arg, "yes") || !Q_strcasecmp(arg, "y") || !Q_strcasecmp(arg, "1"))
+	if (muffmode::CStringEqualsI(arg, "yes") || muffmode::CStringEqualsI(arg, "y") || muffmode::CStringEqualsI(arg, "1"))
 	{
 		vote = 1;
 		return true;
 	}
 
-	if (!Q_strcasecmp(arg, "no") || !Q_strcasecmp(arg, "n") || !Q_strcasecmp(arg, "0"))
+	if (muffmode::CStringEqualsI(arg, "no") || muffmode::CStringEqualsI(arg, "n") || muffmode::CStringEqualsI(arg, "0"))
 	{
 		vote = -1;
 		return true;
@@ -136,38 +141,6 @@ bool MM_ParseVoteChoice(const char *arg, int &vote)
 bool MM_VoteValNone(gentity_t *ent)
 {
 	return true;
-}
-
-bool MM_MapAlreadyListed(const std::vector<std::string> &maps, const char *mapname)
-{
-	for (const auto &existing : maps)
-	{
-		if (!Q_strcasecmp(existing.c_str(), mapname))
-			return true;
-	}
-	return false;
-}
-
-void MM_CollectMapsFromCvar(const char *map_string, std::vector<std::string> &maps)
-{
-	if (!map_string || !map_string[0])
-		return;
-
-	const char *cursor = map_string;
-	char *token;
-	while ((token = COM_Parse(&cursor)) && *token)
-	{
-		if (MM_IsSafeMapToken(token) && !MM_MapAlreadyListed(maps, token))
-			maps.push_back(token);
-	}
-}
-
-std::vector<std::string> MM_CollectConfiguredMaps()
-{
-	std::vector<std::string> maps;
-	MM_CollectMapsFromCvar(g_map_pool ? g_map_pool->string : nullptr, maps);
-	MM_CollectMapsFromCvar(g_map_list ? g_map_list->string : nullptr, maps);
-	return maps;
 }
 
 void MM_UpdateActiveVote()
@@ -226,22 +199,12 @@ void MM_UpdateActiveVote()
 
 bool MM_IsMapValidImpl(const char *mapname)
 {
-	if (!MM_IsSafeMapToken(mapname))
-		return false;
-
-	const std::vector<std::string> maps = MM_CollectConfiguredMaps();
-	for (const auto &map : maps)
-	{
-		if (!Q_strcasecmp(map.c_str(), mapname))
-			return true;
-	}
-
-	return false;
+	return muffmode::maps::ContainsConfiguredMap(mapname);
 }
 
 void MM_PrintAvailableMaps(gentity_t *ent)
 {
-	std::vector<std::string> all_maps = MM_CollectConfiguredMaps();
+	std::vector<std::string> all_maps = muffmode::maps::CollectConfiguredMaps();
 
 	if (all_maps.empty())
 	{
@@ -249,10 +212,7 @@ void MM_PrintAvailableMaps(gentity_t *ent)
 		return;
 	}
 
-	std::sort(all_maps.begin(), all_maps.end(), [](const std::string &a, const std::string &b)
-	{
-		return Q_strcasecmp(a.c_str(), b.c_str()) < 0;
-	});
+	std::sort(all_maps.begin(), all_maps.end(), muffmode::CStringLessI);
 
 	std::string display = join_strings(all_maps, " ");
 	if (display.length() > 256)
@@ -260,7 +220,9 @@ void MM_PrintAvailableMaps(gentity_t *ent)
 	gi.LocClient_Print(ent, PRINT_HIGH, "Valid maps are: {}\n", display.c_str());
 }
 
-} // namespace
+} // namespace muffmode::vote
+
+namespace vote = muffmode::vote;
 
 void MM_TransitionVoteState(VoteState new_state)
 {
@@ -269,7 +231,7 @@ void MM_TransitionVoteState(VoteState new_state)
 	if (old_state == new_state)
 		return;
 
-	if (!MM_IsValidVoteTransition(old_state, new_state))
+	if (!vote::MM_IsValidVoteTransition(old_state, new_state))
 	{
 		MuffModeLog("VOTE", "Invalid state transition: %d -> %d", (int)old_state, (int)new_state);
 		return;
@@ -330,7 +292,7 @@ void MM_CheckVote()
 			MM_TransitionVoteState(VoteState::FAILED);
 			return;
 		}
-		MM_UpdateActiveVote();
+		vote::MM_UpdateActiveVote();
 		break;
 
 	case VoteState::PASSED:
@@ -351,16 +313,16 @@ void MM_CheckVote()
 
 void MM_BeginVoteValidationContext(vcmds_t *cc, const char *arg)
 {
-	s_vote_validation_context_active = true;
-	s_vote_validation_cmd = cc;
-	s_vote_validation_arg = arg ? arg : "";
+	vote::s_vote_validation_context_active = true;
+	vote::s_vote_validation_cmd = cc;
+	vote::s_vote_validation_arg = arg ? arg : "";
 }
 
 void MM_EndVoteValidationContext()
 {
-	s_vote_validation_context_active = false;
-	s_vote_validation_cmd = nullptr;
-	s_vote_validation_arg.clear();
+	vote::s_vote_validation_context_active = false;
+	vote::s_vote_validation_cmd = nullptr;
+	vote::s_vote_validation_arg.clear();
 }
 
 void MM_VotePassed()
@@ -393,7 +355,7 @@ void MM_VotePassGametype()
 	{
 		MuffModeLog("DEBUG", "Vote_Pass_Gametype: GT_NONE, aborting");
 		gi.LocBroadcast_Print(PRINT_HIGH, "Gametype vote failed: stored vote argument is invalid.\n");
-		MM_MarkExecutingVoteFailed();
+		vote::MM_MarkExecutingVoteFailed();
 		return;
 	}
 
@@ -404,7 +366,7 @@ void MM_VotePassGametype()
 	{
 		gi.LocBroadcast_Print(PRINT_HIGH, "Gametype vote rejected: gametype is no longer votable.\n");
 		MuffModeLog("VOTE", "Vote_Pass_Gametype: gametype %d rejected by IsGametypeVotable at execution", (int)gt);
-		MM_MarkExecutingVoteFailed();
+		vote::MM_MarkExecutingVoteFailed();
 		return;
 	}
 
@@ -423,7 +385,7 @@ void MM_VotePassGametype()
 bool MM_VoteValGametype(gentity_t *ent)
 {
 	// Ensure exactly 3 arguments: callvote, gametype, <gametype_name>.
-	if (MM_VoteArgc() != 3)
+	if (vote::MM_VoteArgc() != 3)
 	{
 		gi.LocClient_Print(ent, PRINT_HIGH, "Usage: callvote gametype <gametype_name>\n");
 		std::string votable_list = MM_GetVotableGametypesList();
@@ -432,11 +394,11 @@ bool MM_VoteValGametype(gentity_t *ent)
 		return false;
 	}
 
-	gametype_t gt = GT_IndexFromString(MM_VoteArgv(2));
+	gametype_t gt = GT_IndexFromString(vote::MM_VoteArgv(2));
 
 	if (gt == GT_NONE)
 	{
-		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid gametype: '{}'\n", MM_VoteArgv(2));
+		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid gametype: '{}'\n", vote::MM_VoteArgv(2));
 		std::string votable_list = MM_GetVotableGametypesList();
 		if (!votable_list.empty())
 			gi.LocClient_Print(ent, PRINT_HIGH, "Valid gametypes are: {}\n", votable_list.c_str());
@@ -471,7 +433,7 @@ bool MM_IsGametypeVotable(gametype_t gt)
 
 	while ((token = COM_Parse(&votable_list)) && *token)
 	{
-		if (!Q_strcasecmp(token, gt_short_name[(int)gt]))
+		if (muffmode::CStringEqualsI(token, gt_short_name[(int)gt]))
 			return true;
 	}
 
@@ -521,7 +483,7 @@ bool MM_IsRulesetVotable(ruleset_t rs)
 
 	while ((token = COM_Parse(&votable_list)) && *token)
 	{
-		if (!Q_strcasecmp(token, rs_short_name[ruleset]))
+		if (muffmode::CStringEqualsI(token, rs_short_name[ruleset]))
 			return true;
 	}
 
@@ -569,7 +531,7 @@ void MM_VotePassRuleset()
 	if (rs == ruleset_t::RS_NONE)
 	{
 		gi.LocBroadcast_Print(PRINT_HIGH, "Ruleset vote failed: stored vote argument is invalid.\n");
-		MM_MarkExecutingVoteFailed();
+		vote::MM_MarkExecutingVoteFailed();
 		return;
 	}
 
@@ -580,7 +542,7 @@ void MM_VotePassRuleset()
 	{
 		gi.LocBroadcast_Print(PRINT_HIGH, "Ruleset vote rejected: ruleset is no longer votable.\n");
 		MuffModeLog("VOTE", "Vote_Pass_Ruleset: ruleset %d rejected by IsRulesetVotable at execution", (int)rs);
-		MM_MarkExecutingVoteFailed();
+		vote::MM_MarkExecutingVoteFailed();
 		return;
 	}
 
@@ -589,10 +551,10 @@ void MM_VotePassRuleset()
 
 bool MM_VoteValRuleset(gentity_t *ent)
 {
-	ruleset_t desired_rs = RS_IndexFromString(MM_VoteArgv(2));
+	ruleset_t desired_rs = RS_IndexFromString(vote::MM_VoteArgv(2));
 	if (desired_rs == ruleset_t::RS_NONE)
 	{
-		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid ruleset: '{}'\n", MM_VoteArgv(2));
+		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid ruleset: '{}'\n", vote::MM_VoteArgv(2));
 		std::string votable_list = MM_GetVotableRulesetsList();
 		if (!votable_list.empty())
 			gi.LocClient_Print(ent, PRINT_HIGH, "Valid rulesets are: {}\n", votable_list.c_str());
@@ -626,27 +588,27 @@ void MM_VotePassMap()
 	if (!MM_IsSafeMapToken(level.vote_state.arg.c_str()) || level.vote_state.arg.length() >= sizeof(level.nextmap))
 	{
 		gi.LocBroadcast_Print(PRINT_HIGH, "Map vote failed: invalid map name.\n");
-		MM_MarkExecutingVoteFailed();
+		vote::MM_MarkExecutingVoteFailed();
 		return;
 	}
 
-	Q_strlcpy(level.nextmap, level.vote_state.arg.c_str(), sizeof(level.nextmap));
+	muffmode::CopyString(level.nextmap, level.vote_state.arg);
 	MuffModeLog("DEBUG", "Vote_Pass_Map: queuing gamemap for '%s'", level.nextmap);
 	gi.AddCommandString(G_Fmt("gamemap \"{}\"\n", level.nextmap).data());
 }
 
 bool MM_VoteValMap(gentity_t *ent)
 {
-	if (MM_VoteArgc() < 3 || !MM_VoteArgv(2)[0])
+	if (vote::MM_VoteArgc() < 3 || !vote::MM_VoteArgv(2)[0])
 	{
-		MM_PrintAvailableMaps(ent);
+		vote::MM_PrintAvailableMaps(ent);
 		return false;
 	}
 
-	if (!MM_IsMapValidImpl(MM_VoteArgv(2)))
+	if (!vote::MM_IsMapValidImpl(vote::MM_VoteArgv(2)))
 	{
 		gi.LocClient_Print(ent, PRINT_HIGH, "Unknown map.\n");
-		MM_PrintAvailableMaps(ent);
+		vote::MM_PrintAvailableMaps(ent);
 		return false;
 	}
 
@@ -655,7 +617,7 @@ bool MM_VoteValMap(gentity_t *ent)
 
 bool MM_IsMapValid(const char *mapname)
 {
-	return MM_IsMapValidImpl(mapname);
+	return vote::MM_IsMapValidImpl(mapname);
 }
 
 void MM_VotePassRestartMatch()
@@ -673,7 +635,7 @@ bool MM_VoteValRandom(gentity_t *ent)
 {
 	int arg = 0;
 
-	if (!MM_ParseVoteNonNegativeInt(MM_VoteArgv(2), arg) || arg > 100 || arg < 2)
+	if (!vote::MM_ParseVoteNonNegativeInt(vote::MM_VoteArgv(2), arg) || arg > 100 || arg < 2)
 	{
 		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid random value. Use a number from 2 to 100.\n");
 		return false;
@@ -690,12 +652,12 @@ void MM_VotePassCointoss()
 void MM_VotePassRandom()
 {
 	int arg = 0;
-	if (!MM_ParseStoredVoteNonNegativeInt(arg, "Random"))
+	if (!vote::MM_ParseStoredVoteNonNegativeInt(arg, "Random"))
 		return;
 	if (arg < 2 || arg > 100)
 	{
 		gi.LocBroadcast_Print(PRINT_HIGH, "Random vote failed: stored vote argument is out of range.\n");
-		MM_MarkExecutingVoteFailed();
+		vote::MM_MarkExecutingVoteFailed();
 		return;
 	}
 
@@ -705,7 +667,7 @@ void MM_VotePassRandom()
 void MM_VotePassUnlagged()
 {
 	int argi = 0;
-	if (!MM_ParseStoredVoteBinaryInt(argi, "Unlagged"))
+	if (!vote::MM_ParseStoredVoteBinaryInt(argi, "Unlagged"))
 		return;
 
 	gi.LocBroadcast_Print(PRINT_HIGH, "Lag compensation has been {}.\n", argi ? "ENABLED" : "DISABLED");
@@ -717,7 +679,7 @@ bool MM_VoteValUnlagged(gentity_t *ent)
 {
 	int arg = 0;
 
-	if (!MM_ParseVoteNonNegativeInt(MM_VoteArgv(2), arg) || (arg != 0 && arg != 1))
+	if (!vote::MM_ParseVoteNonNegativeInt(vote::MM_VoteArgv(2), arg) || (arg != 0 && arg != 1))
 	{
 		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid argument. Use 0 to disable or 1 to enable lag compensation.\n");
 		return false;
@@ -736,12 +698,12 @@ bool MM_VoteValUnlagged(gentity_t *ent)
 void MM_VotePassTimelimit()
 {
 	int argi = 0;
-	if (!MM_ParseStoredVoteNonNegativeInt(argi, "Time limit"))
+	if (!vote::MM_ParseStoredVoteNonNegativeInt(argi, "Time limit"))
 		return;
 	if (argi > 1440)
 	{
 		gi.LocBroadcast_Print(PRINT_HIGH, "Time limit vote failed: stored vote argument is out of range.\n");
-		MM_MarkExecutingVoteFailed();
+		vote::MM_MarkExecutingVoteFailed();
 		return;
 	}
 
@@ -757,7 +719,7 @@ bool MM_VoteValTimelimit(gentity_t *ent)
 {
 	int argi = 0;
 
-	if (!MM_ParseVoteNonNegativeInt(MM_VoteArgv(2), argi) || argi > 1440)
+	if (!vote::MM_ParseVoteNonNegativeInt(vote::MM_VoteArgv(2), argi) || argi > 1440)
 	{
 		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid time limit value.\n");
 		return false;
@@ -774,7 +736,7 @@ bool MM_VoteValTimelimit(gentity_t *ent)
 void MM_VotePassScorelimit()
 {
 	int argi = 0;
-	if (!MM_ParseStoredVoteNonNegativeInt(argi, "Score limit"))
+	if (!vote::MM_ParseStoredVoteNonNegativeInt(argi, "Score limit"))
 		return;
 
 	if (argi)
@@ -789,7 +751,7 @@ bool MM_VoteValScorelimit(gentity_t *ent)
 {
 	int argi = 0;
 
-	if (!MM_ParseVoteNonNegativeInt(MM_VoteArgv(2), argi))
+	if (!vote::MM_ParseVoteNonNegativeInt(vote::MM_VoteArgv(2), argi))
 	{
 		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid score limit value.\n");
 		return false;
@@ -807,7 +769,7 @@ bool MM_VoteValScorelimit(gentity_t *ent)
 void MM_VotePassPowerups()
 {
 	int argi = 0;
-	if (!MM_ParseStoredVoteBinaryInt(argi, "Powerups"))
+	if (!vote::MM_ParseStoredVoteBinaryInt(argi, "Powerups"))
 		return;
 
 	gi.LocBroadcast_Print(PRINT_HIGH, "Powerups have been {}.\n", argi ? "ENABLED" : "DISABLED");
@@ -815,14 +777,14 @@ void MM_VotePassPowerups()
 	gi.cvar_forceset("g_no_powerups", argi ? "0" : "1");
 
 	// Restart the map so powerup changes take effect immediately.
-	MM_RestartCurrentMapForVote("Powerups");
+	vote::MM_RestartCurrentMapForVote("Powerups");
 }
 
 bool MM_VoteValPowerups(gentity_t *ent)
 {
 	int arg = 0;
 
-	if (!MM_ParseVoteNonNegativeInt(MM_VoteArgv(2), arg) || (arg != 0 && arg != 1))
+	if (!vote::MM_ParseVoteNonNegativeInt(vote::MM_VoteArgv(2), arg) || (arg != 0 && arg != 1))
 	{
 		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid argument. Use 0 to disable or 1 to enable powerups.\n");
 		return false;
@@ -843,7 +805,7 @@ bool MM_VoteValPowerups(gentity_t *ent)
 void MM_VotePassTechs()
 {
 	int argi = 0;
-	if (!MM_ParseStoredVoteBinaryInt(argi, "Techs"))
+	if (!vote::MM_ParseStoredVoteBinaryInt(argi, "Techs"))
 		return;
 
 	gi.LocBroadcast_Print(PRINT_HIGH, "Techs have been {}.\n", argi ? "ENABLED" : "DISABLED");
@@ -851,7 +813,7 @@ void MM_VotePassTechs()
 	gi.cvar_forceset("g_allow_techs", argi ? "1" : "0");
 
 	// Restart the map so tech changes take effect immediately.
-	MM_RestartCurrentMapForVote("Techs");
+	vote::MM_RestartCurrentMapForVote("Techs");
 }
 
 bool MM_VoteValTechs(gentity_t *ent)
@@ -864,7 +826,7 @@ bool MM_VoteValTechs(gentity_t *ent)
 
 	int arg = 0;
 
-	if (!MM_ParseVoteNonNegativeInt(MM_VoteArgv(2), arg) || (arg != 0 && arg != 1))
+	if (!vote::MM_ParseVoteNonNegativeInt(vote::MM_VoteArgv(2), arg) || (arg != 0 && arg != 1))
 	{
 		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid argument. Use 0 to disable or 1 to enable techs.\n");
 		return false;
@@ -885,7 +847,7 @@ bool MM_VoteValTechs(gentity_t *ent)
 void MM_VotePassFriendlyFire()
 {
 	int argi = 0;
-	if (!MM_ParseStoredVoteBinaryInt(argi, "Friendly fire"))
+	if (!vote::MM_ParseStoredVoteBinaryInt(argi, "Friendly fire"))
 		return;
 
 	gi.LocBroadcast_Print(PRINT_HIGH, "Friendly fire has been {}.\n", argi ? "ENABLED" : "DISABLED");
@@ -903,7 +865,7 @@ bool MM_VoteValFriendlyFire(gentity_t *ent)
 
 	int arg = 0;
 
-	if (!MM_ParseVoteNonNegativeInt(MM_VoteArgv(2), arg) || (arg != 0 && arg != 1))
+	if (!vote::MM_ParseVoteNonNegativeInt(vote::MM_VoteArgv(2), arg) || (arg != 0 && arg != 1))
 	{
 		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid argument. Use 0 to disable or 1 to enable friendly fire.\n");
 		return false;
@@ -1207,21 +1169,22 @@ void MM_CmdCallVote(gentity_t *ent)
 		MuffModeLog("DEBUG", "Cmd_CallVote_f: argv(%d)=%s", i, gi.argv(i));
 
 	// Formulate list of allowed voting commands.
-	char vstr[1024] = " ";
+	constexpr size_t MAX_VOTE_COMMAND_LIST = 1024;
+	std::string vote_command_list = " ";
+	vote_command_list.reserve(128);
 	for (vcmds_t *cc = vote_cmds; cc->name; ++cc)
 	{
 		if (g_vote_flags->integer & cc->flag)
 			continue;
 
-		std::string option = std::string(G_Fmt("{} ", cc->name));
-		if (Q_strlcat(vstr, option.c_str(), sizeof(vstr)) >= sizeof(vstr))
-		{
-			vstr[sizeof(vstr) - 1] = '\0';
+		const std::string option = G_Fmt("{} ", cc->name).data();
+		if (vote_command_list.size() + option.size() >= MAX_VOTE_COMMAND_LIST)
 			break;
-		}
+
+		vote_command_list += option;
 	}
 
-	if (!g_allow_voting->integer || strlen(vstr) <= 1)
+	if (!g_allow_voting->integer || vote_command_list.size() <= 1)
 	{
 		gi.LocClient_Print(ent, PRINT_HIGH, "Voting not allowed here.\n");
 		return;
@@ -1257,7 +1220,7 @@ void MM_CmdCallVote(gentity_t *ent)
 
 	if (gi.argc() < 2)
 	{
-		gi.LocClient_Print(ent, PRINT_HIGH, "Usage: {} <command> <params>\nValid Voting Commands:{}\n", gi.argv(0), vstr);
+		gi.LocClient_Print(ent, PRINT_HIGH, "Usage: {} <command> <params>\nValid Voting Commands:{}\n", gi.argv(0), vote_command_list.c_str());
 		return;
 	}
 
@@ -1301,7 +1264,7 @@ void MM_CmdVote(gentity_t *ent)
 	}
 
 	int vote = 0;
-	if (!MM_ParseVoteChoice(gi.argv(1), vote))
+	if (!vote::MM_ParseVoteChoice(gi.argv(1), vote))
 	{
 		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid vote. Use yes or no.\n");
 		return;
@@ -1352,18 +1315,18 @@ bool ValidateMenuVoteCommand(gentity_t *ent, vcmds_t *cc, const char *arg)
 
 vcmds_t vote_cmds[] = {
 	{"map",					MM_VoteValMap,				MM_VotePassMap,				1,		2,	"[mapname]",						"changes to the specified map"},
-	{"nextmap",				MM_VoteValNone,				MM_VotePassNextMap,			2,		1,	"",									"move to the next map in the rotation"},
-	{"restart",				MM_VoteValNone,				MM_VotePassRestartMatch,	4,		1,	"",									"restarts the current match"},
+	{"nextmap",				vote::MM_VoteValNone,		MM_VotePassNextMap,			2,		1,	"",									"move to the next map in the rotation"},
+	{"restart",				vote::MM_VoteValNone,		MM_VotePassRestartMatch,	4,		1,	"",									"restarts the current match"},
 	{"gametype",			MM_VoteValGametype,			MM_VotePassGametype,		8,		2,	"<gametype>",						"changes the current gametype"},
 	{"timelimit",			MM_VoteValTimelimit,		MM_VotePassTimelimit,		16,		2,	"<0..$>",							"alters the match time limit, 0 for no time limit"},
 	{"scorelimit",			MM_VoteValScorelimit,		MM_VotePassScorelimit,		32,		2,	"<0..$>",							"alters the match score limit, 0 for no score limit"},
 	{"fraglimit",			MM_VoteValScorelimit,		MM_VotePassScorelimit,		32,		2,	"<0..$>",							"alters the match score limit, 0 for no score limit (alias for scorelimit)"},
 	{"shuffle",				MM_VoteValShuffleTeams,		MM_VotePassShuffleTeams,	64,		1,	"",									"shuffles teams"},
 	{"unlagged",			MM_VoteValUnlagged,			MM_VotePassUnlagged,		128,	2,	"<0/1>",							"enables or disables lag compensation"},
-	{"cointoss",			MM_VoteValNone,				MM_VotePassCointoss,		256,	1,	"",									"invokes a HEADS or TAILS cointoss"},
+	{"cointoss",			vote::MM_VoteValNone,		MM_VotePassCointoss,		256,	1,	"",									"invokes a HEADS or TAILS cointoss"},
 	{"random",				MM_VoteValRandom,			MM_VotePassRandom,			512,	2,	"<2-100>",							"randomly selects a number from 2 to specified value"},
 	{"balance",				MM_VoteValBalanceTeams,		MM_VotePassBalanceTeams,	1024,	1,	"",									"balance teams without shuffling"},
-	{"ruleset",				MM_VoteValRuleset,			MM_VotePassRuleset,			2048,	2,	"<q2re|mm|q3a|q2reb|qc>",			"changes the current ruleset"},
+	{"ruleset",				MM_VoteValRuleset,			MM_VotePassRuleset,			2048,	2,	"<q2re|mm|q3a|q2reb|q|qc>",			"changes the current ruleset"},
 	{"powerups",			MM_VoteValPowerups,			MM_VotePassPowerups,		4096,	2,	"<0/1>",							"enables or disables powerups"},
 	{"friendlyfire",		MM_VoteValFriendlyFire,		MM_VotePassFriendlyFire,	8192,	2,	"<0/1>",							"enables or disables friendly fire (team modes only)"},
 	{"techs",				MM_VoteValTechs,			MM_VotePassTechs,			65536,	2,	"<0/1>",							"enables or disables techs (FFA/TDM/CTF only)"},
@@ -1378,7 +1341,7 @@ vcmds_t *FindVoteCmdByName(const char *name)
 
 	for (vcmds_t *cc = vote_cmds; cc->name; ++cc)
 	{
-		if (!Q_strcasecmp(cc->name, name))
+		if (muffmode::CStringEqualsI(cc->name, name))
 			return cc;
 	}
 

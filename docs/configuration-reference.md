@@ -1,6 +1,6 @@
 # MuffMode Configuration Reference
 
-[README](../README.md) | [Player Guide](player-guide.md) | [Server Host Guide](server-host-guide.md) | [Gameplay Reference](gameplay-reference.md)
+[README](../README.md) | [Player Guide](player-guide.md) | [Server Host Guide](server-host-guide.md) | [Gameplay Reference](gameplay-reference.md) | [Rulesets](rulesets.md)
 
 This is the lookup document for MuffMode commands, cvars, vote options, and per-gametype config behavior. It is mainly for server hosts, admins, and competitive organizers who already know what setting they want to change. Players should start with the [Player Guide](player-guide.md); hosts should start with the [Server Host Guide](server-host-guide.md).
 
@@ -120,6 +120,8 @@ Use `callvote <command> [arg]` or `cv <command> [arg]`.
 
 ## Ruleset Values
 
+For player-facing differences between these options, see the [Rulesets](rulesets.md) guide.
+
 | Value | Short name | Ruleset |
 | --- | --- | --- |
 | `1` | `q2re` | Quake II Rerelease |
@@ -194,7 +196,9 @@ Use `callvote <command> [arg]` or `cv <command> [arg]`.
 | `g_dm_respawn_point_min_dist_debug` | `0` | Prints spawn avoidance debug information. |
 | `g_dm_spawn_farthest` | `1` | Spawn point selection mode. |
 | `g_dm_spawnpads` | `1` | Controls deathmatch spawn pads. |
+| `g_auto_ghost_timeout` | `0` | Auto-pauses an active match for disconnected players, in seconds up to `120`; `0` disables. |
 | `g_dm_timeout_length` | `120` | Timeout length in seconds; `0` disables timeouts. |
+| `g_dm_timeout_resume_countdown` | `30` | Countdown announced before a paused match resumes, in seconds up to `120`; `0` resumes immediately. |
 | `g_round_countdown` | `10` | Round countdown time. |
 | `g_warmup_countdown` | `10` | Warmup countdown time. |
 | `g_warmup_ready_percentage` | `0.51f` | Ready percentage required to start. |

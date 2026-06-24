@@ -4,7 +4,10 @@
 #include "g_local.h"
 #include "muffmode/mm_horde.h"
 
+#include <algorithm>
+#include <array>
 #include <climits>
+#include <iterator>
 
 // Late-wave tuning cvars are referenced by helpers defined before the main extern block below.
 extern cvar_t *g_horde_content_peak_wave;
@@ -12,7 +15,7 @@ extern cvar_t *g_horde_late_wave_factor;
 extern cvar_t *g_horde_weight_floor;
 extern cvar_t *g_horde_theme_min_monsters;
 
-namespace {
+namespace muffmode::horde {
 // Themed-wave categories. A monster row may carry several (bitwise OR); 0 = no theme.
 enum : uint32_t {
 	HCAT_SWARM  = 1 << 0,	// sheer numbers of cheap/light bodies
@@ -23,7 +26,7 @@ enum : uint32_t {
 };
 
 // Weighted spawn table row. monsters[] uses drops[] for death loot; items[] uses classname only.
-struct weighted_item_t {
+struct WeightedItem {
 	const char             *classname;
 	int32_t                 min_level = -1, max_level = -1;
 	float                   weight = 1.0f;
@@ -33,7 +36,7 @@ struct weighted_item_t {
 	uint32_t                categories = 0;	// HCAT_* mask for themed waves
 };
 
-constexpr weighted_item_t items[] = {
+constexpr WeightedItem kItems[] = {
 	{ "item_health_small" },
 
 	{ "item_health", -1, -1, 1.0f, 0 },
@@ -64,7 +67,7 @@ constexpr weighted_item_t items[] = {
 // Tuned for a 12-wave arc: soldiers -> gekks/flyers -> mid-tier -> heavies (8-10) -> commander finale (11-12).
 // 1-point chaff stays available all game so leftover budget points are always spendable.
 // Soldier-family weights are kept low so waves 2-4 diversify quickly (soldier share ~73/61/46%).
-constexpr weighted_item_t monsters[] = {
+constexpr WeightedItem kMonsters[] = {
 	// chaff
 	{ "monster_soldier_light", -1, -1, 1.00f, -0.04f, { IT_HEALTH_SMALL }, 1, HCAT_SWARM },
 	{ "monster_soldier", -1, -1, 0.75f, -0.03f, { IT_AMMO_BULLETS_SMALL, IT_HEALTH_SMALL }, 1, HCAT_SWARM },
@@ -104,12 +107,12 @@ constexpr weighted_item_t monsters[] = {
 };
 
 // level.horde_wave_roster is a per-wave bitmask over indices into monsters[].
-static_assert(q_countof(monsters) <= 32, "horde_wave_roster bitmask supports at most 32 monster rows");
+static_assert(std::size(kMonsters) <= 32, "horde_wave_roster bitmask supports at most 32 monster rows");
 
 // True once a wave runs past the tuned content curve (default wave 12), whether that's reached via
 // an endless run (roundlimit 0) or a high finite roundlimit. Drives the budget taper, weight floor,
 // and item clamp; never alters level.round_number (HUD/scoring keep the true wave number).
-static bool Horde_IsLateWave()
+bool IsLateWave()
 {
 	return GT(GT_HORDE) && level.round_number > g_horde_content_peak_wave->integer;
 }
@@ -117,12 +120,12 @@ static bool Horde_IsLateWave()
 // Count monsters[] rows a theme could actually spawn at `wave`: matching category, valid level
 // range, and positive effective weight (with the late-wave floor, matching Horde_PickMonster). Used
 // to keep a theme banner from showing when the theme has no real bodies at this wave.
-static int Horde_CountThemeCandidates(uint32_t category, int wave)
+int CountThemeCandidates(uint32_t category, int wave)
 {
 	const bool late_wave = GT(GT_HORDE) && wave > g_horde_content_peak_wave->integer;
 	int        count = 0;
 
-	for (auto &monster : monsters) {
+	for (const auto &monster : kMonsters) {
 		if (monster.min_level != -1 && wave < monster.min_level)
 			continue;
 		if (monster.max_level != -1 && wave > monster.max_level)
@@ -145,46 +148,46 @@ static int Horde_CountThemeCandidates(uint32_t category, int wave)
 // Themed-wave definitions. A themed wave filters the monster pool to one category, scales the
 // spawn budget, and shows a banner. min_wave keeps a theme out of waves where its monsters
 // don't exist yet; the per-monster min_level still applies on top.
-enum class horde_theme_t : int8_t { NONE = 0, SWARM, AERIAL, HEAVY, MELEE, INFESTATION };
+enum class Theme : int8_t { None = 0, Swarm, Aerial, Heavy, Melee, Infestation };
 
-struct horde_theme_def_t {
-	horde_theme_t theme;
+struct ThemeDefinition {
+	Theme         theme;
 	uint32_t      category;		// HCAT_* this theme allows
 	int32_t       min_wave;		// earliest wave this theme can appear
 	float         budget_mult;	// >1 = more, cheaper bodies; <1 = fewer, tougher
 	const char   *announce;		// center-print banner
 };
 
-constexpr horde_theme_def_t horde_themes[] = {
-	{ horde_theme_t::SWARM,       HCAT_SWARM,  3, 1.30f, "THE SWARM APPROACHES!" },
-	{ horde_theme_t::AERIAL,      HCAT_AERIAL, 4, 1.00f, "AERIAL ASSAULT!" },
-	{ horde_theme_t::HEAVY,       HCAT_HEAVY,  7, 0.80f, "HEAVY ASSAULT!" },
-	{ horde_theme_t::MELEE,       HCAT_MELEE,  4, 1.10f, "THEY'RE CLOSING IN!" },
-	{ horde_theme_t::INFESTATION, HCAT_INFEST, 4, 1.15f, "INFESTATION!" },
+constexpr ThemeDefinition kThemes[] = {
+	{ Theme::Swarm,       HCAT_SWARM,  3, 1.30f, "THE SWARM APPROACHES!" },
+	{ Theme::Aerial,      HCAT_AERIAL, 4, 1.00f, "AERIAL ASSAULT!" },
+	{ Theme::Heavy,       HCAT_HEAVY,  7, 0.80f, "HEAVY ASSAULT!" },
+	{ Theme::Melee,       HCAT_MELEE,  4, 1.10f, "THEY'RE CLOSING IN!" },
+	{ Theme::Infestation, HCAT_INFEST, 4, 1.15f, "INFESTATION!" },
 };
 
-static const horde_theme_def_t *Horde_FindTheme(horde_theme_t theme)
+const ThemeDefinition *FindTheme(Theme theme)
 {
-	if (theme == horde_theme_t::NONE)
+	if (theme == Theme::None)
 		return nullptr;
-	for (auto &def : horde_themes)
+	for (const auto &def : kThemes)
 		if (def.theme == theme)
 			return &def;
 	return nullptr;
 }
 
-static uint32_t Horde_ActiveThemeCategory()
+uint32_t ActiveThemeCategory()
 {
-	const horde_theme_def_t *def = Horde_FindTheme(static_cast<horde_theme_t>(level.horde_wave_theme));
+	const ThemeDefinition *def = FindTheme(static_cast<Theme>(level.horde_wave_theme));
 	return def ? def->category : 0;
 }
 
-struct picked_item_t {
-	const weighted_item_t *item;
-	float                  weight;
+struct PickedItem {
+	const WeightedItem *item;
+	float               weight;
 };
 
-gentity_t *FindClosestPlayerToPoint(vec3_t point)
+gentity_t *ClosestPlayerToPoint(vec3_t point)
 {
 	float      bestplayerdistance = 9999999;
 	gentity_t *closest = nullptr;
@@ -205,17 +208,17 @@ gentity_t *FindClosestPlayerToPoint(vec3_t point)
 	return closest;
 }
 
-gitem_t *Horde_PickItem()
+gitem_t *PickItem()
 {
-	static std::array<picked_item_t, q_countof(items)> picked_items;
-	size_t                                              num_picked_items = 0;
-	float                                               total_weight = 0;
+	static std::array<PickedItem, std::size(kItems)> picked_items;
+	size_t                                           num_picked_items = 0;
+	float                                            total_weight = 0;
 
 	// Past the content peak, freeze the loot curve at the peak so late waves keep dropping the
 	// early/mid weapons instead of only top-tier gear. Waves <= peak use the true wave number.
-	const int loot_wave = Horde_IsLateWave() ? g_horde_content_peak_wave->integer : level.round_number;
+	const int loot_wave = IsLateWave() ? g_horde_content_peak_wave->integer : level.round_number;
 
-	for (auto &item : items) {
+	for (const auto &item : kItems) {
 		if (item.min_level != -1 && loot_wave < item.min_level)
 			continue;
 		if (item.max_level != -1 && loot_wave > item.max_level)
@@ -243,7 +246,7 @@ gitem_t *Horde_PickItem()
 	return nullptr;
 }
 
-static gitem_t *Horde_PickDropItem(const weighted_item_t *monster_row)
+gitem_t *PickDropItem(const WeightedItem *monster_row)
 {
 	if (monster_row) {
 		item_id_t choices[4];
@@ -258,32 +261,32 @@ static gitem_t *Horde_PickDropItem(const weighted_item_t *monster_row)
 			return GetItemByIndex(choices[irandom(num_choices)]);
 	}
 
-	return Horde_PickItem();
+	return PickItem();
 }
 
 // Champions always drop a strong reward: armor, adrenaline, or an occasional powerup.
-static gitem_t *Horde_PickChampionDrop()
+gitem_t *PickChampionDrop()
 {
 	static constexpr item_id_t champion_drops[] = {
 		IT_ARMOR_COMBAT, IT_ARMOR_COMBAT, IT_ARMOR_BODY,
 		IT_ADRENALINE, IT_POWERUP_DOUBLE, IT_POWERUP_QUAD,
 	};
 
-	gitem_t *item = GetItemByIndex(champion_drops[irandom(q_countof(champion_drops))]);
-	return item ? item : Horde_PickItem();
+	gitem_t *item = GetItemByIndex(random_element(champion_drops));
+	return item ? item : PickItem();
 }
 
-static const char *Horde_PickMonster(weighted_item_t const **out_row, int remaining_points, uint32_t theme_category, uint32_t roster_mask)
+const char *PickMonster(const WeightedItem **out_row, int remaining_points, uint32_t theme_category, uint32_t roster_mask)
 {
-	static std::array<picked_item_t, q_countof(monsters)> picked_monsters;
-	size_t                                                num_picked_monsters = 0;
-	float                                                 total_weight = 0;
-	const bool                                            late_wave = Horde_IsLateWave();
+	static std::array<PickedItem, std::size(kMonsters)> picked_monsters;
+	size_t                                              num_picked_monsters = 0;
+	float                                               total_weight = 0;
+	const bool                                          late_wave = IsLateWave();
 
 	if (out_row)
 		*out_row = nullptr;
 
-	for (auto &monster : monsters) {
+	for (const auto &monster : kMonsters) {
 		if (monster.min_level != -1 && level.round_number < monster.min_level)
 			continue;
 		if (monster.max_level != -1 && level.round_number > monster.max_level)
@@ -292,7 +295,7 @@ static const char *Horde_PickMonster(weighted_item_t const **out_row, int remain
 			continue;
 		if (theme_category && !(monster.categories & theme_category))
 			continue;
-		if (roster_mask && !(roster_mask & (1u << static_cast<size_t>(&monster - monsters))))
+		if (roster_mask && !(roster_mask & (1u << static_cast<size_t>(&monster - kMonsters))))
 			continue;
 
 		// clamp so "-1 = always available" rows ramp from wave 1, not wave -1
@@ -328,15 +331,15 @@ static const char *Horde_PickMonster(weighted_item_t const **out_row, int remain
 
 // When weighted pick finds nothing (e.g. all weights zero), use the highest-tier affordable row still
 // valid for this wave. theme_category (0 = any) keeps a themed wave's fallback on-category.
-static const char *Horde_PickMonsterFallback(weighted_item_t const **out_row, int remaining_points, uint32_t theme_category = 0)
+const char *PickMonsterFallback(const WeightedItem **out_row, int remaining_points, uint32_t theme_category = 0)
 {
-	const weighted_item_t *choice = nullptr;
+	const WeightedItem *choice = nullptr;
 
 	if (out_row)
 		*out_row = nullptr;
 	int32_t                    best_cap = -1;
 
-	for (auto &monster : monsters) {
+	for (const auto &monster : kMonsters) {
 		if (monster.min_level != -1 && level.round_number < monster.min_level)
 			continue;
 		if (monster.spawn_points > remaining_points)
@@ -356,7 +359,7 @@ static const char *Horde_PickMonsterFallback(weighted_item_t const **out_row, in
 
 	if (!choice) {
 		best_cap = -1;
-		for (auto &monster : monsters) {
+		for (const auto &monster : kMonsters) {
 			if (monster.min_level != -1 && level.round_number < monster.min_level)
 				continue;
 			if (monster.spawn_points > remaining_points)
@@ -378,33 +381,33 @@ static const char *Horde_PickMonsterFallback(weighted_item_t const **out_row, in
 	return choice ? choice->classname : nullptr;
 }
 
-static const char *Horde_PickMonsterForWave(weighted_item_t const **out_row, int remaining_points)
+const char *PickMonsterForWave(const WeightedItem **out_row, int remaining_points)
 {
 	// Themed waves and roster waves are mutually exclusive (BeginWave only builds a roster when the
 	// theme is NONE).
-	const uint32_t theme_category = Horde_ActiveThemeCategory();
+	const uint32_t theme_category = ActiveThemeCategory();
 
 	// Themed waves are strict: a category banner means every spawn must be on-category. Try the
 	// weighted pick, then a category-respecting fallback; never fall through to the unrestricted
 	// pool. Returning null ends the wave cleanly (leftover budget forfeited) instead of spawning an
 	// off-theme body under a themed banner.
 	if (theme_category) {
-		if (const char *pick = Horde_PickMonster(out_row, remaining_points, theme_category, 0))
+		if (const char *pick = PickMonster(out_row, remaining_points, theme_category, 0))
 			return pick;
-		return Horde_PickMonsterFallback(out_row, remaining_points, theme_category);
+		return PickMonsterFallback(out_row, remaining_points, theme_category);
 	}
 
 	// Non-themed waves bias by this wave's roster, then fall through to the unrestricted pool and the
 	// fallback picker so a wave can never stall.
 	if (level.horde_wave_roster)
-		if (const char *pick = Horde_PickMonster(out_row, remaining_points, 0, level.horde_wave_roster))
+		if (const char *pick = PickMonster(out_row, remaining_points, 0, level.horde_wave_roster))
 			return pick;
 
-	if (const char *pick = Horde_PickMonster(out_row, remaining_points, 0, 0))
+	if (const char *pick = PickMonster(out_row, remaining_points, 0, 0))
 		return pick;
 
 	static int32_t fallback_warn_wave = -1;
-	const char    *fallback = Horde_PickMonsterFallback(out_row, remaining_points);
+	const char    *fallback = PickMonsterFallback(out_row, remaining_points);
 
 	if (fallback && fallback_warn_wave != level.round_number) {
 		fallback_warn_wave = level.round_number;
@@ -413,7 +416,9 @@ static const char *Horde_PickMonsterForWave(weighted_item_t const **out_row, int
 
 	return fallback;
 }
-} // namespace
+} // namespace muffmode::horde
+
+namespace horde = muffmode::horde;
 
 extern cvar_t *g_horde_starting_wave;
 extern cvar_t *g_horde_points_base;
@@ -451,18 +456,23 @@ extern cvar_t *g_horde_theme_min_wave;
 extern cvar_t *g_horde_wave_variety;
 extern cvar_t *g_horde_wave_min_types;
 
-static bool HordeActive()
+namespace muffmode::horde {
+
+constexpr int kMaxMonsterMarkerSlots = POI_HORDE_MONSTER_END - POI_HORDE_MONSTER_0 + 1;
+static_assert(kMaxMonsterMarkerSlots > 0, "Horde monster marker POI range must not be empty");
+
+bool Active()
 {
 	return g_gametype->integer == static_cast<int>(GT_HORDE);
 }
 
-static gclient_t *Horde_SortedConnectedClient(size_t slot)
+gclient_t *SortedConnectedClient(size_t slot)
 {
-	if (slot >= q_countof(level.sorted_clients))
+	if (slot >= std::size(level.sorted_clients))
 		return nullptr;
 
 	const int client_num = level.sorted_clients[slot];
-	if (client_num < 0 || client_num >= (int)game.maxclients)
+	if (client_num < 0 || client_num >= static_cast<int>(game.maxclients))
 		return nullptr;
 
 	gclient_t *client = &game.clients[client_num];
@@ -472,12 +482,12 @@ static gclient_t *Horde_SortedConnectedClient(size_t slot)
 	return client;
 }
 
-static int Horde_MarkMonsterSlots()
+int MonsterMarkerSlots()
 {
-	return clamp(g_horde_mark_monsters_max->integer, 1, static_cast<int>(POI_HORDE_MONSTER_END - POI_HORDE_MONSTER_0 + 1));
+	return clamp(g_horde_mark_monsters_max->integer, 1, kMaxMonsterMarkerSlots);
 }
 
-static bool Horde_ClientWantsMonsterMarkers(gclient_t *cl)
+bool ClientWantsMonsterMarkers(gclient_t *cl)
 {
 	if (!cl || !cl->pers.connected)
 		return false;
@@ -487,7 +497,7 @@ static bool Horde_ClientWantsMonsterMarkers(gclient_t *cl)
 	return cl->eliminated && cl->sess.team != TEAM_SPECTATOR;
 }
 
-static bool Horde_IsLivingMonster(const gentity_t *ent)
+bool IsLivingMonster(const gentity_t *ent)
 {
 	if (!ent->inuse || !(ent->svflags & SVF_MONSTER))
 		return false;
@@ -499,7 +509,7 @@ static bool Horde_IsLivingMonster(const gentity_t *ent)
 	return true;
 }
 
-static void Horde_SendMonsterPOI(gentity_t *player, int slot, const vec3_t &pos)
+void SendMonsterPoi(gentity_t *player, int slot, const vec3_t &pos)
 {
 	gi.WriteByte(svc_poi);
 	gi.WriteShort(static_cast<uint16_t>(POI_HORDE_MONSTER_0 + slot));
@@ -511,7 +521,7 @@ static void Horde_SendMonsterPOI(gentity_t *player, int slot, const vec3_t &pos)
 	gi.unicast(player, false);
 }
 
-static void Horde_ClearMonsterPOI(gentity_t *player, int slot)
+void ClearMonsterPoi(gentity_t *player, int slot)
 {
 	gi.WriteByte(svc_poi);
 	gi.WriteShort(static_cast<uint16_t>(POI_HORDE_MONSTER_0 + slot));
@@ -523,29 +533,29 @@ static void Horde_ClearMonsterPOI(gentity_t *player, int slot)
 	gi.unicast(player, false);
 }
 
-static void Horde_ClearMonsterPOIsForClient(gentity_t *player)
+void ClearMonsterPoisForClient(gentity_t *player)
 {
-	const int slots = Horde_MarkMonsterSlots();
+	const int slots = MonsterMarkerSlots();
 
 	for (int slot = 0; slot < slots; slot++)
-		Horde_ClearMonsterPOI(player, slot);
+		ClearMonsterPoi(player, slot);
 }
 
-static void Horde_ClearMonsterPOIsForAll()
+void ClearMonsterPoisForAll()
 {
 	for (auto ec : active_clients()) {
-		if (!ec->client || !Horde_ClientWantsMonsterMarkers(ec->client))
+		if (!ec->client || !ClientWantsMonsterMarkers(ec->client))
 			continue;
 
-		Horde_ClearMonsterPOIsForClient(ec);
+		ClearMonsterPoisForClient(ec);
 	}
 
 	level.horde_mark_living = -1;
 }
 
-static void MM_Horde_UpdateMonsterMarkers()
+void UpdateMonsterMarkers()
 {
-	if (!HordeActive())
+	if (!Active())
 		return;
 	if (level.round_state != roundst_t::ROUND_IN_PROGRESS)
 		return;
@@ -555,7 +565,7 @@ static void MM_Horde_UpdateMonsterMarkers()
 
 	if (threshold < 1 || living > threshold) {
 		if (level.horde_mark_living >= 0 && level.horde_mark_living <= threshold)
-			Horde_ClearMonsterPOIsForAll();
+			ClearMonsterPoisForAll();
 
 		level.horde_mark_living = static_cast<int16_t>(living);
 		return;
@@ -573,48 +583,48 @@ static void MM_Horde_UpdateMonsterMarkers()
 
 	if (newly_marking) {
 		for (auto ec : active_clients()) {
-			if (!ec->client || !Horde_ClientWantsMonsterMarkers(ec->client))
+			if (!ec->client || !ClientWantsMonsterMarkers(ec->client))
 				continue;
 
 			gi.local_sound(ec, CHAN_AUTO, gi.soundindex("misc/help_marker.wav"), 1.f, ATTN_NORM, 0, GetUnicastKey());
 		}
 	}
 
-	const int max_slots = Horde_MarkMonsterSlots();
-	gentity_t *marked[8] = {};
-	int        num_marked = 0;
+	const int max_slots = MonsterMarkerSlots();
+	std::array<gentity_t *, kMaxMonsterMarkerSlots> marked = {};
+	int                                             num_marked = 0;
 
 	for (size_t i = 1; i < globals.num_entities && num_marked < max_slots; i++) {
 		gentity_t *ent = &g_entities[i];
 
-		if (!Horde_IsLivingMonster(ent))
+		if (!IsLivingMonster(ent))
 			continue;
 
 		marked[num_marked++] = ent;
 	}
 
 	for (auto ec : active_clients()) {
-		if (!ec->client || !Horde_ClientWantsMonsterMarkers(ec->client))
+		if (!ec->client || !ClientWantsMonsterMarkers(ec->client))
 			continue;
 
 		for (int slot = 0; slot < max_slots; slot++) {
 			if (slot < num_marked) {
 				vec3_t pos = marked[slot]->s.origin;
 				pos[2] += marked[slot]->maxs[2] * 0.5f;
-				Horde_SendMonsterPOI(ec, slot, pos);
+				SendMonsterPoi(ec, slot, pos);
 			} else {
-				Horde_ClearMonsterPOI(ec, slot);
+				ClearMonsterPoi(ec, slot);
 			}
 		}
 	}
 }
 
-static int Horde_LivesPerWave()
+int LivesPerWave()
 {
 	return max(1, g_horde_lives->integer);
 }
 
-static bool Horde_ClientIsActiveFighter(gentity_t *ec)
+bool ClientIsActiveFighter(gentity_t *ec)
 {
 	if (!ec->client || !ClientIsPlaying(ec->client))
 		return false;
@@ -626,19 +636,19 @@ static bool Horde_ClientIsActiveFighter(gentity_t *ec)
 	return ec->client->pers.lives > 0;
 }
 
-static bool Horde_HasActiveFighter()
+bool HasActiveFighter()
 {
 	for (auto ec : active_clients()) {
-		if (Horde_ClientIsActiveFighter(ec))
+		if (ClientIsActiveFighter(ec))
 			return true;
 	}
 
 	return false;
 }
 
-static void MM_Horde_GrantWaveLives()
+void GrantWaveLives()
 {
-	const int lives = Horde_LivesPerWave();
+	const int lives = LivesPerWave();
 
 	for (auto ec : active_clients()) {
 		if (!ClientIsPlaying(ec->client))
@@ -656,7 +666,7 @@ static void MM_Horde_GrantWaveLives()
 	}
 }
 
-static float Horde_MultiplierFromFighters(int fighters)
+float MultiplierFromFighters(int fighters)
 {
 	if (!g_horde_player_scale->integer)
 		return 1.f;
@@ -668,7 +678,7 @@ static float Horde_MultiplierFromFighters(int fighters)
 	return 1.f + (fighters - 1) * factor;
 }
 
-static float Horde_MapScaleMultiplier()
+float MapScaleMultiplier()
 {
 	if (!g_horde_map_scale->integer)
 		return 1.f;
@@ -705,6 +715,8 @@ static float Horde_MapScaleMultiplier()
 	return level.horde_map_scale_mult;
 }
 
+} // namespace muffmode::horde
+
 int MM_Horde_CountFighters()
 {
 	int fighters = 0;
@@ -722,8 +734,8 @@ int MM_Horde_CountFighters()
 int MM_Horde_WavePointBudget()
 {
 	const int   fighters = MM_Horde_CountFighters();
-	const float pmult    = Horde_MultiplierFromFighters(fighters);
-	const float msmult   = Horde_MapScaleMultiplier();
+	const float pmult    = horde::MultiplierFromFighters(fighters);
+	const float msmult   = horde::MapScaleMultiplier();
 	const int   base     = g_horde_points_base->integer;
 	const int   per_wave = g_horde_points_per_wave->integer;
 	const int   min_pts  = g_horde_points_min->integer;
@@ -748,7 +760,9 @@ int MM_Horde_WavePointBudget()
 	return max(1, static_cast<int>(budget * pmult * msmult));
 }
 
-static gtime_t Horde_SpawnInterval(bool warmup)
+namespace muffmode::horde {
+
+gtime_t SpawnInterval(bool warmup)
 {
 	if (warmup)
 		return 5_sec;
@@ -758,9 +772,11 @@ static gtime_t Horde_SpawnInterval(bool warmup)
 	return random_time(gtime_t::from_sec(min_sec), gtime_t::from_sec(max_sec));
 }
 
+} // namespace muffmode::horde
+
 bool MM_Horde_ShouldSkipEntitiesReset()
 {
-	return HordeActive();
+	return horde::Active();
 }
 
 int MM_Horde_CountdownWaveNumber()
@@ -790,7 +806,7 @@ void MM_Horde_OnRoundCountdown()
 	if (notGT(GT_HORDE))
 		return;
 
-	MM_Horde_GrantWaveLives();
+	horde::GrantWaveLives();
 }
 
 void MM_Horde_OnRoundStarted()
@@ -802,7 +818,7 @@ void MM_Horde_OnRoundStarted()
 	MM_Horde_BeginWave();
 
 	gi.LocBroadcast_Print(PRINT_CHAT, "Wave {} has begun!\n", level.round_number);
-	if (const horde_theme_def_t *theme = Horde_FindTheme(static_cast<horde_theme_t>(level.horde_wave_theme)))
+	if (const horde::ThemeDefinition *theme = horde::FindTheme(static_cast<horde::Theme>(level.horde_wave_theme)))
 		gi.LocBroadcast_Print(PRINT_CENTER, "{}", theme->announce);
 	else
 		gi.LocBroadcast_Print(PRINT_CENTER, brandom() ? "INCOMING!" : "LOCK AND LOAD!");
@@ -811,7 +827,7 @@ void MM_Horde_OnRoundStarted()
 
 void MM_Horde_NotifyEliminatedSpectator(gentity_t *ent)
 {
-	if (!HordeActive())
+	if (!horde::Active())
 		return;
 	if (level.round_state != roundst_t::ROUND_IN_PROGRESS)
 		return;
@@ -828,7 +844,7 @@ void MM_Horde_NotifyEliminatedSpectator(gentity_t *ent)
 
 void MM_Horde_OnPlayerDeath(gentity_t *ent)
 {
-	if (!HordeActive())
+	if (!horde::Active())
 		return;
 	if (level.round_state != roundst_t::ROUND_IN_PROGRESS)
 		return;
@@ -847,13 +863,13 @@ void MM_Horde_OnPlayerDeath(gentity_t *ent)
 
 bool MM_Horde_CheckAllFightersLost()
 {
-	if (!HordeActive())
+	if (!horde::Active())
 		return false;
 	if (level.round_state != roundst_t::ROUND_IN_PROGRESS)
 		return false;
 	if (level.num_playing_clients < 1)
 		return false;
-	if (Horde_HasActiveFighter())
+	if (horde::HasActiveFighter())
 		return false;
 
 	gi.Broadcast_Print(PRINT_CENTER, "DEFEATED!");
@@ -863,7 +879,7 @@ bool MM_Horde_CheckAllFightersLost()
 
 bool MM_Horde_CheckDesertionDefeat()
 {
-	if (!HordeActive())
+	if (!horde::Active())
 		return false;
 	if (level.match_state != matchst_t::MATCH_IN_PROGRESS)
 		return false;
@@ -877,7 +893,7 @@ bool MM_Horde_CheckDesertionDefeat()
 
 void MM_Horde_CleanWaveTransition()
 {
-	if (!HordeActive())
+	if (!horde::Active())
 		return;
 
 	// Remove dead monster corpses between waves (Horde skips Entities_Reset).
@@ -900,7 +916,7 @@ void MM_Horde_CleanWaveTransition()
 	if (g_debug_monster_kills->integer)
 		level.monsters_registered.fill(nullptr);
 
-	Horde_ClearMonsterPOIsForAll();
+	horde::ClearMonsterPoisForAll();
 	level.horde_mark_time = 0_ms;
 }
 
@@ -922,7 +938,7 @@ bool MM_Horde_UpdateRoundInProgress()
 		return false;
 
 	MM_Horde_RunSpawning();
-	MM_Horde_UpdateMonsterMarkers();
+	horde::UpdateMonsterMarkers();
 
 	if (level.horde_all_spawned && !(level.total_monsters - level.killed_monsters)) {
 		gi.LocBroadcast_Print(PRINT_CENTER, "Monsters eliminated!\n");
@@ -941,7 +957,7 @@ bool MM_Horde_CheckMatchEnd()
 	if (roundlimit->integer <= 0 || level.round_number < roundlimit->integer)
 		return false;
 
-	gclient_t *winner = Horde_SortedConnectedClient(0);
+	gclient_t *winner = horde::SortedConnectedClient(0);
 	if (!winner)
 		QueueIntermission("MATCH ENDED", false, false);
 	else
@@ -953,17 +969,19 @@ bool MM_Horde_CheckMatchEnd()
 
 bool MM_Horde_SkipFragScoreLimit()
 {
-	return HordeActive();
+	return horde::Active();
 }
 
 bool MM_Horde_SkipMercyLimit()
 {
-	return HordeActive();
+	return horde::Active();
 }
 
-static void Horde_PrecacheTableMonsters()
+namespace muffmode::horde {
+
+void PrecacheTableMonsters()
 {
-	for (auto &monster : monsters) {
+	for (const auto &monster : kMonsters) {
 		gentity_t *e = G_Spawn();
 		e->classname = monster.classname;
 		// don't let precache spawns inflate level.total_monsters; it starves
@@ -974,6 +992,8 @@ static void Horde_PrecacheTableMonsters()
 			G_FreeEntity(e);
 	}
 }
+
+} // namespace muffmode::horde
 
 void MM_Horde_Init()
 {
@@ -992,7 +1012,7 @@ void MM_Horde_Init()
 		}
 	}
 
-	Horde_PrecacheTableMonsters();
+	horde::PrecacheTableMonsters();
 }
 
 void MM_Horde_BeginWave()
@@ -1005,27 +1025,27 @@ void MM_Horde_BeginWave()
 	// Pick this wave's theme. Rare (g_horde_theme_chance), never the same as the previous
 	// themed wave, and only themes whose monsters exist by this wave are eligible.
 	{
-		const horde_theme_t prev = static_cast<horde_theme_t>(level.horde_wave_theme);
-		horde_theme_t chosen = horde_theme_t::NONE;
+		const horde::Theme prev = static_cast<horde::Theme>(level.horde_wave_theme);
+		horde::Theme chosen = horde::Theme::None;
 
 		if (g_horde_themed_waves->integer &&
 			level.round_number >= g_horde_theme_min_wave->integer &&
 			frandom() < g_horde_theme_chance->value) {
-			const horde_theme_def_t *eligible[q_countof(horde_themes)];
-			int num_eligible = 0;
+			std::array<const horde::ThemeDefinition *, std::size(horde::kThemes)> eligible = {};
+			size_t num_eligible = 0;
 
-			for (auto &def : horde_themes) {
+			for (const auto &def : horde::kThemes) {
 				if (level.round_number < def.min_wave || def.theme == prev)
 					continue;
 				// Skip themes that can't field enough on-category bodies at this wave, so a banner
 				// never shows for a theme that would spawn off-category fillers (or nothing).
-				if (Horde_CountThemeCandidates(def.category, level.round_number) < g_horde_theme_min_monsters->integer)
+				if (horde::CountThemeCandidates(def.category, level.round_number) < g_horde_theme_min_monsters->integer)
 					continue;
 				eligible[num_eligible++] = &def;
 			}
 
 			if (num_eligible > 0)
-				chosen = eligible[irandom(num_eligible)]->theme;
+				chosen = eligible[irandom(static_cast<int32_t>(num_eligible))]->theme;
 		}
 
 		level.horde_wave_theme = static_cast<int8_t>(chosen);
@@ -1035,12 +1055,15 @@ void MM_Horde_BeginWave()
 	// Non-themed waves only (a themed wave is already a category subset). 0 = unrestricted.
 	level.horde_wave_roster = 0;
 	if (g_horde_wave_variety->integer &&
-		static_cast<horde_theme_t>(level.horde_wave_theme) == horde_theme_t::NONE) {
-		int eligible[q_countof(monsters)], cheap[q_countof(monsters)];
-		int num_eligible = 0, num_cheap = 0, min_cost = INT_MAX;
+		static_cast<horde::Theme>(level.horde_wave_theme) == horde::Theme::None) {
+		std::array<int, std::size(horde::kMonsters)> eligible = {};
+		std::array<int, std::size(horde::kMonsters)> cheap = {};
+		size_t num_eligible = 0;
+		size_t num_cheap = 0;
+		int min_cost = INT_MAX;
 
-		for (size_t i = 0; i < q_countof(monsters); i++) {
-			const weighted_item_t &m = monsters[i];
+		for (size_t i = 0; i < std::size(horde::kMonsters); i++) {
+			const horde::WeightedItem &m = horde::kMonsters[i];
 			if (m.min_level != -1 && level.round_number < m.min_level)
 				continue;
 			if (m.max_level != -1 && level.round_number > m.max_level)
@@ -1050,30 +1073,25 @@ void MM_Horde_BeginWave()
 		}
 
 		const int min_types = max(1, g_horde_wave_min_types->integer);
-		if (num_eligible > min_types) {
-			for (int k = 0; k < num_eligible; k++)
-				if (monsters[eligible[k]].spawn_points == min_cost)
+		if (num_eligible > static_cast<size_t>(min_types)) {
+			for (size_t k = 0; k < num_eligible; k++)
+				if (horde::kMonsters[eligible[k]].spawn_points == min_cost)
 					cheap[num_cheap++] = eligible[k];
 
-			const int roster_size = irandom(min_types, num_eligible + 1);	// inclusive max
+			const int roster_size = irandom(min_types, static_cast<int32_t>(num_eligible) + 1);	// inclusive max
 			uint32_t  mask = 0;
 			int       picked = 0;
 
 			// Guarantee one random cheap grunt so the budget always spends down cleanly.
 			if (num_cheap > 0) {
-				mask |= 1u << cheap[irandom(num_cheap)];
+				mask |= 1u << cheap[irandom(static_cast<int32_t>(num_cheap))];
 				picked = 1;
 			}
 
 			// Shuffle the eligible list, then fill the remaining roster slots from it.
-			for (int i = num_eligible - 1; i > 0; i--) {
-				const int j = irandom(i + 1);
-				const int t = eligible[i];
-				eligible[i] = eligible[j];
-				eligible[j] = t;
-			}
+			std::shuffle(eligible.begin(), eligible.begin() + num_eligible, mt_rand);
 
-			for (int k = 0; k < num_eligible && picked < roster_size; k++) {
+			for (size_t k = 0; k < num_eligible && picked < roster_size; k++) {
 				if (mask & (1u << eligible[k]))
 					continue;	// already seeded the grunt
 				mask |= 1u << eligible[k];
@@ -1092,7 +1110,7 @@ void MM_Horde_BeginWave()
 	level.horde_champion_pending = false;
 	if (g_horde_champions->integer &&
 		level.round_number >= g_horde_champion_min_wave->integer) {
-		if (Horde_IsLateWave()) {
+		if (horde::IsLateWave()) {
 			const int   span = max(1, g_horde_content_peak_wave->integer - g_horde_champion_min_wave->integer + 1);
 			const float rate = g_horde_champion_max_per_run->value * g_horde_champion_chance->value / span;
 
@@ -1121,7 +1139,7 @@ void MM_Horde_BeginWave()
 	level.horde_fighters_snapshotted = static_cast<int8_t>(fighters);
 	level.horde_spawn_points_remaining = MM_Horde_WavePointBudget();
 
-	if (const horde_theme_def_t *theme = Horde_FindTheme(static_cast<horde_theme_t>(level.horde_wave_theme)))
+	if (const horde::ThemeDefinition *theme = horde::FindTheme(static_cast<horde::Theme>(level.horde_wave_theme)))
 		level.horde_spawn_points_remaining =
 			max(1, static_cast<int>(level.horde_spawn_points_remaining * theme->budget_mult));
 
@@ -1137,7 +1155,9 @@ void MM_Horde_BeginWave()
 // against a brush it starts inside), e.g. into the blood pool under the walkway at
 // 1104 208 -633. Lift the origin clear before validating, and nudge as a fallback.
 // Also rejects spots whose ground is liquid. Returns false if the spot is unusable.
-static bool Horde_ValidateSpawnOrigin(vec3_t &origin, const vec3_t &check_mins, const vec3_t &check_maxs)
+namespace muffmode::horde {
+
+bool ValidateSpawnOrigin(vec3_t &origin, const vec3_t &check_mins, const vec3_t &check_maxs)
 {
 	origin[2] += 16.f;
 
@@ -1157,6 +1177,8 @@ static bool Horde_ValidateSpawnOrigin(vec3_t &origin, const vec3_t &check_mins, 
 
 	return true;
 }
+
+} // namespace muffmode::horde
 
 void MM_Horde_RunSpawning()
 {
@@ -1190,9 +1212,9 @@ void MM_Horde_RunSpawning()
 	}
 
 	if (level.horde_monster_spawn_time <= level.time) {
-		const int              remaining = warmup ? INT_MAX : level.horde_spawn_points_remaining;
-		const weighted_item_t *monster_row = nullptr;
-		const char            *monster_class = Horde_PickMonsterForWave(&monster_row, remaining);
+		const int                 remaining = warmup ? INT_MAX : level.horde_spawn_points_remaining;
+		const horde::WeightedItem *monster_row = nullptr;
+		const char               *monster_class = horde::PickMonsterForWave(&monster_row, remaining);
 		if (!monster_class) {
 			if (!warmup)
 				level.horde_all_spawned = true;
@@ -1211,14 +1233,14 @@ void MM_Horde_RunSpawning()
 			constexpr vec3_t horde_check_mins = { -32.f, -32.f, -16.f };
 			constexpr vec3_t horde_check_maxs = {  32.f,  32.f,  64.f };
 			vec3_t spawn_origin = result.spot->s.origin;
-			if (!Horde_ValidateSpawnOrigin(spawn_origin, horde_check_mins, horde_check_maxs)) {
+			if (!horde::ValidateSpawnOrigin(spawn_origin, horde_check_mins, horde_check_maxs)) {
 				// Try a different candidate by excluding the failed spot from selection.
 				// avoid_point is honoured when g_dm_respawn_point_min_dist > 0 (default 256).
 				select_spawn_result_t retry = SelectDeathmatchSpawnPoint(nullptr, result.spot->s.origin, SPAWN_FARTHEST, false, true, false, false);
 				bool retry_ok = false;
 				if (retry.any_valid && retry.spot && retry.spot != result.spot) {
 					spawn_origin = retry.spot->s.origin;
-					if (Horde_ValidateSpawnOrigin(spawn_origin, horde_check_mins, horde_check_maxs)) {
+					if (horde::ValidateSpawnOrigin(spawn_origin, horde_check_mins, horde_check_maxs)) {
 						result = retry;
 						retry_ok = true;
 					}
@@ -1244,7 +1266,7 @@ void MM_Horde_RunSpawning()
 			// stay beefy bullet-sponges without becoming one-shot deleters.
 			const bool is_champion = level.horde_champion_pending && !warmup;
 
-			e->item = is_champion ? Horde_PickChampionDrop() : Horde_PickDropItem(monster_row);
+			e->item = is_champion ? horde::PickChampionDrop() : horde::PickDropItem(monster_row);
 			st = {};
 			st.health_multiplier = is_champion ? g_horde_champion_health_mult->value : 1.0f;
 			ED_CallSpawn(e);
@@ -1292,9 +1314,9 @@ void MM_Horde_RunSpawning()
 				level.horde_champion_pending = false;
 			}
 
-			level.horde_monster_spawn_time = level.time + Horde_SpawnInterval(warmup);
+			level.horde_monster_spawn_time = level.time + horde::SpawnInterval(warmup);
 
-			e->enemy = FindClosestPlayerToPoint(e->s.origin);
+			e->enemy = horde::ClosestPlayerToPoint(e->s.origin);
 			if (e->enemy)
 				FoundTarget(e);
 

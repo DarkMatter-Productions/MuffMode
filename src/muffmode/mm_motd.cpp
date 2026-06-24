@@ -4,19 +4,23 @@
 #include "g_local.h"
 #include "muffmode/mm_command_contracts.h"
 #include "muffmode/mm_motd.h"
+#include "muffmode/mm_util.h"
 
 #include <cstdio>
+#include <optional>
 #include <string>
+#include <utility>
 
-namespace {
-constexpr long MM_MAX_MOTD_FILE_LENGTH = 0x40000;
+namespace muffmode::motd {
 
-bool MM_IsSafeMotdFilename(const char *filename)
+constexpr long k_max_motd_file_length = 0x40000;
+
+bool IsSafeFilename(const char *filename)
 {
 	if (!filename || !*filename)
 		return false;
 
-	if (!strcmp(filename, ".") || !strcmp(filename, ".."))
+	if (CStringEquals(filename, ".") || CStringEquals(filename, ".."))
 		return false;
 
 	size_t length = 0;
@@ -32,7 +36,7 @@ bool MM_IsSafeMotdFilename(const char *filename)
 	return true;
 }
 
-void MM_ClearMOTD()
+void Clear()
 {
 	if (game.motd.empty())
 		return;
@@ -41,18 +45,54 @@ void MM_ClearMOTD()
 	game.motd_mod_count++;
 }
 
-bool MM_IsVerboseLoggingEnabled()
+bool IsVerboseLoggingEnabled()
 {
 	return g_verbose && g_verbose->integer;
 }
-} // namespace
+
+std::optional<std::string> ReadTextFile(FILE *file, const char *name)
+{
+	if (std::fseek(file, 0, SEEK_END) != 0) {
+		gi.Com_PrintFmt("{}: MoTD file seek error: \"{}\"\n", __FUNCTION__, name);
+		return std::nullopt;
+	}
+
+	const long file_length = std::ftell(file);
+	if (file_length < 0) {
+		gi.Com_PrintFmt("{}: MoTD file length error: \"{}\"\n", __FUNCTION__, name);
+		return std::nullopt;
+	}
+
+	if (file_length > k_max_motd_file_length) {
+		gi.Com_PrintFmt("{}: MoTD file length exceeds maximum: \"{}\"\n", __FUNCTION__, name);
+		return std::nullopt;
+	}
+
+	if (std::fseek(file, 0, SEEK_SET) != 0) {
+		gi.Com_PrintFmt("{}: MoTD file rewind error: \"{}\"\n", __FUNCTION__, name);
+		return std::nullopt;
+	}
+
+	std::string contents(static_cast<size_t>(file_length), '\0');
+	if (!contents.empty()) {
+		const size_t read_length = std::fread(&contents[0], 1, contents.size(), file);
+		if (read_length != contents.size()) {
+			gi.Com_PrintFmt("{}: MoTD file read error: \"{}\"\n", __FUNCTION__, name);
+			return std::nullopt;
+		}
+	}
+
+	return contents;
+}
+
+} // namespace muffmode::motd
 
 void MM_LoadMOTD()
 {
 	const char *configured_filename = (g_motd_filename && g_motd_filename->string) ? g_motd_filename->string : "";
 	const char *filename = configured_filename[0] ? configured_filename : "motd.txt";
-	if (!MM_IsSafeMotdFilename(filename)) {
-		MM_ClearMOTD();
+	if (!muffmode::motd::IsSafeFilename(filename)) {
+		muffmode::motd::Clear();
 		gi.Com_PrintFmt("{}: rejecting unsafe MoTD filename: \"{}\"\n", __FUNCTION__, filename);
 		return;
 	}
@@ -60,76 +100,24 @@ void MM_LoadMOTD()
 	std::string path = "baseq2/";
 	path += filename;
 	const char *name = path.c_str();
-	FILE *f = fopen(name, "rb");
-	bool valid = true;
+	auto file = muffmode::OpenFile(name, "rb");
 
-	if (f == nullptr) {
-		MM_ClearMOTD();
-		if (MM_IsVerboseLoggingEnabled())
+	if (!file) {
+		muffmode::motd::Clear();
+		if (muffmode::motd::IsVerboseLoggingEnabled())
 			gi.Com_PrintFmt("{}: MoTD file not found, cleared current message: \"{}\"\n", __FUNCTION__, name);
 		return;
 	}
 
-	char *buffer = nullptr;
-	size_t length = 0;
-
-	if (fseek(f, 0, SEEK_END) != 0) {
-		gi.Com_PrintFmt("{}: MoTD file seek error: \"{}\"\n", __FUNCTION__, name);
-		valid = false;
-	}
-
-	const long file_length = valid ? ftell(f) : -1;
-	if (valid && file_length < 0) {
-		gi.Com_PrintFmt("{}: MoTD file length error: \"{}\"\n", __FUNCTION__, name);
-		valid = false;
-	} else if (valid && file_length > MM_MAX_MOTD_FILE_LENGTH) {
-		gi.Com_PrintFmt("{}: MoTD file length exceeds maximum: \"{}\"\n", __FUNCTION__, name);
-		valid = false;
-	}
-
-	if (valid) {
-		length = static_cast<size_t>(file_length);
-		if (fseek(f, 0, SEEK_SET) != 0) {
-			gi.Com_PrintFmt("{}: MoTD file rewind error: \"{}\"\n", __FUNCTION__, name);
-			valid = false;
-		}
-	}
-
-	if (valid) {
-		buffer = (char *)gi.TagMalloc(length + 1, TAG_LEVEL);
-		if (!buffer) {
-			gi.Com_PrintFmt("{}: MoTD allocation failed: \"{}\"\n", __FUNCTION__, name);
-			valid = false;
-		}
-	}
-
-	if (valid) {
-		if (length) {
-			const size_t read_length = fread(buffer, 1, length, f);
-
-			if (length != read_length) {
-				gi.Com_PrintFmt("{}: MoTD file read error: \"{}\"\n", __FUNCTION__, name);
-				valid = false;
-			}
-		}
-
-		buffer[length] = '\0';
-	}
-	fclose(f);
-
-	if (valid) {
-		game.motd = (const char *)buffer;
+	if (auto contents = muffmode::motd::ReadTextFile(file.get(), name)) {
+		game.motd = std::move(*contents);
 		game.motd_mod_count++;
-		if (MM_IsVerboseLoggingEnabled())
+		if (muffmode::motd::IsVerboseLoggingEnabled())
 			gi.Com_PrintFmt("{}: MotD file verified and loaded: \"{}\"\n", __FUNCTION__, name);
 	} else {
-		MM_ClearMOTD();
+		muffmode::motd::Clear();
 		gi.Com_PrintFmt("{}: MotD file load error for \"{}\", discarding.\n", __FUNCTION__, name);
 	}
-
-	// game.motd is a std::string and copied the contents above; free the scratch buffer.
-	if (buffer)
-		gi.TagFree(buffer);
 }
 
 void MM_CmdLoadMotd(gentity_t *ent)

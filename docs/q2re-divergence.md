@@ -1,5 +1,7 @@
 # Where MuffMode's `RS_Q2RE` ruleset diverges from stock Quake II Rerelease
 
+For player-facing ruleset selection and gameplay summaries, use [Muff Mode Rulesets](rulesets.md). This page is a technical parity audit for `q2re` only.
+
 **Scope:** MuffMode running under the default ruleset `g_ruleset 1` (`RS_Q2RE`), compared against
 stock Quake II Rerelease, for **single player**, **deathmatch**, and **CTF**. Sources compared:
 `src/` (MuffMode) vs `q2re-src/` (stock q2re).

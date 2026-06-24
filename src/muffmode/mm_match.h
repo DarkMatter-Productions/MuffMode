@@ -12,5 +12,6 @@ void Match_Reset();
 void Round_End();
 void MM_Match_RunFrame();
 void TimeoutEnd();
+void MM_TimeoutBeginResumeCountdown();
 void MM_CmdTimeOut(gentity_t *ent);
 void MM_CmdTimeIn(gentity_t *ent);

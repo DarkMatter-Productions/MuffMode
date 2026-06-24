@@ -5,22 +5,26 @@
 #include "muffmode/mm_match.h"
 #include "muffmode/mm_menu.h"
 #include "muffmode/mm_team.h"
+#include "muffmode/mm_util.h"
 #include "muffmode/mm_vote_menu.h"
 #include "monsters/m_player.h"
 
-#include <assert.h>
+#include <array>
 #include <string>
+#include <string_view>
 
-constexpr const char *BREAKER = "\35\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\37";
+namespace muffmode::menu {
 
-static bool G_Menu_HasClient(gentity_t *ent)
+constexpr const char *kBreaker = "\35\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\37";
+
+bool HasClient(gentity_t *ent)
 {
 	return ent && ent->client;
 }
 
-static bool G_Menu_GetEntries(gentity_t *ent, menu_t **entries, int *num = nullptr)
+bool GetEntries(gentity_t *ent, menu_t **entries, int *num = nullptr)
 {
-	if (!G_Menu_HasClient(ent) || !ent->client->menu || !ent->client->menu->entries || ent->client->menu->num <= 0)
+	if (!HasClient(ent) || !ent->client->menu || !ent->client->menu->entries || ent->client->menu->num <= 0)
 		return false;
 
 	if (entries)
@@ -30,35 +34,23 @@ static bool G_Menu_GetEntries(gentity_t *ent, menu_t **entries, int *num = nullp
 	return true;
 }
 
-static int G_Menu_ContentLimit(int num_entries)
+int ContentLimit(int num_entries)
 {
 	return max(0, num_entries - 2);
 }
 
-static int G_Menu_CvarInteger(cvar_t *cvar)
+void SetText(menu_t &entry, std::string_view text)
 {
-	return cvar ? cvar->integer : 0;
+	muffmode::CopyString(entry.text, text);
 }
 
-static const char *G_Menu_CvarString(cvar_t *cvar)
+void SetText(menu_t *entry, std::string_view text)
 {
-	return (cvar && cvar->string) ? cvar->string : "";
+	if (entry)
+		SetText(*entry, text);
 }
 
-static bool G_Menu_CvarEnabled(cvar_t *cvar)
-{
-	return G_Menu_CvarInteger(cvar) != 0;
-}
-
-static void G_Menu_SetText(menu_t *p, const char *text)
-{
-	if (!p)
-		return;
-
-	Q_strlcpy(p->text, text ? text : "", sizeof(p->text));
-}
-
-static bool G_Menu_CopyHostPlayerName(char *value, size_t value_size)
+bool CopyHostPlayerName(char *value, size_t value_size)
 {
 	if (!value || !value_size)
 		return false;
@@ -71,48 +63,70 @@ static bool G_Menu_CopyHostPlayerName(char *value, size_t value_size)
 	return value[0] != '\0';
 }
 
-static int G_Menu_NormalizeTimelimit(int minutes)
+template <size_t N>
+bool CopyHostPlayerName(std::array<char, N> &value)
+{
+	return CopyHostPlayerName(value.data(), value.size());
+}
+
+int NormalizeTimelimit(int minutes)
 {
 	return clamp(minutes, 5, 60);
 }
 
-static void G_Menu_SetHostName(menu_t *p) {
-	const char *name = G_Menu_CvarString(hostname);
-	G_Menu_SetText(p, name[0] ? name : "MuffMode Server");
+void SetHostName(menu_t *p)
+{
+	const char *name = muffmode::CvarString(hostname);
+	SetText(p, name[0] ? name : "MuffMode Server");
 }
 
-static void G_Menu_SetGamemodName(menu_t *p) {
-	G_Menu_SetText(p, level.gamemod_name);
+void SetGamemodName(menu_t *p)
+{
+	SetText(p, level.gamemod_name);
 }
 
-static void G_Menu_SetGametypeName(menu_t *p) {
-	G_Menu_SetText(p, level.gametype_name);
+void SetGametypeName(menu_t *p)
+{
+	SetText(p, level.gametype_name);
 }
 
-static void G_Menu_SetLevelName(menu_t *p) {
+void SetLevelName(menu_t *p)
+{
 	static char levelname[33];
 
-	levelname[0] = '*';
-	if (g_entities[0].message)
-		Q_strlcpy(levelname + 1, g_entities[0].message, sizeof(levelname) - 1);
-	else
-		Q_strlcpy(levelname + 1, level.mapname, sizeof(levelname) - 1);
-	levelname[sizeof(levelname) - 1] = 0;
-	G_Menu_SetText(p, levelname);
+	std::string value = "*";
+	value += g_entities[0].message ? g_entities[0].message : level.mapname;
+	muffmode::CopyString(levelname, value);
+	SetText(p, levelname);
 }
 
-static const char *G_Menu_CurrentRulesetName()
+const char *CurrentRulesetName()
 {
-	const int ruleset = clamp((int)game.ruleset, (int)RS_NONE + 1, (int)RS_NUM_RULESETS - 1);
+	const int ruleset = clamp(static_cast<int>(game.ruleset), static_cast<int>(RS_NONE) + 1, static_cast<int>(RS_NUM_RULESETS) - 1);
 	return rs_long_name[ruleset];
 }
+
+} // namespace muffmode::menu
+
+namespace menu = muffmode::menu;
 
 /*----------------------------------------------------------------------------------*/
 /* ADMIN */
 
-void G_Menu_ReturnToMain(gentity_t *ent, menu_hnd_t *p);
+namespace muffmode::menu::join {
+void Open(gentity_t *ent);
+}
 
-struct admin_settings_t {
+namespace muffmode::menu::info {
+void ReturnToMain(gentity_t *ent, menu_hnd_t *p);
+void OpenChaseCam(gentity_t *ent, menu_hnd_t *p);
+void OpenHost(gentity_t *ent, menu_hnd_t *p);
+void OpenServer(gentity_t *ent, menu_hnd_t *p);
+}
+
+namespace muffmode::menu::admin {
+
+struct AdminSettings {
 	int	 timelimit;
 	bool weaponsstay;
 	bool instantitems;
@@ -121,17 +135,18 @@ struct admin_settings_t {
 	bool match_lock;
 };
 
-void G_Menu_Admin_UpdateSettings(gentity_t *ent, menu_hnd_t *setmenu);
-void G_Menu_Admin(gentity_t *ent, menu_hnd_t *p);
+void UpdateSettings(gentity_t *ent, menu_hnd_t *settings_menu);
+void Open(gentity_t *ent, menu_hnd_t *p);
 
-static void G_Menu_Admin_SettingsApply(gentity_t *ent, menu_hnd_t *p) {
-	if (!G_Menu_HasClient(ent) || !ent->client->sess.admin || !p || !p->arg)
+void ApplySettings(gentity_t *ent, menu_hnd_t *p)
+{
+	if (!menu::HasClient(ent) || !ent->client->sess.admin || !p || !p->arg)
 		return;
 
-	admin_settings_t *settings = (admin_settings_t *)p->arg;
-	settings->timelimit = G_Menu_NormalizeTimelimit(settings->timelimit);
+	auto *settings = static_cast<AdminSettings *>(p->arg);
+	settings->timelimit = menu::NormalizeTimelimit(settings->timelimit);
 
-	if (settings->timelimit != G_Menu_CvarInteger(timelimit)) {
+	if (settings->timelimit != muffmode::CvarInteger(timelimit)) {
 		gi.LocBroadcast_Print(PRINT_HIGH, "{} changed the timelimit to {} minutes.\n",
 			ent->client->resp.netname, settings->timelimit);
 
@@ -139,153 +154,157 @@ static void G_Menu_Admin_SettingsApply(gentity_t *ent, menu_hnd_t *p) {
 		gi.cvar_set("timelimit", value.c_str());
 	}
 
-	if (settings->weaponsstay != G_Menu_CvarEnabled(g_dm_weapons_stay)) {
+	if (settings->weaponsstay != muffmode::CvarEnabled(g_dm_weapons_stay)) {
 		gi.LocBroadcast_Print(PRINT_HIGH, "{} turned {} weapons stay.\n",
 			ent->client->resp.netname, settings->weaponsstay ? "on" : "off");
 		gi.cvar_set("g_dm_weapons_stay", settings->weaponsstay ? "1" : "0");
 	}
 
-	if (settings->instantitems != G_Menu_CvarEnabled(g_dm_instant_items)) {
+	if (settings->instantitems != muffmode::CvarEnabled(g_dm_instant_items)) {
 		gi.LocBroadcast_Print(PRINT_HIGH, "{} turned {} instant items.\n",
 			ent->client->resp.netname, settings->instantitems ? "on" : "off");
 		gi.cvar_set("g_dm_instant_items", settings->instantitems ? "1" : "0");
 	}
 
-	if (settings->pu_drop != G_Menu_CvarEnabled(g_dm_powerup_drop)) {
+	if (settings->pu_drop != muffmode::CvarEnabled(g_dm_powerup_drop)) {
 		gi.LocBroadcast_Print(PRINT_HIGH, "{} turned {} powerup dropping.\n",
 			ent->client->resp.netname, settings->pu_drop ? "on" : "off");
 		gi.cvar_set("g_dm_powerup_drop", settings->pu_drop ? "1" : "0");
 	}
 
-	if (settings->instantweap != (G_Menu_CvarEnabled(g_instant_weapon_switch) || G_Menu_CvarEnabled(g_frenzy))) {
+	if (settings->instantweap != (muffmode::CvarEnabled(g_instant_weapon_switch) || muffmode::CvarEnabled(g_frenzy))) {
 		gi.LocBroadcast_Print(PRINT_HIGH, "{} turned {} instant weapon switch.\n",
 			ent->client->resp.netname, settings->instantweap ? "on" : "off");
 		gi.cvar_set("g_instant_weapon_switch", settings->instantweap ? "1" : "0");
 	}
 
-	if (settings->match_lock != G_Menu_CvarEnabled(g_match_lock)) {
+	if (settings->match_lock != muffmode::CvarEnabled(g_match_lock)) {
 		gi.LocBroadcast_Print(PRINT_HIGH, "{} turned {} match lock.\n",
 			ent->client->resp.netname, settings->match_lock ? "on" : "off");
 		gi.cvar_set("g_match_lock", settings->match_lock ? "1" : "0");
 	}
 
 	P_Menu_Close(ent);
-	G_Menu_Admin(ent, nullptr);
+	Open(ent, nullptr);
 }
 
-static void G_Menu_Admin_SettingsCancel(gentity_t *ent, menu_hnd_t *p) {
-	if (!G_Menu_HasClient(ent))
+void CancelSettings(gentity_t *ent, menu_hnd_t *p)
+{
+	if (!menu::HasClient(ent))
 		return;
 
 	P_Menu_Close(ent);
-	G_Menu_Admin(ent, nullptr);
+	Open(ent, nullptr);
 }
 
-static void G_Menu_Admin_ChangeMatchLen(gentity_t *ent, menu_hnd_t *p) {
-	if (!G_Menu_HasClient(ent) || !p || !p->arg)
+void ChangeMatchLength(gentity_t *ent, menu_hnd_t *p)
+{
+	if (!menu::HasClient(ent) || !p || !p->arg)
 		return;
 
-	admin_settings_t *settings = (admin_settings_t *)p->arg;
+	auto *settings = static_cast<AdminSettings *>(p->arg);
 
 	settings->timelimit = (settings->timelimit % 60) + 5;
-	settings->timelimit = G_Menu_NormalizeTimelimit(settings->timelimit);
+	settings->timelimit = menu::NormalizeTimelimit(settings->timelimit);
 
-	G_Menu_Admin_UpdateSettings(ent, p);
+	UpdateSettings(ent, p);
 }
 
-static void G_Menu_Admin_ChangeMatchSetupLen(gentity_t *ent, menu_hnd_t *p) {
-	if (!G_Menu_HasClient(ent) || !p || !p->arg)
+void ChangeMatchSetupLength(gentity_t *ent, menu_hnd_t *p)
+{
+	if (!menu::HasClient(ent) || !p || !p->arg)
 		return;
 
-	G_Menu_Admin_UpdateSettings(ent, p);
+	UpdateSettings(ent, p);
 }
 
-static void G_Menu_Admin_ChangeMatchStartLen(gentity_t *ent, menu_hnd_t *p) {
-	if (!G_Menu_HasClient(ent) || !p || !p->arg)
+void ChangeMatchStartLength(gentity_t *ent, menu_hnd_t *p)
+{
+	if (!menu::HasClient(ent) || !p || !p->arg)
 		return;
 
-	G_Menu_Admin_UpdateSettings(ent, p);
+	UpdateSettings(ent, p);
 }
 
-static void G_Menu_Admin_ChangeWeapStay(gentity_t *ent, menu_hnd_t *p) {
-	if (!G_Menu_HasClient(ent) || !p || !p->arg)
+void ToggleWeaponsStay(gentity_t *ent, menu_hnd_t *p)
+{
+	if (!menu::HasClient(ent) || !p || !p->arg)
 		return;
 
-	admin_settings_t *settings = (admin_settings_t *)p->arg;
+	auto *settings = static_cast<AdminSettings *>(p->arg);
 
 	settings->weaponsstay = !settings->weaponsstay;
-	G_Menu_Admin_UpdateSettings(ent, p);
+	UpdateSettings(ent, p);
 }
 
-static void G_Menu_Admin_ChangeInstantItems(gentity_t *ent, menu_hnd_t *p) {
-	if (!G_Menu_HasClient(ent) || !p || !p->arg)
+void ToggleInstantItems(gentity_t *ent, menu_hnd_t *p)
+{
+	if (!menu::HasClient(ent) || !p || !p->arg)
 		return;
 
-	admin_settings_t *settings = (admin_settings_t *)p->arg;
+	auto *settings = static_cast<AdminSettings *>(p->arg);
 
 	settings->instantitems = !settings->instantitems;
-	G_Menu_Admin_UpdateSettings(ent, p);
+	UpdateSettings(ent, p);
 }
 
-static void G_Menu_Admin_ChangePowerupDrop(gentity_t *ent, menu_hnd_t *p) {
-	if (!G_Menu_HasClient(ent) || !p || !p->arg)
+void TogglePowerupDrop(gentity_t *ent, menu_hnd_t *p)
+{
+	if (!menu::HasClient(ent) || !p || !p->arg)
 		return;
 
-	admin_settings_t *settings = (admin_settings_t *)p->arg;
+	auto *settings = static_cast<AdminSettings *>(p->arg);
 
 	settings->pu_drop = !settings->pu_drop;
-	G_Menu_Admin_UpdateSettings(ent, p);
+	UpdateSettings(ent, p);
 }
 
-static void G_Menu_Admin_ChangeInstantWeap(gentity_t *ent, menu_hnd_t *p) {
-	if (!G_Menu_HasClient(ent) || !p || !p->arg)
+void ToggleInstantWeapon(gentity_t *ent, menu_hnd_t *p)
+{
+	if (!menu::HasClient(ent) || !p || !p->arg)
 		return;
 
-	admin_settings_t *settings = (admin_settings_t *)p->arg;
+	auto *settings = static_cast<AdminSettings *>(p->arg);
 
 	settings->instantweap = !settings->instantweap;
-	G_Menu_Admin_UpdateSettings(ent, p);
+	UpdateSettings(ent, p);
 }
 
-static void G_Menu_Admin_ChangeMatchLock(gentity_t *ent, menu_hnd_t *p) {
-	if (!G_Menu_HasClient(ent) || !p || !p->arg)
+void ToggleMatchLock(gentity_t *ent, menu_hnd_t *p)
+{
+	if (!menu::HasClient(ent) || !p || !p->arg)
 		return;
 
-	admin_settings_t *settings = (admin_settings_t *)p->arg;
+	auto *settings = static_cast<AdminSettings *>(p->arg);
 
 	settings->match_lock = !settings->match_lock;
-	G_Menu_Admin_UpdateSettings(ent, p);
+	UpdateSettings(ent, p);
 }
 
-void G_Menu_Admin_UpdateSettings(gentity_t *ent, menu_hnd_t *setmenu) {
-	if (!G_Menu_HasClient(ent) || !setmenu || !setmenu->entries || !setmenu->arg || setmenu->num < 8)
+void UpdateSettings(gentity_t *ent, menu_hnd_t *settings_menu)
+{
+	if (!menu::HasClient(ent) || !settings_menu || !settings_menu->entries || !settings_menu->arg || settings_menu->num < 8)
 		return;
 
-	int				  i = 2;
-	admin_settings_t *settings = (admin_settings_t *)setmenu->arg;
+	int row = 2;
+	auto *settings = static_cast<AdminSettings *>(settings_menu->arg);
 
-	P_Menu_UpdateEntry(setmenu->entries + i, G_Fmt("time limit: {:2} mins", settings->timelimit).data(), MENU_ALIGN_LEFT, G_Menu_Admin_ChangeMatchLen);
-	i++;
+	P_Menu_UpdateEntry(settings_menu->entries + row++, G_Fmt("time limit: {:2} mins", settings->timelimit).data(), MENU_ALIGN_LEFT, ChangeMatchLength);
 
-	P_Menu_UpdateEntry(setmenu->entries + i, G_Fmt("weapons stay: {}", settings->weaponsstay ? "Yes" : "No").data(), MENU_ALIGN_LEFT, G_Menu_Admin_ChangeWeapStay);
-	i++;
+	P_Menu_UpdateEntry(settings_menu->entries + row++, G_Fmt("weapons stay: {}", settings->weaponsstay ? "Yes" : "No").data(), MENU_ALIGN_LEFT, ToggleWeaponsStay);
 
-	P_Menu_UpdateEntry(setmenu->entries + i, G_Fmt("instant items: {}", settings->instantitems ? "Yes" : "No").data(), MENU_ALIGN_LEFT, G_Menu_Admin_ChangeInstantItems);
-	i++;
+	P_Menu_UpdateEntry(settings_menu->entries + row++, G_Fmt("instant items: {}", settings->instantitems ? "Yes" : "No").data(), MENU_ALIGN_LEFT, ToggleInstantItems);
 
-	P_Menu_UpdateEntry(setmenu->entries + i, G_Fmt("powerup drops: {}", settings->pu_drop ? "Yes" : "No").data(), MENU_ALIGN_LEFT, G_Menu_Admin_ChangePowerupDrop);
-	i++;
+	P_Menu_UpdateEntry(settings_menu->entries + row++, G_Fmt("powerup drops: {}", settings->pu_drop ? "Yes" : "No").data(), MENU_ALIGN_LEFT, TogglePowerupDrop);
 
-	P_Menu_UpdateEntry(setmenu->entries + i, G_Fmt("instant weapon switch: {}", settings->instantweap ? "Yes" : "No").data(), MENU_ALIGN_LEFT, G_Menu_Admin_ChangeInstantWeap);
-	i++;
+	P_Menu_UpdateEntry(settings_menu->entries + row++, G_Fmt("instant weapon switch: {}", settings->instantweap ? "Yes" : "No").data(), MENU_ALIGN_LEFT, ToggleInstantWeapon);
 
-	P_Menu_UpdateEntry(setmenu->entries + i, G_Fmt("match lock: {}", settings->match_lock ? "Yes" : "No").data(), MENU_ALIGN_LEFT, G_Menu_Admin_ChangeMatchLock);
-	i++;
+	P_Menu_UpdateEntry(settings_menu->entries + row++, G_Fmt("match lock: {}", settings->match_lock ? "Yes" : "No").data(), MENU_ALIGN_LEFT, ToggleMatchLock);
 
 	P_Menu_Update(ent);
 }
 
-const menu_t def_setmenu[] = {
+const menu_t settings_menu_template[] = {
 	{ "*Settings Menu", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_LEFT, nullptr },
 	{ "", MENU_ALIGN_LEFT, nullptr }, // int timelimit;
@@ -303,39 +322,38 @@ const menu_t def_setmenu[] = {
 	{ "", MENU_ALIGN_LEFT, nullptr },
 	{ "", MENU_ALIGN_LEFT, nullptr },
 	{ "", MENU_ALIGN_LEFT, nullptr },
-	{ "$g_pc_return", MENU_ALIGN_LEFT, G_Menu_ReturnToMain }
+	{ "$g_pc_return", MENU_ALIGN_LEFT, menu::info::ReturnToMain }
 };
 
-static void G_Menu_Admin_Settings(gentity_t *ent, menu_hnd_t *p) {
-	if (!G_Menu_HasClient(ent) || !ent->client->sess.admin)
+void OpenSettings(gentity_t *ent, menu_hnd_t *p)
+{
+	if (!menu::HasClient(ent) || !ent->client->sess.admin)
 		return;
-
-	admin_settings_t *settings;
-	menu_hnd_t *menu;
 
 	P_Menu_Close(ent);
 
-	settings = (admin_settings_t *)gi.TagMalloc(sizeof(*settings), TAG_LEVEL);
+	auto *settings = static_cast<AdminSettings *>(gi.TagMalloc(sizeof(AdminSettings), TAG_LEVEL));
 	if (!settings)
 		return;
 
-	settings->timelimit = G_Menu_NormalizeTimelimit(G_Menu_CvarInteger(timelimit));
-	settings->weaponsstay = G_Menu_CvarEnabled(g_dm_weapons_stay);
-	settings->instantitems = G_Menu_CvarEnabled(g_dm_instant_items);
-	settings->pu_drop = G_Menu_CvarEnabled(g_dm_powerup_drop);
-	settings->instantweap = G_Menu_CvarEnabled(g_instant_weapon_switch);
-	settings->match_lock = G_Menu_CvarEnabled(g_match_lock);
+	settings->timelimit = menu::NormalizeTimelimit(muffmode::CvarInteger(timelimit));
+	settings->weaponsstay = muffmode::CvarEnabled(g_dm_weapons_stay);
+	settings->instantitems = muffmode::CvarEnabled(g_dm_instant_items);
+	settings->pu_drop = muffmode::CvarEnabled(g_dm_powerup_drop);
+	settings->instantweap = muffmode::CvarEnabled(g_instant_weapon_switch);
+	settings->match_lock = muffmode::CvarEnabled(g_match_lock);
 
-	menu = P_Menu_Open(ent, def_setmenu, -1, sizeof(def_setmenu) / sizeof(menu_t), settings, nullptr);
-	if (!menu) {
+	menu_hnd_t *settings_menu = P_Menu_Open(ent, settings_menu_template, -1, muffmode::CountAsInt(settings_menu_template), settings, nullptr);
+	if (!settings_menu) {
 		gi.TagFree(settings);
 		return;
 	}
-	G_Menu_Admin_UpdateSettings(ent, menu);
+	UpdateSettings(ent, settings_menu);
 }
 
-static void G_Menu_Admin_MatchSet(gentity_t *ent, menu_hnd_t *p) {
-	if (!G_Menu_HasClient(ent) || !ent->client->sess.admin)
+void ApplyMatchAction(gentity_t *ent, menu_hnd_t *p)
+{
+	if (!menu::HasClient(ent) || !ent->client->sess.admin)
 		return;
 
 	P_Menu_Close(ent);
@@ -349,17 +367,18 @@ static void G_Menu_Admin_MatchSet(gentity_t *ent, menu_hnd_t *p) {
 	}
 }
 
-static void G_Menu_Admin_Cancel(gentity_t *ent, menu_hnd_t *p) {
-	if (!G_Menu_HasClient(ent))
+void Cancel(gentity_t *ent, menu_hnd_t *p)
+{
+	if (!menu::HasClient(ent))
 		return;
 
 	P_Menu_Close(ent);
 }
 
-menu_t adminmenu[] = {
+menu_t admin_menu[] = {
 	{ "*Administration Menu", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_LEFT, nullptr },
-	{ "Settings", MENU_ALIGN_LEFT, G_Menu_Admin_Settings },
+	{ "Settings", MENU_ALIGN_LEFT, OpenSettings },
 	{ "", MENU_ALIGN_LEFT, nullptr },
 	{ "", MENU_ALIGN_LEFT, nullptr },
 	{ "", MENU_ALIGN_LEFT, nullptr },
@@ -374,34 +393,52 @@ menu_t adminmenu[] = {
 	{ "", MENU_ALIGN_LEFT, nullptr },
 	{ "", MENU_ALIGN_LEFT, nullptr },
 	{ "", MENU_ALIGN_LEFT, nullptr },
-	{ "$g_pc_return", MENU_ALIGN_LEFT, G_Menu_ReturnToMain }
+	{ "$g_pc_return", MENU_ALIGN_LEFT, menu::info::ReturnToMain }
 };
 
-void G_Menu_Admin(gentity_t *ent, menu_hnd_t *p) {
-	if (!G_Menu_HasClient(ent) || !ent->client->sess.admin)
+void Open(gentity_t *ent, menu_hnd_t *p)
+{
+	if (!menu::HasClient(ent) || !ent->client->sess.admin)
 		return;
 
-	adminmenu[3].text[0] = '\0';
-	adminmenu[3].SelectFunc = nullptr;
-	adminmenu[4].text[0] = '\0';
-	adminmenu[4].SelectFunc = nullptr;
+	menu::SetText(admin_menu[3], "");
+	admin_menu[3].SelectFunc = nullptr;
+	menu::SetText(admin_menu[4], "");
+	admin_menu[4].SelectFunc = nullptr;
 
 	if (level.match_state <= matchst_t::MATCH_COUNTDOWN) {
-		Q_strlcpy(adminmenu[3].text, "Force start match", sizeof(adminmenu[3].text));
-		adminmenu[3].SelectFunc = G_Menu_Admin_MatchSet;
+		menu::SetText(admin_menu[3], "Force start match");
+		admin_menu[3].SelectFunc = ApplyMatchAction;
 
 	} else if (level.match_state == matchst_t::MATCH_IN_PROGRESS) {
-		Q_strlcpy(adminmenu[3].text, "Reset match", sizeof(adminmenu[3].text));
-		adminmenu[3].SelectFunc = G_Menu_Admin_MatchSet;
+		menu::SetText(admin_menu[3], "Reset match");
+		admin_menu[3].SelectFunc = ApplyMatchAction;
 	}
 
 	P_Menu_Close(ent);
-	P_Menu_Open(ent, adminmenu, -1, sizeof(adminmenu) / sizeof(menu_t), nullptr, nullptr);
+	P_Menu_Open(ent, admin_menu, -1, muffmode::CountAsInt(admin_menu), nullptr, nullptr);
 }
+
+} // namespace muffmode::menu::admin
 
 /*-----------------------------------------------------------------------*/
 
-const menu_t pmstatsmenu[] = {
+namespace muffmode::menu::stats {
+
+struct MenuWriter {
+	menu_t *entries = nullptr;
+	int     num_entries = 0;
+	int     row = 0;
+
+	void Add(std::string_view text)
+	{
+		if (row < num_entries)
+			menu::SetText(entries[row], text);
+		row++;
+	}
+};
+
+const menu_t match_stats_menu[] = {
 	{ "Player Match Stats", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_LEFT, nullptr },
@@ -419,216 +456,190 @@ const menu_t pmstatsmenu[] = {
 	{ "", MENU_ALIGN_LEFT, nullptr },
 	{ "", MENU_ALIGN_LEFT, nullptr },
 	{ "", MENU_ALIGN_LEFT, nullptr },
-	{ "$g_pc_return", MENU_ALIGN_LEFT, G_Menu_ReturnToMain }
+	{ "$g_pc_return", MENU_ALIGN_LEFT, menu::info::ReturnToMain }
 };
 
-static void G_Menu_PMStats_Update(gentity_t *ent) {
+void Update(gentity_t *ent)
+{
 	menu_t *entries = nullptr;
 	int num_entries = 0;
 
-	if (!G_Menu_CvarEnabled(g_matchstats))
+	if (!muffmode::CvarEnabled(g_matchstats))
 		return;
-	if (!G_Menu_GetEntries(ent, &entries, &num_entries))
+	if (!menu::GetEntries(ent, &entries, &num_entries))
 		return;
 
-	client_match_stats_t *st = &ent->client->mstats;
-	int i = 0;
-	char value[MAX_INFO_VALUE] = { 0 };
-	G_Menu_CopyHostPlayerName(value, sizeof(value));
+	const auto &stats = ent->client->mstats;
+	MenuWriter writer{ entries, num_entries };
+	std::array<char, MAX_INFO_VALUE> value = {};
+	menu::CopyHostPlayerName(value);
 
-	if (i < num_entries)
-		Q_strlcpy(entries[i].text, "Player Stats for Match", sizeof(entries[i].text));
-	i++;
+	writer.Add("Player Stats for Match");
 
-	if (value[0]) {
-		if (i < num_entries)
-			Q_strlcpy(entries[i].text, G_Fmt("{}", value).data(), sizeof(entries[i].text));
-		i++;
+	if (value[0])
+		writer.Add(G_Fmt("{}", value.data()).data());
+
+	writer.Add(menu::kBreaker);
+
+	writer.Add(G_Fmt("kills: {}", stats.total_kills).data());
+	writer.Add(G_Fmt("deaths: {}", stats.total_deaths).data());
+	if (stats.total_kills) {
+		if (stats.total_deaths > 0) {
+			const float ratio = static_cast<float>(stats.total_kills) / static_cast<float>(stats.total_deaths);
+			writer.Add(G_Fmt("k/d ratio: {:2}", ratio).data());
+		} else {
+			writer.Add("k/d ratio: N/A");
+		}
 	}
 
-	if (i < num_entries)
-		Q_strlcpy(entries[i].text, BREAKER, sizeof(entries[i].text));
-	i++;
+	writer.Add("");
+	writer.Add(G_Fmt("dmg dealt: {}", stats.total_dmg_dealt).data());
+	writer.Add(G_Fmt("dmg received: {}", stats.total_dmg_received).data());
+	if (stats.total_dmg_dealt) {
+		if (stats.total_dmg_received > 0) {
+			const float ratio = static_cast<float>(stats.total_dmg_dealt) / static_cast<float>(stats.total_dmg_received);
+			writer.Add(G_Fmt("dmg ratio: {:02}", ratio).data());
+		} else {
+			writer.Add("dmg ratio: N/A");
+		}
+	}
 
-	if (i < num_entries)
-		Q_strlcpy(entries[i].text, G_Fmt("kills: {}", st->total_kills).data(), sizeof(entries[i].text));
-	i++;
-	if (i < num_entries)
-		Q_strlcpy(entries[i].text, G_Fmt("deaths: {}", st->total_deaths).data(), sizeof(entries[i].text));
-	i++;
-	if (st->total_kills) {
-		if (i < num_entries) {
-			if (st->total_deaths > 0) {
-				float val = (float)st->total_kills / (float)st->total_deaths;
-				Q_strlcpy(entries[i].text, G_Fmt("k/d ratio: {:2}", val).data(), sizeof(entries[i].text));
-			} else {
-				Q_strlcpy(entries[i].text, "k/d ratio: N/A", sizeof(entries[i].text));
-			}
+	writer.Add("");
+	writer.Add(G_Fmt("shots fired: {}", stats.total_shots).data());
+	writer.Add(G_Fmt("shots on target: {}", stats.total_hits).data());
+	if (stats.total_hits) {
+		if (stats.total_shots > 0) {
+			const int accuracy = static_cast<int>((static_cast<float>(stats.total_hits) / static_cast<float>(stats.total_shots)) * 100.f);
+			writer.Add(G_Fmt("total accuracy: {}%", accuracy).data());
+		} else {
+			writer.Add("total accuracy: N/A");
 		}
-		i++;
-	}
-	if (i < num_entries)
-		entries[i].text[0] = '\0';
-	i++;
-	if (i < num_entries)
-		Q_strlcpy(entries[i].text, G_Fmt("dmg dealt: {}", st->total_dmg_dealt).data(), sizeof(entries[i].text));
-	i++;
-	if (i < num_entries)
-		Q_strlcpy(entries[i].text, G_Fmt("dmg received: {}", st->total_dmg_received).data(), sizeof(entries[i].text));
-	i++;
-	if (st->total_dmg_dealt) {
-		if (i < num_entries) {
-			if (st->total_dmg_received > 0) {
-				float val = (float)st->total_dmg_dealt / (float)st->total_dmg_received;
-				Q_strlcpy(entries[i].text, G_Fmt("dmg ratio: {:02}", val).data(), sizeof(entries[i].text));
-			} else {
-				Q_strlcpy(entries[i].text, "dmg ratio: N/A", sizeof(entries[i].text));
-			}
-		}
-		i++;
-	}
-	if (i < num_entries)
-		entries[i].text[0] = '\0';
-	i++;
-	if (i < num_entries)
-		Q_strlcpy(entries[i].text, G_Fmt("shots fired: {}", st->total_shots).data(), sizeof(entries[i].text));
-	i++;
-	if (i < num_entries)
-		Q_strlcpy(entries[i].text, G_Fmt("shots on target: {}", st->total_hits).data(), sizeof(entries[i].text));
-	i++;
-	if (st->total_hits) {
-		if (i < num_entries) {
-			if (st->total_shots > 0) {
-				int val = (int)(((float)st->total_hits / (float)st->total_shots) * 100.f);
-				Q_strlcpy(entries[i].text, G_Fmt("total accuracy: {}%", val).data(), sizeof(entries[i].text));
-			} else {
-				Q_strlcpy(entries[i].text, "total accuracy: N/A", sizeof(entries[i].text));
-			}
-		}
-		i++;
 	}
 }
 
-static void G_Menu_PMStats(gentity_t *ent, menu_hnd_t *p) {
-	if (!G_Menu_HasClient(ent))
+void Open(gentity_t *ent, menu_hnd_t *p)
+{
+	if (!menu::HasClient(ent))
 		return;
 
 	P_Menu_Close(ent);
-	P_Menu_Open(ent, pmstatsmenu, -1, sizeof(pmstatsmenu) / sizeof(menu_t), nullptr, G_Menu_PMStats_Update);
+	P_Menu_Open(ent, match_stats_menu, -1, muffmode::CountAsInt(match_stats_menu), nullptr, Update);
 }
+
+} // namespace muffmode::menu::stats
 
 /*-----------------------------------------------------------------------*/
 
-static void G_Menu_Join_Team_Free(gentity_t *ent, menu_hnd_t *p) {
+namespace muffmode::menu::join {
+
+void JoinFree(gentity_t *ent, menu_hnd_t *)
+{
 	SetTeam(ent, TEAM_FREE, false, false, false);
 }
 
-static void G_Menu_Join_Team_Red(gentity_t *ent, menu_hnd_t *p) {
-	SetTeam(ent, !G_Menu_CvarEnabled(g_teamplay_allow_team_pick) ? PickTeam(-1) : TEAM_RED, false, false, false);
+void JoinRed(gentity_t *ent, menu_hnd_t *)
+{
+	SetTeam(ent, !muffmode::CvarEnabled(g_teamplay_allow_team_pick) ? PickTeam(-1) : TEAM_RED, false, false, false);
 }
 
-static void G_Menu_Join_Team_Blue(gentity_t *ent, menu_hnd_t *p) {
-	if (!G_Menu_CvarEnabled(g_teamplay_allow_team_pick))
+void JoinBlue(gentity_t *ent, menu_hnd_t *)
+{
+	if (!muffmode::CvarEnabled(g_teamplay_allow_team_pick))
 		return;
 
 	SetTeam(ent, TEAM_BLUE, false, false, false);
 }
 
-static void G_Menu_Join_Team_Spec(gentity_t *ent, menu_hnd_t *p) {
+void JoinSpectator(gentity_t *ent, menu_hnd_t *)
+{
 	SetTeam(ent, TEAM_SPECTATOR, false, false, false);
 }
 
-void G_Menu_ReturnToMain(gentity_t *ent, menu_hnd_t *p);
-void G_Menu_ChaseCam(gentity_t *ent, menu_hnd_t *p);
-void G_Menu_HostInfo(gentity_t *ent, menu_hnd_t *p);
-void G_Menu_ServerInfo(gentity_t *ent, menu_hnd_t *p);
-
-static void G_Menu_ReadyUp(gentity_t *ent, menu_hnd_t *p) {
+void ToggleReady(gentity_t *ent, menu_hnd_t *)
+{
 	MM_CmdReadyUp(ent);
 }
 
-static const int jmenu_hostname = 0;
-static const int jmenu_gametype = 1;
-static const int jmenu_level = 2;
-static const int jmenu_match = 3;
+constexpr int kHostName = 0;
+constexpr int kGametype = 1;
+constexpr int kLevel = 2;
+constexpr int kMatch = 3;
 
-static const int jmenu_teams_join_red = 5;
-static const int jmenu_teams_join_blue = 6;
-static const int jmenu_teams_spec = 7;
-static const int jmenu_teams_chase = 8;
-static const int jmenu_teams_readyup = 9;
-static const int jmenu_teams_hostinfo = 10;
-static const int jmenu_teams_svinfo = 11;
-static const int jmenu_teams_player = 12;
-static const int jmenu_teams_callvote = 13;
-static const int jmenu_teams_admin = 14;
+constexpr int kTeamsJoinRed = 5;
+constexpr int kTeamsJoinBlue = 6;
+constexpr int kTeamsChase = 8;
+constexpr int kTeamsReadyUp = 9;
+constexpr int kTeamsPlayerStats = 12;
+constexpr int kTeamsCallVote = 13;
+constexpr int kTeamsAdmin = 14;
 
-static const int jmenu_free_join = 5;
-static const int jmenu_free_spec = 7;
-static const int jmenu_free_chase = 8;
-static const int jmenu_free_readyup = 9;
-static const int jmenu_free_hostinfo = 10;
-static const int jmenu_free_svinfo = 11;
-static const int jmenu_free_player = 12;
-static const int jmenu_free_callvote = 13;
-static const int jmenu_free_admin = 14;
+constexpr int kFreeJoin = 5;
+constexpr int kFreeChase = 8;
+constexpr int kFreeReadyUp = 9;
+constexpr int kFreePlayerStats = 12;
+constexpr int kFreeCallVote = 13;
+constexpr int kFreeAdmin = 14;
 
-static const int jmenu_gamemod = 16;
-static const int jmenu_notice = 17;
+constexpr int kGameMod = 16;
+constexpr int kNotice = 17;
 
-const menu_t teams_join_menu[] = {
+const menu_t kTeamsMenuTemplate[] = {
 	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_CENTER, nullptr },
-	{ "$g_pc_join_red_team", MENU_ALIGN_LEFT, G_Menu_Join_Team_Red },
-	{ "$g_pc_join_blue_team", MENU_ALIGN_LEFT, G_Menu_Join_Team_Blue },
-	{ "Spectate", MENU_ALIGN_LEFT, G_Menu_Join_Team_Spec },
-	{ "$g_pc_chase_camera", MENU_ALIGN_LEFT, G_Menu_ChaseCam },
+	{ "$g_pc_join_red_team", MENU_ALIGN_LEFT, JoinRed },
+	{ "$g_pc_join_blue_team", MENU_ALIGN_LEFT, JoinBlue },
+	{ "Spectate", MENU_ALIGN_LEFT, JoinSpectator },
+	{ "$g_pc_chase_camera", MENU_ALIGN_LEFT, menu::info::OpenChaseCam },
 	{ "", MENU_ALIGN_LEFT, nullptr },  // Ready Up (set dynamically)
-	{ "Host Info", MENU_ALIGN_LEFT, G_Menu_HostInfo },
-	{ "Match Info", MENU_ALIGN_LEFT, G_Menu_ServerInfo },
-	{ "Player Stats", MENU_ALIGN_LEFT, G_Menu_PMStats },
-	{ "Call a Vote", MENU_ALIGN_LEFT, G_Menu_CallVote },
+	{ "Host Info", MENU_ALIGN_LEFT, menu::info::OpenHost },
+	{ "Match Info", MENU_ALIGN_LEFT, menu::info::OpenServer },
+	{ "Player Stats", MENU_ALIGN_LEFT, menu::stats::Open },
+	{ "Call a Vote", MENU_ALIGN_LEFT, ::G_Menu_CallVote },
 	{ "", MENU_ALIGN_LEFT, nullptr },
 	{ "", MENU_ALIGN_LEFT, nullptr },
 	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_CENTER, nullptr }
 };
 
-const menu_t free_join_menu[] = {
+const menu_t kFreeMenuTemplate[] = {
 	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_LEFT, nullptr },
-	{ "Join Game", MENU_ALIGN_LEFT, G_Menu_Join_Team_Free },
+	{ "Join Game", MENU_ALIGN_LEFT, JoinFree },
 	{ "", MENU_ALIGN_LEFT, nullptr },
-	{ "Spectate", MENU_ALIGN_LEFT, G_Menu_Join_Team_Spec },
-	{ "$g_pc_chase_camera", MENU_ALIGN_LEFT, G_Menu_ChaseCam },
+	{ "Spectate", MENU_ALIGN_LEFT, JoinSpectator },
+	{ "$g_pc_chase_camera", MENU_ALIGN_LEFT, menu::info::OpenChaseCam },
 	{ "", MENU_ALIGN_LEFT, nullptr },  // Ready Up (set dynamically)
-	{ "Host Info", MENU_ALIGN_LEFT, G_Menu_HostInfo },
-	{ "Match Info", MENU_ALIGN_LEFT, G_Menu_ServerInfo },
-	{ "Player Stats", MENU_ALIGN_LEFT, G_Menu_PMStats },
-	{ "Call a Vote", MENU_ALIGN_LEFT, G_Menu_CallVote },
+	{ "Host Info", MENU_ALIGN_LEFT, menu::info::OpenHost },
+	{ "Match Info", MENU_ALIGN_LEFT, menu::info::OpenServer },
+	{ "Player Stats", MENU_ALIGN_LEFT, menu::stats::Open },
+	{ "Call a Vote", MENU_ALIGN_LEFT, ::G_Menu_CallVote },
 	{ "", MENU_ALIGN_LEFT, nullptr },
 	{ "", MENU_ALIGN_LEFT, nullptr },
 	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_CENTER, nullptr }
 };
 
-const menu_t nochasemenu[] = {
+} // namespace muffmode::menu::join
+
+namespace muffmode::menu::info {
+
+const menu_t kNoChaseMenuTemplate[] = {
 	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "$g_pc_no_chase", MENU_ALIGN_LEFT, nullptr },
 	{ "", MENU_ALIGN_CENTER, nullptr },
-	{ "$g_pc_return", MENU_ALIGN_LEFT, G_Menu_ReturnToMain }
+	{ "$g_pc_return", MENU_ALIGN_LEFT, ReturnToMain }
 };
 
-const menu_t hostinfomenu[] = {
+const menu_t kHostMenuTemplate[] = {
 	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_CENTER, nullptr },
@@ -646,10 +657,10 @@ const menu_t hostinfomenu[] = {
 	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_CENTER, nullptr },
-	{ "$g_pc_return", MENU_ALIGN_LEFT, G_Menu_ReturnToMain }
+	{ "$g_pc_return", MENU_ALIGN_LEFT, ReturnToMain }
 };
 
-const menu_t svinfomenu[] = {
+const menu_t kServerMenuTemplate[] = {
 	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_LEFT, nullptr },
 	{ "", MENU_ALIGN_LEFT, nullptr },
@@ -667,22 +678,24 @@ const menu_t svinfomenu[] = {
 	{ "", MENU_ALIGN_LEFT, nullptr },
 	{ "", MENU_ALIGN_LEFT, nullptr },
 	{ "", MENU_ALIGN_LEFT, nullptr },
-	{ "$g_pc_return", MENU_ALIGN_LEFT, G_Menu_ReturnToMain }
+	{ "$g_pc_return", MENU_ALIGN_LEFT, ReturnToMain }
 };
 
-static void G_Menu_NoChaseCamUpdate(gentity_t *ent) {
+void UpdateNoChase(gentity_t *ent)
+{
 	menu_t *entries = nullptr;
 	int num_entries = 0;
-	if (!G_Menu_GetEntries(ent, &entries, &num_entries) || G_Menu_ContentLimit(num_entries) < 3)
+	if (!menu::GetEntries(ent, &entries, &num_entries) || menu::ContentLimit(num_entries) < 3)
 		return;
 
-	G_Menu_SetGamemodName(&entries[0]);
-	G_Menu_SetGametypeName(&entries[1]);
-	G_Menu_SetLevelName(&entries[2]);
+	menu::SetGamemodName(&entries[0]);
+	menu::SetGametypeName(&entries[1]);
+	menu::SetLevelName(&entries[2]);
 }
 
-void G_Menu_ChaseCam(gentity_t *ent, menu_hnd_t *p) {
-	if (!G_Menu_HasClient(ent))
+void OpenChaseCam(gentity_t *ent, menu_hnd_t *)
+{
+	if (!menu::HasClient(ent))
 		return;
 
 	SetTeam(ent, TEAM_SPECTATOR, false, false, false);
@@ -696,74 +709,78 @@ void G_Menu_ChaseCam(gentity_t *ent, menu_hnd_t *p) {
 	GetFollowTarget(ent);
 
 	P_Menu_Close(ent);
-	P_Menu_Open(ent, nochasemenu, -1, sizeof(nochasemenu) / sizeof(menu_t), nullptr, G_Menu_NoChaseCamUpdate);
+	P_Menu_Open(ent, kNoChaseMenuTemplate, -1, muffmode::CountAsInt(kNoChaseMenuTemplate), nullptr, UpdateNoChase);
 }
 
-void G_Menu_ReturnToMain(gentity_t *ent, menu_hnd_t *p) {
-	if (!G_Menu_HasClient(ent))
+void ReturnToMain(gentity_t *ent, menu_hnd_t *)
+{
+	if (!menu::HasClient(ent))
 		return;
 
 	P_Menu_Close(ent);
-	G_Menu_Join_Open(ent);
+	menu::join::Open(ent);
 	gi.local_sound(ent, CHAN_AUTO, gi.soundindex("misc/menu3.wav"), 1, ATTN_NONE, 0);
 }
 
-static void G_Menu_HostInfo_Update(gentity_t *ent) {
+void UpdateHost(gentity_t *ent)
+{
 	menu_t *entries = nullptr;
 	int num_entries = 0;
-	if (!G_Menu_GetEntries(ent, &entries, &num_entries))
+	if (!menu::GetEntries(ent, &entries, &num_entries))
 		return;
-	const int content_limit = G_Menu_ContentLimit(num_entries);
+	const int content_limit = menu::ContentLimit(num_entries);
 
 	int		i = 0;
 
-	const char *server_name = G_Menu_CvarString(hostname);
+	const char *server_name = muffmode::CvarString(hostname);
 	if (server_name[0] && i + 2 < content_limit) {
-		Q_strlcpy(entries[i].text, "Server Name:", sizeof(entries[i].text));
+		menu::SetText(entries[i], "Server Name:");
 		i++;
-		Q_strlcpy(entries[i].text, server_name, sizeof(entries[i].text));
+		menu::SetText(entries[i], server_name);
 		i++;
 		i++;
 	}
 
 	if (i + 2 < content_limit) {
-		char value[MAX_INFO_VALUE] = { 0 };
+		std::array<char, MAX_INFO_VALUE> value = {};
 
-		if (G_Menu_CopyHostPlayerName(value, sizeof(value))) {
-			Q_strlcpy(entries[i].text, "Host:", sizeof(entries[i].text));
+		if (menu::CopyHostPlayerName(value)) {
+			menu::SetText(entries[i], "Host:");
 			i++;
-			Q_strlcpy(entries[i].text, value, sizeof(entries[i].text));
+			menu::SetText(entries[i], value.data());
 			i++;
 			i++;
 		}
 	}
 
 	if (game.motd.size() && i < content_limit) {
-		Q_strlcpy(entries[i].text, "Message of the Day:", sizeof(entries[i].text));
+		menu::SetText(entries[i], "Message of the Day:");
 		i++;
 		// 26 char line width
 		// 9 lines
 		// = 234
 
 		if (i < content_limit)
-			Q_strlcpy(entries[i].text, G_Fmt("{}", game.motd.c_str()).data(), sizeof(entries[i].text));
+			menu::SetText(entries[i], G_Fmt("{}", game.motd.c_str()).data());
 	}
 }
 
-void G_Menu_HostInfo(gentity_t *ent, menu_hnd_t *p) {
-	if (!G_Menu_HasClient(ent))
+void OpenHost(gentity_t *ent, menu_hnd_t *)
+{
+	if (!menu::HasClient(ent))
 		return;
 
 	P_Menu_Close(ent);
-	P_Menu_Open(ent, hostinfomenu, -1, sizeof(hostinfomenu) / sizeof(menu_t), nullptr, G_Menu_HostInfo_Update);
+	P_Menu_Open(ent, kHostMenuTemplate, -1, muffmode::CountAsInt(kHostMenuTemplate), nullptr, UpdateHost);
 }
 
-static void G_Menu_ServerInfo_Update(gentity_t *ent) {
+void UpdateServer(gentity_t *ent)
+{
 	menu_t *entries = nullptr;
 	int num_entries = 0;
-	if (!G_Menu_GetEntries(ent, &entries, &num_entries))
+	if (!menu::GetEntries(ent, &entries, &num_entries))
 		return;
-	const int content_limit = G_Menu_ContentLimit(num_entries);
+	const int content_limit = menu::ContentLimit(num_entries);
 	if (content_limit < 3)
 		return;
 
@@ -773,98 +790,98 @@ static void G_Menu_ServerInfo_Update(gentity_t *ent) {
 	bool	items = ItemSpawnsEnabled();
 	int		scorelimit = GT_ScoreLimit();
 	
-	Q_strlcpy(entries[i].text, "Match Info", sizeof(entries[i].text));
+	menu::SetText(entries[i], "Match Info");
 	i++;
 
-	Q_strlcpy(entries[i].text, BREAKER, sizeof(entries[i].text));
+	menu::SetText(entries[i], menu::kBreaker);
 	i++;
 
-	Q_strlcpy(entries[i].text, level.gametype_name, sizeof(entries[i].text));
+	menu::SetText(entries[i], level.gametype_name);
 	i++;
 	
 	if (level.level_name[0]) {
-		Q_strlcpy(entries[i].text, G_Fmt("map: {}", level.level_name).data(), sizeof(entries[i].text));
+		menu::SetText(entries[i], G_Fmt("map: {}", level.level_name).data());
 		i++;
 	}
 	if (level.mapname[0]) {
-		Q_strlcpy(entries[i].text, G_Fmt("mapname: {}", level.mapname).data(), sizeof(entries[i].text));
+		menu::SetText(entries[i], G_Fmt("mapname: {}", level.mapname).data());
 		i++;
 	}
 	if (level.author[0]) {
-		Q_strlcpy(entries[i].text, G_Fmt("author: {}", level.author).data(), sizeof(entries[i].text));
+		menu::SetText(entries[i], G_Fmt("author: {}", level.author).data());
 		i++;
 	}
 	if (level.author2[0] && level.author[0]) {
-		Q_strlcpy(entries[i].text, G_Fmt("      {}", level.author2).data(), sizeof(entries[i].text));
+		menu::SetText(entries[i], G_Fmt("      {}", level.author2).data());
 		i++;
 	}
 
-	Q_strlcpy(entries[i].text, G_Fmt("ruleset: {}", G_Menu_CurrentRulesetName()).data(), sizeof(entries[i].text));
+	menu::SetText(entries[i], G_Fmt("ruleset: {}", menu::CurrentRulesetName()).data());
 	i++;
 
 	if (scorelimit) {
 		if (i >= content_limit) return;
-		Q_strlcpy(entries[i].text, G_Fmt("{} limit: {}", GT_ScoreLimitString(), scorelimit).data(), sizeof(entries[i].text));
+		menu::SetText(entries[i], G_Fmt("{} limit: {}", GT_ScoreLimitString(), scorelimit).data());
 		i++;
 		limits = true;
 	}
 
 	if (timelimit->value > 0) {
 		if (i >= content_limit) return;
-		Q_strlcpy(entries[i].text, G_Fmt("time limit: {}", G_TimeString(timelimit->value * 60000, false)).data(), sizeof(entries[i].text));
+		menu::SetText(entries[i], G_Fmt("time limit: {}", G_TimeString(timelimit->value * 60000, false)).data());
 		i++;
 		limits = true;
 	}
 
 	if (limits) {
 		if (i >= content_limit) return;
-		Q_strlcpy(entries[i].text, BREAKER, sizeof(entries[i].text));
+		menu::SetText(entries[i], menu::kBreaker);
 		i++;
 	}
 
 	if (g_instagib->integer || GT(GT_INSTAGIB)) {
 		if (i >= content_limit) return;
 		if (g_instagib_splash->integer) {
-			Q_strlcpy(entries[i].text, "InstaGib + Rail Splash", sizeof(entries[i].text));
+			menu::SetText(entries[i], "InstaGib + Rail Splash");
 		} else {
-			Q_strlcpy(entries[i].text, "InstaGib", sizeof(entries[i].text));
+			menu::SetText(entries[i], "InstaGib");
 		}
 		i++;
 	}
 	if (g_vampiric_damage->integer) {
 		if (i >= content_limit) return;
-		Q_strlcpy(entries[i].text, "Vampiric Damage", sizeof(entries[i].text));
+		menu::SetText(entries[i], "Vampiric Damage");
 		i++;
 	}
 	if (g_frenzy->integer) {
 		if (i >= content_limit) return;
-		Q_strlcpy(entries[i].text, "Weapons Frenzy", sizeof(entries[i].text));
+		menu::SetText(entries[i], "Weapons Frenzy");
 		i++;
 	}
 	if (g_nadefest->integer || GT(GT_NADEFEST)) {
 		if (i >= content_limit) return;
-		Q_strlcpy(entries[i].text, "Nade Fest", sizeof(entries[i].text));
+		menu::SetText(entries[i], "Nade Fest");
 		i++;
 	}
 	if (g_quadhog->integer) {
 		if (i >= content_limit) return;
-		Q_strlcpy(entries[i].text, "Quad Hog", sizeof(entries[i].text));
+		menu::SetText(entries[i], "Quad Hog");
 		i++;
 	}
 
 	if (i >= content_limit) return;
-	Q_strlcpy(entries[i].text, BREAKER, sizeof(entries[i].text));
+	menu::SetText(entries[i], menu::kBreaker);
 	i++;
 
 	if (items) {
 		if (g_dm_weapons_stay->integer) {
 			if (i >= content_limit) return;
-			Q_strlcpy(entries[i].text, "weapons stay", sizeof(entries[i].text));
+			menu::SetText(entries[i], "weapons stay");
 			i++;
 		} else {
 			if (g_weapon_respawn_time->integer != 30) {
 				if (i >= content_limit) return;
-				Q_strlcpy(entries[i].text, G_Fmt("weapon respawn delay: {}", g_weapon_respawn_time->integer).data(), sizeof(entries[i].text));
+				menu::SetText(entries[i], G_Fmt("weapon respawn delay: {}", g_weapon_respawn_time->integer).data());
 				i++;
 			}
 		}
@@ -872,102 +889,102 @@ static void G_Menu_ServerInfo_Update(gentity_t *ent) {
 
 	if (g_infinite_ammo->integer && !infiniteammo) {
 		if (i >= content_limit) return;
-		Q_strlcpy(entries[i].text, "infinite ammo", sizeof(entries[i].text));
+		menu::SetText(entries[i], "infinite ammo");
 		i++;
 	}
 	if (Teams() && g_friendly_fire->integer) {
 		if (i >= content_limit) return;
-		Q_strlcpy(entries[i].text, "friendly fire", sizeof(entries[i].text));
+		menu::SetText(entries[i], "friendly fire");
 		i++;
 	}
 
 	if (g_allow_grapple->integer) {
 		if (i >= content_limit) return;
-		Q_strlcpy(entries[i].text, G_Fmt("{}grapple enabled", g_grapple_offhand->integer ? "off-hand " : "").data(), sizeof(entries[i].text));
+		menu::SetText(entries[i], G_Fmt("{}grapple enabled", g_grapple_offhand->integer ? "off-hand " : "").data());
 		i++;
 	}
 
 	if (g_inactivity->integer > 0) {
 		if (i >= content_limit) return;
-		Q_strlcpy(entries[i].text, G_Fmt("inactivity timer: {} sec", g_inactivity->integer).data(), sizeof(entries[i].text));
+		menu::SetText(entries[i], G_Fmt("inactivity timer: {} sec", g_inactivity->integer).data());
 		i++;
 	}
 
 	if (g_teleporter_freeze->integer) {
 		if (i >= content_limit) return;
-		Q_strlcpy(entries[i].text, "teleporter freeze", sizeof(entries[i].text));
+		menu::SetText(entries[i], "teleporter freeze");
 		i++;
 	}
 
 	if (Teams() && g_teamplay_force_balance->integer && notGT(GT_RR)) {
 		if (i >= content_limit) return;
-		Q_strlcpy(entries[i].text, "forced team balancing", sizeof(entries[i].text));
+		menu::SetText(entries[i], "forced team balancing");
 		i++;
 	}
 
 	if (g_dm_random_items->integer && items) {
 		if (i >= content_limit) return;
-		Q_strlcpy(entries[i].text, "random items", sizeof(entries[i].text));
+		menu::SetText(entries[i], "random items");
 		i++;
 	}
 
 	if (g_dm_force_join->integer) {
 		if (i >= content_limit) return;
-		Q_strlcpy(entries[i].text, "forced game joining", sizeof(entries[i].text));
+		menu::SetText(entries[i], "forced game joining");
 		i++;
 	}
 
 	if (!g_dm_powerup_drop->integer) {
 		if (i >= content_limit) return;
-		Q_strlcpy(entries[i].text, "no powerup drops", sizeof(entries[i].text));
+		menu::SetText(entries[i], "no powerup drops");
 		i++;
 	}
 
 	if (g_knockback_scale->value != 1) {
 		if (i >= content_limit) return;
-		Q_strlcpy(entries[i].text, G_Fmt("knockback scale: {}", g_knockback_scale->value).data(), sizeof(entries[i].text));
+		menu::SetText(entries[i], G_Fmt("knockback scale: {}", g_knockback_scale->value).data());
 		i++;
 	}
 
 	if (g_dm_no_self_damage->integer) {
 		if (i >= content_limit) return;
-		Q_strlcpy(entries[i].text, "no self-damage", sizeof(entries[i].text));
+		menu::SetText(entries[i], "no self-damage");
 		i++;
 	}
 
 	if (g_dm_no_fall_damage->integer) {
 		if (i >= content_limit) return;
-		Q_strlcpy(entries[i].text, "no falling damage", sizeof(entries[i].text));
+		menu::SetText(entries[i], "no falling damage");
 		i++;
 	}
 
 	if (!g_dm_instant_items->integer) {
 		if (i >= content_limit) return;
-		Q_strlcpy(entries[i].text, "no instant items", sizeof(entries[i].text));
+		menu::SetText(entries[i], "no instant items");
 		i++;
 	}
 
 	if (items) {
 		if (i >= content_limit) return;
 		if (g_no_items->integer) {
-			Q_strlcpy(entries[i].text, "no items", sizeof(entries[i].text));
+			menu::SetText(entries[i], "no items");
 			i++;
 		} else {
 			if (i >= content_limit) return;
 			if (g_no_health->integer) {
-				Q_strlcpy(entries[i].text, "no health spawns", sizeof(entries[i].text));
+				menu::SetText(entries[i], "no health spawns");
 				i++;
 			}
 
 			if (i >= content_limit) return;
 			if (g_no_armor->integer) {
-				Q_strlcpy(entries[i].text, "no armor spawns", sizeof(entries[i].text));
+				menu::SetText(entries[i], "no armor spawns");
 				i++;
 			}
 
 			if (i >= content_limit) return;
 			if (g_no_mines->integer) {
-				Q_strlcpy(entries[i].text, "no mines", sizeof(entries[i].text));
+				menu::SetText(entries[i], "no mines");
 				i++;
 			}
 		}
@@ -975,54 +992,67 @@ static void G_Menu_ServerInfo_Update(gentity_t *ent) {
 
 	if (g_dm_allow_exit->integer) {
 		if (i >= content_limit) return;
-		Q_strlcpy(entries[i].text, "allow exiting", sizeof(entries[i].text));
+		menu::SetText(entries[i], "allow exiting");
 		i++;
 	}
 
 	if (g_mover_speed_scale->value != 1.0f) {
 		if (i >= content_limit) return;
-		Q_strlcpy(entries[i].text, G_Fmt("mover speed scale: {}", g_mover_speed_scale->value).data(), sizeof(entries[i].text));
+		menu::SetText(entries[i], G_Fmt("mover speed scale: {}", g_mover_speed_scale->value).data());
 		i++;
 	}
 
 }
 
-void G_Menu_ServerInfo(gentity_t *ent, menu_hnd_t *p) {
-	if (!G_Menu_HasClient(ent))
+void OpenServer(gentity_t *ent, menu_hnd_t *)
+{
+	if (!menu::HasClient(ent))
 		return;
 
 	P_Menu_Close(ent);
-	P_Menu_Open(ent, svinfomenu, -1, sizeof(svinfomenu) / sizeof(menu_t), nullptr, G_Menu_ServerInfo_Update);
+	P_Menu_Open(ent, kServerMenuTemplate, -1, muffmode::CountAsInt(kServerMenuTemplate), nullptr, UpdateServer);
 }
 
-static void G_Menu_GameRules_Update(gentity_t *ent) {
+void UpdateGameRules(gentity_t *ent)
+{
 	menu_t *entries = nullptr;
 	int num_entries = 0;
-	if (!G_Menu_GetEntries(ent, &entries, &num_entries) || G_Menu_ContentLimit(num_entries) < 3)
+	if (!menu::GetEntries(ent, &entries, &num_entries) || menu::ContentLimit(num_entries) < 3)
 		return;
 
 	int		i = 0;
 
-	Q_strlcpy(entries[i].text, "Game Rules", sizeof(entries[i].text)); i++;
-	Q_strlcpy(entries[i].text, BREAKER, sizeof(entries[i].text)); i++;
-	Q_strlcpy(entries[i].text, G_Fmt("{}", level.gametype_name).data(), sizeof(entries[i].text)); i++;
+	menu::SetText(entries[i], "Game Rules"); i++;
+	menu::SetText(entries[i], menu::kBreaker); i++;
+	menu::SetText(entries[i], G_Fmt("{}", level.gametype_name).data()); i++;
 }
 
-static void G_Menu_GameRules(gentity_t *ent, menu_hnd_t *p) {
-	if (!G_Menu_HasClient(ent))
+void OpenGameRules(gentity_t *ent, menu_hnd_t *)
+{
+	if (!menu::HasClient(ent))
 		return;
 
 	P_Menu_Close(ent);
-	P_Menu_Open(ent, svinfomenu, -1, sizeof(svinfomenu) / sizeof(menu_t), nullptr, G_Menu_GameRules_Update);
+	P_Menu_Open(ent, kServerMenuTemplate, -1, muffmode::CountAsInt(kServerMenuTemplate), nullptr, UpdateGameRules);
 }
 
-static void G_Menu_Join_Update(gentity_t *ent) {
+} // namespace muffmode::menu::info
+
+void G_Menu_ReturnToMain(gentity_t *ent, menu_hnd_t *p)
+{
+	menu::info::ReturnToMain(ent, p);
+}
+
+namespace muffmode::menu::join {
+
+void Update(gentity_t *ent)
+{
 	menu_t *entries = nullptr;
 	int num_entries = 0;
-	if (!G_Menu_GetEntries(ent, &entries, &num_entries) || num_entries <= jmenu_notice)
+	if (!menu::GetEntries(ent, &entries, &num_entries) || num_entries <= kNotice)
 		return;
 
-	int		pmax = G_Menu_CvarInteger(maxplayers);
+	const int max_players = max(1, muffmode::CvarInteger(maxplayers));
 	int		num_red = 0, num_blue = 0, num_free = 0, num_queue = 0;
 
 	for (auto ec : active_clients()) {
@@ -1043,140 +1073,140 @@ static void G_Menu_Join_Update(gentity_t *ent) {
 		}
 	}
 
-	if (pmax < 1) pmax = 1;
+	const bool teams = Teams();
+	if (teams) {
+		if (!muffmode::CvarEnabled(g_teamplay_allow_team_pick) && !level.locked[TEAM_RED] && !level.locked[TEAM_BLUE]) {
+			menu::SetText(entries[kTeamsJoinRed], G_Fmt("Join a Team ({}/{})", num_red + num_blue, max_players).data());
+			menu::SetText(entries[kTeamsJoinBlue], "");
 
-	if (Teams()) {
-		if (!G_Menu_CvarEnabled(g_teamplay_allow_team_pick) && !level.locked[TEAM_RED] && !level.locked[TEAM_BLUE]) {
-			Q_strlcpy(entries[jmenu_teams_join_red].text, G_Fmt("Join a Team ({}/{})", num_red + num_blue, pmax).data(), sizeof(entries[jmenu_teams_join_red].text));
-			Q_strlcpy(entries[jmenu_teams_join_blue].text, "", sizeof(entries[jmenu_teams_join_blue].text));
-
-			entries[jmenu_teams_join_red].SelectFunc = G_Menu_Join_Team_Red;
-			entries[jmenu_teams_join_blue].SelectFunc = nullptr;
+			entries[kTeamsJoinRed].SelectFunc = JoinRed;
+			entries[kTeamsJoinBlue].SelectFunc = nullptr;
 		} else {
 			if (level.locked[TEAM_RED]) {
-				Q_strlcpy(entries[jmenu_teams_join_red].text, G_Fmt("{} is LOCKED", Teams_TeamName(TEAM_RED)).data(), sizeof(entries[jmenu_teams_join_red].text));
-				entries[jmenu_teams_join_red].SelectFunc = nullptr;
+				menu::SetText(entries[kTeamsJoinRed], G_Fmt("{} is LOCKED", Teams_TeamName(TEAM_RED)).data());
+				entries[kTeamsJoinRed].SelectFunc = nullptr;
 			} else {
-				Q_strlcpy(entries[jmenu_teams_join_red].text, G_Fmt("Join {} ({}/{})", Teams_TeamName(TEAM_RED), num_red, pmax / 2).data(), sizeof(entries[jmenu_teams_join_red].text));
-				entries[jmenu_teams_join_red].SelectFunc = G_Menu_Join_Team_Red;
+				menu::SetText(entries[kTeamsJoinRed], G_Fmt("Join {} ({}/{})", Teams_TeamName(TEAM_RED), num_red, max_players / 2).data());
+				entries[kTeamsJoinRed].SelectFunc = JoinRed;
 			}
 			if (level.locked[TEAM_BLUE]) {
-				Q_strlcpy(entries[jmenu_teams_join_blue].text, G_Fmt("{} is LOCKED", Teams_TeamName(TEAM_BLUE)).data(), sizeof(entries[jmenu_teams_join_blue].text));
-				entries[jmenu_teams_join_blue].SelectFunc = nullptr;
+				menu::SetText(entries[kTeamsJoinBlue], G_Fmt("{} is LOCKED", Teams_TeamName(TEAM_BLUE)).data());
+				entries[kTeamsJoinBlue].SelectFunc = nullptr;
 			} else {
-				Q_strlcpy(entries[jmenu_teams_join_blue].text, G_Fmt("Join {} ({}/{})", Teams_TeamName(TEAM_BLUE), num_blue, pmax / 2).data(), sizeof(entries[jmenu_teams_join_blue].text));
-				entries[jmenu_teams_join_blue].SelectFunc = G_Menu_Join_Team_Blue;
+				menu::SetText(entries[kTeamsJoinBlue], G_Fmt("Join {} ({}/{})", Teams_TeamName(TEAM_BLUE), num_blue, max_players / 2).data());
+				entries[kTeamsJoinBlue].SelectFunc = JoinBlue;
 			}
 
 		}
 	} else {
 		// Allow duel queue joining even during match lock (queue joining doesn't affect active match)
-		bool is_duel_queue_join = GT(GT_DUEL) && level.num_playing_clients == 2;
+		const bool is_duel_queue_join = GT(GT_DUEL) && level.num_playing_clients == 2;
 		if (level.locked[TEAM_FREE] && !is_duel_queue_join) {
-			Q_strlcpy(entries[jmenu_free_join].text, "Match LOCKED", sizeof(entries[jmenu_free_join].text));
-			entries[jmenu_free_join].SelectFunc = nullptr;
+			menu::SetText(entries[kFreeJoin], "Match LOCKED");
+			entries[kFreeJoin].SelectFunc = nullptr;
 		} else if (GT(GT_DUEL) && level.num_playing_clients == 2) {
-			Q_strlcpy(entries[jmenu_free_join].text, G_Fmt("Join Queue to Play ({}/{})", num_queue, max(0, pmax - 2)).data(), sizeof(entries[jmenu_free_join].text));
-			entries[jmenu_free_join].SelectFunc = G_Menu_Join_Team_Free;
+			menu::SetText(entries[kFreeJoin], G_Fmt("Join Queue to Play ({}/{})", num_queue, max(0, max_players - 2)).data());
+			entries[kFreeJoin].SelectFunc = JoinFree;
 		} else {
-			Q_strlcpy(entries[jmenu_free_join].text, G_Fmt("Join Match ({}/{})", num_free, GT(GT_DUEL) ? 2 : pmax).data(), sizeof(entries[jmenu_free_join].text));
-			entries[jmenu_free_join].SelectFunc = G_Menu_Join_Team_Free;
+			menu::SetText(entries[kFreeJoin], G_Fmt("Join Match ({}/{})", num_free, GT(GT_DUEL) ? 2 : max_players).data());
+			entries[kFreeJoin].SelectFunc = JoinFree;
 		}
 	}
 
-	if (!G_Menu_CvarEnabled(g_matchstats)) {
-		int index = Teams() ? jmenu_teams_player : jmenu_free_player;
-		Q_strlcpy(entries[index].text, "", sizeof(entries[index].text));
+	if (!muffmode::CvarEnabled(g_matchstats)) {
+		int index = teams ? kTeamsPlayerStats : kFreePlayerStats;
+		menu::SetText(entries[index], "");
 		entries[index].SelectFunc = nullptr;
 	} else {
-		int index = Teams() ? jmenu_teams_player : jmenu_free_player;
-		Q_strlcpy(entries[index].text, "Player Stats", sizeof(entries[index].text));
-		entries[index].SelectFunc = G_Menu_PMStats;
+		int index = teams ? kTeamsPlayerStats : kFreePlayerStats;
+		menu::SetText(entries[index], "Player Stats");
+		entries[index].SelectFunc = menu::stats::Open;
 	}
 
-	if (!G_Menu_CvarEnabled(g_allow_voting)) {
-		int index = Teams() ? jmenu_teams_callvote : jmenu_free_callvote;
-		Q_strlcpy(entries[index].text, "", sizeof(entries[index].text));
+	if (!muffmode::CvarEnabled(g_allow_voting)) {
+		int index = teams ? kTeamsCallVote : kFreeCallVote;
+		menu::SetText(entries[index], "");
 		entries[index].SelectFunc = nullptr;
 	} else {
-		int index = Teams() ? jmenu_teams_callvote : jmenu_free_callvote;
-		Q_strlcpy(entries[index].text, "Call a Vote", sizeof(entries[index].text));
-		entries[index].SelectFunc = G_Menu_CallVote;
+		int index = teams ? kTeamsCallVote : kFreeCallVote;
+		menu::SetText(entries[index], "Call a Vote");
+		entries[index].SelectFunc = ::G_Menu_CallVote;
 	}
 
-	const char *force_join = G_Menu_CvarString(g_dm_force_join);
+	const char *force_join = muffmode::CvarString(g_dm_force_join);
 	if (force_join[0]) {
-		if (Teams()) {
-			if (Q_strcasecmp(force_join, "red") == 0) {
-				entries[jmenu_teams_join_blue].text[0] = '\0';
-				entries[jmenu_teams_join_blue].SelectFunc = nullptr;
-			} else if (Q_strcasecmp(force_join, "blue") == 0) {
-				entries[jmenu_teams_join_red].text[0] = '\0';
-				entries[jmenu_teams_join_red].SelectFunc = nullptr;
+		if (teams) {
+			if (muffmode::CStringEqualsI(force_join, "red")) {
+				menu::SetText(entries[kTeamsJoinBlue], "");
+				entries[kTeamsJoinBlue].SelectFunc = nullptr;
+			} else if (muffmode::CStringEqualsI(force_join, "blue")) {
+				menu::SetText(entries[kTeamsJoinRed], "");
+				entries[kTeamsJoinRed].SelectFunc = nullptr;
 			}
 		}
 	}
 
-	int index = Teams() ? jmenu_teams_chase : jmenu_free_chase;
+	int index = teams ? kTeamsChase : kFreeChase;
 	if (ent->client->follow_target)
-		Q_strlcpy(entries[index].text, "$g_pc_leave_chase_camera", sizeof(entries[index].text));
+		menu::SetText(entries[index], "$g_pc_leave_chase_camera");
 	else
-		Q_strlcpy(entries[index].text, "$g_pc_chase_camera", sizeof(entries[index].text));
+		menu::SetText(entries[index], "$g_pc_chase_camera");
 
-	index = Teams() ? jmenu_teams_readyup : jmenu_free_readyup;
-	if (G_Menu_CvarEnabled(g_dm_do_readyup) && level.match_state == matchst_t::MATCH_WARMUP_READYUP) {
-		Q_strlcpy(entries[index].text, ent->client->resp.ready ? "Not Ready" : "Ready Up", sizeof(entries[index].text));
-		entries[index].SelectFunc = G_Menu_ReadyUp;
+	index = teams ? kTeamsReadyUp : kFreeReadyUp;
+	if (muffmode::CvarEnabled(g_dm_do_readyup) && level.match_state == matchst_t::MATCH_WARMUP_READYUP) {
+		menu::SetText(entries[index], ent->client->resp.ready ? "Not Ready" : "Ready Up");
+		entries[index].SelectFunc = ToggleReady;
 	} else {
-		entries[index].text[0] = '\0';
+		menu::SetText(entries[index], "");
 		entries[index].SelectFunc = nullptr;
 	}
 
-	G_Menu_SetHostName(entries + jmenu_hostname);
-	G_Menu_SetGametypeName(entries + jmenu_gametype);
-	G_Menu_SetLevelName(entries + jmenu_level);
+	menu::SetHostName(entries + kHostName);
+	menu::SetGametypeName(entries + kGametype);
+	menu::SetLevelName(entries + kLevel);
 
-	G_Menu_SetGamemodName(entries + jmenu_gamemod);
+	menu::SetGamemodName(entries + kGameMod);
 
 	switch (level.match_state) {
 	case matchst_t::MATCH_NONE:
-		entries[jmenu_match].text[0] = '\0';
+		menu::SetText(entries[kMatch], "");
 		break;
 
 	case matchst_t::MATCH_WARMUP_DELAYED:
 	case matchst_t::MATCH_WARMUP_DEFAULT:
 	case matchst_t::MATCH_WARMUP_READYUP:
-		Q_strlcpy(entries[jmenu_match].text, "*MATCH WARMUP", sizeof(entries[jmenu_match].text));
+		menu::SetText(entries[kMatch], "*MATCH WARMUP");
 		break;
 
 	case matchst_t::MATCH_COUNTDOWN:
-		Q_strlcpy(entries[jmenu_match].text, "*MATCH IS STARTING", sizeof(entries[jmenu_match].text));
+		menu::SetText(entries[kMatch], "*MATCH IS STARTING");
 		break;
 
 	case matchst_t::MATCH_IN_PROGRESS:
-		Q_strlcpy(entries[jmenu_match].text, "*MATCH IN PROGRESS", sizeof(entries[jmenu_match].text));
+		menu::SetText(entries[kMatch], "*MATCH IN PROGRESS");
 		break;
 
 	default:
-		Q_strlcpy(entries[jmenu_match].text, BREAKER, sizeof(entries[jmenu_match].text));
+		menu::SetText(entries[kMatch], menu::kBreaker);
 		break;
 	}
 
-	int admin_index = Teams() ? jmenu_teams_admin : jmenu_free_admin;
+	int admin_index = teams ? kTeamsAdmin : kFreeAdmin;
 	if (ent->client->sess.admin) {
-		Q_strlcpy(entries[admin_index].text, "Admin", sizeof(entries[admin_index].text));
+		menu::SetText(entries[admin_index], "Admin");
 		entries[admin_index].align = MENU_ALIGN_LEFT;
-		entries[admin_index].SelectFunc = G_Menu_Admin;
+		entries[admin_index].SelectFunc = menu::admin::Open;
 	} else {
-		Q_strlcpy(entries[admin_index].text, "", sizeof(entries[admin_index].text));
+		menu::SetText(entries[admin_index], "");
 		entries[admin_index].SelectFunc = nullptr;
 	}
 
-	Q_strlcpy(entries[jmenu_notice].text, "github.com/themuffinator", sizeof(entries[jmenu_notice].text));
+	menu::SetText(entries[kNotice], "github.com/themuffinator");
 }
 
-void G_Menu_Join_Open(gentity_t *ent) {
-	if (!G_Menu_HasClient(ent))
+void Open(gentity_t *ent)
+{
+	if (!menu::HasClient(ent))
 		return;
 
 	if (Vote_Menu_Active(ent))
@@ -1204,8 +1234,15 @@ void G_Menu_Join_Open(gentity_t *ent) {
 		else
 			team = brandom() ? TEAM_RED : TEAM_BLUE;
 
-		P_Menu_Open(ent, teams_join_menu, team, sizeof(teams_join_menu) / sizeof(menu_t), nullptr, G_Menu_Join_Update);
+		P_Menu_Open(ent, kTeamsMenuTemplate, team, muffmode::CountAsInt(kTeamsMenuTemplate), nullptr, Update);
 	} else {
-		P_Menu_Open(ent, free_join_menu, TEAM_FREE, sizeof(free_join_menu) / sizeof(menu_t), nullptr, G_Menu_Join_Update);
+		P_Menu_Open(ent, kFreeMenuTemplate, TEAM_FREE, muffmode::CountAsInt(kFreeMenuTemplate), nullptr, Update);
 	}
+}
+
+} // namespace muffmode::menu::join
+
+void G_Menu_Join_Open(gentity_t *ent)
+{
+	menu::join::Open(ent);
 }

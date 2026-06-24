@@ -28,6 +28,7 @@ int MM_HealthPickupAmount(gentity_t *ent, int quantity);
 gtime_t MM_HealthPickupRespawnDelay();
 bool MM_HealthPickupUsesMegaThink(gentity_t *ent, gentity_t *other);
 
+int MM_AmmoPickupCount(gentity_t *ent, int quantity);
 int MM_AmmoSlugPickupCount(int quantity);
 
 int MM_PickRespawnItemTeamIndex(int current_index, int count);

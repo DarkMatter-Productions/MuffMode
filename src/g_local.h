@@ -1701,6 +1701,8 @@ struct level_locals_t {
 
 	gtime_t		timeout_in_place;
 	gentity_t	*timeout_ent;
+	bool		timeout_auto;
+	bool		timeout_resuming;
 
 	std::string match_id;
 
@@ -2375,6 +2377,7 @@ extern cvar_t *g_allow_voting;
 extern cvar_t *g_arena_dmg_armor;
 extern cvar_t *g_arena_start_armor;
 extern cvar_t *g_arena_start_health;
+extern cvar_t *g_auto_ghost_timeout;
 extern cvar_t *g_cheats;
 extern cvar_t *g_coop_enable_lives;
 extern cvar_t *g_coop_health_scaling;
@@ -2421,6 +2424,7 @@ extern cvar_t *g_dm_spawn_farthest;
 extern cvar_t *g_dm_spawnpads;
 extern cvar_t *g_dm_strong_mines;
 extern cvar_t *g_dm_timeout_length;
+extern cvar_t *g_dm_timeout_resume_countdown;
 extern cvar_t *g_dm_weapons_stay;
 extern cvar_t *g_drop_cmds;
 extern cvar_t *g_entity_override_dir;
@@ -2757,6 +2761,9 @@ void func_train_find(gentity_t *self);
 gentity_t *plat_spawn_inside_trigger(gentity_t *ent);
 void	 Move_Calc(gentity_t *ent, const vec3_t &dest, void(*endfunc)(gentity_t *self));
 void G_SetMoveinfoSounds(gentity_t *self, const char *default_start, const char *default_mid, const char *default_end);
+void door_use_areaportals(gentity_t *self, bool open);
+void door_killed(gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int damage, const vec3_t &point, const mod_t &mod);
+void door_touch(gentity_t *self, gentity_t *other, const trace_t &tr, bool other_touching_self);
 
 constexpr spawnflags_t SPAWNFLAG_TRAIN_START_ON = 1_spawnflag;
 
@@ -2862,6 +2869,7 @@ void ThrowClientHead(gentity_t *self, int damage);
 void gib_die(gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int damage, const vec3_t &point, const mod_t &mod);
 gentity_t *ThrowGib(gentity_t *self, const char *gibname, int damage, gib_type_t type, float scale);
 void BecomeExplosion1(gentity_t *self);
+void BecomeExplosion2(gentity_t *self);
 void misc_viper_use(gentity_t *self, gentity_t *other, gentity_t *activator);
 void misc_strogg_ship_use(gentity_t *self, gentity_t *other, gentity_t *activator);
 void VelocityForDamage(int damage, vec3_t &v);

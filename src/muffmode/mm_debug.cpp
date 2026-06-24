@@ -3,10 +3,14 @@
 
 #include "g_local.h"
 #include "muffmode/mm_debug.h"
+#include "muffmode/mm_util.h"
+#include <array>
 #include <cstdarg>
 #include <cstdio>
 #include <ctime>
 #include <fstream>
+#include <optional>
+#include <string>
 #ifdef _WIN32
 #include <io.h>
 #include <sys/stat.h>
@@ -16,19 +20,44 @@
 
 extern cvar_t *g_muffmode_debug;
 
-namespace {
-std::ofstream g_muffmode_log;
-bool g_log_initialized = false;
+namespace muffmode::debug {
+
+constexpr const char *kLogFile = "muffmode_debug.log";
+
+std::ofstream log_stream;
+bool log_initialized = false;
+
+std::optional<std::tm> LocalTimeSnapshot(std::time_t time)
+{
+	const std::tm *time_info = std::localtime(&time);
+	if (!time_info)
+		return std::nullopt;
+
+	return *time_info;
+}
+
+std::string FormatLocalTime(std::time_t time, const char *format)
+{
+	std::array<char, 64> timestamp = {};
+	const auto time_info = LocalTimeSnapshot(time);
+	if (!time_info)
+		return "";
+
+	if (!std::strftime(timestamp.data(), timestamp.size(), format, &*time_info))
+		return "";
+
+	return timestamp.data();
+}
 
 bool ShouldTruncateLog()
 {
 	// Check if log file exists.
 #ifdef _WIN32
 	struct _stat fileInfo;
-	if (_stat("muffmode_debug.log", &fileInfo) != 0)
+	if (_stat(kLogFile, &fileInfo) != 0)
 #else
 	struct stat fileInfo;
-	if (stat("muffmode_debug.log", &fileInfo) != 0)
+	if (stat(kLogFile, &fileInfo) != 0)
 #endif
 	{
 		// File doesn't exist, create a new one.
@@ -36,93 +65,99 @@ bool ShouldTruncateLog()
 	}
 
 	// Get file modification time.
-	time_t fileTime = fileInfo.st_mtime;
-	struct tm *fileTm = localtime(&fileTime);
-	if (!fileTm)
+	const auto file_date = LocalTimeSnapshot(fileInfo.st_mtime);
+	if (!file_date)
 		return true;
-	struct tm fileDate = *fileTm;
 
 	// Get current time.
-	time_t now = time(nullptr);
-	struct tm *nowTm = localtime(&now);
-	if (!nowTm)
+	const auto now_date = LocalTimeSnapshot(std::time(nullptr));
+	if (!now_date)
 		return false;
-	struct tm nowDate = *nowTm;
 
 	// If file date is different from today, truncate.
-	if (fileDate.tm_year != nowDate.tm_year || fileDate.tm_mon != nowDate.tm_mon || fileDate.tm_mday != nowDate.tm_mday)
-		return true;
-
-	return false;
+	return file_date->tm_year != now_date->tm_year ||
+		file_date->tm_mon != now_date->tm_mon ||
+		file_date->tm_mday != now_date->tm_mday;
 }
 
 void EnsureLogInitialized()
 {
-	if (!g_log_initialized)
-	{
-		bool shouldTruncate = ShouldTruncateLog();
-		std::ios_base::openmode mode = shouldTruncate ? std::ios::trunc : std::ios::app;
+	if (log_initialized)
+		return;
 
-		g_muffmode_log.open("muffmode_debug.log", mode);
-		if (g_muffmode_log.is_open())
-		{
-			time_t now = time(nullptr);
-			char timestamp[64];
-			strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", localtime(&now));
+	const bool should_truncate = ShouldTruncateLog();
+	const std::ios_base::openmode mode = should_truncate ? std::ios::trunc : std::ios::app;
 
-			if (shouldTruncate)
-			{
-				g_muffmode_log << "==========================================\n";
-				g_muffmode_log << "MuffMode Debug Log Started: " << timestamp << "\n";
-				g_muffmode_log << "==========================================\n";
-			}
-			else
-			{
-				g_muffmode_log << "\n----------------------------------------\n";
-				g_muffmode_log << "Log Continued: " << timestamp << "\n";
-				g_muffmode_log << "----------------------------------------\n";
-			}
-			g_muffmode_log.flush();
+	log_stream.open(kLogFile, mode);
+	if (log_stream.is_open()) {
+		const std::string timestamp = FormatLocalTime(std::time(nullptr), "%Y-%m-%d %H:%M:%S");
+
+		if (should_truncate) {
+			log_stream << "==========================================\n";
+			log_stream << "MuffMode Debug Log Started: " << timestamp << "\n";
+			log_stream << "==========================================\n";
+		} else {
+			log_stream << "\n----------------------------------------\n";
+			log_stream << "Log Continued: " << timestamp << "\n";
+			log_stream << "----------------------------------------\n";
 		}
-		g_log_initialized = true;
+		log_stream.flush();
 	}
+	log_initialized = true;
 }
-} // namespace
+
+bool LogIsOpen()
+{
+	return log_stream.is_open();
+}
+
+bool LogEnabled()
+{
+	return muffmode::CvarEnabled(g_muffmode_debug);
+}
+
+void WriteLogLine(const char *category, const char *text)
+{
+	log_stream << "[" << FormatLocalTime(std::time(nullptr), "%H:%M:%S") << "] [" << category << "] " << text << '\n';
+	log_stream.flush();
+}
+
+void WriteSeparator()
+{
+	log_stream << "----------------------------------------\n";
+	log_stream.flush();
+}
+
+} // namespace muffmode::debug
 
 void MuffModeLog(const char *category, const char *format, ...)
 {
-	if (!g_muffmode_debug || !g_muffmode_debug->integer)
+	if (!muffmode::debug::LogEnabled())
 		return;
 
-	EnsureLogInitialized();
+	muffmode::debug::EnsureLogInitialized();
 
-	if (!g_muffmode_log.is_open())
+	if (!muffmode::debug::LogIsOpen())
 		return;
 
-	time_t now = time(nullptr);
-	char timestamp[32];
-	strftime(timestamp, sizeof(timestamp), "%H:%M:%S", localtime(&now));
-
-	char buffer[512];
+	std::array<char, 512> buffer = {};
 	va_list args;
 	va_start(args, format);
-	vsnprintf(buffer, sizeof(buffer), format, args);
+	std::vsnprintf(buffer.data(), buffer.size(), format, args);
 	va_end(args);
 
-	g_muffmode_log << "[" << timestamp << "] [" << category << "] " << buffer << std::endl;
-	g_muffmode_log.flush();
+	muffmode::debug::WriteLogLine(category, buffer.data());
 }
 
 void MuffModeLog_Separator()
 {
-	if (!g_muffmode_debug || !g_muffmode_debug->integer)
+	if (!muffmode::debug::LogEnabled())
 		return;
 
-	EnsureLogInitialized();
+	muffmode::debug::EnsureLogInitialized();
 
-	if (!g_muffmode_log.is_open())
+	if (!muffmode::debug::LogIsOpen())
 		return;
 
-	g_muffmode_log << "----------------------------------------\n";
-	g_muffmode_log.flush();
+	muffmode::debug::WriteSeparator();
 }

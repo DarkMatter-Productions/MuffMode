@@ -32,7 +32,8 @@
 | --- | --- |
 | Install, join games, vote, bind the hook, or learn player commands | [Player Guide](docs/player-guide.md) |
 | Run a public server, private lobby, pickup, or scrim server | [Server Host Guide](docs/server-host-guide.md) |
-| Compare gametypes, game modifications, maps, and rulesets | [Gameplay Reference](docs/gameplay-reference.md) |
+| Compare gametypes, game modifications, and maps | [Gameplay Reference](docs/gameplay-reference.md) |
+| Choose a ruleset or compare weapon, item, ammo, and movement feel | [Rulesets](docs/rulesets.md) |
 | Browse included `mm-*` map remasters, ports, original readmes/BSPs, source maps, item registers, and history | [Muff Mode Map Guide](docs/maps/index.md) |
 | Look up commands, cvars, voting flags, and config files | [Configuration Reference](docs/configuration-reference.md) |
 | Build maps or entity overrides for Muff Mode | [Level Design Guide](docs/level-design-guide.md) |
@@ -40,6 +41,7 @@
 | Compile the DLL from source | [Build Guide](docs/build-guide.md) |
 | Reproduce hardening, test, analysis, fuzz, and release gates | [Hardening Guide](docs/hardening-guide.md) |
 | Review license and dependency notices | [Licensing](docs/licensing.md) and [Dependency Policy](docs/dependencies.md) |
+| Track unreleased changes and release highlights | [Changelog](docs/changelog.md) |
 | Prepare and publish a release package | [Release Process](docs/release-process.md) |
 
 <h2 align="center">Quick Install</h2>
@@ -55,7 +57,7 @@ For a more careful walkthrough, use the [Player Guide](docs/player-guide.md) or 
 
  - **Built for every lobby style** — supports **casual public servers**, **private friend sessions**, **pickups**, **scrims**, and more organized competitive events.
  - **A fuller mode lineup** — includes **Deathmatch**, **Duel**, **TDM**, **CTF**, **Clan Arena**, **CaptureStrike**, **Red Rover**, **Last Man Standing**, **Horde**, **Freeze Tag**, **ProBall**, **Instagib**, and **NadeFest**.
- - **Flexible rulesets** — switch between **Quake II Rerelease**, **Muff Mode**, **Q2RE Balanced**, **Quake III Arena style**, **Quake style**, and **Quake Champions style** depending on the feel you want.
+ - **Flexible rulesets** — switch between [**Quake II Rerelease**, **Muff Mode**, **Q2RE Balanced**, **Quake III Arena style**, **Quake style**, and **Quake Champions style**](docs/rulesets.md) depending on the feel you want.
  - **Better match flow** — warmups, ready checks, countdowns, post-match delays, sudden death, overtime, round handling, and timeouts help games start cleanly and stay organized.
  - **Player-friendly interface improvements** — a purpose-built HUD, compact scoreboard, frag messages, timer support, help text, MOTD access, and match-state feedback keep important information visible without overwhelming the screen.
  - **Fast, accessible voting** — use **GUI or console voting** for maps, gametypes, rulesets, server settings, and administrative actions, with host-side controls to keep votes focused.

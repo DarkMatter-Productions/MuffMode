@@ -131,6 +131,7 @@ cvar_t *g_allow_voting;
 cvar_t *g_arena_dmg_armor;
 cvar_t *g_arena_start_armor;
 cvar_t *g_arena_start_health;
+cvar_t *g_auto_ghost_timeout;
 cvar_t *g_cheats;
 cvar_t *g_coop_enable_lives;
 cvar_t *g_coop_health_scaling;
@@ -175,6 +176,7 @@ cvar_t *g_dm_spawn_farthest;
 cvar_t *g_dm_spawnpads;
 cvar_t *g_dm_strong_mines;
 cvar_t *g_dm_timeout_length;
+cvar_t *g_dm_timeout_resume_countdown;
 cvar_t *g_dm_weapons_stay;
 cvar_t *g_drop_cmds;
 cvar_t *g_entity_override_dir;
@@ -617,6 +619,7 @@ static void InitGame() {
 	g_arena_dmg_armor = gi.cvar("g_arena_dmg_armor", "0", CVAR_NOFLAGS);
 	g_arena_start_armor = gi.cvar("g_arena_start_armor", "200", CVAR_NOFLAGS);
 	g_arena_start_health = gi.cvar("g_arena_start_health", "200", CVAR_NOFLAGS);
+	g_auto_ghost_timeout = gi.cvar("g_auto_ghost_timeout", "0", CVAR_NOFLAGS);
 	g_coop_health_scaling = gi.cvar("g_coop_health_scaling", "0", CVAR_LATCH);
 	g_corpse_sink_time = gi.cvar("g_corpse_sink_time", "15", CVAR_NOFLAGS);
 	g_damage_scale = gi.cvar("g_damage_scale", "1", CVAR_NOFLAGS);
@@ -650,6 +653,7 @@ static void InitGame() {
 	g_dm_spawn_farthest = gi.cvar("g_dm_spawn_farthest", "1", CVAR_NOFLAGS);
 	g_dm_spawnpads = gi.cvar("g_dm_spawnpads", "1", CVAR_NOFLAGS);
 	g_dm_timeout_length = gi.cvar("g_dm_timeout_length", "120", CVAR_NOFLAGS);
+	g_dm_timeout_resume_countdown = gi.cvar("g_dm_timeout_resume_countdown", "30", CVAR_NOFLAGS);
 	g_dm_weapons_stay = gi.cvar("g_dm_weapons_stay", "0", CVAR_NOFLAGS);
 	g_drop_cmds = gi.cvar("g_drop_cmds", "7", CVAR_NOFLAGS);
 	g_entity_override_dir = gi.cvar("g_entity_override_dir", "maps", CVAR_NOFLAGS);
@@ -2254,7 +2258,9 @@ static inline void G_RunFrame_(bool main_loop) {
 		MuffModeLog("ERROR", "G_RunFrame_: re-entrant call detected! (main_loop=%d)", main_loop);
 	level.in_frame = true;
 
-	if (level.timeout_in_place > 0_ms && level.timeout_ent) {
+	MM_Ghost_RunFrame();
+
+	if (level.timeout_in_place > 0_ms) {
 		int t = (level.timeout_in_place).seconds<int>() + 1;
 
 		if (!level.countdown_check || level.countdown_check.seconds<int>() > t) {
@@ -2268,6 +2274,7 @@ static inline void G_RunFrame_(bool main_loop) {
 			TimeoutEnd();
 
 		ClientEndServerFrames();
+		level.in_frame = false;
 		return;
 	} else {
 		// track gametype changes and update accordingly
@@ -2361,6 +2368,11 @@ static inline void G_RunFrame_(bool main_loop) {
 		if (!(ent->s.renderfx & RF_BEAM))
 			ent->s.old_origin = ent->s.origin;
 
+		if (i > 0 && i <= game.maxclients && ent->client && !ent->client->pers.connected) {
+			MM_PROFILE_INC(frame_clients_visited);
+			continue;
+		}
+
 		// if the ground entity moved, make sure we are still on it
 		if ((ent->groundentity) && (ent->groundentity->linkcount != ent->groundentity_linkcount)) {
 			contents_t mask = G_GetClipMask(ent);
@@ -2452,7 +2464,7 @@ void G_RunFrame(bool main_loop) {
 
 	const bool any_clients_spawned = G_AnyClientsSpawned();
 
-	if (main_loop && !any_clients_spawned) {
+	if (main_loop && !any_clients_spawned && !level.timeout_in_place && !MM_Ghost_HasActiveReservations()) {
 		MM_PROFILE_INC(frame_no_client_skips);
 		return;
 	}

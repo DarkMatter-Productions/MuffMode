@@ -10,19 +10,26 @@
 #include "muffmode/mm_horde.h"
 #include "muffmode/mm_match.h"
 #include "muffmode/mm_team.h"
+#include "muffmode/mm_util.h"
 #include "monsters/m_player.h"	// corpse frames on match reset
+
+#include <algorithm>
+#include <cstdlib>
+#include <iterator>
 
 extern cvar_t *g_horde_champions;
 extern cvar_t *g_horde_champion_max_per_run;
 extern cvar_t *g_horde_champion_chance;
 
-static gclient_t *MM_MatchSortedConnectedClient(size_t slot)
+namespace muffmode::match {
+
+gclient_t *SortedConnectedClient(size_t slot)
 {
-	if (slot >= q_countof(level.sorted_clients))
+	if (slot >= std::size(level.sorted_clients))
 		return nullptr;
 
 	const int client_num = level.sorted_clients[slot];
-	if (client_num < 0 || client_num >= (int)game.maxclients)
+	if (client_num < 0 || client_num >= static_cast<int>(game.maxclients))
 		return nullptr;
 
 	gclient_t *client = &game.clients[client_num];
@@ -32,12 +39,13 @@ static gclient_t *MM_MatchSortedConnectedClient(size_t slot)
 	return client;
 }
 
-static bool MM_IsConnectedClientEntity(gentity_t *ent)
+bool IsConnectedClientEntity(gentity_t *ent)
 {
 	return ent && ent->inuse && ent->client && ent->client->pers.connected;
 }
 
-static void Monsters_KillAll() {
+void KillAllMonsters()
+{
 	for (size_t i = 0; i < globals.max_entities; i++) {
 		if (!g_entities[i].inuse)
 			continue;
@@ -49,15 +57,13 @@ static void Monsters_KillAll() {
 	level.killed_monsters = 0;
 }
 
-static void Entities_ItemTeams_Reset() {
-	gentity_t	*ent;
-	size_t		i;
-
+void ResetItemTeams()
+{
 	// Mirror item-team spawn setup (SpawnItem in g_items.cpp): hide every team
 	// member, then let each team master re-run RespawnItem to reveal one. A single
 	// iterator is used; the old code reused `ent` for inner chain walks, which
 	// desynced it from `i` and walked out of bounds on every match reset.
-	for (ent = g_entities + 1, i = 1; i < globals.num_entities; i++, ent++) {
+	for (gentity_t *ent = g_entities + 1, *end = g_entities + globals.num_entities; ent < end; ++ent) {
 		if (!ent->inuse)
 			continue;
 
@@ -108,15 +114,13 @@ static void Entities_ItemTeams_Reset() {
 
 /*
 ============
-Entities_Reset
+ResetEntities
 
 Reset clients and items
 ============
 */
-static void Entities_Reset(bool reset_players, bool reset_ghost, bool reset_score) {
-	gentity_t *ent;
-	size_t	i;
-
+void ResetEntities(bool reset_players, bool reset_ghost, bool reset_score)
+{
 	// reset the players
 	if (reset_players) {
 		for (auto ec : active_clients()) {
@@ -176,16 +180,16 @@ static void Entities_Reset(bool reset_players, bool reset_ghost, bool reset_scor
 	Tech_Reset();
 	CTF_ResetFlags();
 
-	Monsters_KillAll();
+	KillAllMonsters();
 
-	Entities_ItemTeams_Reset();
+	ResetItemTeams();
 
 	// reset item spawns and gibs/corpses, remove dropped items and projectiles
-	for (ent = g_entities + 1, i = 1; i < globals.num_entities; i++, ent++) {
+	for (gentity_t *ent = g_entities + 1, *end = g_entities + globals.num_entities; ent < end; ++ent) {
 		if (!ent->inuse)
 			continue;
 
-		if (Q_strcasecmp(ent->classname, "bodyque") == 0 || Q_strcasecmp(ent->classname, "gib") == 0) {
+		if (muffmode::CStringEqualsI(ent->classname, "bodyque") || muffmode::CStringEqualsI(ent->classname, "gib")) {
 			ent->svflags = SVF_NOCLIENT;
 			ent->takedamage = false;
 			ent->solid = SOLID_NOT;
@@ -236,12 +240,12 @@ static void Entities_Reset(bool reset_players, bool reset_ghost, bool reset_scor
 
 	// Reset trains that might be used by elevators
 	// This fixes elevators breaking after match start when trains have nextthink set
-	for (ent = g_entities + 1, i = 1; i < globals.num_entities; i++, ent++) {
+	for (gentity_t *ent = g_entities + 1, *end = g_entities + globals.num_entities; ent < end; ++ent) {
 		if (!ent->inuse)
 			continue;
 
 		// Reset trains that are not currently moving
-		if (!Q_strcasecmp(ent->classname, "func_train")) {
+		if (muffmode::CStringEqualsI(ent->classname, "func_train")) {
 			if (ent->movetype == MOVETYPE_PUSH && !ent->velocity) {
 				// Clear nextthink to allow elevators to work after match start
 				ent->nextthink = 0_ms;
@@ -251,6 +255,10 @@ static void Entities_Reset(bool reset_players, bool reset_ghost, bool reset_scor
 		}
 	}
 }
+
+} // namespace muffmode::match
+
+namespace match = muffmode::match;
 #if 0
 static int SortRoundScores(const void *a, const void *b) {
 	gclient_t *ca, *cb;
@@ -313,10 +321,13 @@ gclient_t *Round_SaveOldPlayerScore() {
 #endif
 /*
 =============
-Round_StartNew
+StartNewRound
 =============
 */
-static bool Round_StartNew() {
+namespace muffmode::match {
+
+bool StartNewRound()
+{
 	if (!MM_GametypeHasFlag(GTF_ROUNDS)) {
 		level.round_state = roundst_t::ROUND_NONE;
 		level.round_state_timer = 0_sec;
@@ -328,7 +339,7 @@ static bool Round_StartNew() {
 	level.countdown_check = 0_sec;
 
 	if (!MM_Horde_ShouldSkipEntitiesReset())
-		Entities_Reset(true, false, false);
+		ResetEntities(true, false, false);
 
 	if (GT(GT_STRIKE)) {
 		// A "round" is a pair of turns: each team attacks once. strike_turn tracks which
@@ -367,6 +378,8 @@ static bool Round_StartNew() {
 	return true;
 }
 
+} // namespace muffmode::match
+
 /*
 =============
 Round_End
@@ -391,14 +404,19 @@ void Round_End() {
 
 /*
 =============
-SetMatchID
+SetMatchId
 =============
 */
-static void SetMatchID() {
+namespace muffmode::match {
+
+void SetMatchId()
+{
 	//level.match_id = gt_short_name_upper[g_gametype->integer];
 	//level.match_id += "-";
 	level.match_id = stime();
 }
+
+} // namespace muffmode::match
 
 /*
 ============
@@ -438,9 +456,9 @@ void Match_Start() {
 		level.horde_champions_remaining = static_cast<int8_t>(n);
 	}
 
-	memset(level.ghosts, 0, sizeof(level.ghosts));
+	MM_Ghost_ClearAll();
 
-	Entities_Reset(true, true, true);
+	match::ResetEntities(true, true, true);
 	UnReadyAll();
 	ValidateCaptains();
 
@@ -452,7 +470,7 @@ void Match_Start() {
 		level.locked[TEAM_FREE] = true;
 	}
 
-	SetMatchID();
+	match::SetMatchId();
 
 	gi.LocBroadcast_Print(PRINT_TTS, "Match ID: {}\n", level.match_id.c_str());
 
@@ -462,7 +480,7 @@ void Match_Start() {
 		level.round_number = 0;
 	}
 
-	if (Round_StartNew())
+	if (match::StartNewRound())
 		return;
 
 	gi.LocBroadcast_Print(PRINT_CENTER, "FIGHT!");
@@ -481,7 +499,7 @@ void Match_Reset() {
 	//	return;
 	//}
 
-	Entities_Reset(true, true, true);
+	match::ResetEntities(true, true, true);
 	UnReadyAll();
 	ValidateCaptains();
 
@@ -505,11 +523,14 @@ void Match_Reset() {
 
 /*
 =============
-CheckReady
+ReadyConditionsMet
 =============
 */
-static bool CheckReady() {
-	if (!g_dm_do_readyup->integer)
+namespace muffmode::match {
+
+bool ReadyConditionsMet()
+{
+	if (!muffmode::CvarEnabled(g_dm_do_readyup))
 		return true;
 
 	int count_ready = 0;
@@ -533,11 +554,12 @@ static bool CheckReady() {
 		return true;
 
 	// wait if below minimum players
-	if (minplayers->integer > 0 && (count_humans + count_bots) < minplayers->integer)
+	const int min_players = muffmode::CvarInteger(minplayers);
+	if (min_players > 0 && (count_humans + count_bots) < min_players)
 		return false;
 
 	// start if only bots
-	if (!count_humans && count_bots && g_dm_allow_no_humans->integer)
+	if (!count_humans && count_bots && muffmode::CvarEnabled(g_dm_allow_no_humans))
 		return true;
 
 	// wait if no ready humans
@@ -545,19 +567,23 @@ static bool CheckReady() {
 		return false;
 
 	// start if over min ready percentile
-	const float ready_percentage = clamp(g_warmup_ready_percentage->value, 0.0f, 1.0f);
-	if (((float)count_ready / (float)count_humans) >= ready_percentage)
+	const float ready_percentage = clamp(muffmode::CvarValue(g_warmup_ready_percentage), 0.0f, 1.0f);
+	if ((static_cast<float>(count_ready) / static_cast<float>(count_humans)) >= ready_percentage)
 		return true;
 
 	return false;
 }
 
+} // namespace muffmode::match
+
 /*
 =============
-CheckDMRoundState
+TickRoundState
 =============
 */
-static void CheckDMRoundState(void) {
+namespace muffmode::match {
+
+void TickRoundState() {
 	if (!MM_GametypeHasFlag(GTF_ROUNDS))
 		return;
 
@@ -569,7 +595,7 @@ static void CheckDMRoundState(void) {
 		if (level.round_state_timer > level.time)
 			return;
 
-		Round_StartNew();
+		StartNewRound();
 		return;
 	}
 
@@ -582,7 +608,7 @@ static void CheckDMRoundState(void) {
 			level.round_state = roundst_t::ROUND_IN_PROGRESS;
 			level.round_state_timer = level.time + gtime_t::from_min(roundtimelimit->value);
 
-			// Strike manages round_number/turn in Round_StartNew(); others advance it here.
+			// Strike manages round_number/turn in StartNewRound(); others advance it here.
 			if (GT(GT_HORDE))
 				MM_Horde_AdvanceRoundNumber();
 			else if (!GT(GT_STRIKE))
@@ -744,12 +770,16 @@ static void CheckDMRoundState(void) {
 	}
 }
 
+} // namespace muffmode::match
+
 /*
 =============
-CheckDMCountdown
+TickCountdown
 =============
 */
-static void CheckDMCountdown(void) {
+namespace muffmode::match {
+
+void TickCountdown() {
 	if ((level.match_state != matchst_t::MATCH_COUNTDOWN && level.round_state != roundst_t::ROUND_COUNTDOWN) || level.intermission_time) {
 		if (level.countdown_check)
 			level.countdown_check = 0_sec;
@@ -777,12 +807,16 @@ static void CheckDMCountdown(void) {
 	}
 }
 
+} // namespace muffmode::match
+
 /*
 =============
-CheckDMMatchEndWarning
+TickMatchEndWarning
 =============
 */
-static void CheckDMMatchEndWarning(void) {
+namespace muffmode::match {
+
+void TickMatchEndWarning() {
 	if (MM_GametypeHasFlag(GTF_ROUNDS))
 		return;
 
@@ -812,14 +846,18 @@ static void CheckDMMatchEndWarning(void) {
 	}
 }
 
+} // namespace muffmode::match
+
 /*
 =============
-CheckDMWarmupState
+TickWarmupState
 
 Once a frame, check for changes in match state during warmup
 =============
 */
-static void CheckDMWarmupState(void) {
+namespace muffmode::match {
+
+void TickWarmupState() {
 	uint8_t min_players;
 
 	if (!level.num_playing_clients) {
@@ -900,7 +938,7 @@ static void CheckDMWarmupState(void) {
 	}
 
 	if (Teams()) {
-		if (g_teamplay_force_balance->integer && abs(level.num_playing_red - level.num_playing_blue) > 1) {
+		if (g_teamplay_force_balance->integer && std::abs(level.num_playing_red - level.num_playing_blue) > 1) {
 			teams_imba = true;
 		} else if (level.num_playing_red < 1 || level.num_playing_blue < 1 || level.num_playing_clients < min_players) {
 			not_enough = true;
@@ -1007,12 +1045,12 @@ static void CheckDMWarmupState(void) {
 
 	// if sufficient number of players are ready, start countdown
 	if (level.match_state == matchst_t::MATCH_WARMUP_READYUP) {
-		if (CheckReady()) {
+		if (ReadyConditionsMet()) {
 countdown:
 			level.match_state = matchst_t::MATCH_COUNTDOWN;
 			level.warmup_requisite = warmupreq_t::WARMUP_REQ_NONE;
 			level.warmup_notice_time = 0_sec;
-			Monsters_KillAll();
+			KillAllMonsters();
 
 			// lock teams on countdown if g_match_lock is enabled
 			if (g_match_lock->integer) {
@@ -1028,8 +1066,8 @@ countdown:
 				level.match_state_timer = level.time + gtime_t::from_sec(g_warmup_countdown->integer);
 
 				// announce it
-				gclient_t *first = MM_MatchSortedConnectedClient(0);
-				gclient_t *second = MM_MatchSortedConnectedClient(1);
+				gclient_t *first = SortedConnectedClient(0);
+				gclient_t *second = SortedConnectedClient(1);
 				if ((GT(GT_DUEL) || (level.num_playing_clients == 2 && g_match_lock->integer)) && first && second)
 					gi.LocBroadcast_Print(PRINT_CENTER, "{} vs {}\nBegins in...", first->resp.netname, second->resp.netname);
 				else
@@ -1056,6 +1094,8 @@ start:
 	}
 }
 
+} // namespace muffmode::match
+
 // ----------------
 
 /*
@@ -1068,22 +1108,58 @@ match-end warning.
 ================
 */
 void MM_Match_RunFrame() {
-	CheckDMWarmupState();
-	CheckDMRoundState();
-	CheckDMCountdown();
-	CheckDMMatchEndWarning();
+	match::TickWarmupState();
+	match::TickRoundState();
+	match::TickCountdown();
+	match::TickMatchEndWarning();
 }
 
 /*
 ==================
-TimeoutEnd
+FinishTimeout
 ==================
 */
-void TimeoutEnd() {
+namespace muffmode::match {
+
+void FinishTimeout() {
 	level.timeout_in_place = 0_ms;
 	level.timeout_ent = nullptr;
+	level.timeout_auto = false;
+	level.timeout_resuming = false;
+	level.countdown_check = 0_sec;
 	gi.Broadcast_Print(PRINT_CENTER, "Timeout has ended.\n");
 	gi.positioned_sound(world->s.origin, world, CHAN_RELIABLE | CHAN_NO_PHS_ADD | CHAN_AUX, gi.soundindex("misc/tele_up.wav"), 1, ATTN_NONE, 0);
+}
+
+} // namespace muffmode::match
+
+void MM_TimeoutBeginResumeCountdown() {
+	if (level.timeout_resuming)
+		return;
+
+	const int resume_seconds = MM_ClampResumeCountdownSeconds(g_dm_timeout_resume_countdown ? g_dm_timeout_resume_countdown->integer : 30);
+
+	level.timeout_auto = false;
+	level.timeout_ent = nullptr;
+	level.timeout_resuming = true;
+	level.countdown_check = 0_sec;
+
+	if (resume_seconds <= 0) {
+		match::FinishTimeout();
+		return;
+	}
+
+	level.timeout_in_place = gtime_t::from_sec(resume_seconds);
+	gi.LocBroadcast_Print(PRINT_CENTER, "Match resumes in {}.", G_TimeString(resume_seconds * 1000, false));
+}
+
+void TimeoutEnd() {
+	if (!level.timeout_resuming) {
+		MM_TimeoutBeginResumeCountdown();
+		return;
+	}
+
+	match::FinishTimeout();
 }
 
 /*
@@ -1094,7 +1170,7 @@ Ends a timeout session.
 ==================
 */
 void MM_CmdTimeIn(gentity_t *ent) {
-	if (!MM_IsConnectedClientEntity(ent))
+	if (!match::IsConnectedClientEntity(ent))
 		return;
 
 	if (!MM_IsExactArgcValid(gi.argc(), 1)) {
@@ -1106,8 +1182,12 @@ void MM_CmdTimeIn(gentity_t *ent) {
 		gi.Client_Print(ent, PRINT_HIGH, "A timeout is not currently in effect.\n");
 		return;
 	}
+	if (level.timeout_resuming) {
+		gi.Client_Print(ent, PRINT_HIGH, "The match is already resuming.\n");
+		return;
+	}
 
-	if (level.timeout_ent && !MM_IsConnectedClientEntity(level.timeout_ent))
+	if (level.timeout_ent && !match::IsConnectedClientEntity(level.timeout_ent))
 		level.timeout_ent = nullptr;
 
 	if (!ent->client->sess.admin && level.timeout_ent != ent) {
@@ -1116,7 +1196,7 @@ void MM_CmdTimeIn(gentity_t *ent) {
 	}
 
 	gi.LocBroadcast_Print(PRINT_HIGH, "{} is resuming the match.\n", ent->client->pers.netname);
-	level.timeout_in_place = 3_sec;
+	MM_TimeoutBeginResumeCountdown();
 }
 
 /*
@@ -1127,7 +1207,7 @@ Calls a timeout session.
 ==================
 */
 void MM_CmdTimeOut(gentity_t *ent) {
-	if (!MM_IsConnectedClientEntity(ent))
+	if (!match::IsConnectedClientEntity(ent))
 		return;
 
 	if (!MM_IsExactArgcValid(gi.argc(), 1)) {
@@ -1154,7 +1234,10 @@ void MM_CmdTimeOut(gentity_t *ent) {
 	}
 
 	level.timeout_ent = ent;
+	level.timeout_auto = false;
+	level.timeout_resuming = false;
 	level.timeout_in_place = gtime_t::from_sec(timeout_seconds);
+	level.countdown_check = 0_sec;
 	gi.LocBroadcast_Print(PRINT_CENTER, "{} called a timeout!\n{} has been granted.", ent->client->resp.netname, G_TimeString(timeout_seconds * 1000, false));
 	gi.positioned_sound(world->s.origin, world, CHAN_RELIABLE | CHAN_NO_PHS_ADD | CHAN_AUX, gi.soundindex("world/klaxon2.wav"), 1, ATTN_NONE, 0);
 	ent->client->pers.timeout_used = true;

@@ -7,12 +7,13 @@
 #include "muffmode/mm_maps.h"
 #include "muffmode/mm_parse.h"
 #include "muffmode/mm_team.h"
+#include "muffmode/mm_util.h"
 
 #include <cstdio>
-#include <cstring>
 #include <string>
+#include <string_view>
 
-namespace {
+namespace muffmode::gametype {
 
 int s_check_ruleset = -1;
 
@@ -75,10 +76,10 @@ const char *MM_SkipCfgWhitespace(const char *p)
 	return p;
 }
 
-bool MM_ConsumeCfgCommand(const char *&p, const char *command)
+bool MM_ConsumeCfgCommand(const char *&p, std::string_view command)
 {
-	const size_t len = std::strlen(command);
-	if (Q_strncasecmp(p, command, len))
+	const size_t len = command.size();
+	if (Q_strncasecmp(p, command.data(), len))
 		return false;
 
 	if (p[len] && !MM_IsAsciiWhitespace(p[len]))
@@ -88,15 +89,15 @@ bool MM_ConsumeCfgCommand(const char *&p, const char *command)
 	return true;
 }
 
-bool MM_ConsumeCfgTargetName(const char *&p, const char *name)
+bool MM_ConsumeCfgTargetName(const char *&p, std::string_view name)
 {
 	p = MM_SkipCfgWhitespace(p);
 
-	const size_t len = std::strlen(name);
+	const size_t len = name.size();
 	if (*p == '"')
 	{
 		const char *quoted = p + 1;
-		if (Q_strncasecmp(quoted, name, len) || quoted[len] != '"')
+		if (Q_strncasecmp(quoted, name.data(), len) || quoted[len] != '"')
 			return false;
 
 		p = quoted + len + 1;
@@ -105,7 +106,7 @@ bool MM_ConsumeCfgTargetName(const char *&p, const char *name)
 		return true;
 	}
 
-	if (Q_strncasecmp(p, name, len))
+	if (Q_strncasecmp(p, name.data(), len))
 		return false;
 
 	if (p[len] && !MM_IsAsciiWhitespace(p[len]))
@@ -208,16 +209,27 @@ bool MM_ShouldSkipGtCfgLine(const char *line)
 	return false;
 }
 
-bool MM_IsOverlongCfgLine(FILE *f, const char *line)
+bool MM_IsOverlongCfgLine(FILE *f, std::string_view line)
 {
-	if (strchr(line, '\n') || feof(f))
+	if (line.find('\n') != std::string_view::npos || std::feof(f))
 		return false;
 
 	int ch = 0;
-	while ((ch = fgetc(f)) != '\n' && ch != EOF) {
+	while ((ch = std::fgetc(f)) != '\n' && ch != EOF) {
 	}
 
 	return true;
+}
+
+void MM_TrimCfgLineEnd(char *line)
+{
+	if (!line)
+		return;
+
+	const std::string_view text(line);
+	const size_t newline = text.find_first_of("\r\n");
+	if (newline != std::string_view::npos)
+		line[newline] = '\0';
 }
 
 void MM_ExecGametypeCfg(gametype_t gt)
@@ -241,8 +253,8 @@ void MM_ExecGametypeCfg(gametype_t gt)
 	}
 
 	const std::string path = MM_GametypeCfgPath(cfg_name);
-	FILE *f = fopen(path.c_str(), "rb");
-	if (!f)
+	auto file = muffmode::OpenFile(path.c_str(), "rb");
+	if (!file)
 	{
 		gi.Com_PrintFmt("WARNING: Could not open {} for filtered load; skipping gametype cfg.\n", path.c_str());
 		return;
@@ -256,7 +268,7 @@ void MM_ExecGametypeCfg(gametype_t gt)
 	int lines_read = 0;
 	char line_buf[1024];
 
-	while (fgets(line_buf, sizeof(line_buf), f))
+	while (std::fgets(line_buf, sizeof(line_buf), file.get()))
 	{
 		lines_read++;
 		if (lines_read > MM_MAX_GAMETYPE_CFG_LINES)
@@ -266,18 +278,13 @@ void MM_ExecGametypeCfg(gametype_t gt)
 			break;
 		}
 
-		if (MM_IsOverlongCfgLine(f, line_buf))
+		if (MM_IsOverlongCfgLine(file.get(), line_buf))
 		{
 			skipped++;
 			continue;
 		}
 
-		char *nl = strchr(line_buf, '\n');
-		if (nl)
-			*nl = '\0';
-		nl = strchr(line_buf, '\r');
-		if (nl)
-			*nl = '\0';
+		MM_TrimCfgLineEnd(line_buf);
 
 		if (MM_IsCommentOrEmptyCfgLine(line_buf))
 			continue;
@@ -292,20 +299,18 @@ void MM_ExecGametypeCfg(gametype_t gt)
 		executed++;
 	}
 
-	fclose(f);
-
 	gi.Com_PrintFmt("Filtered gametype cfg complete: executed {} line{}, skipped {} line{}.\n",
 		executed, executed == 1 ? "" : "s", skipped, skipped == 1 ? "" : "s");
 }
 
-} // namespace
+} // namespace muffmode::gametype
 
 gametype_avail_t MM_GetGametypeAvailability(gametype_t gt)
 {
 	const int i = (int)gt;
 	if (i < 0 || i >= GT_NUM_GAMETYPES)
 		return gametype_avail_t::Removed;
-	return k_gametype_availability[i];
+	return muffmode::gametype::k_gametype_availability[i];
 }
 
 bool MM_IsGametypeEnabled(gametype_t gt)
@@ -367,7 +372,7 @@ std::string MM_GetEnabledGametypesList()
 
 void MM_CheckRuleset()
 {
-	if (game.ruleset && s_check_ruleset == g_ruleset->modified_count)
+	if (game.ruleset && muffmode::gametype::s_check_ruleset == g_ruleset->modified_count)
 		return;
 
 	game.ruleset = (ruleset_t)clamp(g_ruleset->integer, (int)RS_NONE + 1, (int)RS_NUM_RULESETS - 1);
@@ -375,7 +380,7 @@ void MM_CheckRuleset()
 	if ((int)game.ruleset != g_ruleset->integer)
 		gi.cvar_forceset("g_ruleset", G_Fmt("{}", (int)game.ruleset).data());
 
-	s_check_ruleset = g_ruleset->modified_count;
+	muffmode::gametype::s_check_ruleset = g_ruleset->modified_count;
 
 	gi.LocBroadcast_Print(PRINT_HIGH, "Ruleset: {}\n", rs_long_name[(int)game.ruleset]);
 }
@@ -465,16 +470,16 @@ void MM_ChangeGametype(gametype_t gt, bool force_cfg)
 		}
 
 		if (g_gametype_cfg->integer && deathmatch->integer)
-			MM_ExecGametypeCfg(gt);
+			muffmode::gametype::MM_ExecGametypeCfg(gt);
 
 		extern bool g_map_list_shuffled;
 		g_map_list_shuffled = false;
 
 		// Avoid GT_Changes() issuing a redundant reload for an explicit gametype change.
-		s_gt_g_gametype = g_gametype->modified_count;
-		s_gt_check = (gametype_t)g_gametype->integer;
-		s_gt_teamplay = teamplay->modified_count;
-		s_gt_ctf = ctf->modified_count;
+		muffmode::gametype::s_gt_g_gametype = g_gametype->modified_count;
+		muffmode::gametype::s_gt_check = (gametype_t)g_gametype->integer;
+		muffmode::gametype::s_gt_teamplay = teamplay->modified_count;
+		muffmode::gametype::s_gt_ctf = ctf->modified_count;
 	}
 	else if (force_cfg && g_gametype_cfg->integer && deathmatch->integer)
 	{
@@ -483,7 +488,7 @@ void MM_ChangeGametype(gametype_t gt, bool force_cfg)
 		// side effects above run). Player votes pass force_cfg = false and never
 		// reach here, so a same-gametype vote can't clobber settings players have
 		// voted on.
-		MM_ExecGametypeCfg(gt);
+		muffmode::gametype::MM_ExecGametypeCfg(gt);
 	}
 }
 
@@ -501,7 +506,7 @@ void MM_GTChanges()
 	bool team_reset = false;
 	gametype_t gt = gametype_t::GT_NONE;
 
-	if (s_gt_g_gametype != g_gametype->modified_count)
+	if (muffmode::gametype::s_gt_g_gametype != g_gametype->modified_count)
 	{
 		const gametype_t raw = (gametype_t)clamp(g_gametype->integer, (int)GT_FIRST, (int)GT_LAST);
 		gt = MM_SanitizeGametype(raw);
@@ -509,7 +514,7 @@ void MM_GTChanges()
 		if (gt != raw)
 			gi.cvar_forceset("g_gametype", G_Fmt("{}", (int)gt).data());
 
-		if (gt != s_gt_check)
+		if (gt != muffmode::gametype::s_gt_check)
 		{
 			switch (gt)
 			{
@@ -528,15 +533,15 @@ void MM_GTChanges()
 					gi.cvar_forceset("ctf", "0");
 				break;
 			}
-			s_gt_teamplay = teamplay->modified_count;
-			s_gt_ctf = ctf->modified_count;
+			muffmode::gametype::s_gt_teamplay = teamplay->modified_count;
+			muffmode::gametype::s_gt_ctf = ctf->modified_count;
 			changed = true;
 		}
 	}
 
 	if (!changed)
 	{
-		if (s_gt_teamplay != teamplay->modified_count)
+		if (muffmode::gametype::s_gt_teamplay != teamplay->modified_count)
 		{
 			if (teamplay->integer)
 			{
@@ -551,11 +556,11 @@ void MM_GTChanges()
 					gi.cvar_forceset("ctf", "0");
 			}
 			changed = true;
-			s_gt_teamplay = teamplay->modified_count;
-			s_gt_ctf = ctf->modified_count;
+			muffmode::gametype::s_gt_teamplay = teamplay->modified_count;
+			muffmode::gametype::s_gt_ctf = ctf->modified_count;
 		}
 
-		if (s_gt_ctf != ctf->modified_count)
+		if (muffmode::gametype::s_gt_ctf != ctf->modified_count)
 		{
 			if (ctf->integer)
 			{
@@ -570,18 +575,18 @@ void MM_GTChanges()
 					gi.cvar_forceset("teamplay", "1");
 			}
 			changed = true;
-			s_gt_teamplay = teamplay->modified_count;
-			s_gt_ctf = ctf->modified_count;
+			muffmode::gametype::s_gt_teamplay = teamplay->modified_count;
+			muffmode::gametype::s_gt_ctf = ctf->modified_count;
 		}
 	}
 
 	if (!changed || gt == gametype_t::GT_NONE)
 		return;
 
-	if (s_gt_teams_on != Teams())
+	if (muffmode::gametype::s_gt_teams_on != Teams())
 	{
 		team_reset = true;
-		s_gt_teams_on = Teams();
+		muffmode::gametype::s_gt_teams_on = Teams();
 	}
 
 	if (team_reset)
@@ -613,11 +618,11 @@ void MM_GTChanges()
 		}
 	}
 
-	if ((int)gt != s_gt_check)
+	if ((int)gt != muffmode::gametype::s_gt_check)
 	{
 		gi.cvar_forceset("g_gametype", G_Fmt("{}", (int)gt).data());
-		s_gt_g_gametype = g_gametype->modified_count;
-		s_gt_check = (gametype_t)g_gametype->integer;
+		muffmode::gametype::s_gt_g_gametype = g_gametype->modified_count;
+		muffmode::gametype::s_gt_check = (gametype_t)g_gametype->integer;
 	}
 	else
 	{
@@ -625,7 +630,7 @@ void MM_GTChanges()
 	}
 
 	MuffModeLog("DEBUG", "GT_Changes: issuing gamemap '%s' (gt=%d gt_check=%d gt_g_gametype=%d g_gametype->modified_count=%d teamplay=%d ctf=%d in_frame=%d)",
-		level.mapname, (int)gt, (int)s_gt_check, s_gt_g_gametype, g_gametype->modified_count,
+		level.mapname, (int)gt, (int)muffmode::gametype::s_gt_check, muffmode::gametype::s_gt_g_gametype, g_gametype->modified_count,
 		teamplay->integer, ctf->integer, level.in_frame);
 	if (!MM_IsSafeMapToken(level.mapname)) {
 		gi.Com_PrintFmt("ERROR: Current map name is unsafe: {}\n", level.mapname);
@@ -637,10 +642,10 @@ void MM_GTChanges()
 
 void MM_SyncGametypeTracking()
 {
-	s_gt_teamplay = teamplay->modified_count;
-	s_gt_ctf = ctf->modified_count;
-	s_gt_g_gametype = g_gametype->modified_count;
-	s_gt_teams_on = Teams();
+	muffmode::gametype::s_gt_teamplay = teamplay->modified_count;
+	muffmode::gametype::s_gt_ctf = ctf->modified_count;
+	muffmode::gametype::s_gt_g_gametype = g_gametype->modified_count;
+	muffmode::gametype::s_gt_teams_on = Teams();
 }
 
 void MM_GTSetLongName()
@@ -774,5 +779,5 @@ void MM_GTSetLongName()
 		}
 	}
 	if (s)
-		Q_strlcpy(level.gametype_name, s, sizeof(level.gametype_name));
+		muffmode::CopyString(level.gametype_name, s);
 }

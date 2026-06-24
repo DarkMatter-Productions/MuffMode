@@ -17,6 +17,8 @@ param(
     [string]$UpdaterRuntime = "win-x64",
     [string]$InstallerScript = "packaging/installer/muffmode-installer.iss",
     [string]$InnoSetupCompiler,
+    [string]$ChangelogPath = "docs/changelog.md",
+    [AllowEmptyString()][string]$ReleaseIntro,
 
     [switch]$SkipBuild,
     [switch]$SkipUpdaterBuild,
@@ -26,6 +28,7 @@ param(
     [switch]$CreateGitHubRelease,
     [switch]$Prerelease,
     [switch]$RequireCopilot,
+    [switch]$NoIntroPrompt,
     [switch]$AllowDirtyPackage
 )
 
@@ -34,6 +37,18 @@ $ErrorActionPreference = "Stop"
 
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $ReleaseRepo = "DarkMatter-Productions/MuffMode"
+$script:ChangelogRequiredColumns = @("Release", "Category", "Magnitude", "Summary", "Details")
+$script:ChangelogCategories = @(
+    "Player Experience",
+    "Competitive Play",
+    "Server Hosting",
+    "Gameplay and Balance",
+    "Maps and Content",
+    "Fixes",
+    "Documentation and Packaging",
+    "Internal Maintenance"
+)
+$script:ChangelogMagnitudes = @("major", "minor", "patch")
 
 function Write-Step {
     param([string]$Message)
@@ -111,6 +126,473 @@ function Limit-Text {
     return "$($Text.Substring(0, $MaxCharacters).TrimEnd())`n`n[Context truncated after $MaxCharacters characters.]"
 }
 
+function Split-MarkdownTableRow {
+    param([string]$Line)
+
+    $inner = $Line.Trim()
+    if ($inner.StartsWith("|")) {
+        $inner = $inner.Substring(1)
+    }
+    if ($inner.EndsWith("|")) {
+        $inner = $inner.Substring(0, $inner.Length - 1)
+    }
+
+    return @([regex]::Split($inner, '(?<!\\)\|') | ForEach-Object {
+        ($_ -replace '\\\|', '|').Trim()
+    })
+}
+
+function ConvertTo-ChangelogTableCell {
+    param([AllowNull()][string]$Text)
+
+    if ($null -eq $Text) {
+        return ""
+    }
+
+    return (($Text -replace '\r?\n', "<br>").Trim() -replace '\|', '\|')
+}
+
+function ConvertFrom-ChangelogTableCell {
+    param([AllowNull()][string]$Text)
+
+    if ($null -eq $Text) {
+        return ""
+    }
+
+    return (($Text -replace '<br\s*/?>', ' ') -replace '\s+', ' ').Trim()
+}
+
+function Get-CanonicalChangelogRelease {
+    param([AllowNull()][string]$Release)
+
+    $value = ConvertFrom-ChangelogTableCell $Release
+    if ([string]::IsNullOrWhiteSpace($value) -or $value -ieq "Unreleased") {
+        return "Unreleased"
+    }
+
+    if ($value -match '^v?(\d+\.\d+\.\d+)$') {
+        return $Matches[1]
+    }
+
+    throw "Changelog release value '$value' must be 'Unreleased' or a semantic version such as 0.36.21."
+}
+
+function Get-CanonicalChangelogCategory {
+    param([string]$Category)
+
+    $value = ConvertFrom-ChangelogTableCell $Category
+    foreach ($allowedCategory in $script:ChangelogCategories) {
+        if ($allowedCategory -ieq $value) {
+            return $allowedCategory
+        }
+    }
+
+    throw "Changelog category '$value' is not valid. Use one of: $($script:ChangelogCategories -join ', ')."
+}
+
+function Get-CanonicalChangelogMagnitude {
+    param([string]$Magnitude)
+
+    $value = (ConvertFrom-ChangelogTableCell $Magnitude).ToLowerInvariant()
+    if ($script:ChangelogMagnitudes -contains $value) {
+        return $value
+    }
+
+    throw "Changelog magnitude '$value' is not valid. Use one of: $($script:ChangelogMagnitudes -join ', ')."
+}
+
+function ConvertFrom-ChangelogLedger {
+    param([string]$Path = $ChangelogPath)
+
+    $ledgerPath = Resolve-RepoPath $Path
+    if (-not (Test-Path -LiteralPath $ledgerPath -PathType Leaf)) {
+        throw "Central changelog ledger was not found: $ledgerPath"
+    }
+
+    $lines = @(Get-Content -LiteralPath $ledgerPath)
+    $headerIndex = -1
+    $headers = @()
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($lines[$i].TrimStart().StartsWith("|")) {
+            $candidateHeaders = Split-MarkdownTableRow $lines[$i]
+            $missing = @($script:ChangelogRequiredColumns | Where-Object { $candidateHeaders -notcontains $_ })
+            if ($missing.Count -eq 0) {
+                $headerIndex = $i
+                $headers = $candidateHeaders
+                break
+            }
+        }
+    }
+
+    if ($headerIndex -lt 0) {
+        throw "Central changelog ledger must contain a Markdown table with columns: $($script:ChangelogRequiredColumns -join ', ')."
+    }
+
+    if ($headerIndex + 1 -ge $lines.Count -or $lines[$headerIndex + 1] -notmatch '^\s*\|?\s*:?-{3,}:?\s*\|') {
+        throw "Central changelog ledger table is missing the Markdown separator row after the header."
+    }
+
+    $columnIndex = @{}
+    for ($i = 0; $i -lt $headers.Count; $i++) {
+        $columnIndex[$headers[$i]] = $i
+    }
+
+    $entries = New-Object System.Collections.Generic.List[object]
+    for ($i = $headerIndex + 2; $i -lt $lines.Count; $i++) {
+        $line = $lines[$i]
+        if ([string]::IsNullOrWhiteSpace($line) -or -not $line.TrimStart().StartsWith("|")) {
+            break
+        }
+
+        $cells = Split-MarkdownTableRow $line
+        if ($cells.Count -lt $headers.Count) {
+            throw "Changelog row $($i + 1) has $($cells.Count) columns, but the table header has $($headers.Count)."
+        }
+
+        $summary = ConvertFrom-ChangelogTableCell $cells[$columnIndex["Summary"]]
+        $details = ConvertFrom-ChangelogTableCell $cells[$columnIndex["Details"]]
+        if ([string]::IsNullOrWhiteSpace($summary)) {
+            throw "Changelog row $($i + 1) is missing a summary."
+        }
+        if ($details.Length -lt 30) {
+            throw "Changelog row $($i + 1) needs a detailed description of at least 30 characters."
+        }
+
+        $entries.Add([pscustomobject]@{
+            Release = Get-CanonicalChangelogRelease $cells[$columnIndex["Release"]]
+            Category = Get-CanonicalChangelogCategory $cells[$columnIndex["Category"]]
+            Magnitude = Get-CanonicalChangelogMagnitude $cells[$columnIndex["Magnitude"]]
+            Summary = $summary
+            Details = $details
+            LineNumber = $i + 1
+        })
+    }
+
+    if ($entries.Count -eq 0) {
+        throw "Central changelog ledger does not contain any change rows."
+    }
+
+    $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($entry in $entries) {
+        $key = "$($entry.Release)|$($entry.Category)|$($entry.Summary)"
+        if (-not $seen.Add($key)) {
+            throw "Duplicate changelog summary '$($entry.Summary)' for $($entry.Release) / $($entry.Category). Merge related rows into one detailed change."
+        }
+    }
+
+    return @($entries | ForEach-Object { $_ })
+}
+
+function Get-ChangelogEntriesForRelease {
+    param([AllowNull()][string]$TargetVersion)
+
+    $entries = @(ConvertFrom-ChangelogLedger -Path $ChangelogPath)
+    if ([string]::IsNullOrWhiteSpace($TargetVersion)) {
+        return @($entries | Where-Object { $_.Release -eq "Unreleased" })
+    }
+
+    $target = (Get-CanonicalChangelogRelease $TargetVersion)
+    $targetEntries = @($entries | Where-Object { $_.Release -eq $target })
+    if ($targetEntries.Count -gt 0) {
+        return $targetEntries
+    }
+
+    return @($entries | Where-Object { $_.Release -eq "Unreleased" })
+}
+
+function Update-ChangelogReleaseVersions {
+    param(
+        [string]$TargetVersion,
+        [string]$Path = $ChangelogPath
+    )
+
+    $ledgerPath = Resolve-RepoPath $Path
+    $lines = @(Get-Content -LiteralPath $ledgerPath)
+    $headerIndex = -1
+    $headers = @()
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($lines[$i].TrimStart().StartsWith("|")) {
+            $candidateHeaders = Split-MarkdownTableRow $lines[$i]
+            $missing = @($script:ChangelogRequiredColumns | Where-Object { $candidateHeaders -notcontains $_ })
+            if ($missing.Count -eq 0) {
+                $headerIndex = $i
+                $headers = $candidateHeaders
+                break
+            }
+        }
+    }
+
+    if ($headerIndex -lt 0) {
+        throw "Central changelog ledger must contain the canonical Markdown table before release versions can be stamped."
+    }
+
+    $releaseColumn = [array]::IndexOf($headers, "Release")
+    $updatedRows = 0
+    for ($i = $headerIndex + 2; $i -lt $lines.Count; $i++) {
+        $line = $lines[$i]
+        if ([string]::IsNullOrWhiteSpace($line) -or -not $line.TrimStart().StartsWith("|")) {
+            break
+        }
+
+        $cells = Split-MarkdownTableRow $line
+        if ($cells.Count -lt $headers.Count) {
+            throw "Changelog row $($i + 1) has $($cells.Count) columns, but the table header has $($headers.Count)."
+        }
+
+        $release = Get-CanonicalChangelogRelease $cells[$releaseColumn]
+        if ($release -eq "Unreleased") {
+            $cells[$releaseColumn] = $TargetVersion
+            $escapedCells = @($cells | ForEach-Object { ConvertTo-ChangelogTableCell $_ })
+            $lines[$i] = "| $($escapedCells -join ' | ') |"
+            $updatedRows++
+        }
+    }
+
+    if ($updatedRows -gt 0) {
+        Set-Content -LiteralPath $ledgerPath -Value ($lines -join "`n") -Encoding utf8
+        Write-Step "Stamped $updatedRows changelog row(s) with release version $TargetVersion"
+    }
+    else {
+        Write-Warning "No Unreleased changelog rows were found to stamp with $TargetVersion."
+    }
+}
+
+function Get-ChangelogMagnitudeRank {
+    param([string]$Magnitude)
+
+    switch ($Magnitude) {
+        "major" { return 0 }
+        "minor" { return 1 }
+        "patch" { return 2 }
+        default { return 3 }
+    }
+}
+
+function Select-HighlightChangelogEntries {
+    param([object[]]$Entries)
+
+    $majorEntries = @($Entries | Where-Object { $_.Magnitude -eq "major" })
+    if ($majorEntries.Count -gt 0) {
+        return @($majorEntries)
+    }
+
+    $visibleEntries = @($Entries | Where-Object { $_.Category -ne "Internal Maintenance" })
+    if ($visibleEntries.Count -eq 0) {
+        $visibleEntries = @($Entries)
+    }
+
+    return @($visibleEntries |
+        Sort-Object @{ Expression = { Get-ChangelogMagnitudeRank -Magnitude $_.Magnitude } }, Category, Summary |
+        Select-Object -First 3)
+}
+
+function Get-PlainReleaseText {
+    param(
+        [AllowNull()][string]$Text,
+        [int]$MaxCharacters = 180
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Text)) {
+        return ""
+    }
+
+    $plain = $Text `
+        -replace '\[([^\]]+)\]\([^)]+\)', '$1' `
+        -replace '`([^`]+)`', '$1' `
+        -replace '\*\*([^*]+)\*\*', '$1' `
+        -replace '\s+', ' '
+    $plain = $plain.Trim()
+    if ($plain.Length -le $MaxCharacters) {
+        return $plain
+    }
+
+    $cut = $plain.Substring(0, $MaxCharacters - 3).TrimEnd()
+    $lastSpace = $cut.LastIndexOf(" ")
+    if ($lastSpace -gt [int]($MaxCharacters * 0.6)) {
+        $cut = $cut.Substring(0, $lastSpace).TrimEnd()
+    }
+
+    return "$cut..."
+}
+
+function New-ReleaseIntroMessage {
+    param(
+        [string]$TargetVersion,
+        [string]$Channel,
+        [object[]]$Entries
+    )
+
+    $channelName = Get-ChannelDisplayName -Channel $Channel
+    $label = if ($channelName) { "Muff Mode v$TargetVersion $channelName" } else { "Muff Mode v$TargetVersion" }
+    $headlineEntries = @(Select-HighlightChangelogEntries -Entries $Entries)
+    $headline = $headlineEntries | Select-Object -First 1
+    if ($headline) {
+        $summary = Get-PlainReleaseText -Text $headline.Summary -MaxCharacters 120
+        $details = Get-PlainReleaseText -Text $headline.Details -MaxCharacters 180
+        return "$label is live. The headline change is ${summary}: $details"
+    }
+
+    return "$label is live with a focused set of fixes and release polish. Grab the build, try it in real matches, and send feedback from actual server play."
+}
+
+function Test-CanShowReleaseIntroDialog {
+    if ($NoIntroPrompt) {
+        return $false
+    }
+    if ($env:GITHUB_ACTIONS -or $env:CI) {
+        return $false
+    }
+    if ($env:OS -ne "Windows_NT") {
+        return $false
+    }
+
+    return [System.Environment]::UserInteractive
+}
+
+function Show-ReleaseIntroDialog {
+    param([string]$SuggestedIntro)
+
+    try {
+        Add-Type -AssemblyName System.Windows.Forms
+        Add-Type -AssemblyName System.Drawing
+
+        $form = New-Object System.Windows.Forms.Form
+        $form.Text = "Muff Mode Release Intro"
+        $form.Size = New-Object System.Drawing.Size(640, 360)
+        $form.StartPosition = "CenterScreen"
+        $form.MinimizeBox = $false
+        $form.MaximizeBox = $false
+
+        $label = New-Object System.Windows.Forms.Label
+        $label.Location = New-Object System.Drawing.Point(12, 12)
+        $label.Size = New-Object System.Drawing.Size(600, 42)
+        $label.Text = "Edit the Discord/release intro, or leave the generated text unchanged."
+        $form.Controls.Add($label)
+
+        $textBox = New-Object System.Windows.Forms.TextBox
+        $textBox.Location = New-Object System.Drawing.Point(12, 58)
+        $textBox.Size = New-Object System.Drawing.Size(600, 190)
+        $textBox.Multiline = $true
+        $textBox.ScrollBars = "Vertical"
+        $textBox.Text = $SuggestedIntro
+        $form.Controls.Add($textBox)
+
+        $okButton = New-Object System.Windows.Forms.Button
+        $okButton.Location = New-Object System.Drawing.Point(412, 266)
+        $okButton.Size = New-Object System.Drawing.Size(95, 30)
+        $okButton.Text = "Use Intro"
+        $okButton.DialogResult = [System.Windows.Forms.DialogResult]::OK
+        $form.Controls.Add($okButton)
+
+        $generatedButton = New-Object System.Windows.Forms.Button
+        $generatedButton.Location = New-Object System.Drawing.Point(517, 266)
+        $generatedButton.Size = New-Object System.Drawing.Size(95, 30)
+        $generatedButton.Text = "Generated"
+        $generatedButton.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+        $form.Controls.Add($generatedButton)
+
+        $form.AcceptButton = $okButton
+        $form.CancelButton = $generatedButton
+        $result = $form.ShowDialog()
+        if ($result -eq [System.Windows.Forms.DialogResult]::OK -and -not [string]::IsNullOrWhiteSpace($textBox.Text)) {
+            return $textBox.Text.Trim()
+        }
+    }
+    catch {
+        Write-Warning "Could not show release intro dialog; using generated intro. $($_.Exception.Message)"
+    }
+
+    return $null
+}
+
+function Resolve-ReleaseIntroMessage {
+    param(
+        [string]$TargetVersion,
+        [string]$Channel,
+        [object[]]$Entries,
+        [AllowNull()][string]$ManualIntro
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($ManualIntro)) {
+        return $ManualIntro.Trim()
+    }
+    if (-not [string]::IsNullOrWhiteSpace($env:MUFFMODE_RELEASE_INTRO)) {
+        return $env:MUFFMODE_RELEASE_INTRO.Trim()
+    }
+
+    $generated = New-ReleaseIntroMessage -TargetVersion $TargetVersion -Channel $Channel -Entries $Entries
+    if (Test-CanShowReleaseIntroDialog) {
+        $dialogIntro = Show-ReleaseIntroDialog -SuggestedIntro $generated
+        if (-not [string]::IsNullOrWhiteSpace($dialogIntro)) {
+            return $dialogIntro
+        }
+    }
+
+    return $generated
+}
+
+function Format-ChangelogBullet {
+    param([object]$Entry)
+
+    return "- **$($Entry.Summary)** _($($Entry.Magnitude))_ - $($Entry.Details)"
+}
+
+function New-LedgerReleaseChangelog {
+    param(
+        [string]$TargetVersion,
+        [string]$PreviousTag,
+        [string]$Channel,
+        [string]$OutputPath,
+        [object[]]$Entries,
+        [string]$Intro
+    )
+
+    $compareUrl = "https://github.com/$ReleaseRepo/compare/$PreviousTag...v$TargetVersion"
+    $channelName = Get-ChannelDisplayName -Channel $Channel
+    $releaseLabel = if ($channelName) { "Muff Mode v$TargetVersion $channelName" } else { "Muff Mode v$TargetVersion" }
+    $majorHighlights = @($Entries | Where-Object { $_.Magnitude -eq "major" })
+    $highlightEntries = @(Select-HighlightChangelogEntries -Entries $Entries)
+    $usingFallbackHighlights = $majorHighlights.Count -eq 0
+
+    $lines = New-Object System.Collections.Generic.List[string]
+    $lines.Add("# $releaseLabel Changelog")
+    $lines.Add("")
+    if (-not [string]::IsNullOrWhiteSpace($Intro)) {
+        $lines.Add($Intro.Trim())
+        $lines.Add("")
+    }
+    $lines.Add("These are the centrally logged changes since $PreviousTag for the $Channel release channel.")
+    $lines.Add("")
+    $lines.Add("Compare: [$PreviousTag...v$TargetVersion]($compareUrl)")
+
+    if ($highlightEntries.Count -gt 0) {
+        $lines.Add("")
+        $lines.Add("## Highlights")
+        if ($usingFallbackHighlights) {
+            $lines.Add("")
+            $lines.Add("_No major changes are logged for this release, so these highlights call out the most relevant smaller changes._")
+        }
+        foreach ($entry in $highlightEntries) {
+            $lines.Add((Format-ChangelogBullet $entry))
+        }
+    }
+
+    foreach ($category in $script:ChangelogCategories) {
+        $categoryEntries = @($Entries | Where-Object { $_.Category -eq $category })
+        if ($categoryEntries.Count -eq 0) {
+            continue
+        }
+
+        $lines.Add("")
+        $lines.Add("## $category")
+        foreach ($entry in ($categoryEntries | Sort-Object @{ Expression = { Get-ChangelogMagnitudeRank -Magnitude $_.Magnitude } }, Summary)) {
+            $lines.Add((Format-ChangelogBullet $entry))
+        }
+    }
+
+    Set-Content -LiteralPath $OutputPath -Value ($lines -join "`n") -Encoding utf8
+}
+
 function Invoke-GitHubCopilot {
     param(
         [string]$Prompt,
@@ -156,132 +638,12 @@ function Assert-GitHubCopilot {
 
     $output = & copilot --help 2>&1 | Out-String
     if ($LASTEXITCODE -ne 0) {
-        throw "GitHub Copilot CLI is required for release changelog and README generation. Install @github/copilot and authenticate it so 'copilot' can run in non-interactive mode.`n$output"
+        throw "GitHub Copilot CLI is required for release README generation. Install @github/copilot and authenticate it so 'copilot' can run in non-interactive mode.`n$output"
     }
 }
 
 function Test-GitHubCopilotCommand {
     return [bool](Get-Command "copilot" -ErrorAction SilentlyContinue)
-}
-
-function ConvertTo-ReleaseSentence {
-    param([string]$Text)
-
-    $clean = ($Text -replace '^(feat|feature|fix|docs|doc|chore|ci|build|refactor|style|test)(\([^)]+\))?!?:\s*', '').Trim()
-    if ([string]::IsNullOrWhiteSpace($clean)) {
-        return $Text.Trim()
-    }
-
-    if ($clean.Length -eq 1) {
-        return $clean.ToUpperInvariant()
-    }
-
-    return "$($clean.Substring(0, 1).ToUpperInvariant())$($clean.Substring(1))"
-}
-
-function Get-DeterministicReleaseCategory {
-    param([string]$Subject)
-
-    $text = $Subject.ToLowerInvariant()
-
-    if ($text -match '\b(server|host|hosting|admin|cvar|config|configs|diagnostic|doctor|updater|installer)\b') {
-        return "Server Hosting"
-    }
-    if ($text -match '\b(competitive|match|duel|tdm|team|captain|ready|timeout|overtime|ruleset|vote|voting)\b') {
-        return "Competitive Play"
-    }
-    if ($text -match '\b(gametype|weapon|balance|item|map|entity|horde|arena|hook|grapple)\b') {
-        return "Gameplay and Balance"
-    }
-    if ($text -match '\b(fix|bug|crash|error|resolve|repair|correct)\b') {
-        return "Fixes"
-    }
-    if ($text -match '\b(doc|docs|readme|release|package|workflow|changelog|installer|asset)\b') {
-        return "Documentation and Packaging"
-    }
-
-    return "Internal Maintenance"
-}
-
-function New-DeterministicReleaseChangelog {
-    param(
-        [string]$TargetVersion,
-        [string]$PreviousTag,
-        [string]$Channel,
-        [string]$OutputPath
-    )
-
-    Write-Step "Compiling deterministic changelog from $PreviousTag..HEAD"
-    $range = "$PreviousTag..HEAD"
-    $compareUrl = "https://github.com/$ReleaseRepo/compare/$PreviousTag...v$TargetVersion"
-    $channelName = Get-ChannelDisplayName -Channel $Channel
-    $releaseLabel = if ($channelName) { "Muff Mode v$TargetVersion $channelName" } else { "Muff Mode v$TargetVersion" }
-
-    $commitLines = git -C $RepoRoot log --no-merges --date=short --pretty=format:'%h%x09%s' $range
-    if (-not $commitLines) {
-        $commitLines = git -C $RepoRoot log --date=short --pretty=format:'%h%x09%s' $range
-    }
-    if (-not $commitLines) {
-        throw "No commits found in $range. Refusing to create an empty changelog."
-    }
-
-    $categories = [ordered]@{
-        "Highlights" = New-Object System.Collections.Generic.List[string]
-        "Player Experience" = New-Object System.Collections.Generic.List[string]
-        "Competitive Play" = New-Object System.Collections.Generic.List[string]
-        "Server Hosting" = New-Object System.Collections.Generic.List[string]
-        "Gameplay and Balance" = New-Object System.Collections.Generic.List[string]
-        "Fixes" = New-Object System.Collections.Generic.List[string]
-        "Documentation and Packaging" = New-Object System.Collections.Generic.List[string]
-        "Internal Maintenance" = New-Object System.Collections.Generic.List[string]
-    }
-
-    $seen = New-Object System.Collections.Generic.HashSet[string]
-    foreach ($line in $commitLines) {
-        if ([string]::IsNullOrWhiteSpace($line)) { continue }
-        $parts = $line -split "`t", 2
-        if ($parts.Count -lt 2) { continue }
-
-        $hash = $parts[0].Trim()
-        $subject = $parts[1].Trim()
-        if ([string]::IsNullOrWhiteSpace($subject)) { continue }
-        if ($subject -match '^Bump Muff Mode to v') { continue }
-
-        $summary = ConvertTo-ReleaseSentence $subject
-        if (-not $seen.Add($summary.ToLowerInvariant())) { continue }
-
-        $category = Get-DeterministicReleaseCategory $subject
-        if ($categories[$category].Count -lt 8) {
-            $categories[$category].Add("- $summary ([``$hash``](https://github.com/$ReleaseRepo/commit/$hash))")
-        }
-    }
-
-    if ($categories["Highlights"].Count -eq 0) {
-        foreach ($categoryName in @("Player Experience", "Competitive Play", "Server Hosting", "Gameplay and Balance", "Fixes", "Documentation and Packaging")) {
-            if ($categories[$categoryName].Count -gt 0 -and $categories["Highlights"].Count -lt 3) {
-                $plain = $categories[$categoryName][0] -replace '\s+\(\[`?[0-9a-f]+`?\]\([^)]+\)\)$', ''
-                $categories["Highlights"].Add($plain)
-            }
-        }
-    }
-
-    $lines = New-Object System.Collections.Generic.List[string]
-    $lines.Add("# $releaseLabel Changelog")
-    $lines.Add("")
-    $lines.Add("These are the notable changes since $PreviousTag for the $Channel release channel.")
-    $lines.Add("")
-    $lines.Add("Compare: [$PreviousTag...v$TargetVersion]($compareUrl)")
-
-    foreach ($categoryName in $categories.Keys) {
-        if ($categories[$categoryName].Count -eq 0) { continue }
-        $lines.Add("")
-        $lines.Add("## $categoryName")
-        foreach ($entry in $categories[$categoryName]) {
-            $lines.Add($entry)
-        }
-    }
-
-    Set-Content -LiteralPath $OutputPath -Value ($lines -join "`n") -Encoding utf8
 }
 
 function ConvertTo-HtmlText {
@@ -298,6 +660,8 @@ function Convert-InlineMarkdownToHtml {
     $encoded = ConvertTo-HtmlText $Text
     $encoded = [regex]::Replace($encoded, '\[([^\]]+)\]\((https?://[^)]+)\)', '<a href="$2">$1</a>')
     $encoded = [regex]::Replace($encoded, '`([^`]+)`', '<code>$1</code>')
+    $encoded = [regex]::Replace($encoded, '\*\*([^*]+)\*\*', '<strong>$1</strong>')
+    $encoded = [regex]::Replace($encoded, '_\((major|minor|patch)\)_', '<em>($1)</em>')
     return $encoded
 }
 
@@ -444,7 +808,7 @@ function New-DeterministicHtmlReadme {
       <div class="grid">
         <article class="card">
           <h3>Windows Installer</h3>
-          <p>Use the installer for the cleanest setup. It shows detected Steam, Epic Online Store, and GOG installs, keeps an other-location option available, and can create updater and launcher shortcuts.</p>
+          <p>Use the installer for the cleanest setup. It shows detected Steam, Epic Games Store, GOG, and Xbox app / Microsoft Store installs, keeps an other-location option available, shows the resolved target before install, requires a real Quake II folder with a known launcher executable, rejects unsafe system, special-folder, and extracted-package targets, verifies the copied DLL, updater, docs, legal notices, original-map readmes, custom map BSPs, selected entity overrides, version manifest, and exact server/gametype config contents, writes an install receipt, backs up an existing game DLL when needed, and can create updater, launcher, guide, changelog, and server config shortcuts.</p>
         </article>
         <article class="card">
           <h3>Zip Package</h3>
@@ -475,11 +839,30 @@ function New-DeterministicHtmlReadme {
       </ul>
     </section>
     <section>
-      <h2>Gametype And Ruleset Notes</h2>
+      <h2>Gametype Overview</h2>
       <div class="grid">
-        <article class="card"><strong>Common gametypes:</strong> FFA, Duel, TDM, CTF, Clan Arena, Freeze Tag, CaptureStrike, Red Rover, LMS, Horde, ProBall, Instagib, and NadeFest.</article>
-        <article class="card"><strong>Rulesets:</strong> Quake II Rerelease, Muff Mode, Quake III Arena style, Q2RE Balanced, Quake style, and Quake Champions style.</article>
+        <article class="card"><strong>Quick public games:</strong> FFA, Instagib, NadeFest, and Horde are easy drop-in choices.</article>
+        <article class="card"><strong>Competitive matches:</strong> Duel, TDM, CTF, Clan Arena, and CaptureStrike benefit most from a locked map pool and a known ruleset.</article>
+        <article class="card"><strong>Community nights:</strong> Red Rover, LMS, Freeze Tag, ProBall, Vampiric Damage, Weapons Frenzy, and Quad Hog change the rhythm without requiring a different install.</article>
       </div>
+    </section>
+    <section>
+      <h2>Ruleset Cheat Sheet</h2>
+      <p>Rulesets change the feel of the same map: starts, weapon specs, ammo, armor, health, powerups, knockback, and a few movement details. Players can vote with <code>callvote ruleset &lt;shortname&gt;</code> when the server allows it.</p>
+      <table>
+        <thead>
+          <tr><th>Pick</th><th>Feel</th><th>What players should notice</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>q2re</code></td><td>Quake II Rerelease</td><td>Closest rerelease baseline: stock starts, weapon feel, item economy, and fire-rate-only Haste.</td></tr>
+          <tr><td><code>mm</code></td><td>Muff Mode</td><td>House balance with smoother rockets, shorter Plasma Beam range, tighter slug economy, stronger powerup flow, and Q2 movement identity.</td></tr>
+          <tr><td><code>q3a</code></td><td>Quake III Arena style</td><td>Q3-style starts, weapon specs, ammo, armor, health, splash, knockback, and firing projection using existing Muff Mode assets. Double jumps remain intact.</td></tr>
+          <tr><td><code>q2reb</code></td><td>Q2RE Balanced</td><td>Conservative competitive tuning: capped health and armor, softer MG/CG/Rail, faster HyperBlaster, and readable powerup sounds.</td></tr>
+          <tr><td><code>q</code></td><td>Quake style</td><td>Shotgun and Axe-style starts, classic rocket emphasis, raised ammo caps, stronger armor replacement, and remapped map weapon slots.</td></tr>
+          <tr><td><code>qc</code></td><td>Quake Champions style</td><td>Random opening weapon, tighter health/armor caps, modernized weapon tuning, and no warmup grant of every visible map weapon.</td></tr>
+        </tbody>
+      </table>
+      <p>Q3A keeps Muff Mode's no-custom-assets rule: Gauntlet uses Chainfist, Lightning Gun uses Plasma Beam, Plasma Gun uses HyperBlaster, and Nailgun uses Ion Ripper. Super Shotgun is removed; the regular Shotgun carries Q3 shotgun specs. Because cells are shared across Q3A energy weapons, BFG costs <code>10</code> cells per shot.</p>
     </section>
     <section>
       <h2>Included Custom Maps</h2>
@@ -587,6 +970,22 @@ function Resolve-AutoVersionMode {
 
     if ($text -match '(?m)(breaking change|breaking-change|breaks compatibility|^[a-z]+(\([^)]+\))?!:|^.*!:)') {
         return "major"
+    }
+
+    $ledgerEntries = @()
+    try {
+        $ledgerEntries = @(Get-ChangelogEntriesForRelease -TargetVersion $null)
+    }
+    catch {
+        Write-Warning "Could not inspect the central changelog ledger for auto-versioning; falling back to git history heuristics. $($_.Exception.Message)"
+    }
+
+    if ($ledgerEntries.Count -gt 0) {
+        if (@($ledgerEntries | Where-Object { $_.Magnitude -in @("major", "minor") }).Count -gt 0) {
+            return "minor"
+        }
+
+        return "patch"
     }
 
     if ($text -match '(?m)^(feat|feature)(\(|:)|\badd(ed|s)?\b|\bnew\b|\bintroduce(d|s)?\b|\binstaller\b|\bupdater\b|\bgametype\b|\bruleset\b|\bweapon\b|\bentity\b|\bcvar\b|\bcommand\b|\bmap\b|\bvoting\b|\bmenu\b|\bpackage\b|\bworkflow\b') {
@@ -881,187 +1280,32 @@ function Resolve-InnoSetupCompiler {
     throw "Inno Setup compiler (ISCC.exe) was not found. Install Inno Setup 6, add ISCC.exe to PATH, pass -InnoSetupCompiler, or pass -SkipInstaller."
 }
 
-function Get-ReleaseChangeContext {
-    param(
-        [string]$TargetVersion,
-        [string]$PreviousTag
-    )
-
-    $range = "$PreviousTag..HEAD"
-    $compareUrl = "https://github.com/$ReleaseRepo/compare/$PreviousTag...v$TargetVersion"
-
-    $commits = (git -C $RepoRoot log --date=short --pretty=format:'%h%x09%ad%x09%s%x09%an' $range | Out-String).Trim()
-    if (-not $commits) {
-        throw "No commits found in $range. Refusing to create an empty changelog."
-    }
-
-    $nonMergeDetails = (git -C $RepoRoot log --no-merges --date=short --pretty=format:'---%ncommit %h%nDate: %ad%nSubject: %s%nBody:%n%b' --name-status $range | Out-String).Trim()
-    $mergeCommits = (git -C $RepoRoot log --merges --date=short --pretty=format:'%h%x09%ad%x09%s' $range | Out-String).Trim()
-    $shortStat = (git -C $RepoRoot diff --shortstat $range | Out-String).Trim()
-    $diffStat = (git -C $RepoRoot diff --find-renames --stat $range | Out-String).Trim()
-    $nameStatus = (git -C $RepoRoot diff --find-renames --name-status $range | Out-String).Trim()
-
-    return @"
-Release target: Muff Mode v$TargetVersion
-Previous release tag: $PreviousTag
-Git range: $range
-Compare URL: $compareUrl
-
-COMMIT SUMMARY
-$(Limit-Text -Text $commits -MaxCharacters 18000)
-
-MERGE COMMITS
-$(Limit-Text -Text $mergeCommits -MaxCharacters 8000)
-
-OVERALL SHORT STAT
-$shortStat
-
-CHANGED FILES
-$(Limit-Text -Text $nameStatus -MaxCharacters 20000)
-
-DIFF STAT
-$(Limit-Text -Text $diffStat -MaxCharacters 20000)
-
-NON-MERGE COMMIT DETAILS
-$(Limit-Text -Text $nonMergeDetails -MaxCharacters 55000)
-"@
-}
-
-function Convert-CopilotOutputToMarkdown {
-    param(
-        [string]$Output,
-        [string]$TargetVersion,
-        [string]$PreviousTag
-    )
-
-    $clean = (Remove-AnsiSequences $Output).Trim()
-    $fence = [regex]::Match($clean, '(?is)```(?:markdown|md)?\s*(.*?)\s*```')
-    if ($fence.Success) {
-        $clean = $fence.Groups[1].Value.Trim()
-    }
-    else {
-        $heading = [regex]::Match($clean, '(?m)^#\s+.+$')
-        if ($heading.Success -and $heading.Index -gt 0) {
-            $clean = $clean.Substring($heading.Index).Trim()
-        }
-    }
-
-    if ($clean -notmatch '(?m)^#\s+') {
-        throw "GitHub Copilot did not return a Markdown changelog with a title."
-    }
-    if ($clean -notmatch '(?m)^##\s+') {
-        throw "GitHub Copilot did not return category headings for the changelog."
-    }
-    if ($clean -notmatch '(?m)^\s*-\s+\S') {
-        throw "GitHub Copilot did not return bullet-point release notes."
-    }
-    if ($clean -notmatch [regex]::Escape($PreviousTag)) {
-        throw "GitHub Copilot changelog does not mention the previous release tag $PreviousTag."
-    }
-    if ($clean -notmatch [regex]::Escape($TargetVersion)) {
-        throw "GitHub Copilot changelog does not mention target version $TargetVersion."
-    }
-    if ($clean -match '(?i)```|as an ai|i can(?:not|''t)|i am unable') {
-        throw "GitHub Copilot returned conversational or fenced output instead of clean release notes."
-    }
-
-    return $clean.Trim()
-}
-
 function New-ReleaseChangelog {
     param(
         [string]$TargetVersion,
         [string]$PreviousTag,
         [string]$Channel,
-        [string]$OutputPath
+        [string]$OutputPath,
+        [object[]]$Entries,
+        [string]$Intro
     )
 
-    Write-Step "Compiling Copilot changelog from $PreviousTag..HEAD"
-    $range = "$PreviousTag..HEAD"
-    $compareUrl = "https://github.com/$ReleaseRepo/compare/$PreviousTag...v$TargetVersion"
-    $channelName = Get-ChannelDisplayName -Channel $Channel
-    $releaseLabel = if ($channelName) { "Muff Mode v$TargetVersion $channelName" } else { "Muff Mode v$TargetVersion" }
-    $changeContext = Get-ReleaseChangeContext -TargetVersion $TargetVersion -PreviousTag $PreviousTag
-
-    $prompt = @"
-You are GitHub Copilot preparing public release notes for $releaseLabel.
-
-Inspect the supplied git range context and write an elegant Markdown changelog for the release package and GitHub release notes.
-
-Audience:
-- Casual Quake II Remastered players who want to know what feels better or easier.
-- Competitive players who care about match flow, rulesets, balance, teams, voting, and reliability.
-- Server hosts who care about setup, cvars, configs, diagnostics, packaging, and admin controls.
-
-Scope rules:
-- Use only changes from the supplied range: $range.
-- Include the compare link: $compareUrl.
-- This project is currently in the $Channel channel. Make the beta/release state visible in the title or intro when relevant.
-- Summarize changes by practical impact; do not dump every commit.
-- Combine duplicate or related commits into one clear bullet.
-- If a change is internal, explain why it matters to players, competitive matches, or server hosts. If it has no practical user-facing effect, keep it under "Internal Maintenance".
-- Do not invent features or fixes that are not supported by the context.
-- Do not include build instructions, source compilation steps, contributor workflow, badges, or marketing fluff.
-
-Category guidance:
-- Start with "# $releaseLabel Changelog".
-- Include a short intro that says these are changes since $PreviousTag.
-- Use only category headings that have real content.
-- Prefer these headings when relevant:
-  ## Highlights
-  ## Player Experience
-  ## Competitive Play
-  ## Server Hosting
-  ## Gameplay and Balance
-  ## Maps and Content
-  ## Fixes
-  ## Documentation and Packaging
-  ## Internal Maintenance
-- Use concise bullets. Lead with the user-facing result, then add technical context only when it helps.
-
-Output requirements:
-- Return only Markdown.
-- Do not wrap the output in a code fence.
-- Include the compare link near the top.
-
-GIT RANGE CONTEXT:
-$changeContext
-"@
-
-    if (Test-GitHubCopilotCommand) {
-        try {
-            $output = Invoke-GitHubCopilot `
-                -Prompt $prompt `
-                -Purpose "generating the release changelog" `
-                -AllowedTools @("shell(git:*)")
-
-            $markdown = Convert-CopilotOutputToMarkdown `
-                -Output $output `
-                -TargetVersion $TargetVersion `
-                -PreviousTag $PreviousTag
-
-            Set-Content -LiteralPath $OutputPath -Value $markdown -Encoding utf8
-            return
-        }
-        catch {
-            if ($RequireCopilot) {
-                throw
-            }
-            Write-Warning "GitHub Copilot changelog generation failed; using deterministic release notes instead. $($_.Exception.Message)"
-        }
-    }
-    else {
-        if ($RequireCopilot) {
-            throw "GitHub Copilot CLI is required because -RequireCopilot was supplied, but 'copilot' was not found on PATH."
-        }
-        Write-Warning "GitHub Copilot CLI was not found; using deterministic release notes instead."
+    Write-Step "Compiling release changelog from central ledger $ChangelogPath"
+    if ($null -eq $Entries -or $Entries.Count -eq 0) {
+        $Entries = @(Get-ChangelogEntriesForRelease -TargetVersion $TargetVersion)
     }
 
-    New-DeterministicReleaseChangelog `
+    if ($Entries.Count -eq 0) {
+        throw "No central changelog rows are marked Unreleased or $TargetVersion. Add a grouped row to $ChangelogPath before releasing."
+    }
+
+    New-LedgerReleaseChangelog `
         -TargetVersion $TargetVersion `
         -PreviousTag $PreviousTag `
         -Channel $Channel `
-        -OutputPath $OutputPath
+        -OutputPath $OutputPath `
+        -Entries $Entries `
+        -Intro $Intro
 }
 
 function Get-ReadmeSourceMarkdown {
@@ -1070,6 +1314,7 @@ function Get-ReadmeSourceMarkdown {
         "docs/player-guide.md",
         "docs/server-host-guide.md",
         "docs/gameplay-reference.md",
+        "docs/rulesets.md",
         "docs/maps/index.md",
         "docs/configuration-reference.md",
         "docs/level-design-guide.md"
@@ -1138,10 +1383,11 @@ Create a complete standalone HTML document for end users. Use the Markdown docum
 Audience and scope:
 - Primary audience: Quake II Remastered players and server hosts installing this release.
 - This project is currently in $Channel channel. Make that release state visible but not alarming.
-- Include installation, first-use guidance, player usage, voting, common host setup, gametype overview, ruleset overview, offhand hook bind, debugging pointer, package contents, and the changelog.
+- Include installation, first-use guidance, player usage, voting, common host setup, gametype overview, a player-focused ruleset guide, offhand hook bind, debugging pointer, package contents, and the changelog.
+- Use docs/rulesets.md as the authoritative ruleset source. Make every ruleset's unique feel and tradeoffs clear, including Q3A's existing-asset weapon mappings, preserved double jumps, Super Shotgun removal, regular Shotgun Q3 specs, and shared-cell BFG ammo cost.
 - Include a compact "Included Custom Maps" section using the source map guide. Show map title, filename, release status, and good gametype fits, and link to the full Muff Mode Map Guide for history, original release dates, preserved original readmes/BSPs, separate remaster source-map links, and item registers.
 - Explain that original map readmes are included in the main installer/manual zip under rerelease/baseq2/docs/muffmode/maps/original-readmes, while source maps and original BSPs are published as separate supplemental release archives.
-- Explain that most Windows users can use the installer, which presents detected Steam, Epic Online Store, and GOG installs, keeps an other-location choice available, and offers Desktop/Start menu shortcuts for the updater and launcher. Also include the zip/manual extraction path for users who prefer it.
+- Explain that most Windows users can use the installer, which presents detected Steam, Epic Games Store, GOG, and Xbox app / Microsoft Store installs, keeps an other-location choice available, shows the resolved target before install, requires a real Quake II folder with a known launcher executable, rejects unsafe system, special-folder, and extracted-package targets, verifies the copied DLL, updater, docs, legal notices, original-map readmes, custom map BSPs, selected entity overrides, version manifest, and exact server/gametype config contents, writes an install receipt, backs up an existing game DLL when needed, and offers Desktop/Start menu shortcuts for the updater, launcher, install guide, changelog, and server config guide. Also include the zip/manual extraction path for users who prefer it.
 - Do not include build instructions, source compilation steps, contributor notes, GitHub badges, or repository development workflow.
 - Keep it polished, friendly, and practical. Avoid marketing fluff.
 
@@ -1233,6 +1479,7 @@ function Assert-ReleasePackageContents {
 
     foreach ($requiredFile in @(
         "README.html",
+        "README.md",
         "CHANGELOG.md",
         "LICENSE",
         "THIRD_PARTY_NOTICES.md",
@@ -1240,7 +1487,47 @@ function Assert-ReleasePackageContents {
         "rerelease\baseq2\game_x64.dll",
         "rerelease\baseq2\muffmode-version.json",
         "rerelease\baseq2\muffmode.version",
-        "rerelease\baseq2\docs\muffmode\maps\original-readmes\README.md"
+        "rerelease\baseq2\CONFIGS_README.md",
+        "rerelease\baseq2\server-base.cfg",
+        "rerelease\baseq2\gt-FFA.cfg",
+        "rerelease\baseq2\gt-DUEL.cfg",
+        "rerelease\baseq2\gt-TDM.cfg",
+        "rerelease\baseq2\gt-CTF.cfg",
+        "rerelease\baseq2\gt-CA.cfg",
+        "rerelease\baseq2\gt-REDROVER.cfg",
+        "rerelease\baseq2\gt-HORDE.cfg",
+        "rerelease\baseq2\gt-INSTAGIB.cfg",
+        "rerelease\baseq2\gt-NADEFEST.cfg",
+        "rerelease\baseq2\gt-STRIKE.cfg",
+        "rerelease\baseq2\docs\muffmode\maps\original-readmes\README.md",
+        "rerelease\baseq2\docs\muffmode\maps\original-readmes\2box4-readme.txt",
+        "rerelease\baseq2\docs\muffmode\maps\original-readmes\aerowalk-readme.txt",
+        "rerelease\baseq2\docs\muffmode\maps\original-readmes\broken2-readme.txt",
+        "rerelease\baseq2\docs\muffmode\maps\original-readmes\fleshref-readme.txt",
+        "rerelease\baseq2\docs\muffmode\maps\original-readmes\grind-readme.txt",
+        "rerelease\baseq2\docs\muffmode\maps\original-readmes\ztn2dm1-readme.txt",
+        "rerelease\baseq2\docs\muffmode\maps\original-readmes\ztn2dm2-readme.txt",
+        "rerelease\baseq2\docs\muffmode\maps\original-readmes\ztn2dm3-readme.txt",
+        "rerelease\baseq2\docs\muffmode\maps\original-readmes\ztn2dm5-readme.txt",
+        "rerelease\maps\mm-aerowalk.bsp",
+        "rerelease\maps\mm-coldzero.bsp",
+        "rerelease\maps\mm-crucible.bsp",
+        "rerelease\maps\mm-kmachine.bsp",
+        "rerelease\maps\mm-powertrip.bsp",
+        "rerelease\maps\mm-rage.bsp",
+        "rerelease\maps\mm-railgun101.bsp",
+        "rerelease\maps\mm-reclamation.bsp",
+        "rerelease\maps\mm-recycler.bsp",
+        "rerelease\maps\2box4.ent",
+        "rerelease\maps\aerowalk.ent",
+        "rerelease\maps\grom_dm3.ent",
+        "rerelease\maps\kmachine.ent",
+        "rerelease\maps\koldduel1.ent",
+        "rerelease\maps\paradm4.ent",
+        "rerelease\maps\trdm04a.ent",
+        "rerelease\maps\vd6dm2.ent",
+        "rerelease\maps\ven_dm2.ent",
+        "rerelease\maps\ztn2dm5.ent"
     )) {
         $path = Join-Path $PackageRoot $requiredFile
         if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
@@ -1598,8 +1885,10 @@ try {
     if ($UpdateVersionFiles) {
         Write-Step "Updating VERSION and src/g_local.h"
         Update-VersionFiles -TargetVersion $targetVersion
+        Update-ChangelogReleaseVersions -TargetVersion $targetVersion -Path $ChangelogPath
     }
     Assert-VersionFilesMatch -TargetVersion $targetVersion
+    [void](ConvertFrom-ChangelogLedger -Path $ChangelogPath)
 
     if ($VersionOnly) {
         Write-Step "Version files are ready for $targetVersion"
@@ -1640,7 +1929,23 @@ try {
     $releaseNotesPath = Join-Path $outputRootAbs "muffmode-$targetVersion-release-notes.md"
     $readmeHtmlPath = Join-Path $outputRootAbs "README-$targetVersion.html"
 
-    New-ReleaseChangelog -TargetVersion $targetVersion -PreviousTag $previousReleaseTag -Channel $Channel -OutputPath $releaseNotesPath
+    $releaseEntries = @(Get-ChangelogEntriesForRelease -TargetVersion $targetVersion)
+    if ($releaseEntries.Count -eq 0) {
+        throw "No central changelog rows are marked Unreleased or $targetVersion. Add grouped release notes to $ChangelogPath before packaging."
+    }
+    $resolvedReleaseIntro = Resolve-ReleaseIntroMessage `
+        -TargetVersion $targetVersion `
+        -Channel $Channel `
+        -Entries $releaseEntries `
+        -ManualIntro $ReleaseIntro
+
+    New-ReleaseChangelog `
+        -TargetVersion $targetVersion `
+        -PreviousTag $previousReleaseTag `
+        -Channel $Channel `
+        -OutputPath $releaseNotesPath `
+        -Entries $releaseEntries `
+        -Intro $resolvedReleaseIntro
     New-CopilotHtmlReadme -TargetVersion $targetVersion -Channel $Channel -ChangelogPath $releaseNotesPath -OutputPath $readmeHtmlPath
 
     $package = New-ReleasePackage `

@@ -4,12 +4,15 @@
 #include "g_local.h"
 #include "muffmode/mm_captain.h"
 #include "muffmode/mm_command_contracts.h"
+#include "muffmode/mm_util.h"
 
 #include <algorithm>
+#include <string>
+#include <string_view>
 
-namespace {
+namespace muffmode::captain {
 
-bool MM_RequireCaptainCommandArgc(gentity_t *ent, int min_expected, int max_expected, const char *usage)
+bool RequireCommandArgc(gentity_t *ent, int min_expected, int max_expected, const char *usage)
 {
 	if (!ent || !ent->client)
 		return false;
@@ -21,33 +24,30 @@ bool MM_RequireCaptainCommandArgc(gentity_t *ent, int min_expected, int max_expe
 	return false;
 }
 
-bool MM_RequireNoCaptainCommandArgs(gentity_t *ent)
+bool RequireNoCommandArgs(gentity_t *ent)
 {
-	return MM_RequireCaptainCommandArgc(ent, 1, 1, gi.argv(0));
+	return RequireCommandArgc(ent, 1, 1, gi.argv(0));
 }
 
-bool MM_IsCaptainTeam(team_t team)
+bool IsCaptainTeam(team_t team)
 {
 	return team == TEAM_RED || team == TEAM_BLUE;
 }
 
-bool MM_IsBotClient(gentity_t *ent)
+bool IsBotClient(gentity_t *ent)
 {
 	return ent && ((ent->svflags & SVF_BOT) || (ent->client && ent->client->sess.is_a_bot));
 }
 
-bool MM_IsValidCaptain(team_t team, gentity_t *ent)
+bool IsValidCaptain(team_t team, gentity_t *ent)
 {
-	return MM_IsCaptainTeam(team) && ent && ent->inuse && ent->client &&
-		ent->client->pers.connected && ent->client->sess.team == team && !MM_IsBotClient(ent);
+	return IsCaptainTeam(team) && ent && ent->inuse && ent->client &&
+		ent->client->pers.connected && ent->client->sess.team == team && !IsBotClient(ent);
 }
 
-int MM_CaptainCvarInteger(cvar_t *cvar)
-{
-	return cvar ? cvar->integer : 0;
-}
+} // namespace muffmode::captain
 
-} // namespace
+namespace captain = muffmode::captain;
 
 /*----------------------------------------------------------------*/
 /* CAPTAINS AND TEAM LOCKS                                        */
@@ -61,10 +61,10 @@ Sets ent as captain of team. Pass nullptr to remove captain.
 =================
 */
 void SetCaptain(team_t team, gentity_t *ent) {
-	if (!MM_IsCaptainTeam(team))
+	if (!captain::IsCaptainTeam(team))
 		return;
 
-	if (ent && !MM_IsValidCaptain(team, ent))
+	if (ent && !captain::IsValidCaptain(team, ent))
 		return;
 
 	level.captain[team] = ent;
@@ -83,8 +83,10 @@ Finds the longest-tenured teammate to auto-promote as captain.
 Returns nullptr if no eligible player found.
 =================
 */
-static gentity_t *FindNewCaptain(team_t team, gentity_t *exclude = nullptr) {
-	if (!MM_IsCaptainTeam(team))
+namespace muffmode::captain {
+
+gentity_t *FindNewCaptain(team_t team, gentity_t *exclude = nullptr) {
+	if (!IsCaptainTeam(team))
 		return nullptr;
 
 	gentity_t *best = nullptr;
@@ -97,7 +99,7 @@ static gentity_t *FindNewCaptain(team_t team, gentity_t *exclude = nullptr) {
 			continue;
 		if (ec->client->sess.team != team)
 			continue;
-		if (MM_IsBotClient(ec))
+		if (IsBotClient(ec))
 			continue;
 		if (!best || ec->client->sess.team_join_time < earliest) {
 			best = ec;
@@ -108,6 +110,8 @@ static gentity_t *FindNewCaptain(team_t team, gentity_t *exclude = nullptr) {
 	return best;
 }
 
+} // namespace muffmode::captain
+
 /*
 =================
 VacateCaptain
@@ -117,12 +121,12 @@ longest-tenured teammate, or clears captain if team is empty.
 =================
 */
 void VacateCaptain(team_t team, gentity_t *leaving) {
-	if (!MM_IsCaptainTeam(team))
+	if (!captain::IsCaptainTeam(team))
 		return;
 
 	level.captain[team] = nullptr;
 
-	gentity_t *replacement = FindNewCaptain(team, leaving);
+	gentity_t *replacement = captain::FindNewCaptain(team, leaving);
 	if (replacement)
 		SetCaptain(team, replacement);
 }
@@ -142,10 +146,10 @@ void ValidateCaptains() {
 
 	for (team_t t : { TEAM_RED, TEAM_BLUE }) {
 		gentity_t *cap = level.captain[t];
-		if (MM_IsValidCaptain(t, cap))
+		if (captain::IsValidCaptain(t, cap))
 			continue; // captain is still valid
 		level.captain[t] = nullptr;
-		gentity_t *replacement = FindNewCaptain(t);
+		gentity_t *replacement = captain::FindNewCaptain(t);
 		if (replacement)
 			SetCaptain(t, replacement);
 	}
@@ -158,8 +162,10 @@ IsCaptainOrAdmin
 Returns true if ent is captain of the given team, or is an admin.
 =================
 */
-static bool IsCaptainOrAdmin(gentity_t *ent, team_t team) {
-	if (!ent || !ent->client || !MM_IsCaptainTeam(team))
+namespace muffmode::captain {
+
+bool IsCaptainOrAdmin(gentity_t *ent, team_t team) {
+	if (!ent || !ent->client || !IsCaptainTeam(team))
 		return false;
 
 	if (ent->client->sess.admin)
@@ -168,6 +174,8 @@ static bool IsCaptainOrAdmin(gentity_t *ent, team_t team) {
 		return true;
 	return false;
 }
+
+} // namespace muffmode::captain
 
 /*
 =================
@@ -187,9 +195,9 @@ void MM_CmdCaptain(gentity_t *ent) {
 		return;
 	}
 
-	team_t team = ent->client->sess.team;
+	const team_t team = ent->client->sess.team;
 
-	if (team != TEAM_RED && team != TEAM_BLUE) {
+	if (!captain::IsCaptainTeam(team)) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "You must be on a team to use this command.\n");
 		return;
 	}
@@ -197,7 +205,7 @@ void MM_CmdCaptain(gentity_t *ent) {
 	if (gi.argc() == 1) {
 		if (level.captain[team] == ent) {
 			gi.LocClient_Print(ent, PRINT_HIGH, "You are the captain of {}.\n", Teams_TeamName(team));
-		} else if (MM_IsValidCaptain(team, level.captain[team])) {
+		} else if (captain::IsValidCaptain(team, level.captain[team])) {
 			gi.LocClient_Print(ent, PRINT_HIGH, "{} is the captain of {}.\n",
 				level.captain[team]->client->resp.netname, Teams_TeamName(team));
 		} else {
@@ -208,7 +216,7 @@ void MM_CmdCaptain(gentity_t *ent) {
 	}
 
 	// transfer captain to another player
-	if (!MM_IsValidCaptain(team, level.captain[team]))
+	if (!captain::IsValidCaptain(team, level.captain[team]))
 		level.captain[team] = nullptr;
 
 	if (level.captain[team] != ent) {
@@ -222,13 +230,12 @@ void MM_CmdCaptain(gentity_t *ent) {
 		return;
 	}
 
-	size_t args_len = strlen(args);
-	char name_buf[MAX_NETNAME];
-	if (args_len >= 2 && args[0] == '"' && args[args_len - 1] == '"') {
-		size_t copy_len = std::min(args_len - 2, sizeof(name_buf) - 1);
-		memcpy(name_buf, args + 1, copy_len);
-		name_buf[copy_len] = '\0';
-		args = name_buf;
+	std::string quoted_name;
+	const std::string_view arg_view(args);
+	if (arg_view.size() >= 2 && arg_view.front() == '"' && arg_view.back() == '"') {
+		const size_t copy_len = std::min(arg_view.size() - 2, static_cast<size_t>(MAX_NETNAME - 1));
+		quoted_name.assign(arg_view.substr(1, copy_len));
+		args = quoted_name.c_str();
 	}
 
 	gentity_t *target = ClientEntFromString(args);
@@ -238,7 +245,7 @@ void MM_CmdCaptain(gentity_t *ent) {
 		return;
 	}
 
-	if (MM_IsBotClient(target)) {
+	if (captain::IsBotClient(target)) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "Bots cannot be team captain.\n");
 		return;
 	}
@@ -274,27 +281,23 @@ void MM_CmdLockTeam(gentity_t *ent) {
 		return;
 	}
 
-	team_t team;
-
 	if (ent->client->sess.admin) {
-		if (!MM_RequireCaptainCommandArgc(ent, 1, 2, G_Fmt("{} [red|blue]", gi.argv(0)).data()))
+		if (!captain::RequireCommandArgc(ent, 1, 2, G_Fmt("{} [red|blue]", gi.argv(0)).data()))
 			return;
-	} else if (!MM_RequireNoCaptainCommandArgs(ent)) {
+	} else if (!captain::RequireNoCommandArgs(ent)) {
 		return;
 	}
 
-	if (ent->client->sess.admin && gi.argc() == 2) {
-		team = StringToTeamNum(gi.argv(1));
-	} else {
-		team = ent->client->sess.team;
-	}
+	const team_t team = ent->client->sess.admin && gi.argc() == 2
+		? StringToTeamNum(gi.argv(1))
+		: ent->client->sess.team;
 
-	if (team != TEAM_RED && team != TEAM_BLUE) {
+	if (!captain::IsCaptainTeam(team)) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid team.\n");
 		return;
 	}
 
-	if (!IsCaptainOrAdmin(ent, team)) {
+	if (!captain::IsCaptainOrAdmin(ent, team)) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "Only team captains or admins can lock teams.\n");
 		return;
 	}
@@ -325,27 +328,23 @@ void MM_CmdUnlockTeam(gentity_t *ent) {
 		return;
 	}
 
-	team_t team;
-
 	if (ent->client->sess.admin) {
-		if (!MM_RequireCaptainCommandArgc(ent, 1, 2, G_Fmt("{} [red|blue]", gi.argv(0)).data()))
+		if (!captain::RequireCommandArgc(ent, 1, 2, G_Fmt("{} [red|blue]", gi.argv(0)).data()))
 			return;
-	} else if (!MM_RequireNoCaptainCommandArgs(ent)) {
+	} else if (!captain::RequireNoCommandArgs(ent)) {
 		return;
 	}
 
-	if (ent->client->sess.admin && gi.argc() == 2) {
-		team = StringToTeamNum(gi.argv(1));
-	} else {
-		team = ent->client->sess.team;
-	}
+	const team_t team = ent->client->sess.admin && gi.argc() == 2
+		? StringToTeamNum(gi.argv(1))
+		: ent->client->sess.team;
 
-	if (team != TEAM_RED && team != TEAM_BLUE) {
+	if (!captain::IsCaptainTeam(team)) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid team.\n");
 		return;
 	}
 
-	if (!IsCaptainOrAdmin(ent, team)) {
+	if (!captain::IsCaptainOrAdmin(ent, team)) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "Only team captains or admins can unlock teams.\n");
 		return;
 	}
@@ -408,7 +407,9 @@ void BroadcastReadyReminderMessage() {
 	}
 }
 
-static bool ReadyConditions(gentity_t *ent, bool desired_status, bool admin_cmd) {
+namespace muffmode::captain {
+
+bool ReadyConditions(gentity_t *ent, bool desired_status, bool admin_cmd) {
 	if (!ent || !ent->client)
 		return false;
 
@@ -430,7 +431,7 @@ static bool ReadyConditions(gentity_t *ent, bool desired_status, bool admin_cmd)
 	switch (level.warmup_requisite) {
 	case warmupreq_t::WARMUP_REQ_MORE_PLAYERS:
 	{
-		const int minp = GT(GT_DUEL) ? 2 : std::max(1, MM_CaptainCvarInteger(minplayers));
+		const int minp = GT(GT_DUEL) ? 2 : std::max(1, muffmode::CvarInteger(minplayers));
 		const int req = std::max(1, minp - level.num_playing_clients);
 		gi.LocClient_Print(ent, PRINT_HIGH, "{}{} more player{} present.\n", s, req, req > 1 ? "s are" : " is");
 		break;
@@ -445,14 +446,16 @@ static bool ReadyConditions(gentity_t *ent, bool desired_status, bool admin_cmd)
 	return false;
 }
 
+} // namespace muffmode::captain
+
 void MM_CmdReadyAll(gentity_t *ent) {
 	if (!ent || !ent->client)
 		return;
 
-	if (!MM_RequireNoCaptainCommandArgs(ent))
+	if (!captain::RequireNoCommandArgs(ent))
 		return;
 
-	if (!ReadyConditions(ent, true, true))
+	if (!captain::ReadyConditions(ent, true, true))
 		return;
 
 	ReadyAll();
@@ -464,10 +467,10 @@ void MM_CmdUnReadyAll(gentity_t *ent) {
 	if (!ent || !ent->client)
 		return;
 
-	if (!MM_RequireNoCaptainCommandArgs(ent))
+	if (!captain::RequireNoCommandArgs(ent))
 		return;
 
-	if (!ReadyConditions(ent, false, true))
+	if (!captain::ReadyConditions(ent, false, true))
 		return;
 
 	UnReadyAll();
@@ -486,7 +489,7 @@ void MM_CmdReadyTeam(gentity_t *ent) {
 	if (!ent || !ent->client)
 		return;
 
-	if (!MM_RequireNoCaptainCommandArgs(ent))
+	if (!captain::RequireNoCommandArgs(ent))
 		return;
 
 	if (!Teams()) {
@@ -494,17 +497,17 @@ void MM_CmdReadyTeam(gentity_t *ent) {
 		return;
 	}
 
-	if (!ReadyConditions(ent, true, false))
+	if (!captain::ReadyConditions(ent, true, false))
 		return;
 
-	team_t team = ent->client->sess.team;
+	const team_t team = ent->client->sess.team;
 
-	if (team != TEAM_RED && team != TEAM_BLUE) {
+	if (!captain::IsCaptainTeam(team)) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "You must be on a team to use this command.\n");
 		return;
 	}
 
-	if (!IsCaptainOrAdmin(ent, team)) {
+	if (!captain::IsCaptainOrAdmin(ent, team)) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "Only team captains or admins can ready the team.\n");
 		return;
 	}
@@ -530,21 +533,25 @@ void MM_CmdReadyTeam(gentity_t *ent) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "All players on {} are already ready.\n", Teams_TeamName(team));
 }
 
-static void BroadcastReadyStatus(gentity_t *ent) {
+namespace muffmode::captain {
+
+void BroadcastReadyStatus(gentity_t *ent) {
 	if (!ent || !ent->client)
 		return;
 
 	gi.LocBroadcast_Print(PRINT_CENTER, "%bind:+wheel2:Use Compass to toggle your ready status.%MATCH IS IN WARMUP\n{} is {}ready.", ent->client->resp.netname, ent->client->resp.ready ? "" : "NOT ");
 }
 
+} // namespace muffmode::captain
+
 void MM_CmdReady(gentity_t *ent) {
 	if (!ent || !ent->client)
 		return;
 
-	if (!MM_RequireNoCaptainCommandArgs(ent))
+	if (!captain::RequireNoCommandArgs(ent))
 		return;
 
-	if (!ReadyConditions(ent, true, false))
+	if (!captain::ReadyConditions(ent, true, false))
 		return;
 
 	if (level.match_state != matchst_t::MATCH_WARMUP_READYUP) {
@@ -558,17 +565,17 @@ void MM_CmdReady(gentity_t *ent) {
 	}
 
 	ent->client->resp.ready = true;
-	BroadcastReadyStatus(ent);
+	captain::BroadcastReadyStatus(ent);
 }
 
 void MM_CmdNotReady(gentity_t *ent) {
 	if (!ent || !ent->client)
 		return;
 
-	if (!MM_RequireNoCaptainCommandArgs(ent))
+	if (!captain::RequireNoCommandArgs(ent))
 		return;
 
-	if (!ReadyConditions(ent, false, false))
+	if (!captain::ReadyConditions(ent, false, false))
 		return;
 
 	if (!ent->client->resp.ready) {
@@ -577,19 +584,19 @@ void MM_CmdNotReady(gentity_t *ent) {
 	}
 
 	ent->client->resp.ready = false;
-	BroadcastReadyStatus(ent);
+	captain::BroadcastReadyStatus(ent);
 }
 
 void MM_CmdReadyUp(gentity_t *ent) {
 	if (!ent || !ent->client)
 		return;
 
-	if (!MM_RequireNoCaptainCommandArgs(ent))
+	if (!captain::RequireNoCommandArgs(ent))
 		return;
 
-	if (!ReadyConditions(ent, !ent->client->resp.ready, false))
+	if (!captain::ReadyConditions(ent, !ent->client->resp.ready, false))
 		return;
 
 	ent->client->resp.ready ^= true;
-	BroadcastReadyStatus(ent);
+	captain::BroadcastReadyStatus(ent);
 }

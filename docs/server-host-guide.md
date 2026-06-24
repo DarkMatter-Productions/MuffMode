@@ -1,6 +1,6 @@
 # MuffMode Server Host Guide
 
-[README](../README.md) | [Player Guide](player-guide.md) | [Gameplay Reference](gameplay-reference.md) | [Configuration Reference](configuration-reference.md) | [Build Guide](build-guide.md)
+[README](../README.md) | [Player Guide](player-guide.md) | [Gameplay Reference](gameplay-reference.md) | [Rulesets](rulesets.md) | [Configuration Reference](configuration-reference.md) | [Build Guide](build-guide.md)
 
 This guide is for lobby owners, dedicated server hosts, event organizers, and admins who want a practical setup path before diving into the full cvar reference. It is written around real server use: casual public play, private friend lobbies, pickups, scrims, and competitive events.
 
@@ -104,7 +104,7 @@ Set `g_ruleset` by index, or use `ruleset <shortname>`.
 | `5` | `q` | Quake style |
 | `6` | `qc` | Quake Champions style |
 
-See [Rulesets](gameplay-reference.md#rulesets) for the gameplay differences.
+See [Rulesets](rulesets.md) for the player-facing gameplay differences.
 
 ## Match Flow
 
@@ -119,7 +119,9 @@ Good match flow matters for both audiences: casual players should not get stuck 
 | `g_round_countdown` | `10` | Round countdown for round-based gametypes. |
 | `g_dm_overtime` | `120` | Overtime session length in seconds, currently for Duels. |
 | `g_dm_tie_max_time` | `1800` | Maximum total tied-overtime duration before forced resolution. |
+| `g_auto_ghost_timeout` | `0` | Auto-pauses an active match for disconnected players, in seconds up to `120`; `0` disables. |
 | `g_dm_timeout_length` | `120` | Timeout length in seconds. Set `0` to disable timeouts. |
+| `g_dm_timeout_resume_countdown` | `30` | Countdown announced before a paused match resumes, in seconds up to `120`; `0` resumes immediately. |
 | `mercylimit` | `0` | Score gap that ends a match. `0` disables. |
 
 ## Team Controls

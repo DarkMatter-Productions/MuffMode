@@ -1,6 +1,6 @@
 # MuffMode Player Guide
 
-[README](../README.md) | [Server Host Guide](server-host-guide.md) | [Gameplay Reference](gameplay-reference.md) | [Configuration Reference](configuration-reference.md)
+[README](../README.md) | [Server Host Guide](server-host-guide.md) | [Gameplay Reference](gameplay-reference.md) | [Rulesets](rulesets.md) | [Configuration Reference](configuration-reference.md)
 
 This guide is for anyone joining a MuffMode game. You do not need to learn every console command to have a good time: most everyday actions are available through the game menu, and the commands below are here when you want faster control.
 
@@ -83,7 +83,7 @@ callvote timelimit 15
 callvote scorelimit 50
 ```
 
-Servers can restrict voting, spectator voting, mid-match voting, available gametypes, and available rulesets. If a vote option is missing, it is probably a host choice rather than a client problem. See [Vote Commands](configuration-reference.md#vote-commands) for the full list.
+Servers can restrict voting, spectator voting, mid-match voting, available gametypes, and available rulesets. If a vote option is missing, it is probably a host choice rather than a client problem. Use the [Rulesets](rulesets.md) guide when you want to know what a ruleset vote changes, and see [Vote Commands](configuration-reference.md#vote-commands) for the full command list.
 
 ## Offhand Hook
 
@@ -100,5 +100,7 @@ Use `hook` and `unhook` directly if you prefer separate commands.
 ## Helpful Notes
 
 - Some gametypes are works in progress. The [Gameplay Reference](gameplay-reference.md) calls these out.
+- Rulesets change starts, weapons, ammo, armor, health, powerups, and movement feel. The [Rulesets](rulesets.md) guide has the player-facing differences.
 - Custom skins, voting, team picking, timeouts, MyMap, and ready-up behavior are server controlled.
+- During active matches, servers can restore your match state automatically if you reconnect quickly with the same social ID.
 - If something feels misconfigured, ask the host to run `doctor`; it reports risky cvar combinations and suggested fixes.
