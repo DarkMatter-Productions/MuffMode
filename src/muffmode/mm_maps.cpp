@@ -26,8 +26,22 @@ bool IsSafeMapToken(std::string_view mapname)
 	if (mapname.size() >= MAX_QPATH)
 		return false;
 
-	for (const unsigned char c : mapname) {
-		if (c <= ' ' || c == '"' || c == '\'' || c == ';' || c == '/' || c == '\\')
+	auto is_separator = [](char c) {
+		return c == '/' || c == '\\';
+	};
+
+	if (is_separator(mapname.front()) || is_separator(mapname.back()))
+		return false;
+
+	for (size_t i = 0; i < mapname.size(); ++i) {
+		const unsigned char c = static_cast<unsigned char>(mapname[i]);
+
+		if (c <= ' ' || c == '"' || c == '\'' || c == ';' || c == ':')
+			return false;
+		if (mapname[i] == '.' && i + 1 < mapname.size() && mapname[i + 1] == '.')
+			return false;
+
+		if (is_separator(mapname[i]) && i + 1 < mapname.size() && is_separator(mapname[i + 1]))
 			return false;
 	}
 
@@ -419,6 +433,14 @@ void MM_PrintTruncatedMapSource(gentity_t *ent)
 	gi.LocClient_Print(ent, PRINT_HIGH, "{}\n", display.c_str());
 }
 
+void MM_PrintTruncatedMapPool(gentity_t *ent)
+{
+	std::string display = muffmode::CvarString(g_map_pool);
+	if (display.length() > MAX_MAP_LIST_DISPLAY)
+		display = display.substr(0, MAX_MAP_LIST_DISPLAY) + "...";
+	gi.LocClient_Print(ent, PRINT_HIGH, "{}\n", display.c_str());
+}
+
 bool MM_IsValidMyMapModifier(const char *modifier)
 {
 	if (!modifier || !modifier[0] || !modifier[1])
@@ -531,18 +553,27 @@ void MM_CmdMapList(gentity_t *ent)
 		return;
 	}
 
-	if (muffmode::maps::HasConfiguredMapSource()) {
-		gi.LocClient_Print(ent, PRINT_HIGH, muffmode::CvarString(g_map_list)[0] ? "Current map list:\n" : "Current map pool:\n");
-		if (muffmode::CvarString(g_map_list)[0])
-			map_queue::MM_PrintTruncatedMapList(ent);
-		else
-			map_queue::MM_PrintTruncatedMapSource(ent);
-		if (MM_MQ_Count()) {
-			gi.LocClient_Print(ent, PRINT_HIGH, "\nCurrent MyMap Queue:\n");
-			map_queue::MM_MQ_PrintList(ent);
-		}
-	} else {
+	if (!muffmode::maps::HasConfiguredMapSource()) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "No map list or pool set.\n");
+		return;
+	}
+
+	const bool has_list = muffmode::CvarString(g_map_list)[0];
+	const bool has_pool = muffmode::CvarString(g_map_pool)[0];
+
+	if (has_list) {
+		gi.LocClient_Print(ent, PRINT_HIGH, "Current map list (rotation):\n");
+		map_queue::MM_PrintTruncatedMapList(ent);
+	}
+
+	if (has_pool) {
+		gi.LocClient_Print(ent, PRINT_HIGH, has_list ? "\nMap pool (votable):\n" : "Current map pool:\n");
+		map_queue::MM_PrintTruncatedMapPool(ent);
+	}
+
+	if (MM_MQ_Count()) {
+		gi.LocClient_Print(ent, PRINT_HIGH, "\nCurrent MyMap Queue:\n");
+		map_queue::MM_MQ_PrintList(ent);
 	}
 }
 

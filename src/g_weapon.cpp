@@ -26,6 +26,11 @@ bool fire_hit(gentity_t *self, vec3_t aim, int damage, int kick) {
 	float	range;
 	vec3_t	dir;
 
+	// enemy can be cleared (killed/removed/disconnected) after the melee swing
+	// began but before this impact frame runs; bail out rather than deref null
+	if (!self->enemy)
+		return false;
+
 	// see if enemy is in range
 	range = distance_between_boxes(self->enemy->absmin, self->enemy->absmax, self->absmin, self->absmax);
 	if (range > aim[0])

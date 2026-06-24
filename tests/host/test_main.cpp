@@ -3,6 +3,7 @@
 
 #include "fake_game_import.h"
 #include "muffmode/mm_command_contracts.h"
+#include "muffmode/mm_horde_ai_rules.h"
 #include "muffmode/mm_parse.h"
 #include "muffmode/mm_red_rover_rules.h"
 
@@ -154,6 +155,22 @@ MM_TEST(red_rover_uses_individual_scorelimit_and_blocks_only_manual_side_switche
 	MM_CHECK_FALSE(MM_RedRoverBlocksManualTeamSwitch(red, blue, spectator, true, false));
 }
 
+MM_TEST(red_rover_round_ends_only_when_one_team_is_cleared) {
+	// a round ends the moment one side is emptied (>= 2 players total)
+	MM_CHECK(MM_RedRoverRoundShouldEnd(3, 0));
+	MM_CHECK(MM_RedRoverRoundShouldEnd(0, 4));
+	MM_CHECK(MM_RedRoverRoundShouldEnd(2, 0));
+
+	// both teams populated: round continues
+	MM_CHECK_FALSE(MM_RedRoverRoundShouldEnd(3, 1));
+	MM_CHECK_FALSE(MM_RedRoverRoundShouldEnd(1, 1));
+
+	// lone survivor (everyone else gone) must not trip an instant round-end
+	MM_CHECK_FALSE(MM_RedRoverRoundShouldEnd(1, 0));
+	MM_CHECK_FALSE(MM_RedRoverRoundShouldEnd(0, 1));
+	MM_CHECK_FALSE(MM_RedRoverRoundShouldEnd(0, 0));
+}
+
 MM_TEST(scoreboard_footer_reserve_keeps_layout_room_available) {
 	MM_CHECK_EQ(MM_ScoreboardFooterReserve(false), 96u);
 	MM_CHECK_EQ(MM_ScoreboardFooterReserve(true), 320u);
@@ -173,6 +190,25 @@ MM_TEST(fake_command_import_models_argv_contract) {
 	MM_CHECK_EQ(std::string(fake.argv(99)), "");
 	MM_CHECK_EQ(std::string(fake.args()), "1 2 3");
 	MM_CHECK(MM_IsTeleportArgcValid(fake.argc()));
+}
+
+MM_TEST(horde_target_load_score_prefers_lower_burden_at_equal_distance) {
+	const float spread = 512.f;
+	const float dist = 1024.f;
+
+	MM_CHECK(MM_Horde_ComputeTargetLoadScore(0, dist, spread) < MM_Horde_ComputeTargetLoadScore(3, dist, spread));
+	MM_CHECK(MM_Horde_ComputeTargetLoadScore(1, dist, spread) < MM_Horde_ComputeTargetLoadScore(1, dist + spread, spread));
+}
+
+MM_TEST(horde_adaptive_spawn_mult_bounds_and_direction) {
+	MM_CHECK_EQ(MM_Horde_ClampAdaptiveSpawnMult(2.f), 1.35f);
+	MM_CHECK_EQ(MM_Horde_ClampAdaptiveSpawnMult(0.1f), 0.65f);
+
+	const float coasting = MM_Horde_ComputeAdaptiveSpawnMult(0.95f, 0.1f, 1.5f);
+	const float struggling = MM_Horde_ComputeAdaptiveSpawnMult(0.2f, 0.9f, 0.3f);
+	MM_CHECK(coasting > 1.f);
+	MM_CHECK(struggling < 1.f);
+	MM_CHECK_EQ(MM_Horde_ComputeAdaptiveBudgetMult(1.f), 1.f);
 }
 
 } // namespace

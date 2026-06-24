@@ -117,6 +117,7 @@ cvar_t *run_roll;
 cvar_t *g_airaccelerate;
 cvar_t *g_allow_admin;
 cvar_t *g_allow_custom_skins;
+cvar_t *g_allow_skin_overrides;
 cvar_t *g_team_force_models;
 cvar_t *g_team_red_model;
 cvar_t *g_team_blue_model;
@@ -149,6 +150,7 @@ cvar_t *g_dm_allow_exit;
 cvar_t *g_dm_allow_no_humans;
 cvar_t *g_dm_auto_join;
 cvar_t *g_dm_crosshair_id;
+cvar_t *g_dm_death_scoreboard;
 cvar_t *g_dm_do_readyup;
 cvar_t *g_dm_do_warmup;
 cvar_t *g_dm_exec_level_cfg;
@@ -232,6 +234,8 @@ cvar_t *g_horde_late_wave_factor;
 cvar_t *g_horde_weight_floor;
 cvar_t *g_horde_theme_min_monsters;
 cvar_t *g_horde_start_chainsaw;
+cvar_t *g_horde_item_respawn_scale;
+cvar_t *g_horde_enhanced_ai;
 cvar_t *g_huntercam;
 cvar_t *g_inactivity;
 cvar_t *g_infinite_ammo;
@@ -358,7 +362,7 @@ int _gt[] = {
 	/* GT_CA */ GTF_TEAMS | GTF_ARENA | GTF_ROUNDS | GTF_ELIMINATION,
 	/* GT_FREEZE */ 0, // removed
 	/* GT_STRIKE */ GTF_TEAMS | GTF_ARENA | GTF_ROUNDS | GTF_CTF | GTF_ELIMINATION,
-	/* GT_RR */ GTF_TEAMS | GTF_ARENA | GTF_FRAGS,
+	/* GT_RR */ GTF_TEAMS | GTF_ARENA | GTF_ROUNDS | GTF_FRAGS,
 	/* GT_LMS */ 0, // removed
 	/* GT_HORDE */ GTF_ROUNDS,
 	/* GT_BALL */ 0, // removed
@@ -516,6 +520,8 @@ static void InitGame() {
 	g_horde_weight_floor = gi.cvar("g_horde_weight_floor", "0.12", CVAR_NOFLAGS);
 	g_horde_theme_min_monsters = gi.cvar("g_horde_theme_min_monsters", "2", CVAR_NOFLAGS);
 	g_horde_start_chainsaw = gi.cvar("g_horde_start_chainsaw", "1", CVAR_NOFLAGS);
+	g_horde_item_respawn_scale = gi.cvar("g_horde_item_respawn_scale", "4", CVAR_NOFLAGS);
+	g_horde_enhanced_ai = gi.cvar("g_horde_enhanced_ai", "1", CVAR_NOFLAGS);
 
 	g_huntercam = gi.cvar("g_huntercam", "1", CVAR_SERVERINFO | CVAR_LATCH);
 	g_dm_strong_mines = gi.cvar("g_dm_strong_mines", "0", CVAR_NOFLAGS);
@@ -606,7 +612,8 @@ static void InitGame() {
 	g_airaccelerate = gi.cvar("g_airaccelerate", "0", CVAR_NOFLAGS);
 	g_allow_admin = gi.cvar("g_allow_admin", "1", CVAR_NOFLAGS);
 	g_allow_custom_skins = gi.cvar("g_allow_custom_skins", "1", CVAR_NOFLAGS);
-	g_team_force_models = gi.cvar("g_team_force_models", "1",           CVAR_NOFLAGS);
+	g_allow_skin_overrides = gi.cvar("g_allow_skin_overrides", "1", CVAR_NOFLAGS);
+	g_team_force_models = gi.cvar("g_team_force_models", "0",           CVAR_NOFLAGS);
 	g_team_red_model    = gi.cvar("g_team_red_model",   "male/ctf_r",  CVAR_NOFLAGS);
 	g_team_blue_model   = gi.cvar("g_team_blue_model",  "female/ctf_b", CVAR_NOFLAGS);
 	g_allow_forfeit = gi.cvar("g_allow_forfeit", "1", CVAR_NOFLAGS);
@@ -628,6 +635,7 @@ static void InitGame() {
 	g_dm_allow_no_humans = gi.cvar("g_dm_allow_no_humans", "1", CVAR_NOFLAGS);
 	g_dm_auto_join = gi.cvar("g_dm_auto_join", "0", CVAR_NOFLAGS);
 	g_dm_crosshair_id = gi.cvar("g_dm_crosshair_id", "1", CVAR_NOFLAGS);
+	g_dm_death_scoreboard = gi.cvar("g_dm_death_scoreboard", "1", CVAR_NOFLAGS);
 	g_dm_do_readyup = gi.cvar("g_dm_do_readyup", "0", CVAR_NOFLAGS);
 	g_dm_do_warmup = gi.cvar("g_dm_do_warmup", "1", CVAR_NOFLAGS);
 	g_dm_exec_level_cfg = gi.cvar("g_dm_exec_level_cfg", "0", CVAR_NOFLAGS);
@@ -1264,7 +1272,9 @@ void CalculateRanks() {
 	level.warmup_notice_time = level.time;
 
 	if (level.match_state == MATCH_IN_PROGRESS) {
-		if (GTF(GTF_FRAGS)) {
+		// Red Rover is decided by the round/time limits, not a frag target, so it skips the
+		// "N frags to win" countdown even though it tracks individual frags (GTF_FRAGS).
+		if (GTF(GTF_FRAGS) && notGT(GT_RR)) {
 			//gi.Com_PrintFmt("new={} old={}\n", game.clients[level.sorted_clients[0]].resp.score, old_first_score);
 			// frag_warning has 3 entries (1/2/3 frags to go). Once the leader reaches
 			// the limit score_diff is <= 0, so guard the lower bound or score_diff-1
@@ -1722,7 +1732,7 @@ void CheckDMExitRules() {
 				QueueIntermission(G_Fmt("{} hit the mercylimit ({}).", Teams_TeamName(TEAM_BLUE), mercylimit->integer).data(), true, false);
 				return;
 			}
-		} else if (!MM_Horde_SkipMercyLimit()) {
+		} else if (!MM_Horde_SkipMercyLimit() && notGT(GT_RR)) {
 			gclient_t *cl1, *cl2;
 
 			cl1 = ClientFromSortedSlot(0);
@@ -1746,9 +1756,24 @@ void CheckDMExitRules() {
 	// no score limit in race
 	if (false) // Race mode removed
 		return;
-	
+
 	int	scorelimit = GT_ScoreLimit();
 	if (!scorelimit) return;
+
+	// Red Rover is an arena mode like CA: the match ends after `roundlimit` rounds (or the
+	// timelimit backstop above), never on a frag target. But unlike CA it scores individual
+	// frags rather than team round-wins, so the winner is the frag leader after that many
+	// rounds. GT_ScoreLimit() returns roundlimit here (GTF_ROUNDS), and level.round_number
+	// is the round just finished (we only reach this at ROUND_ENDED).
+	if (GT(GT_RR)) {
+		if (level.round_number >= scorelimit) {
+			gclient_t *leader = ClientFromSortedSlot(0);
+			QueueIntermission(leader
+				? G_Fmt("{} WINS! (most frags after {} rounds)", leader->resp.netname, scorelimit).data()
+				: "Round limit hit.", false, false);
+		}
+		return;
+	}
 
 	if (teams) {
 		// Strike: only decide the match between rounds, after both teams have had an

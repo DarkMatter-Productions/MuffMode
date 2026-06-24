@@ -531,7 +531,12 @@ bool SetTeam(gentity_t *ent, team_t desired_team, bool inactive, bool force, boo
 	FreeFollower(ent);
 
 	ent->svflags &= ~SVF_NOCLIENT;
-	ent->client->resp.score = 0;
+	// Red Rover scores individual frags that persist for the whole match, but players
+	// change team constantly (defect on death, reshuffle each round). Zeroing on a team
+	// change here would wipe their running total every round, so skip it for RR - a fresh
+	// joiner already starts at 0 from client init.
+	if (notGT(GT_RR))
+		ent->client->resp.score = 0;
 	ent->client->sess.team = desired_team;
 	if (desired_team == TEAM_SPECTATOR)
 		ent->client->eliminated = false;

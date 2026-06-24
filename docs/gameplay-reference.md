@@ -67,7 +67,7 @@ Muff Mode maintains a curated set of final `mm-*` remasters and ports, plus a se
 | `ca` | Clan Arena | Round-based team elimination with no item spawns, no self-damage, and a full arsenal. Good for fast team matches. |
 | `ft` | Freeze Tag | Team elimination where teammates thaw frozen players. Work in progress. |
 | `strike` | CaptureStrike | Threewave-inspired attack/defend mode combining Clan Arena, CTF, and Counter-Strike style rounds. |
-| `rr` | Red Rover | Two teams with the Clan Arena loadout; on death you defect to the opposing team and respawn instantly. Continuous play scored by individual frags to the frag/time limit. |
+| `rr` | Red Rover | Two teams with the Clan Arena loadout; on death you defect to the opposing team and respawn instantly. An arena mode like CA: each round ends on a team wipe (everyone forced onto one team) or `roundtimelimit`, announces that round's top fragger, and reshuffles for the next one. The match ends on `roundlimit` (primary) or `timelimit` (backstop) and the player with the most frags wins. Scored by individual frags; `fraglimit` is disabled, as in CA. |
 | `lms` | Last Man Standing | Survival-focused elimination mode. |
 | `horde` | Horde Mode | Fight monster waves and stay on top of the scoreboard through up to 16 waves. Good for casual groups. Limited lives are not currently handled. |
 | `ball` | ProBall | Sports-style mode where players carry a ball into the enemy goal. Work in progress. |

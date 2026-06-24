@@ -283,9 +283,17 @@ void MM_CmdGametype(gentity_t *ent)
 		const gametype_t current_gt = admin::MM_CurrentGametypeForAdminDisplay();
 		const std::string enabled_list = MM_GetEnabledGametypesList();
 		if (!enabled_list.empty())
-			gi.LocClient_Print(ent, PRINT_HIGH, "Usage: {} <{}>\nChanges current gametype. Current gametype is {} ({}).\n", gi.argv(0), enabled_list.c_str(), gt_long_name[(int)current_gt], (int)current_gt);
+			gi.LocClient_Print(ent, PRINT_HIGH, "Usage: {} <{}>\nChanges current gametype. Current gametype is {} ({}).\n", gi.argv(0), enabled_list.c_str(), gt_long_name[(int)current_gt], gt_short_name[(int)current_gt]);
 		else
-			gi.LocClient_Print(ent, PRINT_HIGH, "Usage: {} <gametype>\nChanges current gametype. Current gametype is {} ({}).\n", gi.argv(0), gt_long_name[(int)current_gt], (int)current_gt);
+			gi.LocClient_Print(ent, PRINT_HIGH, "Usage: {} <gametype>\nChanges current gametype. Current gametype is {} ({}).\n", gi.argv(0), gt_long_name[(int)current_gt], gt_short_name[(int)current_gt]);
+		return;
+	}
+
+	// Listing the available gametypes (the no-argument path above) is open to everyone so
+	// players can see what's on offer; actually changing the gametype stays admin-only.
+	if (!admin::MM_AdminCvarEnabled(g_allow_admin) || !ent->client->sess.admin)
+	{
+		gi.LocClient_Print(ent, PRINT_HIGH, "Only admins can change the gametype.\n");
 		return;
 	}
 

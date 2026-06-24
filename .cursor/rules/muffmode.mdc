@@ -1,0 +1,76 @@
+---
+description: MuffMode repo conventions, module layout, builds, commits, and versioning
+alwaysApply: true
+---
+
+# MuffMode
+
+Quake II Rerelease server-side multiplayer mod (C++ game DLL). Primary dev branch: `muffdev` / `ozdev`.
+
+## Architecture
+
+- **Thin vanilla hooks**: keep `g_*.cpp`, `p_*.cpp`, etc. as small wrappers; put MuffMode logic in `src/muffmode/`.
+- **New features** → new `mm_<feature>.{h,cpp}`, declare API in the header, add `#include "mm_<feature>.h"` to `src/muffmode/muffmode.h` (alphabetical), wire `src/game.vcxproj` + `.filters`.
+- **Player prefs** → `client_config_t` (`sess.pc` in `g_local.h`), not raw userinfo. Commands: thin `Cmd_*_f` in `g_cmds.cpp` → `MM_Cmd*` in the module.
+- **Cvars** → register in `g_main.cpp`, `extern` in `g_local.h`. Document in `docs/configuration-reference.md` when user-facing.
+- **Minimize scope**: match surrounding style; no drive-by refactors.
+
+## Build & test
+
+From repo root, in a VS 2022 developer shell:
+
+```powershell
+./scripts/ci/build-msbuild.ps1 -Configuration Release -Platform x64 -TreatWarningsAsErrors
+```
+
+Local quick build: `build.bat`. See `docs/build-guide.md`.
+
+## Commits
+
+- Only commit when explicitly asked.
+- One-line subject, repo style: `area: what changed; bump X.Y.Z.` (e.g. `mm_skin: add per-viewer eskin/tskin; bump 0.36.31.`).
+- Never amend pushed commits; never skip hooks unless asked.
+
+## Versioning (required for every shipped change)
+
+**Source of truth:** repo-root `VERSION` and `GAMEMOD_VERSION` in `src/g_local.h` must always match.
+
+```cpp
+constexpr const char *GAMEMOD_VERSION = "0.36.33";  // src/g_local.h
+```
+
+```text
+0.36.33   # VERSION (no v prefix, no trailing newline issues)
+```
+
+### Day-to-day dev commits
+
+1. Bump **patch** (`0.36.32` → `0.36.33`) in **both** files together.
+2. Mention the bump in the commit message.
+3. Do not change `GAMEVERSION` (`baseq2`) — only `GAMEMOD_VERSION` / `VERSION`.
+
+### Release / automated bump
+
+Use `scripts/release.ps1` (see `docs/release-process.md`):
+
+```powershell
+# Align files to next patch without building
+.\scripts\release.ps1 -VersionMode patch -UpdateVersionFiles -SkipBuild -AllowDirtyPackage
+
+# Or exact version
+.\scripts\release.ps1 -Version 0.37.0 -UpdateVersionFiles -SkipBuild -AllowDirtyPackage
+```
+
+`-VersionMode auto|major|minor|patch` picks semver from git history. Releases block if `VERSION` ≠ `GAMEMOD_VERSION`.
+
+### Checklist before finishing version work
+
+- [ ] `VERSION` updated
+- [ ] `src/g_local.h` `GAMEMOD_VERSION` matches exactly
+- [ ] Commit message includes `bump X.Y.Z`
+
+## Docs
+
+- Player-facing commands → `docs/player-guide.md`
+- Cvars → `docs/configuration-reference.md`
+- Do not add markdown files unless requested.

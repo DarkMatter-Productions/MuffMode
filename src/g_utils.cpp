@@ -6,6 +6,7 @@
 #include "g_debug_log.h"
 // [MuffMode] Team management lives in muffmode/mm_team
 #include "muffmode/mm_profile.h"
+#include "muffmode/mm_skin.h"
 #include "muffmode/mm_team.h"
 #include <cerrno>
 #include <ctime>
@@ -713,6 +714,13 @@ void G_AssignPlayerSkin(gentity_t *ent, const char *s) {
 	}
 
 	gi.configstring(CS_PLAYERSKINS + playernum, t.data());
+
+	// [MuffMode] The canonical broadcast above clobbers any per-viewer skin
+	// override of this player, and a team change here can flip enemy/teammate
+	// relationships, so re-send overrides both for this player as a target and
+	// as a viewer.
+	MM_RefreshSkinOverridesForTarget(ent);
+	MM_RefreshSkinOverridesForViewer(ent);
 
 	//	gi.LocClient_Print(ent, PRINT_HIGH, "$g_assigned_team", ent->client->resp.netname);
 }

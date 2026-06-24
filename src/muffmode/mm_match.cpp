@@ -9,6 +9,7 @@
 #include "muffmode/mm_ghost.h"
 #include "muffmode/mm_horde.h"
 #include "muffmode/mm_match.h"
+#include "muffmode/mm_red_rover_rules.h"
 #include "muffmode/mm_team.h"
 #include "muffmode/mm_util.h"
 #include "monsters/m_player.h"	// corpse frames on match reset
@@ -341,6 +342,11 @@ bool StartNewRound()
 	if (!MM_Horde_ShouldSkipEntitiesReset())
 		ResetEntities(true, false, false);
 
+	// Red Rover: re-split the teams evenly at the start of every round, so each round opens
+	// balanced after the previous one funnelled everyone onto one side.
+	if (GT(GT_RR))
+		TeamShuffle();
+
 	if (GT(GT_STRIKE)) {
 		// A "round" is a pair of turns: each team attacks once. strike_turn tracks which
 		// turn of the pair we're starting (0 = first attacker, 1 = roles swapped). The
@@ -480,6 +486,10 @@ void Match_Start() {
 		level.round_number = 0;
 	}
 
+	// Red Rover ends after roundlimit rounds, so the count must start at 0 each match.
+	if (GT(GT_RR))
+		level.round_number = 0;
+
 	if (match::StartNewRound())
 		return;
 
@@ -578,6 +588,68 @@ bool ReadyConditionsMet()
 
 /*
 =============
+CheckLastManStanding
+=============
+*/
+namespace muffmode::match {
+
+static void CheckLastManStanding() {
+	if (notGT(GT_CA) && notGT(GT_STRIKE) && notGT(GT_RR) && notGT(GT_HORDE))
+		return;
+
+	auto announce_survivor = [](gentity_t *survivor) {
+		gi.LocClient_Print(survivor, PRINT_CENTER, "You are the last one standing!");
+		survivor->client->last_standing_clear_time = level.time + 3_sec;
+	};
+
+	// Horde is co-op survival: all fighters share one side against the monsters, so the
+	// "last one standing" is the final fighter still in the wave. Count fighters who have
+	// not been eliminated (out of lives) rather than current health - a fighter who is
+	// briefly dead but still has lives will respawn, so they are not yet the last survivor.
+	if (GT(GT_HORDE)) {
+		gentity_t *survivor = nullptr;
+		int count = 0;
+
+		for (auto ec : active_clients()) {
+			if (!ClientIsPlaying(ec->client) || ec->client->eliminated)
+				continue;
+			count++;
+			survivor = ec;
+		}
+
+		if (level.last_standing_count[TEAM_FREE] > 1 && count == 1 && survivor)
+			announce_survivor(survivor);
+
+		level.last_standing_count[TEAM_FREE] = count;
+		return;
+	}
+
+	for (team_t team : { TEAM_RED, TEAM_BLUE }) {
+		gentity_t *survivor = nullptr;
+		int count = 0;
+
+		for (auto ec : active_clients()) {
+			if (ec->client->sess.team != team || !ClientIsPlaying(ec->client))
+				continue;
+			// Red Rover keeps everyone currently on the team (death there defects rather
+			// than eliminates); CA/Strike count only living, non-eliminated round players.
+			if (GT(GT_RR) || (!ec->client->eliminated && ec->health > 0)) {
+				count++;
+				survivor = ec;
+			}
+		}
+
+		if (level.last_standing_count[team] > 1 && count == 1 && survivor)
+			announce_survivor(survivor);
+
+		level.last_standing_count[team] = count;
+	}
+}
+
+} // namespace muffmode::match
+
+/*
+=============
 TickRoundState
 =============
 */
@@ -608,6 +680,16 @@ void TickRoundState() {
 			level.round_state = roundst_t::ROUND_IN_PROGRESS;
 			level.round_state_timer = level.time + gtime_t::from_min(roundtimelimit->value);
 
+			for (int &c : level.last_standing_count)
+				c = 0;
+
+			if (GT(GT_RR)) {
+				for (auto ec : active_clients()) {
+					ec->client->resp.round_start_score = ec->client->resp.score;
+					ec->client->resp.round_dmg = 0;
+				}
+			}
+
 			// Strike manages round_number/turn in StartNewRound(); others advance it here.
 			if (GT(GT_HORDE))
 				MM_Horde_AdvanceRoundNumber();
@@ -633,6 +715,8 @@ void TickRoundState() {
 
 	// end round
 	if (level.round_state == roundst_t::ROUND_IN_PROGRESS) {
+		CheckLastManStanding();
+
 		auto is_living_round_player = [](gentity_t *ent) {
 			return ent->client && ClientIsPlaying(ent->client) &&
 				!ent->client->eliminated && ent->health > 0;
@@ -691,6 +775,51 @@ void TickRoundState() {
 			if (MM_Horde_UpdateRoundInProgress())
 				Round_End();
 			return;
+
+		case GT_RR:
+		{
+			int count_red = 0, count_blue = 0;
+
+			for (auto ec : active_clients()) {
+				if (!ClientIsPlaying(ec->client))
+					continue;
+				if (ec->client->sess.team == TEAM_RED)
+					count_red++;
+				else if (ec->client->sess.team == TEAM_BLUE)
+					count_blue++;
+			}
+
+			const bool team_cleared = MM_RedRoverRoundShouldEnd(count_red, count_blue);
+			const bool time_expired = roundtimelimit->value > 0 && level.time >= level.round_state_timer;
+			if (team_cleared || time_expired) {
+				gclient_t *top = nullptr;
+				int best_round_frags = 0, best_round_dmg = 0;
+
+				for (auto ec : active_clients()) {
+					if (!ClientIsPlaying(ec->client))
+						continue;
+
+					const int round_frags = ec->client->resp.score - ec->client->resp.round_start_score;
+					const int round_dmg = ec->client->resp.round_dmg;
+					if (!top || round_frags > best_round_frags ||
+						(round_frags == best_round_frags && round_dmg > best_round_dmg)) {
+						top = ec->client;
+						best_round_frags = round_frags;
+						best_round_dmg = round_dmg;
+					}
+				}
+
+				if (top)
+					gi.LocBroadcast_Print(PRINT_CENTER, "Round winner:\n{}\nwith {} {} ({} dmg)", top->resp.netname,
+						best_round_frags, best_round_frags == 1 ? "frag" : "frags", best_round_dmg);
+				else
+					gi.LocBroadcast_Print(PRINT_CENTER, "Round over.");
+				AnnouncerSound(world, "round_won", "ctf/flagcap.wav", true);
+
+				Round_End();
+			}
+			return;
+		}
 
 		}
 
@@ -921,7 +1050,7 @@ void TickWarmupState() {
 
 	// Red Rover: never let a connected client sit uninitialised (TEAM_NONE) during a
 	// live match - that strands them off every team (grey tag, missing from the
-	// scoreboard) and skews the counts the reshuffle relies on. Deliberate spectators
+	// scoreboard) and skews the per-team counts the round logic relies on. Deliberate spectators
 	// (TEAM_SPECTATOR) are left alone; leaving the match is allowed.
 	if (GT(GT_RR) && level.match_state == matchst_t::MATCH_IN_PROGRESS) {
 		for (auto ec : active_clients())
@@ -929,12 +1058,15 @@ void TickWarmupState() {
 				SetTeam(ec, PickTeam(-1), false, false, false);
 	}
 
-	// Red Rover: a disconnect (or any swap) can collapse everyone onto one team.
-	// Friendly fire is off, so no kills/defects can rebalance it — reshuffle live so
-	// play continues instead of stalemating until the timelimit.
-	if (GT(GT_RR) && level.match_state == matchst_t::MATCH_IN_PROGRESS &&
+	// Red Rover: a match ends with everyone funnelled onto one team, and that team
+	// assignment carries into warmup / the next map - leaving the other side empty so the
+	// next match can never reach the player/balance requirements and start. Reshuffle during
+	// warmup to restore balance. NOT during a live match: there an emptied team is the
+	// round-end trigger (TickRoundState), and the next round reshuffles in StartNewRound.
+	if (GT(GT_RR) && level.match_state < matchst_t::MATCH_IN_PROGRESS &&
 		level.num_playing_clients > 1 && (!level.num_playing_red || !level.num_playing_blue)) {
 		TeamShuffle();
+		CalculateRanks();
 	}
 
 	if (Teams()) {

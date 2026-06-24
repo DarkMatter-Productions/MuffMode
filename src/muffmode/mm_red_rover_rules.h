@@ -21,6 +21,15 @@ inline bool MM_UseTeamScoreLimit(bool teams, bool red_rover) {
 	return teams && !red_rover;
 }
 
+// Red Rover (Quake Live rounds): a round ends the moment one side is emptied of players
+// - that team's opponents have "cleared the board". Requires at least two players so a
+// lone survivor (everyone else disconnected) doesn't trip an instant round-end.
+inline bool MM_RedRoverRoundShouldEnd(int red_count, int blue_count) {
+	if (red_count + blue_count < 2)
+		return false;
+	return red_count == 0 || blue_count == 0;
+}
+
 inline bool MM_RedRoverBlocksManualTeamSwitch(int current_team, int desired_team, int spectator_team, bool red_rover, bool match_in_progress) {
 	return red_rover &&
 		match_in_progress &&

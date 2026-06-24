@@ -472,23 +472,23 @@ void ClientRespawn(gentity_t *ent) {
 
 		bool rr_defected = false;
 		if (GT(GT_RR) && level.match_state == matchst_t::MATCH_IN_PROGRESS) {
-			// Red Rover: defect to the opposing team on death. Only switch while a
-			// teammate remains behind, so the swap never empties a team (which would
-			// stall play, e.g. collapse a 1v1 onto a single team).
 			team_t cur = ent->client->sess.team;
-			int teammates_left = 0;
+			team_t other = Teams_OtherTeam(cur);
+			int teammates_left = 0, opponents = 0;
 
 			for (auto ec : active_clients()) {
 				if (ec == ent || !ClientIsPlaying(ec->client))
 					continue;
 				if (ec->client->sess.team == cur)
 					teammates_left++;
+				else if (ec->client->sess.team == other)
+					opponents++;
 			}
 
-			// only a player on an actual team can defect; guard against a corrupt team
-			// value so Teams_OtherTeam() can never strand someone on spectator.
-			if (teammates_left > 0 && (cur == TEAM_RED || cur == TEAM_BLUE)) {
-				ent->client->sess.team = Teams_OtherTeam(cur);
+			// The final player on a side can defect too; the emptied team is what ends
+			// the Red Rover round. Keep the team guard so corrupt state never lands on spectator.
+			if ((cur == TEAM_RED || cur == TEAM_BLUE) && (teammates_left > 0 || opponents > 0)) {
+				ent->client->sess.team = other;
 				G_AssignPlayerSkin(ent, ent->client->pers.skin);
 				rr_defected = true;
 			}
@@ -509,6 +509,17 @@ void ClientRespawn(gentity_t *ent) {
 
 //==============================================================
 
+static uint8_t P_EngineTeamIndex(team_t team) {
+	switch (team) {
+	case TEAM_RED:
+		return 1;
+	case TEAM_BLUE:
+		return 2;
+	default:
+		return 0;
+	}
+}
+
 // [Paril-KEX]
 // skinnum was historically used to pack data
 // so we're going to build onto that.
@@ -528,7 +539,7 @@ void P_AssignClientSkinnum(gentity_t *ent) {
 	if (InCoopStyle())
 		packed.team_index = 1; // all players are teamed in coop
 	else if (Teams())
-		packed.team_index = ent->client->sess.team;
+		packed.team_index = P_EngineTeamIndex(ent->client->sess.team);
 	else
 		packed.team_index = 0;
 
@@ -1671,6 +1682,8 @@ bool ClientConnect(gentity_t *ent, char *userinfo, const char *social_id, bool i
 			ent->client->sess.pc.killbeep_num = 1;
 			ent->client->sess.pc.follow_killer = false;
 			ent->client->sess.pc.follow_powerup = false;
+			ent->client->sess.pc.enemy_skin[0] = 0;
+			ent->client->sess.pc.team_skin[0] = 0;
 
 			InitClientResp(ent->client);
 		}
