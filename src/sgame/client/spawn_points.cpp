@@ -577,13 +577,21 @@ select_spawn_result_t SelectDeathmatchSpawnPoint(gentity_t *ent, vec3_t avoid_po
 	}
 
 	std::vector<gentity_t *> all_spawns = GatherSpawnPoints("info_player_deathmatch");
+	std::vector<gentity_t *> red_spawns;
+	std::vector<gentity_t *> blue_spawns;
+	if (fallback_to_ctf_or_start) {
+		red_spawns = GatherSpawnPoints("info_player_team_red");
+		blue_spawns = GatherSpawnPoints("info_player_team_blue");
+	}
+
+	const bool has_multiplayer_spawns = !all_spawns.empty() || !red_spawns.empty() || !blue_spawns.empty();
 	std::vector<gentity_t *> base_spawns = all_spawns;
 	const bool initial_player_spawn = initial && ent && ent->client;
 	if (initial_player_spawn)
 		base_spawns = FilterInitialSpawns(all_spawns);
 
 	const bool using_initial_subset = initial_player_spawn && base_spawns.size() < all_spawns.size();
-	bool any_defined = !all_spawns.empty();
+	bool any_defined = has_multiplayer_spawns;
 	const bool has_avoid_point = HasSpawnAvoidPoint(ent, avoid_point);
 
 	if (!has_avoid_point)
@@ -610,22 +618,19 @@ select_spawn_result_t SelectDeathmatchSpawnPoint(gentity_t *ent, vec3_t avoid_po
 	}
 
 	if (eligible.empty() && fallback_to_ctf_or_start) {
-		const std::vector<gentity_t *> red = GatherSpawnPoints("info_player_team_red");
-		const std::vector<gentity_t *> blue = GatherSpawnPoints("info_player_team_blue");
-		any_defined = any_defined || !red.empty() || !blue.empty();
-
 		if (Teams()) {
 			const team_t team = (ent && ent->client) ? ent->client->sess.team : TEAM_FREE;
 			if (gentity_t *spot = SelectTeamSpawnPoint(ent, team, avoid_point, force_spawn))
 				return { spot, true };
 		}
-		if ((Teams() || all_spawns.empty()) && (!red.empty() || !blue.empty())) {
+		if ((Teams() || all_spawns.empty()) && (!red_spawns.empty() || !blue_spawns.empty())) {
 			if (gentity_t *spot = SelectAnyTeamSpawnPoint(ent, avoid_point, force_spawn))
 				return { spot, true };
 		}
 	}
 
-	if (fallback_to_ctf_or_start) {
+	// Solo/coop starts are malformed-map recovery only, never normal MP placement.
+	if (fallback_to_ctf_or_start && !has_multiplayer_spawns) {
 		const std::vector<gentity_t *> fallback = GatherFallbackSpawnPoints();
 		any_defined = any_defined || !fallback.empty();
 		if (gentity_t *spot = SelectFallbackStartPoint(ent, avoid_point, force_spawn))
