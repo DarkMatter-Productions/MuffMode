@@ -8,6 +8,7 @@
 #include "core/debug_log.h"
 #include "shadow_lights.h"
 // [MuffMode] Spawn filtering, statusbar and gametype hooks
+#include "muffmode/mm_combat_heatmap.h"
 #include "muffmode/mm_gametype.h"
 #include "muffmode/mm_ghost.h"
 #include "muffmode/mm_horde.h"
@@ -1447,6 +1448,7 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
 	}
 
 	G_LocateSpawnSpots();
+	muffmode::combat_heatmap::ResetForNewLevel();
 
 	SetIntermissionPoint();
 

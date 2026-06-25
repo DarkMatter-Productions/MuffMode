@@ -7,6 +7,7 @@
 #include "mm_vote_types.h"
 #include "mm_admin.h"
 #include "mm_captain.h"
+#include "mm_combat_heatmap.h"
 #include "mm_debug.h"
 #include "mm_gametype.h"
 #include "mm_ghost.h"

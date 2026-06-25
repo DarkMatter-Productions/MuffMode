@@ -5,6 +5,7 @@
 #include "debug_log.h"
 #include "entities/shadow_lights.h"
 #include "muffmode/mm_captain.h"
+#include "muffmode/mm_combat_heatmap.h"
 #include "muffmode/mm_duel.h"
 #include "muffmode/mm_gametype.h"
 #include "muffmode/mm_ghost.h"
@@ -134,6 +135,8 @@ cvar_t *g_allow_voting;
 cvar_t *g_arena_dmg_armor;
 cvar_t *g_arena_start_armor;
 cvar_t *g_arena_start_health;
+cvar_t *g_auto_ghost_max;
+cvar_t *g_auto_ghost_time;
 cvar_t *g_auto_ghost_timeout;
 cvar_t *g_cheats;
 cvar_t *g_coop_enable_lives;
@@ -467,6 +470,7 @@ static void InitGame() {
 
 	// seed RNG
 	mt_rand.seed((uint32_t)std::chrono::system_clock::now().time_since_epoch().count());
+	muffmode::combat_heatmap::Init();
 
 	hostname = gi.cvar("hostname", "Welcome to Muff Mode!", CVAR_NOFLAGS);
 
@@ -630,6 +634,8 @@ static void InitGame() {
 	g_arena_dmg_armor = gi.cvar("g_arena_dmg_armor", "0", CVAR_NOFLAGS);
 	g_arena_start_armor = gi.cvar("g_arena_start_armor", "200", CVAR_NOFLAGS);
 	g_arena_start_health = gi.cvar("g_arena_start_health", "200", CVAR_NOFLAGS);
+	g_auto_ghost_max = gi.cvar("g_auto_ghost_max", "3", CVAR_NOFLAGS);
+	g_auto_ghost_time = gi.cvar("g_auto_ghost_time", "120", CVAR_NOFLAGS);
 	g_auto_ghost_timeout = gi.cvar("g_auto_ghost_timeout", "0", CVAR_NOFLAGS);
 	g_coop_health_scaling = gi.cvar("g_coop_health_scaling", "0", CVAR_LATCH);
 	g_corpse_sink_time = gi.cvar("g_corpse_sink_time", "15", CVAR_NOFLAGS);
@@ -2290,6 +2296,7 @@ static inline void G_RunFrame_(bool main_loop) {
 		MuffModeLog("ERROR", "G_RunFrame_: re-entrant call detected! (main_loop=%d)", main_loop);
 	level.in_frame = true;
 
+	muffmode::combat_heatmap::RunFrame();
 	MM_Ghost_RunFrame();
 
 	if (level.timeout_in_place > 0_ms) {

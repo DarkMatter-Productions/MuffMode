@@ -17,5 +17,6 @@ gentity_t *MM_Ghost_ChooseReconnectSlot(const char *social_id, gentity_t **ignor
 bool MM_Ghost_IsReservedSlot(gentity_t *slot);
 bool MM_Ghost_HasActiveReservations();
 bool MM_Ghost_TryRestore(gentity_t *ent);
+void MM_Ghost_DropTimedOutFlags();
 void MM_Ghost_RunFrame();
 void MM_CmdGhost(gentity_t *ent);

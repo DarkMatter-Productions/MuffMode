@@ -162,21 +162,29 @@ jobs:
               return `${text.slice(0, maxLength - 3).trimEnd()}...`;
             }
 
+            function escapeRegex(value) {
+              return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+            }
+
             function buildDownloadLinks() {
-              const installer = assets.find(asset => /windows-installer\.exe$/i.test(asset.name));
-              const packageZip = assets.find(asset => /\.zip$/i.test(asset.name));
-              const knownAssets = new Set([installer, packageZip].filter(Boolean).map(asset => asset.id));
+              const version = (release.tag_name || "").replace(/^v/i, "");
+              const versionPattern = version ? escapeRegex(version) : "\\d+\\.\\d+\\.\\d+";
+              const packagePattern = new RegExp(`^muffmode-${versionPattern}(?:-(?:alpha|beta|rc))?\\.zip$`, "i");
+              const installerPattern = new RegExp(`^muffmode-${versionPattern}(?:-(?:alpha|beta|rc))?-windows-installer\\.exe$`, "i");
+              const mapSourcesPattern = new RegExp(`^muffmode-${versionPattern}(?:-(?:alpha|beta|rc))?-map-sources\\.zip$`, "i");
+              const packageZip = assets.find(asset => packagePattern.test(asset.name));
+              const installer = assets.find(asset => installerPattern.test(asset.name));
+              const mapSources = assets.find(asset => mapSourcesPattern.test(asset.name));
               const links = [];
 
+              if (packageZip) {
+                links.push(`[${packageZip.name}](${packageZip.browser_download_url})`);
+              }
               if (installer) {
                 links.push(`[Windows Installer](${installer.browser_download_url})`);
               }
-              if (packageZip) {
-                links.push(`[Windows \`.zip\`](${packageZip.browser_download_url})`);
-              }
-
-              for (const asset of assets.filter(asset => !knownAssets.has(asset.id)).slice(0, 3)) {
-                links.push(`[${asset.name}](${asset.browser_download_url})`);
+              if (mapSources) {
+                links.push(`[Map Sources](${mapSources.browser_download_url})`);
               }
 
               links.push(`[Source Code](https://github.com/${owner}/${repo}/archive/refs/tags/${release.tag_name}.zip)`);

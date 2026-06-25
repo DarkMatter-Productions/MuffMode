@@ -1,0 +1,12 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Launch Quake II Rerelease (Steam)",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"${workspaceFolder}\\scripts\\dev\\launch-steam-quake2.ps1\"",
+      "cwd": "${workspaceFolder}"
+    }
+  ]
+}

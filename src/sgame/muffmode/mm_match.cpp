@@ -1283,6 +1283,8 @@ void MM_TimeoutBeginResumeCountdown() {
 
 	const int resume_seconds = MM_ClampResumeCountdownSeconds(g_dm_timeout_resume_countdown ? g_dm_timeout_resume_countdown->integer : 30);
 
+	MM_Ghost_DropTimedOutFlags();
+
 	level.timeout_auto = false;
 	level.timeout_ent = nullptr;
 	level.timeout_resuming = true;

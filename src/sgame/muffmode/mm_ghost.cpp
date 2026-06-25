@@ -12,13 +12,17 @@
 #include <array>
 #include <string>
 
+extern cvar_t *g_auto_ghost_max;
+extern cvar_t *g_auto_ghost_time;
 extern cvar_t *g_auto_ghost_timeout;
 
 namespace muffmode::ghost {
 constexpr int GHOST_CODE_MIN = 10000;
 constexpr int GHOST_CODE_MAX_EXCLUSIVE = 100000;
 constexpr int GHOST_CODE_MAX = GHOST_CODE_MAX_EXCLUSIVE - 1;
-constexpr int AUTO_GHOST_REJOIN_SECONDS = 120;
+constexpr int AUTO_GHOST_DEFAULT_REJOIN_SECONDS = 120;
+constexpr int AUTO_GHOST_MAX_REJOIN_SECONDS = 3600;
+constexpr int AUTO_GHOST_DEFAULT_MAX_RESERVATIONS = 3;
 constexpr float AUTO_GHOST_PLACEHOLDER_ALPHA = 0.25f;
 } // namespace muffmode::ghost
 
@@ -73,6 +77,23 @@ size_t GhostSlotCapacity()
 	return std::min({ configured, static_cast<size_t>(MAX_CLIENTS_KEX), static_cast<size_t>(MAX_CLIENTS) });
 }
 
+int AutoGhostDurationSeconds()
+{
+	if (!g_auto_ghost_time)
+		return muffmode::ghost::AUTO_GHOST_DEFAULT_REJOIN_SECONDS;
+
+	return clamp(g_auto_ghost_time->integer, 0, muffmode::ghost::AUTO_GHOST_MAX_REJOIN_SECONDS);
+}
+
+int AutoGhostMaxReservations()
+{
+	const int capacity = static_cast<int>(GhostSlotCapacity());
+	if (!g_auto_ghost_max)
+		return std::min(muffmode::ghost::AUTO_GHOST_DEFAULT_MAX_RESERVATIONS, capacity);
+
+	return clamp(g_auto_ghost_max->integer, 0, capacity);
+}
+
 bool IsSlotIgnored(gentity_t *slot, gentity_t **ignore, size_t num_ignore)
 {
 	for (size_t i = 0; i < num_ignore; i++)
@@ -108,6 +129,20 @@ bool SnapshotMatchesCurrentMatch(const AutoGhostSnapshot &snapshot)
 		level.match_state == matchst_t::MATCH_IN_PROGRESS &&
 		!level.intermission_time &&
 		!level.intermission_queued;
+}
+
+int ActiveSnapshotCount(int except_index = -1)
+{
+	int count = 0;
+
+	for (size_t i = 0; i < GhostSlotCapacity(); i++) {
+		if (static_cast<int>(i) == except_index)
+			continue;
+		if (SnapshotMatchesCurrentMatch(auto_ghosts[i]))
+			count++;
+	}
+
+	return count;
 }
 
 bool SnapshotMatchesSocialId(const AutoGhostSnapshot &snapshot, const char *social_id)
@@ -187,6 +222,54 @@ void ReleaseExpiredMatchItems(const AutoGhostSnapshot &snapshot)
 		held_tech = held_tech || snapshot.client.pers.inventory[tech_ids[i]];
 	if (held_tech)
 		Tech_Reset();
+}
+
+bool SnapshotCarriesFlag(const AutoGhostSnapshot &snapshot)
+{
+	return snapshot.valid &&
+		(snapshot.client.pers.inventory[IT_FLAG_RED] ||
+			snapshot.client.pers.inventory[IT_FLAG_BLUE]);
+}
+
+void ClearSnapshotFlagState(AutoGhostSnapshot &snapshot)
+{
+	snapshot.client.pers.inventory[IT_FLAG_RED] = 0;
+	snapshot.client.pers.inventory[IT_FLAG_BLUE] = 0;
+	snapshot.client.pers.team_state.flag_pickup_time = 0_ms;
+	snapshot.client.resp.ctf_flagsince = 0_ms;
+	snapshot.entity.s.effects &= ~(EF_FLAG_RED | EF_FLAG_BLUE);
+}
+
+void DropSnapshotFlag(size_t index, item_id_t flag_id)
+{
+	if (index >= auto_ghosts.size())
+		return;
+
+	auto &snapshot = auto_ghosts[index];
+	if (!snapshot.valid || !snapshot.client.pers.inventory[flag_id])
+		return;
+
+	gentity_t *ent = level.ghosts[index].ent;
+	if (GTF(GTF_CTF) && ent && ent->client) {
+		ent->client->pers.inventory[IT_FLAG_RED] = flag_id == IT_FLAG_RED ? snapshot.client.pers.inventory[IT_FLAG_RED] : 0;
+		ent->client->pers.inventory[IT_FLAG_BLUE] = flag_id == IT_FLAG_BLUE ? snapshot.client.pers.inventory[IT_FLAG_BLUE] : 0;
+		ent->client->pers.team_state.flag_pickup_time = snapshot.client.pers.team_state.flag_pickup_time;
+		CTF_DeadDropFlag(ent);
+	} else {
+		CTF_ResetTeamFlag(flag_id == IT_FLAG_RED ? TEAM_RED : TEAM_BLUE);
+	}
+
+	snapshot.client.pers.inventory[flag_id] = 0;
+}
+
+void DropSnapshotFlags(size_t index)
+{
+	if (index >= auto_ghosts.size() || !SnapshotCarriesFlag(auto_ghosts[index]))
+		return;
+
+	DropSnapshotFlag(index, IT_FLAG_RED);
+	DropSnapshotFlag(index, IT_FLAG_BLUE);
+	ClearSnapshotFlagState(auto_ghosts[index]);
 }
 
 void ExpireSnapshot(size_t index)
@@ -452,14 +535,21 @@ int AutoGhostTimeoutSeconds()
 	if (!g_auto_ghost_timeout)
 		return 0;
 
-	return clamp(g_auto_ghost_timeout->integer, 0, muffmode::ghost::AUTO_GHOST_REJOIN_SECONDS);
+	return clamp(g_auto_ghost_timeout->integer, 0, AutoGhostDurationSeconds());
 }
 
-void StartAutoGhostTimeout(gentity_t *ent)
+bool IsFlagRetentionTimeoutActive()
+{
+	return level.timeout_in_place > 0_ms && !level.timeout_resuming;
+}
+
+bool StartAutoGhostTimeout(gentity_t *ent)
 {
 	const int timeout_seconds = AutoGhostTimeoutSeconds();
+	if (IsFlagRetentionTimeoutActive())
+		return true;
 	if (timeout_seconds <= 0 || level.timeout_in_place > 0_ms)
-		return;
+		return false;
 
 	level.timeout_ent = ent;
 	level.timeout_auto = true;
@@ -471,6 +561,7 @@ void StartAutoGhostTimeout(gentity_t *ent)
 		ent->client->resp.netname, G_TimeString(timeout_seconds * 1000, false));
 	gi.positioned_sound(world->s.origin, world, CHAN_RELIABLE | CHAN_NO_PHS_ADD | CHAN_AUX,
 		gi.soundindex("world/klaxon2.wav"), 1, ATTN_NONE, 0);
+	return true;
 }
 
 bool RestoreSnapshot(gentity_t *ent, int ghost_index, bool manual)
@@ -604,8 +695,16 @@ bool MM_Ghost_CaptureDisconnect(gentity_t *ent) {
 	if (level.match_id.empty())
 		return false;
 
-	if (!ent->client->resp.ghost)
-		ghost_snapshot::ExpireSnapshotsForSocialId(ent->client->pers.social_id);
+	const int ghost_seconds = ghost_snapshot::AutoGhostDurationSeconds();
+	if (ghost_seconds <= 0)
+		return false;
+
+	const int existing_ghost_index = ghost_snapshot::GhostIndex(ent->client->resp.ghost);
+	ghost_snapshot::ExpireSnapshotsForSocialId(ent->client->pers.social_id, existing_ghost_index);
+	const int max_ghosts = ghost_snapshot::AutoGhostMaxReservations();
+	if (max_ghosts <= 0 || ghost_snapshot::ActiveSnapshotCount(existing_ghost_index) >= max_ghosts)
+		return false;
+
 	if (!ent->client->resp.ghost)
 		MM_Ghost_Assign(ent);
 
@@ -621,7 +720,7 @@ bool MM_Ghost_CaptureDisconnect(gentity_t *ent) {
 	snapshot = ghost_snapshot::AutoGhostSnapshot{};
 	snapshot.valid = true;
 	snapshot.match_id = level.match_id;
-	snapshot.remaining = gtime_t::from_sec(muffmode::ghost::AUTO_GHOST_REJOIN_SECONDS);
+	snapshot.remaining = gtime_t::from_sec(ghost_seconds);
 	muffmode::CopyString(snapshot.social_id, ent->client->pers.social_id);
 	snapshot.client = *ent->client;
 	snapshot.client.pers.health = ent->health;
@@ -630,7 +729,8 @@ bool MM_Ghost_CaptureDisconnect(gentity_t *ent) {
 	snapshot.entity = ghost_snapshot::CaptureEntityLife(ent);
 
 	ghost_snapshot::UpdateGhostStatsFromEntity(ent, level.ghosts[ghost_index]);
-	ghost_snapshot::StartAutoGhostTimeout(ent);
+	if (!ghost_snapshot::StartAutoGhostTimeout(ent))
+		ghost_snapshot::DropSnapshotFlags(static_cast<size_t>(ghost_index));
 	return true;
 }
 
@@ -740,6 +840,20 @@ bool MM_Ghost_TryRestore(gentity_t *ent) {
 
 /*
 ================
+MM_Ghost_DropTimedOutFlags
+================
+*/
+void MM_Ghost_DropTimedOutFlags() {
+	for (size_t i = 0; i < ghost_snapshot::GhostSlotCapacity(); i++) {
+		if (!ghost_snapshot::SnapshotMatchesCurrentMatch(ghost_snapshot::auto_ghosts[i]))
+			continue;
+
+		ghost_snapshot::DropSnapshotFlags(i);
+	}
+}
+
+/*
+================
 MM_Ghost_RunFrame
 ================
 */
@@ -756,14 +870,21 @@ void MM_Ghost_RunFrame() {
 		if (!snapshot.valid)
 			continue;
 
-		if (snapshot.match_id != level.match_id || snapshot.remaining <= 0_ms) {
+		if (snapshot.match_id != level.match_id) {
+			ghost_snapshot::ExpireSnapshot(i);
+			continue;
+		}
+		if (snapshot.remaining <= 0_ms) {
+			ghost_snapshot::DropSnapshotFlags(i);
 			ghost_snapshot::ExpireSnapshot(i);
 			continue;
 		}
 
 		snapshot.remaining -= FRAME_TIME_MS;
-		if (snapshot.remaining <= 0_ms)
+		if (snapshot.remaining <= 0_ms) {
+			ghost_snapshot::DropSnapshotFlags(i);
 			ghost_snapshot::ExpireSnapshot(i);
+		}
 	}
 }
 

@@ -26,7 +26,10 @@ muffmode-<version>-beta/
 ```text
 muffmode-<version>-beta.zip
 muffmode-<version>-beta-windows-installer.exe
+muffmode-<version>-beta-map-sources.zip
 ```
+
+GitHub also adds the automatic source-code archives. Discord announcements keep the primary download list intentionally short and ordered as the installable `muffmode-<version>[-channel].zip`, Windows installer, map sources, then Source Code. Supplemental original-map archives may still be uploaded for preservation, but they are not listed as primary Discord downloads.
 
 Release notes are generated from the central [changelog ledger](changelog.md), not from commit subjects. The script still prefers [GitHub Copilot CLI](https://docs.github.com/copilot/how-tos/set-up/install-copilot-cli) for `README.html` in non-interactive mode. If Copilot is not installed or authenticated, it falls back to a styled deterministic end-user HTML README so packaging can still complete. Pass `-RequireCopilot` when you intentionally want the release to fail unless Copilot README generation succeeds.
 It also writes `rerelease/baseq2/muffmode-version.json` and `rerelease/baseq2/muffmode.version` so the Windows updater and launcher can compare the installed version with GitHub releases.
@@ -54,7 +57,7 @@ Highlight rules are strict: release highlights include only `major` rows. If a r
 
 When `-UpdateVersionFiles` is used, the script updates `VERSION`, `src/sgame/g_local.h`, and every `Unreleased` changelog row to the target release version.
 
-The Windows installer is built with [Inno Setup 6](https://jrsoftware.org/isinfo.php). The release script looks for `ISCC.exe` on `PATH`, then in the normal Inno Setup install folders. You can pass `-InnoSetupCompiler "C:\Path\To\ISCC.exe"` to override detection or `-SkipInstaller` for a zip-only local package.
+The Windows installer is built with [Inno Setup 6](https://jrsoftware.org/isinfo.php). The release script looks for `ISCC.exe` on `PATH`, then in the normal Inno Setup install folders. You can pass `-InnoSetupCompiler "C:\Path\To\ISCC.exe"` to override detection or `-SkipInstaller` for a zip-only local package. The wrapper validates the packaged DLL/updater and generated installer as Windows PE images, preserves the Inno Setup compiler log beside the release output, and fails publishing if the expected installer is missing when installer generation was not skipped.
 
 ## Release State
 
@@ -149,7 +152,7 @@ See the [Updater Guide](updater-guide.md) for the updater workflow and local ver
 
 ## Publish From GitHub Actions
 
-Use the **Release Muff Mode** workflow in GitHub Actions for normal releases. It runs [scripts/release.ps1](../scripts/release.ps1), updates and commits version files when requested, builds the DLL, publishes the updater, builds the Windows installer, creates the GitHub release, uploads the zip and installer assets, and posts the Discord announcement.
+Use the **Release Muff Mode** workflow in GitHub Actions for normal releases. It runs [scripts/release.ps1](../scripts/release.ps1), updates and commits version files when requested, builds the DLL, publishes the updater, builds the Windows installer, creates the GitHub release, uploads the package zip, installer, map-source archive, and supplemental original-map archive, and posts the Discord announcement.
 
 GitHub's workflow graph shows jobs, not individual steps. This workflow is intentionally split into visible release jobs: **Preflight**, **Resolve Version**, **Build And Package**, **Publish GitHub Release**, and **Announce On Discord**.
 
@@ -199,7 +202,7 @@ After committing version changes and ensuring the working tree is clean:
 .\scripts\release.ps1 -VersionMode auto -CreateGitHubRelease
 ```
 
-The script creates `v<version>`, uploads the package zip and Windows installer, and uses the generated changelog as release notes. Stable releases pass `--latest`; beta, alpha, and release-candidate builds pass `--prerelease --latest=false` because GitHub rejects releases that are both latest and prerelease.
+The script creates `v<version>`, uploads the package zip, Windows installer, map-source archive, and supplemental original-map archive, and uses the generated changelog as release notes. Stable releases pass `--latest`; beta, alpha, and release-candidate builds pass `--prerelease --latest=false` because GitHub rejects releases that are both latest and prerelease.
 
 ## Changelog Scope
 

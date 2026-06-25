@@ -3,6 +3,7 @@
 // Damage, death and combat rule helpers.
 
 #include "g_local.h"
+#include "muffmode/mm_combat_heatmap.h"
 
 /*
 ============
@@ -485,6 +486,20 @@ bool CheckTeamDamage(gentity_t *targ, gentity_t *attacker) {
 	return OnSameTeam(targ, attacker);
 }
 
+static bool ShouldRecordCombatHeat(const gentity_t *attacker, const gclient_t *target_client) {
+	return target_client || (attacker && attacker->client);
+}
+
+static vec3_t CombatHeatOrigin(const gentity_t *target, const gentity_t *inflictor, const vec3_t &point) {
+	if (point)
+		return point;
+	if (target && target->client)
+		return target->s.origin;
+	if (inflictor && inflictor->inuse)
+		return inflictor->s.origin;
+	return target ? target->s.origin : vec3_origin;
+}
+
 void T_Damage(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, const vec3_t &dir, const vec3_t &point,
 	const vec3_t &normal, int damage, int knockback, damageflags_t dflags, mod_t mod) {
 	gclient_t *client;
@@ -787,8 +802,11 @@ void T_Damage(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, const 
 				SpawnDamage(te_sparks, point, normal, take);
 		}
 
-		if (!IsCombatDisabled())
+		if (!IsCombatDisabled()) {
+			if (ShouldRecordCombatHeat(attacker, client))
+				muffmode::combat_heatmap::AddEvent(CombatHeatOrigin(targ, inflictor, point), static_cast<float>(take));
 			targ->health = targ->health - take;
+		}
 
 		if ((targ->flags & FL_IMMORTAL) && targ->health <= 0)
 			targ->health = 1;

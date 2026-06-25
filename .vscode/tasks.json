@@ -1,0 +1,91 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "MuffMode: Build Release + Install Steam DLL",
+      "dependsOrder": "sequence",
+      "dependsOn": [
+        "MuffMode: Build Release DLL",
+        "MuffMode: Install Steam DLL"
+      ],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": [],
+      "detail": "Builds the Release DLL, then replaces Steam Quake II rerelease\\baseq2\\game_x64.dll."
+    },
+    {
+      "label": "MuffMode: Build Release DLL",
+      "type": "process",
+      "command": "powershell.exe",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "${workspaceFolder}\\scripts\\ci\\build-msbuild.ps1",
+        "-Configuration",
+        "Release",
+        "-Platform",
+        "x64"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": "$msCompile",
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      },
+      "detail": "Builds build\\msbuild\\x64\\Release\\game_x64.dll with the canonical MSBuild wrapper."
+    },
+    {
+      "label": "MuffMode: Install Steam DLL",
+      "type": "process",
+      "command": "powershell.exe",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "${workspaceFolder}\\scripts\\dev\\install-steam-dll.ps1",
+        "-Configuration",
+        "Release",
+        "-Platform",
+        "x64"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      },
+      "detail": "Copies build\\msbuild\\x64\\Release\\game_x64.dll into the detected Steam Quake II rerelease baseq2 folder. Set MUFFMODE_QUAKE2_ROOT for custom installs."
+    },
+    {
+      "label": "MuffMode: Launch Quake II Rerelease (Steam)",
+      "type": "process",
+      "command": "powershell.exe",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "${workspaceFolder}\\scripts\\dev\\launch-steam-quake2.ps1"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      },
+      "detail": "Launches Steam Quake II Rerelease with steam://rungameid/2320."
+    }
+  ]
+}

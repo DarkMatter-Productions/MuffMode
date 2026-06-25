@@ -2,10 +2,14 @@
 // Licensed under the GNU General Public License 2.0.
 // Player spawn entities and spawn-point selection.
 #include <algorithm>
+#include <cfloat>
+#include <cmath>
+#include <utility>
 #include <vector>
 
 #include "g_local.h"
 #include "entities/teleporter.h"
+#include "muffmode/mm_combat_heatmap.h"
 
 static THINK(info_player_start_drop) (gentity_t *self) -> void {
 	// allow them to drop
@@ -18,9 +22,9 @@ static THINK(info_player_start_drop) (gentity_t *self) -> void {
 
 static inline void deathmatch_spawn_flags(gentity_t *self) {
 	if (st.nobots)
-		self->flags = FL_NO_BOTS;
+		self->flags |= FL_NO_BOTS;
 	if (st.nohumans)
-		self->flags = FL_NO_HUMANS;
+		self->flags |= FL_NO_HUMANS;
 }
 
 /*QUAKED info_player_start (1 0 0) (-16 -16 -24) (16 16 32) x x x x x x x x NOT_EASY NOT_MEDIUM NOT_HARD NOT_DM NOT_COOP
@@ -64,13 +68,23 @@ void SP_info_player_deathmatch(gentity_t *self) {
 
 /*QUAKED info_player_team_red (1 0 0) (-16 -16 -24) (16 16 32) x x x x x x x x NOT_EASY NOT_MEDIUM NOT_HARD NOT_DM NOT_COOP
 A potential Red Team spawning position for CTF games.
+
+"nobots" will prevent bots from using this spot.
+"nohumans" will prevent humans from using this spot.
 */
-void SP_info_player_team_red(gentity_t *self) {}
+void SP_info_player_team_red(gentity_t *self) {
+	deathmatch_spawn_flags(self);
+}
 
 /*QUAKED info_player_team_blue (0 0 1) (-16 -16 -24) (16 16 32) x x x x x x x x NOT_EASY NOT_MEDIUM NOT_HARD NOT_DM NOT_COOP
 A potential Blue Team spawning position for CTF games.
+
+"nobots" will prevent bots from using this spot.
+"nohumans" will prevent humans from using this spot.
 */
-void SP_info_player_team_blue(gentity_t *self) {}
+void SP_info_player_team_blue(gentity_t *self) {
+	deathmatch_spawn_flags(self);
+}
 
 /*QUAKED info_player_coop (1 0 1) (-16 -16 -24) (16 16 32) x x x x x x x x NOT_EASY NOT_MEDIUM NOT_HARD NOT_DM NOT_COOP
 A potential spawning position for coop games.
@@ -136,22 +150,16 @@ muffmode: excludes current client
 ================
 */
 static float PlayersRangeFromSpot(gentity_t *ent, gentity_t *spot) {
-	float	bestplayerdistance;
-	vec3_t	v;
-	float	playerdistance;
-
-	bestplayerdistance = 9999999;
+	float bestplayerdistance = 9999999.0f;
 
 	for (auto ec : active_clients()) {
-		if (ec->health <= 0 || ec->client->eliminated)
+		if (!ClientIsPlaying(ec->client) || ec->health <= 0 || ec->client->eliminated)
 			continue;
-#if 0
-		if (ent != nullptr)
-			if (ec == ent)
-				continue;
-#endif
-		v = spot->s.origin - ec->s.origin;
-		playerdistance = v.length();
+		if (ent && ec == ent)
+			continue;
+
+		const vec3_t v = spot->s.origin - ec->s.origin;
+		const float playerdistance = v.length();
 
 		if (playerdistance < bestplayerdistance)
 			bestplayerdistance = playerdistance;
@@ -160,9 +168,67 @@ static float PlayersRangeFromSpot(gentity_t *ent, gentity_t *spot) {
 	return bestplayerdistance;
 }
 
-static bool SpawnPointClear(gentity_t *spot) {
-	vec3_t p = spot->s.origin + vec3_t{ 0, 0, 9.f };
-	return !gi.trace(p, PLAYER_MINS, PLAYER_MAXS, p, spot, CONTENTS_PLAYER | CONTENTS_MONSTER).startsolid;
+static gentity_t *UnsafeSpawnPosition(vec3_t spot, bool check_players, const gentity_t *ignore = nullptr, bool allow_nudge = true) {
+	contents_t mask = MASK_PLAYERSOLID;
+
+	if (!check_players)
+		mask &= ~CONTENTS_PLAYER;
+
+	gentity_t *ignore_ent = const_cast<gentity_t *>(ignore);
+	trace_t tr = gi.trace(spot, PLAYER_MINS, PLAYER_MAXS, spot, ignore_ent, mask);
+
+	if (!allow_nudge) {
+		if (tr.startsolid || tr.fraction != 1.0f)
+			return tr.ent ? tr.ent : world;
+		return nullptr;
+	}
+
+	if (tr.startsolid && (!tr.ent || !tr.ent->client)) {
+		spot[2] += 1.0f;
+		tr = gi.trace(spot, PLAYER_MINS, PLAYER_MAXS, spot, ignore_ent, mask);
+	}
+
+	if (tr.startsolid && (!tr.ent || !tr.ent->client)) {
+		const stuck_result_t fix = G_FixStuckObject_Generic(spot, PLAYER_MINS, PLAYER_MAXS,
+			[mask, ignore_ent](const vec3_t &start, const vec3_t &mins, const vec3_t &maxs, const vec3_t &end) {
+				return gi.trace(start, mins, maxs, end, ignore_ent, mask);
+			});
+
+		if (fix == stuck_result_t::NO_GOOD_POSITION)
+			return tr.ent ? tr.ent : world;
+
+		tr = gi.trace(spot, PLAYER_MINS, PLAYER_MAXS, spot, ignore_ent, mask);
+
+		if (tr.startsolid && (!tr.ent || !tr.ent->client))
+			return tr.ent ? tr.ent : world;
+	}
+
+	if (tr.fraction == 1.0f)
+		return nullptr;
+
+	return tr.ent ? tr.ent : world;
+}
+
+static bool SpotIsClearOfSolidsAndPlayers(const vec3_t &spot, bool check_players, const gentity_t *ignore = nullptr, bool allow_nudge = true) {
+	return UnsafeSpawnPosition(spot, check_players, ignore, allow_nudge) == nullptr;
+}
+
+static float DeathmatchSpawnOriginLift() {
+	return (g_dm_spawnpads && g_dm_spawnpads->integer) ? 9.0f : 1.0f;
+}
+
+static float DeathmatchSpawnSafetyLift() {
+	// PutClientOnSpawnPoint lifts the linked entity one more unit after selection.
+	return DeathmatchSpawnOriginLift() + 1.0f;
+}
+
+static bool SpotIsSafe(gentity_t *spot, bool check_players = true) {
+	if (!spot)
+		return false;
+
+	const float zlift = deathmatch->integer ? DeathmatchSpawnSafetyLift() : 0.0f;
+	const vec3_t point = spot->s.origin + vec3_t{ 0.0f, 0.0f, zlift };
+	return SpotIsClearOfSolidsAndPlayers(point, check_players, spot, false);
 }
 
 static bool SpawnPointAllowsClient(const gentity_t *ent, const gentity_t *spot) {
@@ -175,240 +241,410 @@ static bool SpawnPointAllowsClient(const gentity_t *ent, const gentity_t *spot) 
 	return !(spot->flags & FL_NO_HUMANS);
 }
 
-static bool SpawnPointOutsideAvoidRadius(const gentity_t *spot, const vec3_t &avoid_point, float avoid_radius) {
-	if (avoid_point == spot->s.origin)
-		return false;
+static inline bool IsProxMine(const gentity_t *ent) {
+	return ent && ent->classname && !strcmp(ent->classname, "prox_mine");
+}
 
-	if (!avoid_point || !avoid_radius)
-		return true;
+static inline bool IsTeslaMine(const gentity_t *ent) {
+	return ent && ent->classname && !strncmp(ent->classname, "tesla", 5);
+}
 
-	const vec3_t delta = spot->s.origin - avoid_point;
-	if (delta.length() > avoid_radius)
-		return true;
+static inline bool IsTrap(const gentity_t *ent) {
+	return ent && ent->classname && !strncmp(ent->classname, "food_cube_trap", 14);
+}
 
-	if (g_dm_respawn_point_min_dist_debug->integer)
-		gi.Com_PrintFmt("{}: avoiding spawn point\n", *spot);
+static bool SpawnPointHasNearbyMines(const vec3_t &origin, float radius) {
+	gentity_t *ent = nullptr;
+	while ((ent = findradius(ent, origin, radius)) != nullptr) {
+		if (IsProxMine(ent) || IsTeslaMine(ent) || IsTrap(ent))
+			return true;
+	}
 
 	return false;
 }
 
-static bool SpawnPointSelectable(const gentity_t *ent, gentity_t *spot, const vec3_t &avoid_point, float avoid_radius) {
-	return SpawnPointOutsideAvoidRadius(spot, avoid_point, avoid_radius) &&
-		SpawnPointAllowsClient(ent, spot) &&
-		SpawnPointClear(spot);
+static inline vec3_t SpawnEye(const vec3_t &origin) {
+	return origin + vec3_t{ 0.0f, 0.0f, 16.0f };
 }
 
-select_spawn_result_t SelectDeathmatchSpawnPoint(gentity_t *ent, vec3_t avoid_point, playerspawn_t mode, bool force_spawn, bool fallback_to_ctf_or_start, bool intermission, bool initial) {
-	float cv_dist = g_dm_respawn_point_min_dist->value;
-	struct spawn_point_t {
-		gentity_t *point;
-		float dist;
-	};
-
-	static std::vector<spawn_point_t> spawn_points;
-
-	spawn_points.clear();
-
-	// gather all spawn points 
-	gentity_t *spot = nullptr;
-
-	if (cv_dist > 512) cv_dist = 512;
-	else if (cv_dist < 0) cv_dist = 0;
-
-	if (intermission)
-		while ((spot = G_FindByString<&gentity_t::classname>(spot, "info_player_intermission")) != nullptr)
-			spawn_points.push_back({ spot, PlayersRangeFromSpot(ent, spot) });
-
-	if (spawn_points.size() == 0) {
-		spot = nullptr;
-		while ((spot = G_FindByString<&gentity_t::classname>(spot, "info_player_deathmatch")) != nullptr)
-			spawn_points.push_back({ spot, PlayersRangeFromSpot(ent, spot) });
-
-		// no points
-		if (spawn_points.size() == 0) {
-			// try CTF spawns...
-			if (fallback_to_ctf_or_start) {
-				spot = nullptr;
-				while ((spot = G_FindByString<&gentity_t::classname>(spot, "info_player_team_red")) != nullptr)
-					spawn_points.push_back({ spot, PlayersRangeFromSpot(ent, spot) });
-				spot = nullptr;
-				while ((spot = G_FindByString<&gentity_t::classname>(spot, "info_player_team_blue")) != nullptr)
-					spawn_points.push_back({ spot, PlayersRangeFromSpot(ent, spot) });
-
-				// we only have an info_player_start then
-				if (spawn_points.size() == 0) {
-					spot = G_FindByString<&gentity_t::classname>(nullptr, "info_player_start");
-
-					if (spot)
-						spawn_points.push_back({ spot, PlayersRangeFromSpot(ent, spot) });
-
-					// map is malformed
-					if (spawn_points.size() == 0)
-						return { nullptr, false };
-				}
-			} else
-				return { nullptr, false };
-		}
-	}
-
-	// if there's only one spawn point, that's the one.
-	if (spawn_points.size() == 1) {
-		if (force_spawn || SpawnPointClear(spawn_points[0].point))
-			return { spawn_points[0].point, true };
-
-		return { nullptr, true };
-	}
-
-	// order by distances ascending (top of list has closest players to point)
-	std::sort(spawn_points.begin(), spawn_points.end(), [](const spawn_point_t &a, const spawn_point_t &b) { return a.dist < b.dist; });
-
-	switch (mode) {
-	default:	// high random
-	case playerspawn_t::SPAWN_FAR_HALF:		// farthest half
-		{
-			size_t margin = spawn_points.size() / 2;
-
-			// for random, select a random point other than the two
-			// that are closest to the player if possible.
-			// shuffle the non-distance-related spawn points
-			std::shuffle(spawn_points.begin() + margin, spawn_points.end(), mt_rand);
-
-			// run down the list and pick the first one that we can use
-			for (auto it = spawn_points.begin() + margin; it != spawn_points.end(); ++it) {
-				auto spot = it->point;
-
-				if (SpawnPointSelectable(ent, spot, avoid_point, cv_dist))
-					return { spot, true };
-			}
-
-			// none clear, so we have to pick one of the other two
-			if (SpawnPointClear(spawn_points[1].point))
-				return { spawn_points[1].point, true };
-			else if (SpawnPointClear(spawn_points[0].point))
-				return { spawn_points[0].point, true };
-
-			break;
-		}
-	case playerspawn_t::SPAWN_FARTHEST:		// farthest
-		{
-			for (auto it = spawn_points.rbegin(); it != spawn_points.rend(); ++it) {
-				if (SpawnPointSelectable(ent, it->point, avoid_point, cv_dist))
-					return { it->point, true };
-			}
-			// none clear, so we have to pick one of the other two
-			if (spawn_points.size() > 1 && SpawnPointClear(spawn_points[1].point))
-				return { spawn_points[1].point, true };
-			else if (spawn_points.size() > 0 && SpawnPointClear(spawn_points[0].point))
-				return { spawn_points[0].point, true };
-
-			break;
-		}
-	case playerspawn_t::SPAWN_NEAREST:		// nearest
-		{
-			for (const spawn_point_t &candidate : spawn_points) {
-				if (SpawnPointSelectable(ent, candidate.point, avoid_point, cv_dist))
-					return { candidate.point, true };
-			}
-			// none clear
-			break;
-		}
-	}
-
-	if (force_spawn)
-		return { random_element(spawn_points).point, true };
-
-	return { nullptr, true };
+static bool IsEnemy(const gentity_t *requester, const gentity_t *other) {
+	if (!requester || !other || !requester->client || !other->client)
+		return true;
+	if (!Teams())
+		return true;
+	return requester->client->sess.team != other->client->sess.team;
 }
 
-static vec3_t TeamCentralPoint(team_t team) {
-	vec3_t	team_origin = { 0, 0, 0 };
-	uint8_t team_count = 0;
-	for (auto ec : active_players()) {
-		if (ec->client->sess.team != team)
+static bool AnyDirectEnemyLoS(const gentity_t *requester, const vec3_t &spot, float max_dist) {
+	if (!requester || !requester->client)
+		return false;
+
+	const vec3_t to_check = SpawnEye(spot);
+
+	for (auto ec : active_clients()) {
+		if (ec == requester || !ClientIsPlaying(ec->client) || ec->health <= 0 || ec->client->eliminated || !IsEnemy(requester, ec))
 			continue;
 
-		team_origin += ec->s.origin;
-		team_count++;
+		const vec3_t from = SpawnEye(ec->s.origin);
+		if ((to_check - from).length() > max_dist)
+			continue;
+
+		const trace_t tr = gi.trace(from, vec3_origin, vec3_origin, to_check, ec, MASK_SOLID & ~CONTENTS_PLAYER);
+		if (tr.fraction == 1.0f)
+			return true;
 	}
-	if (team_origin)
-		return team_origin / team_count;
-	else
-		return team_origin;
+
+	return false;
+}
+
+constexpr spawnflags_t SPAWNFLAG_INITIAL = 1_spawnflag;
+constexpr float SPAWN_DEFAULT_MIN_PLAYER_RADIUS = 160.0f;
+constexpr float SPAWN_MINE_RADIUS = 196.0f;
+constexpr float SPAWN_MAX_LOS_DIST = 2048.0f;
+constexpr float SPAWN_SCORE_PLAYER_RANGE = 2048.0f;
+constexpr float SPAWN_SCORE_AVOID_RANGE = 1024.0f;
+
+static float SpawnAvoidPointRadius() {
+	return std::clamp(g_dm_respawn_point_min_dist ? g_dm_respawn_point_min_dist->value : 0.0f, 0.0f, 4096.0f);
+}
+
+static bool SpawnAvoidDebugEnabled() {
+	return g_dm_respawn_point_min_dist_debug && g_dm_respawn_point_min_dist_debug->integer;
+}
+
+static bool HasSpawnAvoidPoint(const gentity_t *ent, const vec3_t &avoid_point) {
+	if (ent && ent->client && ent->client->pers.spawned)
+		return true;
+
+	return static_cast<bool>(avoid_point);
+}
+
+static float SpawnMinPlayerRadius() {
+	if (!g_dm_respawn_point_min_dist)
+		return SPAWN_DEFAULT_MIN_PLAYER_RADIUS;
+
+	return std::clamp(g_dm_respawn_point_min_dist->value, 0.0f, 4096.0f);
+}
+
+static playerspawn_t LegacySpawnMode() {
+	return (playerspawn_t)clamp(g_dm_spawn_farthest ? g_dm_spawn_farthest->integer : 1, 0, 3);
+}
+
+static float NormalizeDistancePenalty(float distance, float full_penalty_range) {
+	if (full_penalty_range <= 0.0f)
+		return 0.0f;
+
+	return std::clamp(1.0f - (distance / full_penalty_range), 0.0f, 1.0f);
+}
+
+static std::vector<gentity_t *> GatherSpawnPoints(const char *classname) {
+	std::vector<gentity_t *> spawns;
+	gentity_t *spot = nullptr;
+	while ((spot = G_FindByString<&gentity_t::classname>(spot, classname)) != nullptr) {
+		if (spot->inuse)
+			spawns.push_back(spot);
+	}
+
+	return spawns;
+}
+
+static std::vector<gentity_t *> GatherFallbackSpawnPoints() {
+	std::vector<gentity_t *> spawns = GatherSpawnPoints("info_player_start");
+
+	std::vector<gentity_t *> coop = GatherSpawnPoints("info_player_coop");
+	spawns.insert(spawns.end(), coop.begin(), coop.end());
+
+	std::vector<gentity_t *> lava = GatherSpawnPoints("info_player_coop_lava");
+	spawns.insert(spawns.end(), lava.begin(), lava.end());
+
+	return spawns;
+}
+
+static std::vector<gentity_t *> FilterInitialSpawns(const std::vector<gentity_t *> &spawns) {
+	std::vector<gentity_t *> flagged;
+	flagged.reserve(spawns.size());
+
+	for (gentity_t *spot : spawns) {
+		if (spot && spot->spawnflags.has(SPAWNFLAG_INITIAL))
+			flagged.push_back(spot);
+	}
+
+	return flagged.empty() ? spawns : flagged;
+}
+
+static std::vector<gentity_t *> FilterFallbackSpawns(const std::vector<gentity_t *> &spawns, const gentity_t *ent, const vec3_t &avoid_point, bool respect_avoid_point, bool force_spawn = false) {
+	std::vector<gentity_t *> out;
+	out.reserve(spawns.size());
+
+	const float avoid_radius = SpawnAvoidPointRadius();
+	for (gentity_t *spot : spawns) {
+		if (!spot || !SpawnPointAllowsClient(ent, spot))
+			continue;
+		if (!SpotIsSafe(spot, !force_spawn))
+			continue;
+		if (!force_spawn && respect_avoid_point && avoid_radius > 0.0f && (spot->s.origin - avoid_point).length() < avoid_radius) {
+			if (SpawnAvoidDebugEnabled())
+				gi.Com_PrintFmt("{}: avoiding spawn point near previous spawn\n", *spot);
+			continue;
+		}
+
+		out.push_back(spot);
+	}
+
+	return out;
+}
+
+static std::vector<gentity_t *> FilterEligibleSpawns(const std::vector<gentity_t *> &spawns, gentity_t *ent, const vec3_t &avoid_point, bool force_spawn, bool respect_avoid_point) {
+	std::vector<gentity_t *> out;
+	out.reserve(spawns.size());
+
+	const float avoid_radius = SpawnAvoidPointRadius();
+	const float min_player_radius = SpawnMinPlayerRadius();
+
+	for (gentity_t *spot : spawns) {
+		if (!spot || !SpawnPointAllowsClient(ent, spot))
+			continue;
+		if (!SpotIsSafe(spot, !force_spawn))
+			continue;
+
+		if (!force_spawn) {
+			if (respect_avoid_point && avoid_radius > 0.0f && (spot->s.origin - avoid_point).length() < avoid_radius) {
+				if (SpawnAvoidDebugEnabled())
+					gi.Com_PrintFmt("{}: avoiding spawn point near previous spawn\n", *spot);
+				continue;
+			}
+			if (SpawnPointHasNearbyMines(spot->s.origin, SPAWN_MINE_RADIUS))
+				continue;
+			if (min_player_radius > 0.0f && PlayersRangeFromSpot(ent, spot) < min_player_radius)
+				continue;
+			if (AnyDirectEnemyLoS(ent, spot->s.origin, SPAWN_MAX_LOS_DIST))
+				continue;
+		}
+
+		out.push_back(spot);
+	}
+
+	return out;
+}
+
+template <typename T>
+static T *PickRandomly(const std::vector<T *> &spawns) {
+	if (spawns.empty())
+		return nullptr;
+
+	return spawns[static_cast<size_t>(irandom(static_cast<int32_t>(spawns.size())))];
+}
+
+static float CompositeDangerScore(gentity_t *spot, gentity_t *ent, const vec3_t &avoid_point) {
+	const float heat = muffmode::combat_heatmap::DangerAt(spot->s.origin);
+	const float nearest = std::max(1.0f, PlayersRangeFromSpot(ent, spot));
+	const float near_penalty = NormalizeDistancePenalty(nearest, SPAWN_SCORE_PLAYER_RANGE);
+	const float los_penalty = AnyDirectEnemyLoS(ent, spot->s.origin, SPAWN_MAX_LOS_DIST) ? 1.0f : 0.0f;
+	const float avoid_distance = (spot->s.origin - avoid_point).length();
+	const float avoid_penalty = HasSpawnAvoidPoint(ent, avoid_point) ? NormalizeDistancePenalty(avoid_distance, SPAWN_SCORE_AVOID_RANGE) : 0.0f;
+	const float mine_penalty = SpawnPointHasNearbyMines(spot->s.origin, SPAWN_MINE_RADIUS) ? 1.0f : 0.0f;
+
+	return 0.35f * heat +
+		0.25f * near_penalty +
+		0.20f * los_penalty +
+		0.15f * avoid_penalty +
+		0.05f * mine_penalty;
+}
+
+template <typename ScoreFn>
+static gentity_t *SelectFromSpawnList(const std::vector<gentity_t *> &spawns, const ScoreFn &score_fn) {
+	if (spawns.empty())
+		return nullptr;
+
+	struct scored_spawn_t {
+		gentity_t *spot = nullptr;
+		float score = 0.0f;
+	};
+
+	std::vector<scored_spawn_t> scored;
+	scored.reserve(spawns.size());
+
+	float best = FLT_MAX;
+	for (gentity_t *spot : spawns) {
+		float score = score_fn(spot);
+		if (!std::isfinite(score))
+			score = FLT_MAX;
+		scored.push_back({ spot, score });
+		best = std::min(best, score);
+	}
+
+	constexpr float epsilon = 0.05f;
+	std::vector<gentity_t *> finalists;
+	finalists.reserve(spawns.size());
+
+	for (const scored_spawn_t &candidate : scored) {
+		if (candidate.score <= best + std::max(epsilon, 0.01f * fabsf(best)))
+			finalists.push_back(candidate.spot);
+	}
+
+	if (finalists.empty())
+		return PickRandomly(spawns);
+
+	return PickRandomly(finalists);
+}
+
+static gentity_t *SelectFallbackStartPoint(gentity_t *ent, const vec3_t &avoid_point, bool force_spawn) {
+	const std::vector<gentity_t *> fallback = GatherFallbackSpawnPoints();
+	const bool has_avoid_point = HasSpawnAvoidPoint(ent, avoid_point);
+	const std::vector<gentity_t *> eligible = FilterFallbackSpawns(fallback, ent, avoid_point, has_avoid_point, force_spawn);
+
+	if (eligible.empty())
+		return nullptr;
+
+	return SelectFromSpawnList(eligible, [ent, avoid_point](gentity_t *spot) {
+		return CompositeDangerScore(spot, ent, avoid_point);
+	});
 }
 
 /*
 ================
 SelectTeamSpawnPoint
 
-Go to a team point, but NOT the two points closest
-to other players
+Select from the requested team's points first, then FFA points. Broader
+team/fallback recovery is handled by SelectDeathmatchSpawnPoint.
 ================
 */
-static gentity_t *SelectTeamSpawnPoint(gentity_t *ent, bool force_spawn) {
-	if (ent->client->resp.ctf_state) {
-		select_spawn_result_t result = SelectDeathmatchSpawnPoint(ent, ent->client->spawn_origin, (playerspawn_t)clamp(g_dm_spawn_farthest->integer, 0, 3), force_spawn, false, false, false);	// !ClientIsPlaying(ent->client));
-
-		if (result.any_valid)
-			return result.spot;
-	}
-	/*
-	vec3_t	team_origin = TeamCentralPoint(ent->client->sess.team);
-	gi.LocClient_Print(ent, PRINT_HIGH, "team central point= {} {} {}\n", team_origin[0], team_origin[1], team_origin[2]);
-	if (ent->client->resp.ctf_state) {
-		select_spawn_result_t result = SelectDeathmatchSpawnPoint(ent, team_origin, SPAWN_NEAREST, force_spawn, false, !ClientIsPlaying(ent->client) || ent->client->eliminated, false);
-
-		if (result.any_valid)
-			return result.spot;
-	}
-	*/
-	const char *cname;
-
-	switch (ent->client->sess.team) {
+static gentity_t *SelectTeamSpawnPoint(gentity_t *ent, team_t team, const vec3_t &avoid_point, bool force_spawn) {
+	const char *classname = nullptr;
+	switch (team) {
 		case TEAM_RED:
-			cname = "info_player_team_red";
+			classname = "info_player_team_red";
 			break;
 		case TEAM_BLUE:
-			cname = "info_player_team_blue";
+			classname = "info_player_team_blue";
 			break;
 		default:
-		{
-			select_spawn_result_t result = SelectDeathmatchSpawnPoint(ent, ent->client->spawn_origin, (playerspawn_t)clamp(g_dm_spawn_farthest->integer, 0, 3), force_spawn, true, false, false);
+			classname = "info_player_deathmatch";
+			break;
+	}
 
-			if (result.any_valid)
-				return result.spot;
+	const bool has_avoid_point = HasSpawnAvoidPoint(ent, avoid_point);
+	auto pick_from_list = [ent, &avoid_point, force_spawn, has_avoid_point](const std::vector<gentity_t *> &spawns) {
+		std::vector<gentity_t *> eligible = FilterEligibleSpawns(spawns, ent, avoid_point, force_spawn, has_avoid_point);
+		if (eligible.empty())
+			eligible = FilterFallbackSpawns(spawns, ent, avoid_point, has_avoid_point, force_spawn);
+		if (eligible.empty())
+			return static_cast<gentity_t *>(nullptr);
 
-			gi.Com_Error("Can't find suitable spectator spawn point.");
-			return nullptr;
+		return SelectFromSpawnList(eligible, [ent, avoid_point](gentity_t *spot) {
+			return CompositeDangerScore(spot, ent, avoid_point);
+		});
+	};
+
+	const std::vector<gentity_t *> team_spawns = GatherSpawnPoints(classname);
+	if (gentity_t *spot = pick_from_list(team_spawns))
+		return spot;
+
+	if (strcmp(classname, "info_player_deathmatch")) {
+		const std::vector<gentity_t *> ffa = GatherSpawnPoints("info_player_deathmatch");
+		if (gentity_t *spot = pick_from_list(ffa))
+			return spot;
+	}
+
+	return nullptr;
+}
+
+static gentity_t *SelectAnyTeamSpawnPoint(gentity_t *ent, const vec3_t &avoid_point, bool force_spawn) {
+	std::vector<gentity_t *> team_spawns = GatherSpawnPoints("info_player_team_red");
+	std::vector<gentity_t *> blue = GatherSpawnPoints("info_player_team_blue");
+	team_spawns.insert(team_spawns.end(), blue.begin(), blue.end());
+
+	if (team_spawns.empty())
+		return nullptr;
+
+	const bool has_avoid_point = HasSpawnAvoidPoint(ent, avoid_point);
+	std::vector<gentity_t *> eligible = FilterEligibleSpawns(team_spawns, ent, avoid_point, force_spawn, has_avoid_point);
+	if (eligible.empty())
+		eligible = FilterFallbackSpawns(team_spawns, ent, avoid_point, has_avoid_point, force_spawn);
+
+	if (eligible.empty())
+		return nullptr;
+
+	return SelectFromSpawnList(eligible, [ent, avoid_point](gentity_t *spot) {
+		return CompositeDangerScore(spot, ent, avoid_point);
+	});
+}
+
+select_spawn_result_t SelectDeathmatchSpawnPoint(gentity_t *ent, vec3_t avoid_point, [[maybe_unused]] playerspawn_t mode, bool force_spawn, bool fallback_to_ctf_or_start, bool intermission, bool initial) {
+	if (intermission) {
+		if (gentity_t *spot = level.spawn_spots[SPAWN_SPOT_INTERMISSION])
+			return { spot, true };
+	}
+
+	std::vector<gentity_t *> all_spawns = GatherSpawnPoints("info_player_deathmatch");
+	std::vector<gentity_t *> base_spawns = all_spawns;
+	const bool initial_player_spawn = initial && ent && ent->client;
+	if (initial_player_spawn)
+		base_spawns = FilterInitialSpawns(all_spawns);
+
+	const bool using_initial_subset = initial_player_spawn && base_spawns.size() < all_spawns.size();
+	bool any_defined = !all_spawns.empty();
+	const bool has_avoid_point = HasSpawnAvoidPoint(ent, avoid_point);
+
+	if (!has_avoid_point)
+		std::shuffle(base_spawns.begin(), base_spawns.end(), mt_rand);
+
+	std::vector<gentity_t *> eligible = FilterEligibleSpawns(base_spawns, ent, avoid_point, force_spawn, has_avoid_point);
+
+	if (eligible.empty() && using_initial_subset) {
+		std::vector<gentity_t *> all_eligible = FilterEligibleSpawns(all_spawns, ent, avoid_point, force_spawn, has_avoid_point);
+		if (!all_eligible.empty()) {
+			base_spawns = all_spawns;
+			eligible = std::move(all_eligible);
+		} else
+			base_spawns = all_spawns;
+	}
+
+	if (eligible.empty() && fallback_to_ctf_or_start) {
+		std::vector<gentity_t *> relaxed = FilterFallbackSpawns(base_spawns, ent, avoid_point, has_avoid_point, force_spawn);
+		if (!relaxed.empty()) {
+			return { SelectFromSpawnList(relaxed, [ent, avoid_point](gentity_t *spot) {
+				return CompositeDangerScore(spot, ent, avoid_point);
+			}), true };
 		}
 	}
 
-	static std::vector<gentity_t *> spawn_points;
-	gentity_t *spot = nullptr;
+	if (eligible.empty() && fallback_to_ctf_or_start) {
+		const std::vector<gentity_t *> red = GatherSpawnPoints("info_player_team_red");
+		const std::vector<gentity_t *> blue = GatherSpawnPoints("info_player_team_blue");
+		any_defined = any_defined || !red.empty() || !blue.empty();
 
-	spawn_points.clear();
-
-	while ((spot = G_FindByString<&gentity_t::classname>(spot, cname)) != nullptr)
-		spawn_points.push_back(spot);
-
-	if (!spawn_points.size()) {
-		select_spawn_result_t result = SelectDeathmatchSpawnPoint(ent, ent->client->spawn_origin, (playerspawn_t)clamp(g_dm_spawn_farthest->integer, 0, 3), force_spawn, true, false, false);
-
-		if (!result.any_valid)
-			gi.Com_Error("Can't find suitable team spawn point.");
-
-		return result.spot;
+		if (Teams()) {
+			const team_t team = (ent && ent->client) ? ent->client->sess.team : TEAM_FREE;
+			if (gentity_t *spot = SelectTeamSpawnPoint(ent, team, avoid_point, force_spawn))
+				return { spot, true };
+		}
+		if ((Teams() || all_spawns.empty()) && (!red.empty() || !blue.empty())) {
+			if (gentity_t *spot = SelectAnyTeamSpawnPoint(ent, avoid_point, force_spawn))
+				return { spot, true };
+		}
 	}
 
-	std::shuffle(spawn_points.begin(), spawn_points.end(), mt_rand);
+	if (fallback_to_ctf_or_start) {
+		const std::vector<gentity_t *> fallback = GatherFallbackSpawnPoints();
+		any_defined = any_defined || !fallback.empty();
+		if (gentity_t *spot = SelectFallbackStartPoint(ent, avoid_point, force_spawn))
+			return { spot, true };
+	}
 
-	for (auto &point : spawn_points)
-		if (SpawnPointClear(point))
-			return point;
+	if (eligible.empty()) {
+		std::vector<gentity_t *> loose = FilterFallbackSpawns(base_spawns, ent, avoid_point, has_avoid_point, force_spawn);
+		if (!loose.empty()) {
+			return { SelectFromSpawnList(loose, [ent, avoid_point](gentity_t *spot) {
+				return CompositeDangerScore(spot, ent, avoid_point);
+			}), true };
+		}
+		return { nullptr, any_defined };
+	}
 
-	if (force_spawn)
-		return random_element(spawn_points);
-
-	return nullptr;
+	return { SelectFromSpawnList(eligible, [ent, avoid_point](gentity_t *spot) {
+		return CompositeDangerScore(spot, ent, avoid_point);
+	}), true };
 }
 
 static gentity_t *SelectLavaCoopSpawnPoint(gentity_t *ent) {
@@ -514,39 +750,7 @@ static gentity_t *SelectSingleSpawnPoint(gentity_t *ent) {
 
 // [Paril-KEX]
 gentity_t *G_UnsafeSpawnPosition(vec3_t spot, bool check_players) {
-	contents_t mask = MASK_PLAYERSOLID;
-
-	if (!check_players)
-		mask &= ~CONTENTS_PLAYER;
-
-	trace_t tr = gi.trace(spot, PLAYER_MINS, PLAYER_MAXS, spot, nullptr, mask);
-
-	// sometimes the spot is too close to the ground, give it a bit of slack
-	if (tr.startsolid && !tr.ent->client) {
-		spot[2] += 1;
-		tr = gi.trace(spot, PLAYER_MINS, PLAYER_MAXS, spot, nullptr, mask);
-	}
-
-	// no idea why this happens in some maps..
-	if (tr.startsolid && !tr.ent->client) {
-		// try a nudge
-		if (G_FixStuckObject_Generic(spot, PLAYER_MINS, PLAYER_MAXS, [mask](const vec3_t &start, const vec3_t &mins, const vec3_t &maxs, const vec3_t &end) {
-			return gi.trace(start, mins, maxs, end, nullptr, mask);
-			}) == stuck_result_t::NO_GOOD_POSITION)
-			return tr.ent; // what do we do here...?
-
-			trace_t tr = gi.trace(spot, PLAYER_MINS, PLAYER_MAXS, spot, nullptr, mask);
-
-			if (tr.startsolid && !tr.ent->client)
-				return tr.ent; // what do we do here...?
-	}
-
-	if (tr.fraction == 1.f)
-		return nullptr;
-	else if (check_players && tr.ent && tr.ent->client)
-		return tr.ent;
-
-	return nullptr;
+	return UnsafeSpawnPosition(spot, check_players);
 }
 
 static gentity_t *SelectCoopSpawnPoint(gentity_t *ent, bool force_spawn, bool check_players) {
@@ -645,7 +849,7 @@ static gentity_t *SelectCoopSpawnPoint(gentity_t *ent, bool force_spawn, bool ch
 static bool TryLandmarkSpawn(gentity_t *ent, vec3_t &origin, vec3_t &angles) {
 	// if transitioning from another level with a landmark seamless transition
 	// just set the location here
-	if (!ent->client->landmark_name || !strlen(ent->client->landmark_name)) {
+	if (!ent || !ent->client || !ent->client->landmark_name || !strlen(ent->client->landmark_name)) {
 		return false;
 	}
 
@@ -691,6 +895,8 @@ static bool TryLandmarkSpawn(gentity_t *ent, vec3_t &origin, vec3_t &angles) {
 	return true;
 }
 
+static bool SelectSpectatorSpawnPoint(vec3_t &origin, vec3_t &angles);
+
 /*
 ===========
 SelectSpawnPoint
@@ -699,39 +905,54 @@ Chooses a player start, deathmatch start, coop start, etc
 ============
 */
 bool SelectSpawnPoint(gentity_t *ent, vec3_t &origin, vec3_t &angles, bool force_spawn, bool &landmark) {
+	landmark = false;
 	gentity_t *spot = nullptr;
 
 	// DM spots are simple
 	if (deathmatch->integer) {
-		if (Teams() && ClientIsPlaying(ent->client))
-			spot = SelectTeamSpawnPoint(ent, force_spawn);
-		else {
-			if (false) // Race mode removed
-				spot = SelectSingleSpawnPoint(ent);
+		const bool has_client = ent && ent->client;
+		const bool player_is_eliminated = has_client && ent->client->eliminated;
+		const bool wants_player_spawn = has_client && ClientIsPlaying(ent->client) && !player_is_eliminated;
+		const vec3_t avoid_point = has_client ? ent->client->spawn_origin : vec3_origin;
+		const bool initial_spawn = has_client && !ent->client->pers.spawned;
 
-			if (!spot) {
-				select_spawn_result_t result = SelectDeathmatchSpawnPoint(ent, ent->client->spawn_origin, (playerspawn_t)clamp(g_dm_spawn_farthest->integer, 0, 3), force_spawn, true, !ClientIsPlaying(ent->client) || ent->client->eliminated, false);
-
-				if (!result.any_valid)
-					gi.Com_Error("No valid spawn points found.");
-
-				spot = result.spot;
+		if (level.intermission_time || (has_client && (!ClientIsPlaying(ent->client) || player_is_eliminated))) {
+			if (SelectSpectatorSpawnPoint(origin, angles)) {
+				angles[ROLL] = 0.0f;
+				return true;
 			}
 		}
 
-		if (spot) {
-			origin = spot->s.origin + vec3_t{ 0, 0, (float)(g_dm_spawnpads->integer ? 9 : 1) };
-			angles = spot->s.angles;
+		if (Teams() && wants_player_spawn)
+			spot = SelectTeamSpawnPoint(ent, ent->client->sess.team, avoid_point, force_spawn);
 
-			//muff mode: we just want yaw really, definitely no roll!
-			//if (ClientIsPlaying(ent->client))
-				//angles[PITCH] = 0;
-			angles[ROLL] = 0;
+		if (!spot) {
+			const bool intermission = static_cast<bool>(level.intermission_time);
+			const playerspawn_t legacy_mode = LegacySpawnMode();
+			select_spawn_result_t result = SelectDeathmatchSpawnPoint(ent, avoid_point, legacy_mode, force_spawn, true, intermission, initial_spawn);
 
-			return true;
+			if (!result.spot && !force_spawn)
+				result = SelectDeathmatchSpawnPoint(ent, avoid_point, legacy_mode, true, true, intermission, initial_spawn);
+
+			if (!result.spot) {
+				if (!result.any_valid)
+					gi.Com_PrintFmt("{}: no spawn points defined for this map\n", __FUNCTION__);
+				else if (g_verbose->integer)
+					gi.Com_PrintFmt("{}: no clear spawn point available; will retry\n", __FUNCTION__);
+				return false;
+			}
+
+			spot = result.spot;
 		}
 
-		return false;
+		if (!spot || !spot->inuse)
+			return false;
+
+		origin = spot->s.origin + vec3_t{ 0.0f, 0.0f, DeathmatchSpawnOriginLift() };
+		angles = spot->s.angles;
+		angles[ROLL] = 0;
+
+		return true;
 	}
 
 	if (coop->integer) {
@@ -775,6 +996,8 @@ bool SelectSpawnPoint(gentity_t *ent, vec3_t &origin, vec3_t &angles, bool force
 	// check landmark
 	if (TryLandmarkSpawn(ent, origin, angles))
 		landmark = true;
+	else
+		angles[ROLL] = 0.0f;
 
 	return true;
 }
@@ -785,11 +1008,13 @@ SelectSpectatorSpawnPoint
 
 ============
 */
-static gentity_t *SelectSpectatorSpawnPoint(vec3_t origin, vec3_t angles) {
-	//FindIntermissionPoint();
-	SetIntermissionPoint();
+static bool SelectSpectatorSpawnPoint(vec3_t &origin, vec3_t &angles) {
+	if (!level.spawn_spots[SPAWN_SPOT_INTERMISSION])
+		return false;
+
+	FindIntermissionPoint();
 	origin = level.intermission_origin;
 	angles = level.intermission_angle;
 
-	return level.spawn_spots[SPAWN_SPOT_INTERMISSION]; // was NULL
+	return true;
 }

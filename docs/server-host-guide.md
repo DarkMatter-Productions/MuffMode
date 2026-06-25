@@ -117,7 +117,9 @@ Good match flow matters for both audiences: casual players should not get stuck 
 | `g_round_countdown` | `10` | Round countdown for round-based gametypes. |
 | `g_dm_overtime` | `120` | Overtime session length in seconds, currently for Duels. |
 | `g_dm_tie_max_time` | `1800` | Maximum total tied-overtime duration before forced resolution. |
-| `g_auto_ghost_timeout` | `0` | Auto-pauses an active match for disconnected players, in seconds up to `120`; `0` disables. |
+| `g_auto_ghost_time` | `120` | Seconds an auto-ghost reservation remains available, up to `3600`; `0` disables auto-ghost capture. |
+| `g_auto_ghost_max` | `3` | Maximum active auto-ghost reservations, capped by client capacity; `0` disables auto-ghost capture. |
+| `g_auto_ghost_timeout` | `0` | Auto-pauses an active match for disconnected players, in seconds capped by `g_auto_ghost_time`; `0` disables. |
 | `g_dm_timeout_length` | `120` | Timeout length in seconds. Set `0` to disable timeouts. |
 | `g_dm_timeout_resume_countdown` | `30` | Countdown announced before a paused match resumes, in seconds up to `120`; `0` resumes immediately. |
 | `mercylimit` | `0` | Score gap that ends a match. `0` disables. |

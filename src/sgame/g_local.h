@@ -2380,6 +2380,8 @@ extern cvar_t *g_allow_voting;
 extern cvar_t *g_arena_dmg_armor;
 extern cvar_t *g_arena_start_armor;
 extern cvar_t *g_arena_start_health;
+extern cvar_t *g_auto_ghost_max;
+extern cvar_t *g_auto_ghost_time;
 extern cvar_t *g_auto_ghost_timeout;
 extern cvar_t *g_cheats;
 extern cvar_t *g_coop_enable_lives;

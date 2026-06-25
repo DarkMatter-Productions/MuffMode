@@ -131,13 +131,7 @@ For player-facing differences between these options, see the [Rulesets](rulesets
 
 ## Cvar Changes
 
-`g_dm_spawn_farthest` has three valid values:
-
-| Value | Behavior |
-| --- | --- |
-| `0` | High random, selecting a random spawn point except the two nearest. |
-| `1` | Half farthest, selecting randomly from the farthest 50 percent of spawn points. |
-| `2` | Spawn farthest from current position. |
+Deathmatch respawns use a WORR-style danger score instead of raw farthest-only modes. Spawn selection avoids blocked points, recent combat heat, direct enemy line of sight, nearby players, the player's previous spawn point, and nearby mines or traps. `g_dm_spawn_farthest` is retained for legacy config compatibility, while `g_dm_respawn_point_min_dist` controls hard spacing from the previous spawn and nearby players.
 
 - `g_teamplay_force_join` was renamed to `g_dm_force_join`.
 - Mod-based `sv_*` cvars were renamed to `g_*`.
@@ -192,11 +186,13 @@ For player-facing differences between these options, see the [Rulesets](rulesets
 | `g_dm_overtime` | `120` | Overtime session length in seconds. |
 | `g_dm_tie_max_time` | `1800` | Maximum total tied-overtime duration. |
 | `g_dm_respawn_delay_min` | `1` | Minimum delay after death before respawn. |
-| `g_dm_respawn_point_min_dist` | `256` | Minimum respawn distance from previous spawn point. |
+| `g_dm_respawn_point_min_dist` | `256` | Minimum respawn distance from the previous spawn point and nearby players. |
 | `g_dm_respawn_point_min_dist_debug` | `0` | Prints spawn avoidance debug information. |
-| `g_dm_spawn_farthest` | `1` | Spawn point selection mode. |
+| `g_dm_spawn_farthest` | `1` | Legacy spawn-mode compatibility cvar; respawns use combat-aware scoring. |
 | `g_dm_spawnpads` | `1` | Controls deathmatch spawn pads. |
-| `g_auto_ghost_timeout` | `0` | Auto-pauses an active match for disconnected players, in seconds up to `120`; `0` disables. |
+| `g_auto_ghost_time` | `120` | Seconds an auto-ghost reservation remains available, up to `3600`; `0` disables auto-ghost capture. |
+| `g_auto_ghost_max` | `3` | Maximum active auto-ghost reservations, capped by client capacity; `0` disables auto-ghost capture. |
+| `g_auto_ghost_timeout` | `0` | Auto-pauses an active match for disconnected players, in seconds capped by `g_auto_ghost_time`; `0` disables. |
 | `g_dm_timeout_length` | `120` | Timeout length in seconds; `0` disables timeouts. |
 | `g_dm_timeout_resume_countdown` | `30` | Countdown announced before a paused match resumes, in seconds up to `120`; `0` resumes immediately. |
 | `g_round_countdown` | `10` | Round countdown time. |

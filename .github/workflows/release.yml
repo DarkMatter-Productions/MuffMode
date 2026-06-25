@@ -301,10 +301,39 @@ jobs:
             throw "Could not find generated release notes for $version."
           }
 
-          $assets = @(Get-ChildItem -LiteralPath dist/release -Filter "*.zip")
-          $assets += @(Get-ChildItem -LiteralPath dist/release -Filter "*.exe")
-          if (-not $assets) {
-            throw "No release assets were downloaded."
+          $versionPattern = [regex]::Escape($version)
+          $package = Get-ChildItem -LiteralPath dist/release -Filter "*.zip" |
+            Where-Object { $_.Name -match "^muffmode-$versionPattern(?:-(?:alpha|beta|rc))?\.zip$" } |
+            Select-Object -First 1
+          if (-not $package) {
+            throw "Could not find the installable muffmode package zip for $version."
+          }
+
+          $installer = Get-ChildItem -LiteralPath dist/release -Filter "*.exe" |
+            Where-Object { $_.Name -match "^muffmode-$versionPattern(?:-(?:alpha|beta|rc))?-windows-installer\.exe$" } |
+            Select-Object -First 1
+          if ("${{ inputs.skip_installer }}" -ne "true" -and -not $installer) {
+            throw "Could not find the Windows installer asset for $version."
+          }
+
+          $mapSources = Get-ChildItem -LiteralPath dist/release -Filter "*.zip" |
+            Where-Object { $_.Name -match "^muffmode-$versionPattern(?:-(?:alpha|beta|rc))?-map-sources\.zip$" } |
+            Select-Object -First 1
+          if (-not $mapSources) {
+            throw "Could not find the map source archive for $version."
+          }
+
+          $originalMaps = Get-ChildItem -LiteralPath dist/release -Filter "*.zip" |
+            Where-Object { $_.Name -match "^muffmode-$versionPattern(?:-(?:alpha|beta|rc))?-original-maps\.zip$" } |
+            Select-Object -First 1
+
+          $assets = @($package)
+          if ($installer) {
+            $assets += $installer
+          }
+          $assets += $mapSources
+          if ($originalMaps) {
+            $assets += $originalMaps
           }
 
           $arguments = @("release", "create", $tag)
@@ -489,22 +518,30 @@ jobs:
               return `${text.slice(0, maxLength - 3).trimEnd()}...`;
             }
 
+            function escapeRegex(value) {
+              return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+            }
+
             function buildDownloadLinks() {
               const assets = data.assets || [];
-              const installer = assets.find(asset => /windows-installer\.exe$/i.test(asset.name));
-              const packageZip = assets.find(asset => /\.zip$/i.test(asset.name));
-              const knownAssets = new Set([installer, packageZip].filter(Boolean).map(asset => asset.id));
+              const version = (data.tag_name || "").replace(/^v/i, "");
+              const versionPattern = version ? escapeRegex(version) : "\\d+\\.\\d+\\.\\d+";
+              const packagePattern = new RegExp(`^muffmode-${versionPattern}(?:-(?:alpha|beta|rc))?\\.zip$`, "i");
+              const installerPattern = new RegExp(`^muffmode-${versionPattern}(?:-(?:alpha|beta|rc))?-windows-installer\\.exe$`, "i");
+              const mapSourcesPattern = new RegExp(`^muffmode-${versionPattern}(?:-(?:alpha|beta|rc))?-map-sources\\.zip$`, "i");
+              const packageZip = assets.find(asset => packagePattern.test(asset.name));
+              const installer = assets.find(asset => installerPattern.test(asset.name));
+              const mapSources = assets.find(asset => mapSourcesPattern.test(asset.name));
               const links = [];
 
+              if (packageZip) {
+                links.push(`[${packageZip.name}](${packageZip.browser_download_url})`);
+              }
               if (installer) {
                 links.push(`[Windows Installer](${installer.browser_download_url})`);
               }
-              if (packageZip) {
-                links.push(`[Windows \`.zip\`](${packageZip.browser_download_url})`);
-              }
-
-              for (const asset of assets.filter(asset => !knownAssets.has(asset.id)).slice(0, 3)) {
-                links.push(`[${asset.name}](${asset.browser_download_url})`);
+              if (mapSources) {
+                links.push(`[Map Sources](${mapSources.browser_download_url})`);
               }
 
               links.push(`[Source Code](https://github.com/${owner}/${repo}/archive/refs/tags/${data.tag_name}.zip)`);

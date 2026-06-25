@@ -97,6 +97,35 @@ function Assert-Command {
     }
 }
 
+function Assert-WindowsExecutableImage {
+    param(
+        [string]$Path,
+        [string]$Description
+    )
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw "$Description was not found: $Path"
+    }
+
+    $file = Get-Item -LiteralPath $Path
+    if ($file.Length -lt 2) {
+        throw "$Description is too small to be a Windows executable image: $Path"
+    }
+
+    $buffer = New-Object byte[] 2
+    $stream = [System.IO.File]::Open($file.FullName, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
+    try {
+        $bytesRead = $stream.Read($buffer, 0, $buffer.Length)
+    }
+    finally {
+        $stream.Dispose()
+    }
+
+    if ($bytesRead -ne 2 -or $buffer[0] -ne 0x4d -or $buffer[1] -ne 0x5a) {
+        throw "$Description is not a Windows PE executable image: $Path"
+    }
+}
+
 function Test-GitRevisionExists {
     param([string]$Revision)
 
@@ -1257,6 +1286,7 @@ function Publish-UpdaterExecutable {
         throw "Expected updater executable was not found: $updaterExe"
     }
 
+    Assert-WindowsExecutableImage -Path $updaterExe -Description "Published MuffMode updater"
     return $updaterExe
 }
 
@@ -1270,6 +1300,7 @@ function Resolve-ExistingUpdaterExecutable {
     if (-not (Test-Path -LiteralPath $updaterExe)) {
         throw "-SkipUpdaterBuild was supplied, but MuffModeUpdater.exe does not exist at $updaterExe."
     }
+    Assert-WindowsExecutableImage -Path $updaterExe -Description "Existing MuffMode updater"
     return $updaterExe
 }
 
@@ -1277,8 +1308,8 @@ function Resolve-InnoSetupCompiler {
     param([string]$CompilerPath)
 
     if ($CompilerPath) {
-        $resolved = Resolve-RepoPath $CompilerPath
-        if (-not (Test-Path -LiteralPath $resolved)) {
+        $resolved = Resolve-FullPath $CompilerPath
+        if (-not (Test-Path -LiteralPath $resolved -PathType Leaf)) {
             throw "Inno Setup compiler was not found: $resolved"
         }
         return $resolved
@@ -1565,6 +1596,9 @@ function Assert-ReleasePackageContents {
         }
     }
 
+    Assert-WindowsExecutableImage -Path (Join-Path $PackageRoot "MuffModeUpdater.exe") -Description "Packaged MuffMode updater"
+    Assert-WindowsExecutableImage -Path (Join-Path $PackageRoot "rerelease\baseq2\game_x64.dll") -Description "Packaged game DLL"
+
     $fullPackageRoot = [System.IO.Path]::GetFullPath($PackageRoot)
     $separator = [System.IO.Path]::DirectorySeparatorChar.ToString()
     $packageRootPrefix = if ($fullPackageRoot.EndsWith($separator)) {
@@ -1816,6 +1850,7 @@ function New-WindowsInstaller {
     $packageName = Get-ReleasePackageName -TargetVersion $TargetVersion -Channel $Channel
     $outputRootAbs = Resolve-FullPath $OutputRoot
     $compiler = Resolve-InnoSetupCompiler -CompilerPath $InnoSetupCompiler
+    New-Item -ItemType Directory -Force -Path $outputRootAbs | Out-Null
     $launcherIconFile = Resolve-FullPath "updater/MuffMode.Updater/Assets/MuffModeLauncher.ico"
     if (-not (Test-Path -LiteralPath $launcherIconFile -PathType Leaf)) {
         throw "Launcher icon file was not found: $launcherIconFile"
@@ -1824,9 +1859,13 @@ function New-WindowsInstaller {
     $releaseLabel = if ($channelName) { "Muff Mode v$TargetVersion $channelName" } else { "Muff Mode v$TargetVersion" }
     $installerBaseName = "$packageName-windows-installer"
     $installerPath = Join-Path $outputRootAbs "$installerBaseName.exe"
+    $installerLogPath = Join-Path $outputRootAbs "$installerBaseName.innosetup.log"
 
     if (Test-Path -LiteralPath $installerPath) {
         Remove-Item -LiteralPath $installerPath -Force
+    }
+    if (Test-Path -LiteralPath $installerLogPath) {
+        Remove-Item -LiteralPath $installerLogPath -Force
     }
 
     Write-Step "Creating Windows installer $installerPath"
@@ -1841,15 +1880,18 @@ function New-WindowsInstaller {
         $scriptPath 2>&1
 
     $installerExitCode = $LASTEXITCODE
+    @($installerOutput) | Set-Content -LiteralPath $installerLogPath -Encoding utf8
     $installerOutput | ForEach-Object { Write-Host $_ }
 
     if ($installerExitCode -ne 0) {
-        throw "Inno Setup failed while creating the Windows installer."
+        throw "Inno Setup failed while creating the Windows installer. See $installerLogPath"
     }
     if (-not (Test-Path -LiteralPath $installerPath)) {
         throw "Expected installer was not created: $installerPath"
     }
 
+    Assert-WindowsExecutableImage -Path $installerPath -Description "Generated Windows installer"
+    Write-Host "Installer compiler log: $installerLogPath"
     return $installerPath
 }
 
@@ -1988,15 +2030,10 @@ try {
         -OutputRoot $OutputRoot `
         -AssetRoot $AssetRoot
 
-    $releaseAssetPaths = New-Object System.Collections.Generic.List[string]
-    $releaseAssetPaths.Add($package.ZipPath)
-
     $mapArchives = New-MapSupplementArchives `
         -TargetVersion $targetVersion `
         -Channel $Channel `
         -OutputRoot $OutputRoot
-    $releaseAssetPaths.Add($mapArchives.SourceMapsZipPath)
-    $releaseAssetPaths.Add($mapArchives.OriginalMapsZipPath)
 
     $installerPath = $null
     if ($SkipInstaller) {
@@ -2010,8 +2047,15 @@ try {
             -OutputRoot $OutputRoot `
             -InstallerScript $InstallerScript `
             -InnoSetupCompiler $InnoSetupCompiler
+    }
+
+    $releaseAssetPaths = New-Object System.Collections.Generic.List[string]
+    $releaseAssetPaths.Add($package.ZipPath)
+    if ($installerPath) {
         $releaseAssetPaths.Add($installerPath)
     }
+    $releaseAssetPaths.Add($mapArchives.SourceMapsZipPath)
+    $releaseAssetPaths.Add($mapArchives.OriginalMapsZipPath)
 
     $hash = Get-FileHash -Algorithm SHA256 -LiteralPath $package.ZipPath
     $sourceMapsHash = Get-FileHash -Algorithm SHA256 -LiteralPath $mapArchives.SourceMapsZipPath
