@@ -1,0 +1,336 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>16.0</VCProjectVersion>
+    <Keyword>Win32Proj</Keyword>
+    <ProjectGuid>{c994b5ea-3058-403c-953d-3673c2c4d64e}</ProjectGuid>
+    <RootNamespace>game</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Label="Shared">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup>
+    <OutDir>$(ProjectDir)..\..\build\msbuild\$(Platform)\$(Configuration)\</OutDir>
+    <IntDir>$(ProjectDir)..\..\build\msbuild\obj\$(ProjectName)\$(Platform)\$(Configuration)\</IntDir>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <TargetName>$(ProjectName)_x64</TargetName>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <TargetName>$(ProjectName)_x64</TargetName>
+  </PropertyGroup>
+  <PropertyGroup Label="Vcpkg" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <VcpkgUseStatic>true</VcpkgUseStatic>
+  </PropertyGroup>
+  <PropertyGroup Label="Vcpkg" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <VcpkgUseStatic>true</VcpkgUseStatic>
+  </PropertyGroup>
+  <PropertyGroup Label="Vcpkg">
+    <VcpkgEnableManifest>true</VcpkgEnableManifest>
+    <VcpkgManifestRoot>$(ProjectDir)..\..\</VcpkgManifestRoot>
+    <VcpkgTriplet Condition="'$(VcpkgTriplet)'==''">x64-windows-static</VcpkgTriplet>
+    <MMVcpkgTripletRoot Condition="'$(MMVcpkgTripletRoot)'=='' and Exists('$(VcpkgManifestRoot)vcpkg_installed\$(VcpkgTriplet)\$(VcpkgTriplet)\lib\jsoncpp.lib')">$(VcpkgManifestRoot)vcpkg_installed\$(VcpkgTriplet)\$(VcpkgTriplet)\</MMVcpkgTripletRoot>
+    <MMVcpkgTripletRoot Condition="'$(MMVcpkgTripletRoot)'==''">$(VcpkgManifestRoot)vcpkg_installed\$(VcpkgTriplet)\</MMVcpkgTripletRoot>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>KEX_Q2_GAME;KEX_Q2GAME_EXPORTS;KEX_Q2GAME_DYNAMIC;_CRT_SECURE_NO_WARNINGS;_DEBUG;_CONSOLE;NO_FMT_SOURCE;FMT_HEADER_ONLY;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <DisableSpecificWarnings>4267;4244</DisableSpecificWarnings>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\..\third_party\fmt\include;$(ProjectDir)..\..\third_party\jsoncpp\include;$(ProjectDir)..\..\src\shared;$(ProjectDir)..\..\src\sgame;$(ProjectDir)..\..\src\cgame;$(ProjectDir)..\..\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <SubSystem>NotSet</SubSystem>
+      <AdditionalLibraryDirectories>$(MMVcpkgTripletRoot)debug\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>jsoncpp.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <GenerateMapFile>true</GenerateMapFile>
+    </Link>
+    <ProjectReference>
+      <UseLibraryDependencyInputs>false</UseLibraryDependencyInputs>
+    </ProjectReference>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>KEX_Q2_GAME;KEX_Q2GAME_EXPORTS;NO_FMT_SOURCE;FMT_HEADER_ONLY;KEX_Q2GAME_DYNAMIC;_CRT_SECURE_NO_WARNINGS;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <DisableSpecificWarnings>4267;4244</DisableSpecificWarnings>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\..\third_party\fmt\include;$(ProjectDir)..\..\third_party\jsoncpp\include;$(ProjectDir)..\..\src\shared;$(ProjectDir)..\..\src\sgame;$(ProjectDir)..\..\src\cgame;$(ProjectDir)..\..\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <SubSystem>NotSet</SubSystem>
+      <AdditionalLibraryDirectories>$(MMVcpkgTripletRoot)lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>jsoncpp.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClInclude Include="..\..\src\shared\gameplay.h" />
+    <ClInclude Include="..\..\src\cgame\hud_text.h" />
+    <ClInclude Include="..\..\src\cgame\cgame_local.h" />
+    <ClInclude Include="..\..\src\cgame\messages.h" />
+    <ClInclude Include="..\..\src\cgame\screen.h" />
+    <ClInclude Include="..\..\src\sgame\bots\bot_debug.h" />
+    <ClInclude Include="..\..\src\sgame\bots\bot_exports.h" />
+    <ClInclude Include="..\..\src\sgame\bots\bot_includes.h" />
+    <ClInclude Include="..\..\src\sgame\bots\bot_think.h" />
+    <ClInclude Include="..\..\src\sgame\bots\bot_utils.h" />
+    <ClInclude Include="..\..\src\shared\game.h" />
+    <ClInclude Include="..\..\src\sgame\core\debug_log.h" />
+    <ClInclude Include="..\..\src\sgame\entities\brush_misc.h" />
+    <ClInclude Include="..\..\src\sgame\entities\clock.h" />
+    <ClInclude Include="..\..\src\sgame\entities\shadow_lights.h" />
+    <ClInclude Include="..\..\src\sgame\entities\teleporter.h" />
+    <ClInclude Include="..\..\src\sgame\entities\world_text.h" />
+    <ClInclude Include="..\..\src\sgame\g_local.h" />
+    <ClInclude Include="..\..\src\sgame\client\menu.h" />
+    <ClInclude Include="..\..\src\sgame\client\userinfo.h" />
+    <ClInclude Include="..\..\src\sgame\core\statusbar.h" />
+    <ClInclude Include="..\..\src\sgame\monsters\m_actor.h" />
+    <ClInclude Include="..\..\src\sgame\monsters\m_arachnid.h" />
+    <ClInclude Include="..\..\src\sgame\monsters\m_berserk.h" />
+    <ClInclude Include="..\..\src\sgame\monsters\m_boss2.h" />
+    <ClInclude Include="..\..\src\sgame\monsters\m_boss31.h" />
+    <ClInclude Include="..\..\src\sgame\monsters\m_boss32.h" />
+    <ClInclude Include="..\..\src\sgame\monsters\m_brain.h" />
+    <ClInclude Include="..\..\src\sgame\monsters\m_carrier.h" />
+    <ClInclude Include="..\..\src\sgame\monsters\m_chick.h" />
+    <ClInclude Include="..\..\src\sgame\monsters\m_fixbot.h" />
+    <ClInclude Include="..\..\src\sgame\monsters\m_flash.h" />
+    <ClInclude Include="..\..\src\sgame\monsters\m_flipper.h" />
+    <ClInclude Include="..\..\src\sgame\monsters\m_float.h" />
+    <ClInclude Include="..\..\src\sgame\monsters\m_flyer.h" />
+    <ClInclude Include="..\..\src\sgame\monsters\m_gekk.h" />
+    <ClInclude Include="..\..\src\sgame\monsters\m_gladiator.h" />
+    <ClInclude Include="..\..\src\sgame\monsters\m_guardian.h" />
+    <ClInclude Include="..\..\src\sgame\monsters\m_gunner.h" />
+    <ClInclude Include="..\..\src\sgame\monsters\m_hover.h" />
+    <ClInclude Include="..\..\src\sgame\monsters\m_infantry.h" />
+    <ClInclude Include="..\..\src\sgame\monsters\m_insane.h" />
+    <ClInclude Include="..\..\src\sgame\monsters\m_medic.h" />
+    <ClInclude Include="..\..\src\sgame\monsters\m_mutant.h" />
+    <ClInclude Include="..\..\src\sgame\monsters\m_parasite.h" />
+    <ClInclude Include="..\..\src\sgame\monsters\m_player.h" />
+    <ClInclude Include="..\..\src\sgame\monsters\m_rider.h" />
+    <ClInclude Include="..\..\src\sgame\monsters\m_shambler.h" />
+    <ClInclude Include="..\..\src\sgame\monsters\m_soldier.h" />
+    <ClInclude Include="..\..\src\sgame\monsters\m_stalker.h" />
+    <ClInclude Include="..\..\src\sgame\monsters\m_supertank.h" />
+    <ClInclude Include="..\..\src\sgame\monsters\m_tank.h" />
+    <ClInclude Include="..\..\src\sgame\monsters\m_turret.h" />
+    <ClInclude Include="..\..\src\sgame\monsters\m_widow.h" />
+    <ClInclude Include="..\..\src\sgame\monsters\m_widow2.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_admin.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_captain.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_command_contracts.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_combat_heatmap.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_debug.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_duel.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_gametype.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_ghost.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_horde.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_horde_ai.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_horde_ai_rules.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_horde_tables.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_items_rules.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_loc.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_loc_parse.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_maps.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_match.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_menu.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_motd.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_nav_bake.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_parse.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_pconfig.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_profile.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_red_rover_rules.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_ruleset.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_ruleset_weapons.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_skin.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_spawn_filter.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_spawn_loadout.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_statusbar.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_strike.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_team.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_util.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_vote.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_vote_menu.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_vote_types.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\muffmode.h" />
+    <ClInclude Include="..\..\src\shared\q_std.h" />
+    <ClInclude Include="..\..\src\shared\q_vec3.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="..\..\src\sgame\bots\bot_debug.cpp" />
+    <ClCompile Include="..\..\src\sgame\bots\bot_exports.cpp" />
+    <ClCompile Include="..\..\src\sgame\bots\bot_think.cpp" />
+    <ClCompile Include="..\..\src\sgame\bots\bot_utils.cpp" />
+    <ClCompile Include="..\..\src\cgame\api.cpp" />
+    <ClCompile Include="..\..\src\cgame\messages.cpp" />
+    <ClCompile Include="..\..\src\cgame\screen.cpp" />
+    <ClCompile Include="..\..\src\sgame\core\ai.cpp" />
+    <ClCompile Include="..\..\src\sgame\core\ai_navigation.cpp" />
+    <ClCompile Include="..\..\src\sgame\core\chase_camera.cpp" />
+    <ClCompile Include="..\..\src\sgame\core\combat.cpp" />
+    <ClCompile Include="..\..\src\sgame\core\commands.cpp" />
+    <ClCompile Include="..\..\src\sgame\entities\brush_misc.cpp" />
+    <ClCompile Include="..\..\src\sgame\entities\brush_movers.cpp" />
+    <ClCompile Include="..\..\src\sgame\entities\brush_specials.cpp" />
+    <ClCompile Include="..\..\src\sgame\entities\clock.cpp" />
+    <ClCompile Include="..\..\src\sgame\entities\ctf.cpp" />
+    <ClCompile Include="..\..\src\sgame\entities\gibs.cpp" />
+    <ClCompile Include="..\..\src\sgame\entities\item_powerups.cpp" />
+    <ClCompile Include="..\..\src\sgame\entities\item_registry.cpp" />
+    <ClCompile Include="..\..\src\sgame\entities\items.cpp" />
+    <ClCompile Include="..\..\src\sgame\core\runtime.cpp" />
+    <ClCompile Include="..\..\src\sgame\entities\misc.cpp" />
+    <ClCompile Include="..\..\src\sgame\entities\player_targets.cpp" />
+    <ClCompile Include="..\..\src\sgame\entities\secret_doors.cpp" />
+    <ClCompile Include="..\..\src\sgame\entities\shadow_lights.cpp" />
+    <ClCompile Include="..\..\src\sgame\entities\shooter_targets.cpp" />
+    <ClCompile Include="..\..\src\sgame\entities\spawn.cpp" />
+    <ClCompile Include="..\..\src\sgame\entities\spawn_table.cpp" />
+    <ClCompile Include="..\..\src\sgame\entities\targets.cpp" />
+    <ClCompile Include="..\..\src\sgame\entities\teleporter.cpp" />
+    <ClCompile Include="..\..\src\sgame\entities\trains.cpp" />
+    <ClCompile Include="..\..\src\sgame\entities\triggers.cpp" />
+    <ClCompile Include="..\..\src\sgame\entities\turrets.cpp" />
+    <ClCompile Include="..\..\src\sgame\entities\vehicles.cpp" />
+    <ClCompile Include="..\..\src\sgame\entities\world_text.cpp" />
+    <ClCompile Include="..\..\src\sgame\core\game_utils.cpp" />
+    <ClCompile Include="..\..\src\sgame\core\monster_runtime.cpp" />
+    <ClCompile Include="..\..\src\sgame\core\monster_spawning.cpp" />
+    <ClCompile Include="..\..\src\sgame\core\physics.cpp" />
+    <ClCompile Include="..\..\src\sgame\core\savegame.cpp" />
+    <ClCompile Include="..\..\src\sgame\core\server_commands.cpp" />
+    <ClCompile Include="..\..\src\sgame\core\weapon_projectiles.cpp" />
+    <ClCompile Include="..\..\src\sgame\core\weapon_prox.cpp" />
+    <ClCompile Include="..\..\src\sgame\core\weapon_tesla.cpp" />
+    <ClCompile Include="..\..\src\sgame\monsters\m_actor.cpp" />
+    <ClCompile Include="..\..\src\sgame\monsters\m_arachnid.cpp" />
+    <ClCompile Include="..\..\src\sgame\monsters\m_berserk.cpp" />
+    <ClCompile Include="..\..\src\sgame\monsters\m_boss2.cpp" />
+    <ClCompile Include="..\..\src\sgame\monsters\m_boss3.cpp" />
+    <ClCompile Include="..\..\src\sgame\monsters\m_boss31.cpp" />
+    <ClCompile Include="..\..\src\sgame\monsters\m_boss32.cpp" />
+    <ClCompile Include="..\..\src\sgame\monsters\m_brain.cpp" />
+    <ClCompile Include="..\..\src\sgame\monsters\m_carrier.cpp" />
+    <ClCompile Include="..\..\src\sgame\monsters\m_chick.cpp" />
+    <ClCompile Include="..\..\src\sgame\monsters\m_fixbot.cpp" />
+    <ClCompile Include="..\..\src\sgame\monsters\m_flipper.cpp" />
+    <ClCompile Include="..\..\src\sgame\monsters\m_float.cpp" />
+    <ClCompile Include="..\..\src\sgame\monsters\m_flyer.cpp" />
+    <ClCompile Include="..\..\src\sgame\monsters\m_gekk.cpp" />
+    <ClCompile Include="..\..\src\sgame\monsters\m_gladiator.cpp" />
+    <ClCompile Include="..\..\src\sgame\monsters\m_guardian.cpp" />
+    <ClCompile Include="..\..\src\sgame\monsters\m_guncmdr.cpp" />
+    <ClCompile Include="..\..\src\sgame\monsters\m_gunner.cpp" />
+    <ClCompile Include="..\..\src\sgame\monsters\m_hover.cpp" />
+    <ClCompile Include="..\..\src\sgame\monsters\m_infantry.cpp" />
+    <ClCompile Include="..\..\src\sgame\monsters\m_insane.cpp" />
+    <ClCompile Include="..\..\src\sgame\monsters\m_medic.cpp" />
+    <ClCompile Include="..\..\src\sgame\monsters\m_move.cpp" />
+    <ClCompile Include="..\..\src\sgame\monsters\m_mutant.cpp" />
+    <ClCompile Include="..\..\src\sgame\monsters\m_parasite.cpp" />
+    <ClCompile Include="..\..\src\sgame\monsters\m_shambler.cpp" />
+    <ClCompile Include="..\..\src\sgame\monsters\m_soldier.cpp" />
+    <ClCompile Include="..\..\src\sgame\monsters\m_stalker.cpp" />
+    <ClCompile Include="..\..\src\sgame\monsters\m_supertank.cpp" />
+    <ClCompile Include="..\..\src\sgame\monsters\m_tank.cpp" />
+    <ClCompile Include="..\..\src\sgame\monsters\m_turret.cpp" />
+    <ClCompile Include="..\..\src\sgame\monsters\m_widow.cpp" />
+    <ClCompile Include="..\..\src\sgame\monsters\m_widow2.cpp" />
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_admin.cpp" />
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_captain.cpp" />
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_combat_heatmap.cpp" />
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_debug.cpp" />
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_duel.cpp" />
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_gametype.cpp" />
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_ghost.cpp" />
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_horde_ai.cpp" />
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_horde.cpp" />
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_horde_tables.cpp" />
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_items_rules.cpp" />
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_loc.cpp" />
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_maps.cpp" />
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_match.cpp" />
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_menu.cpp" />
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_motd.cpp" />
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_nav_bake.cpp" />
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_pconfig.cpp" />
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_ruleset.cpp" />
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_ruleset_weapons.cpp" />
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_skin.cpp" />
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_spawn_filter.cpp" />
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_spawn_loadout.cpp" />
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_statusbar.cpp" />
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_strike.cpp" />
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_team.cpp" />
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_vote.cpp" />
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_vote_menu.cpp" />
+    <ClCompile Include="..\..\src\sgame\client\lifecycle.cpp" />
+    <ClCompile Include="..\..\src\sgame\client\death.cpp" />
+    <ClCompile Include="..\..\src\sgame\client\grapple.cpp" />
+    <ClCompile Include="..\..\src\sgame\client\hud.cpp" />
+    <ClCompile Include="..\..\src\sgame\client\menu.cpp" />
+    <ClCompile Include="..\..\src\shared\movement.cpp" />
+    <ClCompile Include="..\..\src\sgame\client\spawn_points.cpp" />
+    <ClCompile Include="..\..\src\sgame\client\trail.cpp" />
+    <ClCompile Include="..\..\src\sgame\client\userinfo.cpp" />
+    <ClCompile Include="..\..\src\sgame\client\view.cpp" />
+    <ClCompile Include="..\..\src\sgame\client\weapons.cpp" />
+    <ClCompile Include="..\..\src\shared\q_std.cpp" />
+  </ItemGroup>
+  <Import Project="MuffMode.Analysis.props" Condition="exists('MuffMode.Analysis.props')" />
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+  </ImportGroup>
+</Project>

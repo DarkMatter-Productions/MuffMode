@@ -5,7 +5,7 @@ param(
     [ValidateSet("x64")]
     [string]$Platform = "x64",
 
-    [string]$Project = "src\game.vcxproj",
+    [string]$Project = "projects\msvc\game.vcxproj",
     [string]$Output = "build\compile_commands.json",
     [string]$Compiler = "clang-cl.exe"
 )
@@ -44,7 +44,7 @@ $includeDirs = @(Split-MSBuildList $itemDefinition.AdditionalIncludeDirectories 
     $_.Replace('$(ProjectDir)', "$projectDir\")
 })
 
-$vcpkgInclude = Join-Path $projectDir "vcpkg_installed\x64-windows-static\x64-windows-static\include"
+$vcpkgInclude = Join-Path $repoRoot "vcpkg_installed\x64-windows-static\x64-windows-static\include"
 if (Test-Path -LiteralPath $vcpkgInclude) {
     $includeDirs += $vcpkgInclude
 }

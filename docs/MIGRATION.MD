@@ -370,7 +370,7 @@ Validated against vanilla Q2RE source (`q2re-src/`): every Phase 7 target is Muf
 4. **R4 — Captains, team locks and readyup extracted (complete)**
    - Added `mm_captain.h` / `mm_captain.cpp` (~470 lines from `g_cmds.cpp`, `g_main.cpp`, `g_utils.cpp`).
    - Keeps vanilla adapter names for high-fan-in calls: `SetCaptain()`, `VacateCaptain()`, `ValidateCaptains()`, `ReadyAll()`, `UnReadyAll()`, `BroadcastReadyReminderMessage()` — declarations moved from `g_local.h` to `mm_captain.h`.
-   - Command bodies became `MM_Cmd*()` (`captain`, `lockteam`, `unlockteam`, `ready`, `notready`, `readyup`, `readyall`, `unreadyall`, `readyteam`); wrappers stay in the command table. `Use_Compass` in `g_items.cpp` calls `MM_CmdReadyUp()`.
+   - Command bodies became `MM_Cmd*()` (`captain`, `lockteam`, `unlockteam`, `ready`, `notready`, `readyup`, `readyall`, `unreadyall`, `readyteam`); wrappers stay in the command table. `Use_Compass` in `items.cpp` calls `MM_ToggleReadyUp()` so inventory command arguments do not leak into ready-up validation.
    - Internal helpers (`FindNewCaptain`, `IsCaptainOrAdmin`, `ReadyConditions`, `BroadcastReadyStatus`) are file-local to the module. `level.captain[]` / `level.locked[]` stay in `g_local.h`.
 
 5. **R5 — Team management core extracted (complete)**

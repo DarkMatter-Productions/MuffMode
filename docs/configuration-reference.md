@@ -1,6 +1,6 @@
 # MuffMode Configuration Reference
 
-[README](../README.md) | [Player Guide](player-guide.md) | [Server Host Guide](server-host-guide.md) | [Gameplay Reference](gameplay-reference.md)
+[README](../README.md) | [Player Guide](player-guide.md) | [Server Host Guide](server-host-guide.md) | [Gameplay Reference](gameplay-reference.md) | [Rulesets](rulesets.md)
 
 This is the lookup document for MuffMode commands, cvars, vote options, and per-gametype config behavior. It is mainly for server hosts, admins, and competitive organizers who already know what setting they want to change. Players should start with the [Player Guide](player-guide.md); hosts should start with the [Server Host Guide](server-host-guide.md).
 
@@ -109,16 +109,16 @@ Use `callvote <command> [arg]` or `cv <command> [arg]`.
 | `3` | `tdm` | Team Deathmatch |
 | `4` | `ctf` | Capture the Flag |
 | `5` | `ca` | Clan Arena |
-| `6` | `ft` | Freeze Tag |
-| `7` | `strike` | CaptureStrike |
+| `7` | `strike` | Capture Strike |
 | `8` | `rr` | Red Rover |
 | `9` | `lms` | Last Man Standing |
 | `10` | `horde` | Horde Mode |
-| `11` | `ball` | ProBall |
 | `12` | `instagib` | Instagib |
 | `13` | `nadefest` | NadeFest |
 
 ## Ruleset Values
+
+For player-facing differences between these options, see the [Rulesets](rulesets.md) guide.
 
 | Value | Short name | Ruleset |
 | --- | --- | --- |
@@ -131,13 +131,7 @@ Use `callvote <command> [arg]` or `cv <command> [arg]`.
 
 ## Cvar Changes
 
-`g_dm_spawn_farthest` has three valid values:
-
-| Value | Behavior |
-| --- | --- |
-| `0` | High random, selecting a random spawn point except the two nearest. |
-| `1` | Half farthest, selecting randomly from the farthest 50 percent of spawn points. |
-| `2` | Spawn farthest from current position. |
+Deathmatch respawns use a WORR-style danger score instead of raw farthest-only modes. Spawn selection avoids blocked points, recent combat heat, direct enemy line of sight, nearby players, the player's previous spawn point, and nearby mines or traps. `g_dm_spawn_farthest` is retained for legacy config compatibility, while `g_dm_respawn_point_min_dist` controls hard spacing from the previous spawn and nearby players.
 
 - `g_teamplay_force_join` was renamed to `g_dm_force_join`.
 - Mod-based `sv_*` cvars were renamed to `g_*`.
@@ -192,11 +186,15 @@ Use `callvote <command> [arg]` or `cv <command> [arg]`.
 | `g_dm_overtime` | `120` | Overtime session length in seconds. |
 | `g_dm_tie_max_time` | `1800` | Maximum total tied-overtime duration. |
 | `g_dm_respawn_delay_min` | `1` | Minimum delay after death before respawn. |
-| `g_dm_respawn_point_min_dist` | `256` | Minimum respawn distance from previous spawn point. |
+| `g_dm_respawn_point_min_dist` | `256` | Minimum respawn distance from the previous spawn point and nearby players. |
 | `g_dm_respawn_point_min_dist_debug` | `0` | Prints spawn avoidance debug information. |
-| `g_dm_spawn_farthest` | `1` | Spawn point selection mode. |
+| `g_dm_spawn_farthest` | `1` | Legacy spawn-mode compatibility cvar; respawns use combat-aware scoring. |
 | `g_dm_spawnpads` | `1` | Controls deathmatch spawn pads. |
+| `g_auto_ghost_time` | `120` | Seconds an auto-ghost reservation remains available, up to `3600`; `0` disables auto-ghost capture. |
+| `g_auto_ghost_max` | `3` | Maximum active auto-ghost reservations, capped by client capacity; `0` disables auto-ghost capture. |
+| `g_auto_ghost_timeout` | `0` | Auto-pauses an active match for disconnected players, in seconds capped by `g_auto_ghost_time`; `0` disables. |
 | `g_dm_timeout_length` | `120` | Timeout length in seconds; `0` disables timeouts. |
+| `g_dm_timeout_resume_countdown` | `30` | Countdown announced before a paused match resumes, in seconds up to `120`; `0` resumes immediately. |
 | `g_round_countdown` | `10` | Round countdown time. |
 | `g_warmup_countdown` | `10` | Warmup countdown time. |
 | `g_warmup_ready_percentage` | `0.51f` | Ready percentage required to start. |
@@ -220,6 +218,8 @@ Use `callvote <command> [arg]` or `cv <command> [arg]`.
 | `g_map_pool` | empty | Additional voting map pool. |
 | `g_gametype_cfg` | `1` | Executes `gt-[GAMETYPE].cfg` on gametype changes. |
 | `g_dm_exec_level_cfg` | `0` | Executes level-specific configs when enabled. |
+| `g_loc` | `1` | Enables the `loc` teammate callout command. |
+| `g_loc_items` | `1` | Allows `loc` to derive a fallback location from visible weapons, powerups, or mega health when no map `.loc` file exists. |
 | `g_motd_filename` | `motd.txt` | Message of the day file. |
 | `g_entity_override_dir` | `maps` | Directory for entity override `.ent` files. |
 | `g_entity_override_load` | `1` | Loads entity override files on map load. |
@@ -247,6 +247,7 @@ Use `callvote <command> [arg]` or `cv <command> [arg]`.
 | `g_knockback_scale` | `1.0` | Scales knockback from damage. |
 | `g_ladder_steps` | `1` | Ladder step sounds: `1` campaigns only, `2` always. |
 | `g_lag_compensation` | `1` | Enables lag compensation. |
+| `g_lag_compensation_enhanced` | `1` | Enables richer lag compensation with historical hitboxes, lag-aware aim projection, frame-based snapshot selection, interpolation, and stale/discontinuous-history cleanup. |
 | `g_mover_speed_scale` | `1.0f` | Scales mover speed for doors, rotators, lifts, and similar entities. |
 | `g_no_powerups` | `0` | Disables powerup pickups. |
 | `g_no_bfg` | `0` | Prevents BFG spawning in maps. |
@@ -293,12 +294,10 @@ When `g_gametype_cfg` is enabled, MuffMode executes a config named for the activ
 | Team Deathmatch | `gt-TDM.cfg` |
 | Capture the Flag | `gt-CTF.cfg` |
 | Clan Arena | `gt-CA.cfg` |
-| Freeze Tag | `gt-FT.cfg` |
-| CaptureStrike | `gt-STRIKE.cfg` |
+| Capture Strike | `gt-STRIKE.cfg` |
 | Red Rover | `gt-REDROVER.cfg` |
 | Last Man Standing | `gt-LMS.cfg` |
 | Horde Mode | `gt-HORDE.cfg` |
-| ProBall | `gt-BALL.cfg` |
 | Instagib | `gt-INSTAGIB.cfg` |
 | NadeFest | `gt-NADEFEST.cfg` |
 

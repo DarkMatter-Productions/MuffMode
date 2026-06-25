@@ -4,11 +4,11 @@
 
 MuffMode uses a **documented dual-path dependency model** for the C++ game DLL:
 
-- `src/vcpkg.json` is the authoritative dependency manifest and baseline for reproducible builds.
-- `src/fmt`, `src/json`, `src/fmt.cc`, `src/format.cc`, and `src/os.cc` are vendored compatibility mirrors kept in the source tree because the current project include path resolves those headers through `$(ProjectDir)`.
+- `vcpkg.json` at the repository root is the authoritative dependency manifest and baseline for reproducible builds.
+- `third_party/fmt` and `third_party/jsoncpp` are vendored compatibility mirrors kept outside `src/` so the source tree contains project code, not dependency code.
 - Vendored copies must match the versions recorded in [docs-dev/robustness/dependency-inventory.json](../docs-dev/robustness/dependency-inventory.json).
 
-Do not add a new dependency, update `src/vcpkg.json`, or replace vendored dependency code without updating:
+Do not add a new dependency, update `vcpkg.json`, or replace vendored dependency code without updating:
 
 - [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md)
 - [docs-dev/robustness/dependency-inventory.json](../docs-dev/robustness/dependency-inventory.json)
@@ -19,10 +19,10 @@ Do not add a new dependency, update `src/vcpkg.json`, or replace vendored depend
 
 | Dependency | Manifest source | Vendored source | Version | License |
 |---|---|---|---:|---|
-| `{fmt}` | `src/vcpkg.json` dependency `fmt` | `src/fmt`, `src/fmt.cc`, `src/format.cc`, `src/os.cc` | 10.1.1 | MIT with optional compiled-object exception |
-| JsonCpp | `src/vcpkg.json` dependency `jsoncpp` | `src/json` | 1.9.5 | MIT or public domain where recognized |
+| `{fmt}` | `vcpkg.json` dependency `fmt` | `third_party/fmt` | 10.1.1 | MIT with optional compiled-object exception |
+| JsonCpp | `vcpkg.json` dependency `jsoncpp` | `third_party/jsoncpp` | 1.9.5 | MIT or public domain where recognized |
 
-The DLL currently builds `{fmt}` header-only through `FMT_HEADER_ONLY`. JsonCpp headers are available locally under `src/json`, while the library is linked from the vcpkg static package.
+The DLL currently builds `{fmt}` header-only through `FMT_HEADER_ONLY`. JsonCpp headers are available locally under `third_party/jsoncpp/include/json`, while the library is linked from the vcpkg static package.
 
 ## Enforcement
 
@@ -35,7 +35,7 @@ Run:
 The script verifies:
 
 - Root `LICENSE` is GPL-2.0.
-- `src/vcpkg.json` still declares `fmt` and `jsoncpp` at the recorded baseline.
+- `vcpkg.json` still declares `fmt` and `jsoncpp` at the recorded baseline.
 - Vendored `{fmt}` and JsonCpp header versions match the inventory.
 - `THIRD_PARTY_NOTICES.md` and release packaging include third-party notices.
 

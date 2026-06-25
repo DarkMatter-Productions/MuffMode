@@ -417,7 +417,7 @@ deploy.bat
 
 # Local vcpkg artifacts
 /vcpkg/
-src/vcpkg_installed/
+/vcpkg_installed/
 **/vcpkg_installed/
 
 # Runtime logs

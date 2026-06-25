@@ -1,76 +1,66 @@
 ---
-description: MuffMode repo conventions, module layout, builds, commits, and versioning
+description: MuffMode agent workflow, repo conventions, module layout, builds, commits, and versioning
 alwaysApply: true
 ---
 
-# MuffMode
+# MuffMode Cursor Rule
 
-Quake II Rerelease server-side multiplayer mod (C++ game DLL). Primary dev branch: `muffdev` / `ozdev`.
+Read and follow `AGENTS.md` in the repository root. It is the canonical agent guide for Cursor, VS Code Copilot, Codex, and other coding agents.
+
+This Cursor rule is intentionally only an adapter. If a convention should apply outside Cursor, update `AGENTS.md` first.
+
+## Bootstrap
+
+- Check `git status --short` before editing; this repo is often mid-refactor.
+- Treat existing edits, deletes, moves, and untracked files as user work.
+- Keep changes scoped; no drive-by refactors or generated-output churn.
+- Prefer `rg` / `rg --files` for discovery.
+- Do not commit, amend, push, or open PRs unless explicitly asked.
+
+## Current Layout
+
+- Server game code: `src/sgame/`
+- MuffMode server modules: `src/sgame/muffmode/`
+- Client/HUD code: `src/cgame/`
+- Shared types/helpers: `src/shared/`
+- Host tests: `tests/host/`
+- Canonical CI/local scripts: `scripts/ci/`
+
+If older docs mention `src/muffmode/` or `src/g_local.h`, verify the live split-tree path with `rg`. `GAMEMOD_VERSION` currently lives in `src/sgame/g_local.h`.
 
 ## Architecture
 
-- **Thin vanilla hooks**: keep `g_*.cpp`, `p_*.cpp`, etc. as small wrappers; put MuffMode logic in `src/muffmode/`.
-- **New features** → new `mm_<feature>.{h,cpp}`, declare API in the header, add `#include "mm_<feature>.h"` to `src/muffmode/muffmode.h` (alphabetical), wire `src/game.vcxproj` + `.filters`.
-- **Player prefs** → `client_config_t` (`sess.pc` in `g_local.h`), not raw userinfo. Commands: thin `Cmd_*_f` in `g_cmds.cpp` → `MM_Cmd*` in the module.
-- **Cvars** → register in `g_main.cpp`, `extern` in `g_local.h`. Document in `docs/configuration-reference.md` when user-facing.
-- **Minimize scope**: match surrounding style; no drive-by refactors.
+- Keep upstream-style Quake II files as thin hooks; put feature bodies in MuffMode modules.
+- New server features usually belong in `src/sgame/muffmode/mm_<feature>.{h,cpp}`, with API in the header, inclusion from `src/sgame/muffmode/muffmode.h`, and entries in `src/game.vcxproj` plus `.filters`.
+- Keep command wrappers in `src/sgame/core/commands.cpp` thin: `Cmd_*_f` delegates to `MM_Cmd*`.
+- Store player prefs in `client_config_t` / `client->sess.pc`, not raw userinfo.
+- Register server cvars in `src/sgame/core/runtime.cpp`, declare externs in `src/sgame/g_local.h`, and document user-facing cvars in `docs/configuration-reference.md`.
 
-## Build & test
+## Build And Test
 
-From repo root, in a VS 2022 developer shell:
+From repo root, in a Visual Studio 2022 developer shell:
 
 ```powershell
 ./scripts/ci/build-msbuild.ps1 -Configuration Release -Platform x64 -TreatWarningsAsErrors
 ```
 
-Local quick build: `build.bat`. See `docs/build-guide.md`.
+Fast host tests:
+
+```powershell
+./scripts/ci/run-host-tests.ps1 -Configuration Release -Platform x64
+```
+
+See `docs/build-guide.md` and `docs/hardening-guide.md`.
 
 ## Commits
 
 - Only commit when explicitly asked.
-- One-line subject, repo style: `area: what changed; bump X.Y.Z.` (e.g. `mm_skin: add per-viewer eskin/tskin; bump 0.36.31.`).
+- One-line subject, repo style: `area: what changed; bump X.Y.Z.` when a version bump is part of the work.
 - Never amend pushed commits; never skip hooks unless asked.
 
-## Versioning (required for every shipped change)
+## Docs And Versioning
 
-**Source of truth:** repo-root `VERSION` and `GAMEMOD_VERSION` in `src/g_local.h` must always match.
-
-```cpp
-constexpr const char *GAMEMOD_VERSION = "0.36.33";  // src/g_local.h
-```
-
-```text
-0.36.33   # VERSION (no v prefix, no trailing newline issues)
-```
-
-### Day-to-day dev commits
-
-1. Bump **patch** (`0.36.32` → `0.36.33`) in **both** files together.
-2. Mention the bump in the commit message.
-3. Do not change `GAMEVERSION` (`baseq2`) — only `GAMEMOD_VERSION` / `VERSION`.
-
-### Release / automated bump
-
-Use `scripts/release.ps1` (see `docs/release-process.md`):
-
-```powershell
-# Align files to next patch without building
-.\scripts\release.ps1 -VersionMode patch -UpdateVersionFiles -SkipBuild -AllowDirtyPackage
-
-# Or exact version
-.\scripts\release.ps1 -Version 0.37.0 -UpdateVersionFiles -SkipBuild -AllowDirtyPackage
-```
-
-`-VersionMode auto|major|minor|patch` picks semver from git history. Releases block if `VERSION` ≠ `GAMEMOD_VERSION`.
-
-### Checklist before finishing version work
-
-- [ ] `VERSION` updated
-- [ ] `src/g_local.h` `GAMEMOD_VERSION` matches exactly
-- [ ] Commit message includes `bump X.Y.Z`
-
-## Docs
-
-- Player-facing commands → `docs/player-guide.md`
-- Cvars → `docs/configuration-reference.md`
-- Do not add markdown files unless requested.
+- Player-facing commands -> `docs/player-guide.md`
+- Cvars -> `docs/configuration-reference.md`
+- Implementation-facing changes normally need a grouped `Unreleased` row in `docs/changelog.md`.
+- For release-bound version work, keep root `VERSION` and `GAMEMOD_VERSION` in `src/sgame/g_local.h` exactly aligned. Do not change `GAMEVERSION`.

@@ -30,7 +30,7 @@ Useful local commands:
 ```powershell
 ./scripts/ci/export-compile-commands.ps1
 ./scripts/ci/run-msvc-analyze.ps1
-./scripts/ci/run-clang-tidy.ps1 -Files src/muffmode/mm_pconfig.cpp
+./scripts/ci/run-clang-tidy.ps1 -Files src/sgame/muffmode/mm_pconfig.cpp
 ./scripts/ci/run-cppcheck.ps1
 ./scripts/ci/run-sanitized-build.ps1 -Sanitizer Address
 ./scripts/ci/run-sanitized-build.ps1 -Sanitizer Undefined -AllowUnsupported

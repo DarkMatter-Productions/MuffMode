@@ -20,10 +20,8 @@ Project: https://github.com/fmtlib/fmt
 
 Local sources:
 
-- `src/fmt/`
-- `src/fmt.cc`
-- `src/format.cc`
-- `src/os.cc`
+- `third_party/fmt/include/fmt/`
+- `third_party/fmt/src/`
 
 License notice:
 
@@ -63,8 +61,8 @@ Project: https://github.com/open-source-parsers/jsoncpp
 
 Local sources:
 
-- `src/json/`
-- `src/vcpkg.json` dependency `jsoncpp`
+- `third_party/jsoncpp/include/json/`
+- `vcpkg.json` dependency `jsoncpp`
 
 License notice:
 

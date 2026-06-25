@@ -68,7 +68,6 @@ Use `gametype` and `not_gametype` to include or exclude an entity for specific g
 | `team` | Team Deathmatch |
 | `ctf` | Capture the Flag |
 | `ca` | Clan Arena |
-| `ft` | Freeze Tag |
 | `rr` | Red Rover |
 | `lms` | Last Man Standing |
 | `horde` | Horde Mode |
@@ -79,8 +78,8 @@ Use `gametype` and `not_gametype` to include or exclude an entity for specific g
 | --- | --- |
 | `notteam` | Removes an entity from team gametypes. |
 | `notfree` | Removes an entity from non-team gametypes. |
-| `nobots` | Prevents an `info_player_deathmatch` spawn from being used by bots. |
-| `nohumans` | Prevents an `info_player_deathmatch` spawn from being used by humans. |
+| `nobots` | Prevents a player spawn point (`info_player_start`, `info_player_deathmatch`, `info_player_team_red`, or `info_player_team_blue`) from being used by bots. |
+| `nohumans` | Prevents a player spawn point (`info_player_start`, `info_player_deathmatch`, `info_player_team_red`, or `info_player_team_blue`) from being used by humans. |
 
 Example:
 

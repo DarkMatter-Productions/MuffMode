@@ -1,10 +1,10 @@
 # MuffMode Release Process
 
-[README](../README.md) | [Build Guide](build-guide.md) | [Configuration Reference](configuration-reference.md)
+[README](../README.md) | [Build Guide](build-guide.md) | [Configuration Reference](configuration-reference.md) | [Changelog](changelog.md)
 
 This project is currently in **Beta**. The release script defaults to `-Channel beta`, names packages with the `-beta` suffix, and publishes GitHub releases with the prerelease flag. GitHub does not allow prereleases to be marked as the repository's "Latest" release, so only stable releases force the latest flag.
 
-This project uses [VERSION](../VERSION) as the release version source of truth. The in-game mod version in [src/g_local.h](../src/g_local.h) must match it before publishing a release.
+This project uses [VERSION](../VERSION) as the release version source of truth. The in-game mod version in [src/sgame/g_local.h](../src/sgame/g_local.h) must match it before publishing a release.
 
 The release script is [scripts/release.ps1](../scripts/release.ps1). It builds a beta zip package shaped like the `muffmode-0.22.15-beta.zip` release asset, plus a Windows installer asset:
 
@@ -26,13 +26,38 @@ muffmode-<version>-beta/
 ```text
 muffmode-<version>-beta.zip
 muffmode-<version>-beta-windows-installer.exe
+muffmode-<version>-beta-map-sources.zip
 ```
 
-The script prefers [GitHub Copilot CLI](https://docs.github.com/copilot/how-tos/set-up/install-copilot-cli) for both `CHANGELOG.md` and `README.html` in non-interactive mode. If Copilot is not installed or authenticated, it falls back to deterministic release notes and a styled end-user HTML README so packaging can still complete. Pass `-RequireCopilot` when you intentionally want the release to fail unless Copilot generation succeeds.
+GitHub also adds the automatic source-code archives. Discord announcements keep the primary download list intentionally short and ordered as the installable `muffmode-<version>[-channel].zip`, Windows installer, map sources, then Source Code. Supplemental original-map archives may still be uploaded for preservation, but they are not listed as primary Discord downloads.
+
+Release notes are generated from the central [changelog ledger](changelog.md), not from commit subjects. The script still prefers [GitHub Copilot CLI](https://docs.github.com/copilot/how-tos/set-up/install-copilot-cli) for `README.html` in non-interactive mode. If Copilot is not installed or authenticated, it falls back to a styled deterministic end-user HTML README so packaging can still complete. Pass `-RequireCopilot` when you intentionally want the release to fail unless Copilot README generation succeeds.
 It also writes `rerelease/baseq2/muffmode-version.json` and `rerelease/baseq2/muffmode.version` so the Windows updater and launcher can compare the installed version with GitHub releases.
 The package also includes the published Windows updater and launcher executable at the package root.
 
-The Windows installer is built with [Inno Setup 6](https://jrsoftware.org/isinfo.php). The release script looks for `ISCC.exe` on `PATH`, then in the normal Inno Setup install folders. You can pass `-InnoSetupCompiler "C:\Path\To\ISCC.exe"` to override detection or `-SkipInstaller` for a zip-only local package.
+## Changelog Ledger
+
+[docs/changelog.md](changelog.md) is the source of truth for release notes, release highlights, package `CHANGELOG.md`, GitHub release notes, and the Discord announcement summary.
+
+Required table columns:
+
+| Column | Purpose |
+| --- | --- |
+| `Release` | `Unreleased` until the release script stamps the shipped version, such as `0.36.21`. |
+| `Category` | One of the approved public release categories: player experience, competitive play, server hosting, gameplay and balance, maps and content, fixes, documentation and packaging, or internal maintenance. |
+| `Magnitude` | `major`, `minor`, or `patch`. This is release-note impact, not a promise that the semantic version must move by the same word. |
+| `Summary` | A grouped user-readable change title. Similar work should share one row. |
+| `Details` | A practical explanation of what changed and why it matters. |
+
+Before finishing any implementation, inspect the existing `Unreleased` rows. If the work belongs with an existing row, rewrite that row's summary/details/category/magnitude instead of adding a duplicate. The release script validates the table, rejects duplicate summaries within the same release/category, and refuses to package a release with no matching `Unreleased` or target-version rows.
+
+CI runs `scripts/ci/check-changelog.ps1` to validate the table. On pull requests, implementation-facing changes must include a `docs/changelog.md` update with at least one `Unreleased` row.
+
+Highlight rules are strict: release highlights include only `major` rows. If a release has no `major` rows, the generator falls back to the most relevant smaller rows and says that no major changes are logged.
+
+When `-UpdateVersionFiles` is used, the script updates `VERSION`, `src/sgame/g_local.h`, and every `Unreleased` changelog row to the target release version.
+
+The Windows installer is built with [Inno Setup 6](https://jrsoftware.org/isinfo.php). The release script looks for `ISCC.exe` on `PATH`, then in the normal Inno Setup install folders. You can pass `-InnoSetupCompiler "C:\Path\To\ISCC.exe"` to override detection or `-SkipInstaller` for a zip-only local package. The wrapper validates the packaged DLL/updater and generated installer as Windows PE images, preserves the Inno Setup compiler log beside the release output, and fails publishing if the expected installer is missing when installer generation was not skipped.
 
 ## Release State
 
@@ -65,7 +90,7 @@ Use this when the selected target version does not match `VERSION` and `GAMEMOD_
 .\scripts\release.ps1 -VersionMode patch -UpdateVersionFiles -SkipBuild -AllowDirtyPackage
 ```
 
-Commit the version changes before publishing a GitHub release.
+Commit the version and changelog stamp changes before publishing a GitHub release.
 
 ## Add Release-Only Assets
 
@@ -92,7 +117,7 @@ Run from a Visual Studio developer shell:
 .\scripts\release.ps1 -VersionMode auto
 ```
 
-Use `-SkipBuild` only when `game_x64.dll` already exists at the repository root.
+Use `-SkipBuild` only when `build\msbuild\x64\Release\game_x64.dll` already exists.
 Use `-SkipUpdaterBuild` only when `MuffModeUpdater.exe` already exists under the updater publish output.
 Use `-SkipInstaller` only when you intentionally want to create the zip without the Windows installer asset.
 
@@ -127,7 +152,7 @@ See the [Updater Guide](updater-guide.md) for the updater workflow and local ver
 
 ## Publish From GitHub Actions
 
-Use the **Release Muff Mode** workflow in GitHub Actions for normal releases. It runs [scripts/release.ps1](../scripts/release.ps1), updates and commits version files when requested, builds the DLL, publishes the updater, builds the Windows installer, creates the GitHub release, uploads the zip and installer assets, and posts the Discord announcement.
+Use the **Release Muff Mode** workflow in GitHub Actions for normal releases. It runs [scripts/release.ps1](../scripts/release.ps1), updates and commits version files when requested, builds the DLL, publishes the updater, builds the Windows installer, creates the GitHub release, uploads the package zip, installer, map-source archive, and supplemental original-map archive, and posts the Discord announcement.
 
 GitHub's workflow graph shows jobs, not individual steps. This workflow is intentionally split into visible release jobs: **Preflight**, **Resolve Version**, **Build And Package**, **Publish GitHub Release**, and **Announce On Discord**.
 
@@ -162,11 +187,12 @@ Workflow inputs:
 | `version` | Optional exact version, such as `0.23.0`. |
 | `previous_tag` | Optional changelog start tag override. |
 | `channel` | Defaults to `beta`; non-stable channels publish as prereleases. |
-| `commit_version_files` | Updates `VERSION` and `src/g_local.h`, commits, and pushes before publishing. |
+| `commit_version_files` | Updates `VERSION` and `src/sgame/g_local.h`, commits, and pushes before publishing. |
 | `skip_installer` | Creates only the zip package when the installer is intentionally not wanted. |
 | `require_copilot` | Requires GitHub Copilot CLI generation and fails if Copilot authentication is unavailable. Leave disabled to use the deterministic fallback when needed. |
+| `release_intro` | Optional manual intro for the GitHub release notes and Discord announcement. Leave blank to let the script generate one from the most significant changelog entries. |
 
-When a Copilot token is configured, the release workflow installs the current standalone GitHub Copilot CLI with `npm install -g @github/copilot`, exports `COPILOT_GITHUB_TOKEN`, and primes `copilot --help` before generating the changelog and end-user HTML README.
+When a Copilot token is configured, the release workflow installs the current standalone GitHub Copilot CLI with `npm install -g @github/copilot`, exports `COPILOT_GITHUB_TOKEN`, and primes `copilot --help` before generating the end-user HTML README.
 
 ## Publish Locally
 
@@ -176,12 +202,12 @@ After committing version changes and ensuring the working tree is clean:
 .\scripts\release.ps1 -VersionMode auto -CreateGitHubRelease
 ```
 
-The script creates `v<version>`, uploads the package zip and Windows installer, and uses the generated changelog as release notes. Stable releases pass `--latest`; beta, alpha, and release-candidate builds pass `--prerelease --latest=false` because GitHub rejects releases that are both latest and prerelease.
+The script creates `v<version>`, uploads the package zip, Windows installer, map-source archive, and supplemental original-map archive, and uses the generated changelog as release notes. Stable releases pass `--latest`; beta, alpha, and release-candidate builds pass `--prerelease --latest=false` because GitHub rejects releases that are both latest and prerelease.
 
 ## Changelog Scope
 
-The changelog is generated from `git log <previous-release-tag>..HEAD`, so it includes only commits since the previous release. Pass `-PreviousTag v0.22.15` to override the detected start tag.
+The changelog is generated from [docs/changelog.md](changelog.md). Rows marked `Unreleased` are used for local package builds before release stamping; rows stamped with the target release version are used after `-UpdateVersionFiles` commits the release metadata. Pass `-PreviousTag v0.22.15` to override the compare link start tag.
 
-When Copilot is available, it receives a structured change context for that exact range: commit subjects, merge subjects, changed files, diff stats, and compare URL. The script writes the full prompt to `dist/release/copilot-prompts`, then gives Copilot a short programmatic instruction to read that file, which avoids Windows command-line length limits. The changelog prompt uses silent/no-question mode and grants only Git shell access for inspection. It is prompted to summarize by practical impact for casual players, competitive players, and server hosts, using only relevant categories such as player experience, competitive play, server hosting, gameplay and balance, fixes, documentation, packaging, and internal maintenance.
+The compare link still uses `<previous-release-tag>...v<target-version>` so GitHub can show the exact commits, but public release wording comes from the grouped ledger rows. This keeps release details stable even when a feature arrives through several commits or when a commit contains both user-facing and internal work.
 
-The script validates Copilot output before packaging. If Copilot is unavailable and `-RequireCopilot` is not used, the deterministic fallback still scopes the changelog to the same git range and creates a Quake II styled end-user README focused on installation, usage, hosting, package contents, and the changelog.
+If `-ReleaseIntro` or `MUFFMODE_RELEASE_INTRO` is supplied, that text becomes the release-note intro and Discord intro. During a local interactive Windows release run, the script also tries to show a small text box seeded with the generated intro so maintainers can replace it before packaging. Use `-NoIntroPrompt` for unattended local builds.

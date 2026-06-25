@@ -1,6 +1,6 @@
 # MuffMode Gameplay Reference
 
-[README](../README.md) | [Player Guide](player-guide.md) | [Server Host Guide](server-host-guide.md) | [Configuration Reference](configuration-reference.md)
+[README](../README.md) | [Player Guide](player-guide.md) | [Server Host Guide](server-host-guide.md) | [Rulesets](rulesets.md) | [Configuration Reference](configuration-reference.md)
 
 This reference helps players and hosts choose what to play. Casual players can use it to find modes that sound fun; competitive players can compare match-focused options; hosts can use it when building rotations and per-gametype configs.
 
@@ -9,9 +9,9 @@ This reference helps players and hosts choose what to play. Casual players can u
 | If you want... | Try |
 | --- | --- |
 | A quick public game | Deathmatch, Instagib, NadeFest, or Horde Mode. |
-| A competitive head-to-head match | Duel with a known ruleset and a focused map list. |
-| Organized team play | Team Deathmatch, Capture the Flag, Clan Arena, or CaptureStrike. |
-| A different pace for a community night | Red Rover, Vampiric Damage, Weapons Frenzy, Quad Hog, or custom ruleset/map combinations. |
+| A competitive head-to-head match | Duel with a [known ruleset](rulesets.md) and a focused map list. |
+| Organized team play | Team Deathmatch, Capture the Flag, Clan Arena, or Capture Strike. |
+| A different pace for a community night | Red Rover, Vampiric Damage, Weapons Frenzy, Quad Hog, or custom [ruleset](rulesets.md)/map combinations. |
 
 ## Feature Overview
 
@@ -65,12 +65,10 @@ Muff Mode maintains a curated set of final `mm-*` remasters and ports, plus a se
 | `tdm` | Team Deathmatch | Competitive or casual team frag competition. |
 | `ctf` | Capture the Flag | Team flag capture play with stronger coordination and map control. |
 | `ca` | Clan Arena | Round-based team elimination with no item spawns, no self-damage, and a full arsenal. Good for fast team matches. |
-| `ft` | Freeze Tag | Team elimination where teammates thaw frozen players. Work in progress. |
-| `strike` | CaptureStrike | Threewave-inspired attack/defend mode combining Clan Arena, CTF, and Counter-Strike style rounds. |
+| `strike` | Capture Strike | Threewave-inspired attack/defend mode: teams alternate offense and defense on CTF maps with a single life per turn and a full arena loadout (100 health / 100 armor). Offense earns 1 team point for the first enemy-flag touch and 2 more for a capture or defender wipe; defense earns no team points. Match ends at `capturelimit` (default 15) after both teams have attacked in the current round-pair. |
 | `rr` | Red Rover | Two teams with the Clan Arena loadout; on death you defect to the opposing team and respawn instantly. An arena mode like CA: each round ends on a team wipe (everyone forced onto one team) or `roundtimelimit`, announces that round's top fragger, and reshuffles for the next one. The match ends on `roundlimit` (primary) or `timelimit` (backstop) and the player with the most frags wins. Scored by individual frags; `fraglimit` is disabled, as in CA. |
 | `lms` | Last Man Standing | Survival-focused elimination mode. |
 | `horde` | Horde Mode | Fight monster waves and stay on top of the scoreboard through up to 16 waves. Good for casual groups. Limited lives are not currently handled. |
-| `ball` | ProBall | Sports-style mode where players carry a ball into the enemy goal. Work in progress. |
 | `instagib` | Instagib | Rail-focused instant-kill combat. |
 | `nadefest` | NadeFest | Grenade-only combat. |
 
@@ -93,7 +91,18 @@ Muff Mode maintains a curated set of final `mm-*` remasters and ports, plus a se
 
 ## Rulesets
 
-Rulesets alter gameplay balance. Casual servers can leave the default alone or expose ruleset voting. Competitive servers should choose a known ruleset before a match and keep it consistent across maps.
+Rulesets change the feel of the same map: starts, weapon specs, ammo, armor, health, powerups, and some movement details. The full player-facing breakdown lives in [Muff Mode Rulesets](rulesets.md).
+
+Use this quick picker when choosing a server vote:
+
+| If you want... | Pick |
+| --- | --- |
+| Closest Quake II Rerelease baseline | `q2re` |
+| Muff Mode's house balance | `mm` |
+| Quake III Arena style weapons, pickups, splash, and knockback | `q3a` |
+| Conservative competitive Quake II rebalance | `q2reb` |
+| Classic Quake-inspired starts and arsenal | `q` |
+| Modern arena-inspired random starts and tighter caps | `qc` |
 
 | Value | Short name | Ruleset |
 | --- | --- | --- |
@@ -104,81 +113,6 @@ Rulesets alter gameplay balance. Casual servers can leave the default alone or e
 | `5` | `q` | Quake style |
 | `6` | `qc` | Quake Champions style |
 
-### Quake II Rerelease
-
-The rerelease ruleset keeps the baseline Quake II rerelease balance.
-
-### Muff Mode
-
-Muff Mode focuses on rebalancing several major pain points:
-
-- Plasma Beam deathmatch damage reduced from `15` to `10`, with maximum range limited to `768` units.
-- Railgun restored to `150` damage in campaigns; rail knockback is `damage * 2`.
-- Slug pickup quantity reduced from `10` to `5`.
-- Direct rocket damage changed from randomized `100-120` to a consistent `120`.
-- Invulnerability is replaced by Protection: no splash damage, full slime protection, one-third lava damage, and half direct damage after armor protection.
-- Adrenaline also increases max health by `5` during deathmatch.
-- Rebreather hold time increased from `30` to `45` seconds.
-- Auto Doc regeneration is slower and regenerates either health or armor at a time.
-- Power Armor uses CTF's `1` damage per cell behavior across deathmatch.
-- Powerups use default `120` second respawn, randomized `30-45` second initial delay, global spawn and pickup sounds, and spawn/pickup messages.
-
-### Quake III Arena Style
-
-Inspired by Quake III Arena:
-
-- Start with Machinegun and Rip Saw.
-- Super Shotgun replaced by Shotgun.
-- Weapon velocity, spread, and damage adjusted toward Quake III Arena behavior.
-- Ammo max set to `200` for each type.
-- Weapon pickup gives `+1` ammo when already held.
-- Armor has no tiers; shards are worth `+5`; armor always provides `66%` protection.
-- Health and armor count down to max health.
-- Spawning health bonus of `25`.
-- Mega Health timer rule removed; Mega Health respawns after `60` seconds.
-- Invulnerability is replaced by Protection.
-- Powerups use default `120` second respawn, randomized `30-45` second initial delay, and global spawn/pickup sounds.
-
-### Q2RE Balanced
-
-A vanilla-friendly ruleset with selective balance improvements:
-
-- Plasma Beam deathmatch damage reduced from `15` to `10`, with maximum range limited to `768` units.
-- Chaingun damage reduced to `5`.
-- Hyperblaster projectile speed increased to `1100`.
-- Machinegun damage reduced to `7` in deathmatch.
-- Rocket Launcher speed increased to `720` in deathmatch.
-- Powerup pickup and activation sounds broadcast to all players in deathmatch.
-
-### Quake Style
-
-Inspired by Quake:
-
-- Start with Shotgun and Axe only.
-- No Machinegun, Chaingun, or Railgun.
-- Max ammo limits set to `200`.
-- Rocket Launcher uses randomized `100-120` damage and speed `1000`.
-- Hyperblaster damage is `15` in deathmatch and `20` in co-op.
-- Machinegun and Chaingun damage use default `8`.
-- Landing footsteps are disabled.
-- Armor protection uses stronger classic-style behavior.
-- Classic weapon balance and pickup rules.
-
-### Quake Champions Style
-
-Inspired by modern arena shooters:
-
-- Random starting weapon: Shotgun, Machinegun, or Hyperblaster, with `50` ammo.
-- Max ammo limits: `200` bullets and `200` for other types.
-- Rocket Launcher damage `100`, speed `750`.
-- Hyperblaster damage `12`, speed `1100`.
-- Machinegun damage `6`.
-- Chaingun damage `6`.
-- Railgun damage `80`.
-- Plasma Beam damage `15`.
-- Faster overall pace with modernized weapon balance.
-- Enhanced movement mechanics and timing.
-
 ## Tweaks And Fixes
 
 - Instagib and NadeFest give players regeneration to recover from environmental and fall damage.
@@ -187,11 +121,12 @@ Inspired by modern arena shooters:
 - Fragging Spree award broadcasts every 10 frags without dying or killing a teammate.
 - Techs can be picked up after being dropped.
 - Gametype changes can happen instantly, such as switching from FFA to TDM.
-- DuelFire Damage has been changed to Haste: `50%` faster movement and `50%` faster weapon rate of fire.
+- DualFire Damage is presented as Haste. In `q2re` and `q2reb` it boosts fire rate only; in `mm`, `q3a`, `q`, and `qc` it also boosts movement.
 
 ## Related Docs
 
 - Player commands and hook binds: [Player Guide](player-guide.md)
+- Player-facing ruleset differences: [Rulesets](rulesets.md)
 - Host setup and match cvars: [Server Host Guide](server-host-guide.md)
 - Full command and cvar lookup: [Configuration Reference](configuration-reference.md)
 - Mapper features and entity controls: [Level Design Guide](level-design-guide.md)

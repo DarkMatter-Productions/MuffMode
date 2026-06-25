@@ -1,4 +1,6 @@
+using System.Net;
 using System.Net.Http.Headers;
+using System.Reflection;
 using System.Text;
 using System.Text.Json;
 
@@ -9,11 +11,22 @@ internal sealed class GitHubReleaseClient : IDisposable
     public const string Repository = "DarkMatter-Productions/MuffMode";
 
     private const string ReleasesEndpoint = $"https://api.github.com/repos/{Repository}/releases?per_page=30";
+    private const long MinDownloadBytes = 1024L * 1024L;
     private const long MaxDownloadBytes = 1024L * 1024L * 1024L;
     private const long MaxReleaseMetadataBytes = 4L * 1024L * 1024L;
+    private const long MinimumDownloadFreeSpaceHeadroomBytes = 64L * 1024L * 1024L;
     private const int HttpErrorBodyLimit = 4096;
+    private const int MaxHttpAttempts = 3;
+    private const int MaxReleaseCount = 30;
+    private const int MaxReleaseAssetCount = 100;
+    private const int MaxAssetFileNameCharacters = 128;
     private const int TransferBufferSize = 128 * 1024;
     private static readonly TimeSpan TemporaryDownloadMaxAge = TimeSpan.FromDays(2);
+    private static readonly TimeSpan HttpRetryBaseDelay = TimeSpan.FromMilliseconds(750);
+    private static readonly TimeSpan MetadataTimestampFutureTolerance = TimeSpan.FromMinutes(10);
+    private static readonly Encoding StrictUtf8Encoding = new UTF8Encoding(
+        encoderShouldEmitUTF8Identifier: false,
+        throwOnInvalidBytes: true);
     private static readonly HashSet<string> ReservedWindowsFileNames = new(StringComparer.OrdinalIgnoreCase)
     {
         "CON",
@@ -47,14 +60,21 @@ internal sealed class GitHubReleaseClient : IDisposable
         {
             Timeout = TimeSpan.FromSeconds(60)
         };
-        _httpClient.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("MuffModeUpdater", "0.1.0"));
+        _httpClient.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("MuffModeUpdater", GetUpdaterVersion()));
         _httpClient.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
+        _httpClient.DefaultRequestHeaders.Add("X-GitHub-Api-Version", "2022-11-28");
     }
 
-    public async Task<ReleaseInfo> GetLatestReleaseAsync(CancellationToken cancellationToken)
+    public async Task<ReleaseInfo> GetLatestReleaseAsync(bool includePrereleases, CancellationToken cancellationToken)
     {
-        using var response = await _httpClient.GetAsync(ReleasesEndpoint, cancellationToken);
+        using var response = await GetWithRetryAsync(
+            new Uri(ReleasesEndpoint),
+            HttpCompletionOption.ResponseContentRead,
+            cancellationToken);
         await EnsureSuccessStatusCodeAsync(response, "GitHub release lookup", cancellationToken);
+        EnsureExpectedStatusCode(response, HttpStatusCode.OK, "GitHub release lookup");
+        ValidateReleaseMetadataResponseUri(response);
+        ValidateReleaseMetadataContentHeaders(response);
 
         var releaseJson = await ReadBoundedContentStringAsync(
             response.Content,
@@ -71,14 +91,27 @@ internal sealed class GitHubReleaseClient : IDisposable
             throw new InvalidOperationException("GitHub release metadata was not valid JSON.", ex);
         }
 
-        var release = releases
+        if (releases.Count > MaxReleaseCount)
+        {
+            throw new InvalidOperationException($"GitHub returned more than {MaxReleaseCount:N0} releases for a bounded release lookup.");
+        }
+
+        var candidates = releases
             .Where(candidate => !candidate.Draft)
             .Select(TryCreateReleaseInfo)
             .OfType<ReleaseInfo>()
-            .OrderByDescending(candidate => candidate.PublishedAt ?? DateTimeOffset.MinValue)
-            .ThenByDescending(candidate => candidate.Version)
+            .Where(candidate => includePrereleases || !candidate.IsPrerelease)
+            .ToList();
+
+        RejectDuplicateReleaseCandidates(candidates);
+
+        var release = candidates
+            .OrderByDescending(candidate => candidate.Version)
+            .ThenByDescending(candidate => candidate.PublishedAt ?? DateTimeOffset.MinValue)
             .FirstOrDefault()
-            ?? throw new InvalidOperationException("No published MuffMode releases with a downloadable muffmode-<version>[-channel].zip package were found on GitHub.");
+            ?? throw new InvalidOperationException(includePrereleases
+                ? "No published MuffMode releases with a downloadable muffmode-<version>[-channel].zip package were found on GitHub."
+                : "No stable MuffMode releases with a downloadable muffmode-<version>.zip package were found on GitHub.");
 
         return release;
     }
@@ -89,31 +122,49 @@ internal sealed class GitHubReleaseClient : IDisposable
         IProgress<UpdaterProgress>? progress,
         CancellationToken cancellationToken)
     {
-        PrepareDownloadDirectory(destinationDirectory);
+        destinationDirectory = PrepareDownloadDirectory(destinationDirectory);
         CleanupOldDownloadFiles(destinationDirectory);
+        EnsureSufficientDownloadDiskSpace(destinationDirectory, release.AssetSize);
         var destinationFileName = GetSafeAssetFileName(release.AssetName);
         var destinationPath = Path.Combine(destinationDirectory, destinationFileName);
         var temporaryPath = Path.Combine(destinationDirectory, $".{destinationFileName}.{Guid.NewGuid():N}.download");
-        var downloadUri = CreateDownloadUri(release.AssetDownloadUrl);
+        var downloadUri = CreateDownloadUri(release.AssetDownloadUrl, release.AssetName, release.TagName);
 
         progress?.Report(new UpdaterProgress($"Downloading {release.AssetName}...", 0));
 
         try
         {
-            using var response = await _httpClient.GetAsync(downloadUri, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            using var response = await GetWithRetryAsync(
+                downloadUri,
+                HttpCompletionOption.ResponseHeadersRead,
+                cancellationToken);
             await EnsureSuccessStatusCodeAsync(response, "Release package download", cancellationToken);
+            EnsureExpectedStatusCode(response, HttpStatusCode.OK, "Release package download");
+            ValidateFinalDownloadUri(response);
+            ValidateDownloadContentHeaders(response);
+            ValidateDownloadContentDisposition(response, release.AssetName);
 
             var totalBytes = response.Content.Headers.ContentLength;
-            if (totalBytes is > MaxDownloadBytes)
+            if (totalBytes is null)
+            {
+                throw new InvalidOperationException("The release package download did not include a Content-Length header.");
+            }
+
+            var expectedBytes = totalBytes.Value;
+            if (expectedBytes < MinDownloadBytes)
+            {
+                throw new InvalidOperationException($"The release package is smaller than the supported minimum of {MinDownloadBytes / 1024 / 1024} MB.");
+            }
+
+            if (expectedBytes > MaxDownloadBytes)
             {
                 throw new InvalidOperationException($"The release package is larger than the supported limit of {MaxDownloadBytes / 1024 / 1024} MB.");
             }
 
-            if (totalBytes is > 0
-                && release.AssetSize is > 0
-                && totalBytes.Value != release.AssetSize.Value)
+            if (release.AssetSize is > 0
+                && expectedBytes != release.AssetSize.Value)
             {
-                throw new IOException($"The release package download size changed after release lookup: GitHub listed {release.AssetSize.Value:N0} bytes, but the download response listed {totalBytes.Value:N0} bytes.");
+                throw new IOException($"The release package download size changed after release lookup: GitHub listed {release.AssetSize.Value:N0} bytes, but the download response listed {expectedBytes:N0} bytes.");
             }
 
             long totalRead = 0;
@@ -142,17 +193,16 @@ internal sealed class GitHubReleaseClient : IDisposable
                         throw new InvalidOperationException($"The release package is larger than the supported limit of {MaxDownloadBytes / 1024 / 1024} MB.");
                     }
 
-                    if (totalBytes is > 0)
-                    {
-                        var percentage = Math.Clamp((int)((double)totalRead / totalBytes.Value * 45), 0, 45);
-                        progress?.Report(new UpdaterProgress($"Downloading {release.AssetName}...", percentage));
-                    }
+                    var percentage = Math.Clamp((int)((double)totalRead / expectedBytes * 45), 0, 45);
+                    progress?.Report(new UpdaterProgress($"Downloading {release.AssetName}...", percentage));
                 }
+
+                destination.Flush(flushToDisk: true);
             }
 
-            if (totalBytes is > 0 && totalRead != totalBytes.Value)
+            if (totalRead != expectedBytes)
             {
-                throw new IOException($"The release package download was incomplete: expected {totalBytes.Value:N0} bytes, received {totalRead:N0} bytes.");
+                throw new IOException($"The release package download was incomplete: expected {expectedBytes:N0} bytes, received {totalRead:N0} bytes.");
             }
 
             if (totalRead == 0)
@@ -160,13 +210,30 @@ internal sealed class GitHubReleaseClient : IDisposable
                 throw new InvalidOperationException("The release package download was empty.");
             }
 
+            if (totalRead < MinDownloadBytes)
+            {
+                throw new InvalidOperationException($"The release package is smaller than the supported minimum of {MinDownloadBytes / 1024 / 1024} MB.");
+            }
+
             if (release.AssetSize is > 0 && totalRead != release.AssetSize.Value)
             {
                 throw new IOException($"The release package download did not match the GitHub asset size: expected {release.AssetSize.Value:N0} bytes, received {totalRead:N0} bytes.");
             }
 
+            if (IsReparsePoint(temporaryPath))
+            {
+                throw new IOException("The downloaded release package temporary file became a reparse point.");
+            }
+
             VerifyFileLength(temporaryPath, totalRead, "downloaded release package");
+            VerifyZipSignature(temporaryPath);
             MoveFileIntoPlace(temporaryPath, destinationPath);
+            VerifyFileLength(destinationPath, totalRead, "downloaded release package after move");
+            if (IsReparsePoint(destinationPath))
+            {
+                throw new IOException("The downloaded release package became a reparse point after it was moved into place.");
+            }
+
             progress?.Report(new UpdaterProgress("Download complete.", 45));
             return destinationPath;
         }
@@ -179,60 +246,152 @@ internal sealed class GitHubReleaseClient : IDisposable
 
     public void Dispose() => _httpClient.Dispose();
 
-    private static void PrepareDownloadDirectory(string destinationDirectory)
+    private static string GetUpdaterVersion()
+    {
+        var version = Assembly.GetExecutingAssembly().GetName().Version;
+        return version is null ? "0.1.0" : version.ToString(3);
+    }
+
+    private async Task<HttpResponseMessage> GetWithRetryAsync(
+        Uri requestUri,
+        HttpCompletionOption completionOption,
+        CancellationToken cancellationToken)
+    {
+        for (var attempt = 1; attempt <= MaxHttpAttempts; attempt++)
+        {
+            HttpResponseMessage? response = null;
+            try
+            {
+                response = await _httpClient.GetAsync(requestUri, completionOption, cancellationToken);
+                if (attempt >= MaxHttpAttempts || !IsTransientStatusCode(response.StatusCode))
+                {
+                    return response;
+                }
+
+                var retryDelay = GetRetryDelay(response, attempt);
+                response.Dispose();
+                response = null;
+                await Task.Delay(retryDelay, cancellationToken);
+            }
+            catch (Exception ex) when (attempt < MaxHttpAttempts && IsTransientHttpException(ex, cancellationToken))
+            {
+                response?.Dispose();
+                await Task.Delay(GetRetryDelay(null, attempt), cancellationToken);
+            }
+        }
+
+        throw new InvalidOperationException("HTTP retry loop ended unexpectedly.");
+    }
+
+    private static string PrepareDownloadDirectory(string destinationDirectory)
     {
         if (string.IsNullOrWhiteSpace(destinationDirectory))
         {
             throw new InvalidOperationException("The download folder path was empty.");
         }
 
-        if (File.Exists(destinationDirectory))
+        if (!Path.IsPathFullyQualified(destinationDirectory))
+        {
+            throw new IOException("The download folder path must be fully qualified.");
+        }
+
+        string fullDestinationDirectory;
+        try
+        {
+            fullDestinationDirectory = Path.GetFullPath(destinationDirectory);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            throw new IOException("The download folder path was invalid.", ex);
+        }
+
+        if (File.Exists(fullDestinationDirectory))
         {
             throw new IOException("The download folder path points at a file.");
         }
 
-        if (Directory.Exists(destinationDirectory) && IsReparsePoint(destinationDirectory))
+        EnsureDirectoryPathHasNoReparsePoints(fullDestinationDirectory, "download folder");
+        Directory.CreateDirectory(fullDestinationDirectory);
+        EnsureDirectoryPathHasNoReparsePoints(fullDestinationDirectory, "download folder");
+        return fullDestinationDirectory;
+    }
+
+    private static void EnsureSufficientDownloadDiskSpace(string destinationDirectory, long? assetSize)
+    {
+        if (assetSize is not > 0)
         {
-            throw new IOException("The download folder is a reparse point.");
+            return;
         }
 
-        Directory.CreateDirectory(destinationDirectory);
-        if (IsReparsePoint(destinationDirectory))
+        try
         {
-            throw new IOException("The download folder is a reparse point.");
+            var root = Path.GetPathRoot(Path.GetFullPath(destinationDirectory));
+            if (string.IsNullOrWhiteSpace(root))
+            {
+                return;
+            }
+
+            var drive = new DriveInfo(root);
+            if (!drive.IsReady)
+            {
+                return;
+            }
+
+            var requiredBytes = AddSaturating(assetSize.Value, MinimumDownloadFreeSpaceHeadroomBytes);
+            if (drive.AvailableFreeSpace < requiredBytes)
+            {
+                throw new IOException(
+                    $"The download drive has {FormatByteCount(drive.AvailableFreeSpace)} free, but the updater needs about {FormatByteCount(requiredBytes)} for the release package and working space.");
+            }
+        }
+        catch (IOException)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or UnauthorizedAccessException)
+        {
+            // Some virtual or removable locations do not expose drive statistics reliably.
         }
     }
 
     private static void CleanupOldDownloadFiles(string destinationDirectory)
     {
-        IEnumerable<string> temporaryFiles;
-        try
-        {
-            temporaryFiles = Directory.EnumerateFiles(destinationDirectory, ".muffmode-*.download").ToList();
-        }
-        catch
-        {
-            return;
-        }
-
         var cutoffUtc = DateTime.UtcNow - TemporaryDownloadMaxAge;
-        foreach (var temporaryFile in temporaryFiles)
+        foreach (var pattern in new[] { ".muffmode-*.download", "muffmode-*.zip" })
         {
+            IEnumerable<string> files;
             try
             {
-                var attributes = File.GetAttributes(temporaryFile);
-                if ((attributes & FileAttributes.ReparsePoint) != 0
-                    || File.GetLastWriteTimeUtc(temporaryFile) >= cutoffUtc)
-                {
-                    continue;
-                }
-
-                File.Delete(temporaryFile);
+                files = Directory.EnumerateFiles(destinationDirectory, pattern).ToList();
             }
             catch
             {
-                // Stale temp cleanup failure is non-fatal.
+                continue;
             }
+
+            foreach (var file in files)
+            {
+                TryDeleteOldDownloadFile(file, cutoffUtc);
+            }
+        }
+    }
+
+    private static void TryDeleteOldDownloadFile(string path, DateTime cutoffUtc)
+    {
+        try
+        {
+            var attributes = File.GetAttributes(path);
+            if ((attributes & FileAttributes.ReparsePoint) != 0
+                || File.GetLastWriteTimeUtc(path) >= cutoffUtc)
+            {
+                return;
+            }
+
+            File.Delete(path);
+        }
+        catch
+        {
+            // Stale download cleanup failure is non-fatal.
         }
     }
 
@@ -275,7 +434,7 @@ internal sealed class GitHubReleaseClient : IDisposable
             throw new InvalidOperationException($"{description} was empty.");
         }
 
-        return Encoding.UTF8.GetString(destination.ToArray());
+        return StrictUtf8Encoding.GetString(destination.ToArray());
     }
 
     private static async Task EnsureSuccessStatusCodeAsync(
@@ -290,12 +449,217 @@ internal sealed class GitHubReleaseClient : IDisposable
 
         var detail = await ReadErrorBodySnippetAsync(response, cancellationToken);
         var message = $"{operation} failed with HTTP {(int)response.StatusCode} {response.ReasonPhrase}.";
+        var rateLimitDetail = GetGitHubRateLimitDetail(response);
+        if (!string.IsNullOrWhiteSpace(rateLimitDetail))
+        {
+            message += $" {rateLimitDetail}";
+        }
+
         if (!string.IsNullOrWhiteSpace(detail))
         {
             message += $" Response: {detail}";
         }
 
         throw new HttpRequestException(message, null, response.StatusCode);
+    }
+
+    private static void EnsureExpectedStatusCode(HttpResponseMessage response, HttpStatusCode expectedStatusCode, string operation)
+    {
+        if (response.StatusCode != expectedStatusCode)
+        {
+            throw new InvalidOperationException($"{operation} returned HTTP {(int)response.StatusCode}, but the updater expected {(int)expectedStatusCode}.");
+        }
+    }
+
+    private static void ValidateReleaseMetadataResponseUri(HttpResponseMessage response)
+    {
+        var finalUri = response.RequestMessage?.RequestUri
+            ?? throw new InvalidOperationException("GitHub release lookup did not expose its final response URL.");
+        if (finalUri.Scheme != Uri.UriSchemeHttps
+            || !finalUri.Host.Equals("api.github.com", StringComparison.OrdinalIgnoreCase)
+            || !string.IsNullOrEmpty(finalUri.UserInfo)
+            || !finalUri.IsDefaultPort
+            || !finalUri.AbsolutePath.Equals($"/repos/{Repository}/releases", StringComparison.OrdinalIgnoreCase)
+            || !finalUri.Query.Equals("?per_page=30", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("GitHub release lookup returned metadata from an unexpected URL.");
+        }
+    }
+
+    private static void ValidateReleaseMetadataContentHeaders(HttpResponseMessage response)
+    {
+        if (response.Content.Headers.ContentEncoding.Any())
+        {
+            throw new InvalidOperationException("GitHub release metadata used unexpected HTTP content encoding.");
+        }
+
+        if (response.Content.Headers.ContentRange is not null)
+        {
+            throw new InvalidOperationException("GitHub release metadata returned a partial content range.");
+        }
+
+        var mediaType = response.Content.Headers.ContentType?.MediaType;
+        if (string.IsNullOrWhiteSpace(mediaType)
+            || (!mediaType.Equals("application/json", StringComparison.OrdinalIgnoreCase)
+                && !mediaType.Equals("application/vnd.github+json", StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new InvalidOperationException($"GitHub release metadata returned an unexpected content type: {mediaType ?? "none"}.");
+        }
+    }
+
+    private static void ValidateFinalDownloadUri(HttpResponseMessage response)
+    {
+        var finalUri = response.RequestMessage?.RequestUri
+            ?? throw new InvalidOperationException("The release package download did not expose its final response URL.");
+        if (finalUri.Scheme != Uri.UriSchemeHttps)
+        {
+            throw new InvalidOperationException("The release package download redirected away from HTTPS.");
+        }
+
+        if (!string.IsNullOrEmpty(finalUri.UserInfo) || !finalUri.IsDefaultPort)
+        {
+            throw new InvalidOperationException("The release package download redirected to an unexpected URL authority.");
+        }
+
+        if (finalUri.Host.Equals("github.com", StringComparison.OrdinalIgnoreCase)
+            || finalUri.Host.Equals("objects.githubusercontent.com", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        throw new InvalidOperationException($"The release package download redirected to an unexpected host: {finalUri.Host}");
+    }
+
+    private static void ValidateDownloadContentHeaders(HttpResponseMessage response)
+    {
+        if (response.Content.Headers.ContentEncoding.Any())
+        {
+            throw new InvalidOperationException("The release package download used unexpected HTTP content encoding.");
+        }
+
+        if (response.Content.Headers.ContentRange is not null)
+        {
+            throw new InvalidOperationException("The release package download returned a partial content range.");
+        }
+
+        var mediaType = response.Content.Headers.ContentType?.MediaType;
+        if (string.IsNullOrWhiteSpace(mediaType))
+        {
+            throw new InvalidOperationException("The release package download did not include a Content-Type header.");
+        }
+
+        if (IsAcceptablePackageContentType(mediaType))
+        {
+            return;
+        }
+
+        if (mediaType.StartsWith("text/", StringComparison.OrdinalIgnoreCase)
+            || mediaType.Equals("application/json", StringComparison.OrdinalIgnoreCase)
+            || mediaType.Equals("application/problem+json", StringComparison.OrdinalIgnoreCase)
+            || mediaType.Equals("text/html", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"The release package download returned {mediaType} instead of a zip file.");
+        }
+
+        throw new InvalidOperationException($"The release package download returned an unexpected content type: {mediaType}.");
+    }
+
+    private static void ValidateDownloadContentDisposition(HttpResponseMessage response, string expectedAssetName)
+    {
+        var contentDisposition = response.Content.Headers.ContentDisposition;
+        var fileName = contentDisposition?.FileNameStar ?? contentDisposition?.FileName;
+        if (string.IsNullOrWhiteSpace(fileName))
+        {
+            return;
+        }
+
+        var actualFileName = fileName.Trim().Trim('"');
+        if (string.IsNullOrWhiteSpace(actualFileName)
+            || actualFileName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0
+            || !string.Equals(Path.GetFileName(actualFileName), actualFileName, StringComparison.Ordinal)
+            || !actualFileName.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("The release package download returned an unsafe file name.");
+        }
+
+        if (!actualFileName.Equals(expectedAssetName, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"The release package download file name was {actualFileName}, but GitHub advertised {expectedAssetName}.");
+        }
+    }
+
+    private static bool IsTransientStatusCode(HttpStatusCode statusCode)
+    {
+        return statusCode is HttpStatusCode.RequestTimeout
+            or HttpStatusCode.TooManyRequests
+            or HttpStatusCode.InternalServerError
+            or HttpStatusCode.BadGateway
+            or HttpStatusCode.ServiceUnavailable
+            or HttpStatusCode.GatewayTimeout;
+    }
+
+    private static bool IsTransientHttpException(Exception exception, CancellationToken cancellationToken)
+    {
+        if (exception is OperationCanceledException && cancellationToken.IsCancellationRequested)
+        {
+            return false;
+        }
+
+        return exception is HttpRequestException or TaskCanceledException;
+    }
+
+    private static TimeSpan GetRetryDelay(HttpResponseMessage? response, int attempt)
+    {
+        if (response?.Headers.RetryAfter is { } retryAfter)
+        {
+            if (retryAfter.Delta is { } delta && delta > TimeSpan.Zero)
+            {
+                return ClampRetryDelay(delta);
+            }
+
+            if (retryAfter.Date is { } date)
+            {
+                var delay = date - DateTimeOffset.UtcNow;
+                if (delay > TimeSpan.Zero)
+                {
+                    return ClampRetryDelay(delay);
+                }
+            }
+        }
+
+        var exponentialMilliseconds = HttpRetryBaseDelay.TotalMilliseconds * Math.Pow(2, attempt - 1);
+        return TimeSpan.FromMilliseconds(exponentialMilliseconds);
+    }
+
+    private static TimeSpan ClampRetryDelay(TimeSpan delay)
+    {
+        var maxDelay = TimeSpan.FromSeconds(10);
+        return delay <= maxDelay ? delay : maxDelay;
+    }
+
+    private static string GetGitHubRateLimitDetail(HttpResponseMessage response)
+    {
+        if (!response.Headers.TryGetValues("X-RateLimit-Remaining", out var remainingValues)
+            || !remainingValues.Any(value => string.Equals(value, "0", StringComparison.Ordinal)))
+        {
+            return "";
+        }
+
+        if (response.Headers.TryGetValues("X-RateLimit-Reset", out var resetValues)
+            && long.TryParse(resetValues.FirstOrDefault(), out var resetUnixSeconds))
+        {
+            try
+            {
+                var resetAt = DateTimeOffset.FromUnixTimeSeconds(resetUnixSeconds).ToLocalTime();
+                return $"GitHub API rate limit is exhausted until {resetAt:yyyy-MM-dd HH:mm:ss zzz}.";
+            }
+            catch (ArgumentOutOfRangeException)
+            {
+                // Fall through to the generic rate-limit message.
+            }
+        }
+
+        return "GitHub API rate limit is exhausted. Try again later.";
     }
 
     private static async Task<string> ReadErrorBodySnippetAsync(
@@ -325,7 +689,7 @@ internal sealed class GitHubReleaseClient : IDisposable
             }
 
             var truncated = totalRead > HttpErrorBodyLimit;
-            var text = Encoding.UTF8.GetString(buffer, 0, Math.Min(totalRead, HttpErrorBodyLimit)).Trim();
+            var text = StrictUtf8Encoding.GetString(buffer, 0, Math.Min(totalRead, HttpErrorBodyLimit)).Trim();
             return truncated ? $"{text}..." : text;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -394,6 +758,42 @@ internal sealed class GitHubReleaseClient : IDisposable
         }
     }
 
+    private static void VerifyZipSignature(string path)
+    {
+        Span<byte> signature = stackalloc byte[4];
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        if (stream.Read(signature) != signature.Length
+            || signature[0] != 0x50
+            || signature[1] != 0x4B
+            || !((signature[2] == 0x03 && signature[3] == 0x04)
+                || (signature[2] == 0x05 && signature[3] == 0x06)
+                || (signature[2] == 0x07 && signature[3] == 0x08)))
+        {
+            throw new InvalidOperationException("The downloaded release package did not look like a valid zip file.");
+        }
+    }
+
+    private static long AddSaturating(long left, long right)
+    {
+        return long.MaxValue - left < right ? long.MaxValue : left + right;
+    }
+
+    private static string FormatByteCount(long bytes)
+    {
+        var units = new[] { "bytes", "KB", "MB", "GB" };
+        var value = (double)bytes;
+        var unitIndex = 0;
+        while (value >= 1024 && unitIndex < units.Length - 1)
+        {
+            value /= 1024;
+            unitIndex++;
+        }
+
+        return unitIndex == 0
+            ? $"{bytes:N0} {units[unitIndex]}"
+            : $"{value:N1} {units[unitIndex]}";
+    }
+
     private static bool IsReleasePackageZip(GitHubAssetDto asset)
     {
         if (string.IsNullOrWhiteSpace(asset.Name) || string.IsNullOrWhiteSpace(asset.BrowserDownloadUrl))
@@ -401,7 +801,19 @@ internal sealed class GitHubReleaseClient : IDisposable
             return false;
         }
 
-        if (asset.Size is <= 0 or > MaxDownloadBytes)
+        if (asset.Size is null or < MinDownloadBytes or > MaxDownloadBytes)
+        {
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(asset.State)
+            && !asset.State.Equals("uploaded", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(asset.ContentType)
+            || !IsAcceptablePackageContentType(asset.ContentType))
         {
             return false;
         }
@@ -414,71 +826,285 @@ internal sealed class GitHubReleaseClient : IDisposable
             && SemanticVersion.TryParse(name, out _);
     }
 
-    private static ReleaseInfo? TryCreateReleaseInfo(GitHubReleaseDto release)
+    private static bool IsAcceptablePackageContentType(string? contentType)
     {
-        var versionText = string.Join(" ", new[] { release.TagName, release.Name }.Where(text => !string.IsNullOrWhiteSpace(text)));
-        if (!SemanticVersion.TryParse(versionText, out var version))
+        if (string.IsNullOrWhiteSpace(contentType))
         {
-            return null;
+            return false;
         }
 
-        var asset = release.Assets
-            .Where(IsReleasePackageZip)
-            .Where(asset => AssetNameMatchesRelease(asset.Name!, version, release.Prerelease))
-            .OrderBy(asset => asset.Name, StringComparer.OrdinalIgnoreCase)
-            .FirstOrDefault();
-        if (asset is null)
-        {
-            return null;
-        }
-
-        return new ReleaseInfo(
-            version,
-            release.TagName ?? version.ToString(),
-            string.IsNullOrWhiteSpace(release.Name) ? $"MuffMode v{version}" : release.Name!,
-            release.Body ?? "",
-            release.HtmlUrl ?? $"https://github.com/{Repository}/releases",
-            release.Prerelease,
-            release.PublishedAt,
-            asset.Name!,
-            asset.BrowserDownloadUrl!,
-            asset.Size);
+        return contentType.Equals("application/zip", StringComparison.OrdinalIgnoreCase)
+            || contentType.Equals("application/x-zip-compressed", StringComparison.OrdinalIgnoreCase)
+            || contentType.Equals("application/octet-stream", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static Uri CreateDownloadUri(string url)
+    private static ReleaseInfo? TryCreateReleaseInfo(GitHubReleaseDto release)
+    {
+        var tagVersion = TryParseOptionalReleaseVersion(release.TagName);
+        var nameVersion = TryParseOptionalReleaseVersion(release.Name);
+        if (tagVersion is not null
+            && nameVersion is not null
+            && tagVersion.Value.CompareTo(nameVersion.Value) != 0)
+        {
+            throw new InvalidOperationException($"Release tag {release.TagName} and title {release.Name} disagree on the version.");
+        }
+
+        var version = tagVersion ?? nameVersion;
+        if (version is null)
+        {
+            return null;
+        }
+
+        var releaseId = GetRequiredGitHubId(release.Id, "release");
+        var releaseTag = ValidateReleaseTag(release.TagName, version.Value);
+        if (release.PublishedAt is null)
+        {
+            throw new InvalidOperationException($"GitHub release {releaseTag} did not include a published timestamp.");
+        }
+
+        ValidateMetadataTimestamp(release.PublishedAt.Value, $"GitHub release {releaseTag} published timestamp");
+
+        var assets = release.Assets
+            ?? throw new InvalidOperationException($"GitHub release {releaseTag} did not include an asset list.");
+        if (assets.Count > MaxReleaseAssetCount)
+        {
+            throw new InvalidOperationException($"GitHub release {releaseTag} listed more than {MaxReleaseAssetCount:N0} assets.");
+        }
+
+        var matchingAssets = assets
+            .Where(IsReleasePackageZip)
+            .Where(asset => AssetNameMatchesRelease(asset.Name!, version.Value, release.Prerelease))
+            .OrderBy(asset => asset.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (matchingAssets.Count == 0)
+        {
+            return null;
+        }
+
+        if (matchingAssets.Count > 1)
+        {
+            throw new InvalidOperationException($"Release {version.Value} has multiple matching MuffMode package zip assets. Keep exactly one package asset for this channel.");
+        }
+
+        var asset = matchingAssets[0];
+        _ = GetSafeAssetFileName(asset.Name!);
+        var downloadUri = CreateDownloadUri(asset.BrowserDownloadUrl!, asset.Name!, releaseTag);
+        var assetId = GetRequiredGitHubId(asset.Id, "release asset");
+        var assetChannel = GetAssetChannel(asset.Name!, version.Value)
+            ?? throw new InvalidOperationException($"GitHub release {releaseTag} had an unexpected package asset name: {asset.Name}");
+        if (asset.UpdatedAt is null)
+        {
+            throw new InvalidOperationException($"GitHub release asset {asset.Name} did not include an updated timestamp.");
+        }
+
+        ValidateMetadataTimestamp(asset.UpdatedAt.Value, $"GitHub release asset {asset.Name} updated timestamp");
+        ValidateGitHubAssetDigestMetadata(asset.Digest, asset.Name!);
+        var htmlUrl = GetTrustedReleaseHtmlUrl(release.HtmlUrl, releaseTag);
+        return new ReleaseInfo(
+            version.Value,
+            releaseId,
+            releaseTag,
+            assetChannel,
+            string.IsNullOrWhiteSpace(release.Name) ? $"MuffMode v{version.Value}" : release.Name!,
+            release.Body ?? "",
+            htmlUrl,
+            release.Prerelease,
+            release.PublishedAt,
+            assetId,
+            asset.Name!,
+            downloadUri.ToString(),
+            asset.Size,
+            asset.ContentType,
+            asset.UpdatedAt,
+            asset.Digest);
+    }
+
+    private static void RejectDuplicateReleaseCandidates(IReadOnlyList<ReleaseInfo> candidates)
+    {
+        var duplicate = candidates
+            .GroupBy(
+                candidate => $"{candidate.Version}|{candidate.Channel}",
+                StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault(group => group.Count() > 1);
+        if (duplicate is null)
+        {
+            return;
+        }
+
+        var versions = string.Join(", ", duplicate.Select(candidate => candidate.TagName));
+        throw new InvalidOperationException($"GitHub returned multiple MuffMode releases for {duplicate.First().Version} ({duplicate.First().Channel}): {versions}.");
+    }
+
+    private static SemanticVersion? TryParseOptionalReleaseVersion(string? text)
+    {
+        return SemanticVersion.TryParse(text, out var version) ? version : null;
+    }
+
+    private static long GetRequiredGitHubId(long? id, string description)
+    {
+        if (id is not > 0)
+        {
+            throw new InvalidOperationException($"GitHub {description} metadata did not include a usable numeric ID.");
+        }
+
+        return id.Value;
+    }
+
+    private static void ValidateMetadataTimestamp(DateTimeOffset timestamp, string description)
+    {
+        if (timestamp > DateTimeOffset.UtcNow + MetadataTimestampFutureTolerance)
+        {
+            throw new InvalidOperationException($"{description} is in the future.");
+        }
+    }
+
+    private static void ValidateGitHubAssetDigestMetadata(string? assetDigest, string assetName)
+    {
+        if (string.IsNullOrWhiteSpace(assetDigest))
+        {
+            throw new InvalidOperationException($"GitHub release asset {assetName} did not include a SHA-256 digest.");
+        }
+
+        const string sha256Prefix = "sha256:";
+        if (!assetDigest.StartsWith(sha256Prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"GitHub release asset {assetName} used an unsupported digest format.");
+        }
+
+        var expected = assetDigest[sha256Prefix.Length..].Trim();
+        if (expected.Length != 64 || expected.Any(value => !Uri.IsHexDigit(value)))
+        {
+            throw new InvalidOperationException($"GitHub release asset {assetName} included an invalid SHA-256 digest.");
+        }
+    }
+
+    private static string ValidateReleaseTag(string? tagName, SemanticVersion version)
+    {
+        if (string.IsNullOrWhiteSpace(tagName))
+        {
+            throw new InvalidOperationException($"GitHub release {version} did not include a tag name.");
+        }
+
+        var tag = tagName.Trim();
+        if (tag.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0
+            || tag.Contains('/')
+            || tag.Contains('\\')
+            || tag.Contains('?')
+            || tag.Contains('#'))
+        {
+            throw new InvalidOperationException($"GitHub release {version} used an unsafe tag name.");
+        }
+
+        if (!SemanticVersion.TryParse(tag, out var tagVersion)
+            || tagVersion.CompareTo(version) != 0)
+        {
+            throw new InvalidOperationException($"GitHub release tag {tag} does not match release version {version}.");
+        }
+
+        if (!tag.Equals(version.ToString(), StringComparison.Ordinal)
+            && !tag.Equals($"v{version}", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException($"GitHub release tag {tag} must be exactly {version} or v{version}.");
+        }
+
+        return tag;
+    }
+
+    private static string GetTrustedReleaseHtmlUrl(string? htmlUrl, string expectedTag)
+    {
+        if (string.IsNullOrWhiteSpace(htmlUrl))
+        {
+            return $"https://github.com/{Repository}/releases/tag/{Uri.EscapeDataString(expectedTag)}";
+        }
+
+        if (!Uri.TryCreate(htmlUrl, UriKind.Absolute, out var uri)
+            || uri.Scheme != Uri.UriSchemeHttps
+            || !uri.Host.Equals("github.com", StringComparison.OrdinalIgnoreCase)
+            || !string.IsNullOrEmpty(uri.UserInfo)
+            || !uri.IsDefaultPort
+            || !string.IsNullOrEmpty(uri.Query)
+            || !string.IsNullOrEmpty(uri.Fragment)
+            || !ReleaseHtmlUrlMatchesTag(uri, expectedTag))
+        {
+            throw new InvalidOperationException("GitHub release metadata contained an unexpected release page URL.");
+        }
+
+        return uri.ToString();
+    }
+
+    private static Uri CreateDownloadUri(string url, string expectedAssetName, string expectedTag)
     {
         if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps)
         {
             throw new InvalidOperationException("The selected release asset did not provide a trusted HTTPS download URL.");
         }
 
-        if (string.Equals(uri.Host, "github.com", StringComparison.OrdinalIgnoreCase))
-        {
-            EnsureExpectedGitHubReleasePath(uri);
-            return uri;
-        }
-
-        if (!string.Equals(uri.Host, "objects.githubusercontent.com", StringComparison.OrdinalIgnoreCase)
-            && !uri.Host.EndsWith(".githubusercontent.com", StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(uri.Host, "github.com", StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException($"The selected release asset points at an unexpected host: {uri.Host}");
         }
 
+        if (!string.IsNullOrEmpty(uri.UserInfo) || !uri.IsDefaultPort)
+        {
+            throw new InvalidOperationException("The selected release asset download URL used an unexpected authority.");
+        }
+
+        if (!string.IsNullOrEmpty(uri.Query) || !string.IsNullOrEmpty(uri.Fragment))
+        {
+            throw new InvalidOperationException("The selected release asset download URL contained unexpected query or fragment data.");
+        }
+
+        EnsureExpectedGitHubReleasePath(uri, expectedTag);
+        EnsureDownloadUriFileNameMatchesAsset(uri, expectedAssetName);
         return uri;
     }
 
-    private static void EnsureExpectedGitHubReleasePath(Uri uri)
+    private static bool ReleaseHtmlUrlMatchesTag(Uri uri, string expectedTag)
     {
-        var expectedPrefix = $"/{Repository}/releases/download/";
-        if (!uri.AbsolutePath.StartsWith(expectedPrefix, StringComparison.OrdinalIgnoreCase))
+        var repositorySegments = Repository.Split('/');
+        var segments = uri.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        return segments.Length == 5
+            && segments[0].Equals(repositorySegments[0], StringComparison.OrdinalIgnoreCase)
+            && segments[1].Equals(repositorySegments[1], StringComparison.OrdinalIgnoreCase)
+            && segments[2].Equals("releases", StringComparison.OrdinalIgnoreCase)
+            && segments[3].Equals("tag", StringComparison.OrdinalIgnoreCase)
+            && Uri.UnescapeDataString(segments[4]).Equals(expectedTag, StringComparison.Ordinal);
+    }
+
+    private static void EnsureExpectedGitHubReleasePath(Uri uri, string expectedTag)
+    {
+        var repositorySegments = Repository.Split('/');
+        var segments = uri.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (segments.Length != 6
+            || !segments[0].Equals(repositorySegments[0], StringComparison.OrdinalIgnoreCase)
+            || !segments[1].Equals(repositorySegments[1], StringComparison.OrdinalIgnoreCase)
+            || !segments[2].Equals("releases", StringComparison.OrdinalIgnoreCase)
+            || !segments[3].Equals("download", StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException("The selected release asset does not point at this repository's release downloads.");
+        }
+
+        var tagSegment = Uri.UnescapeDataString(segments[4]);
+        if (!tagSegment.Equals(expectedTag, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException($"The selected release asset belongs to tag {tagSegment}, but GitHub advertised release tag {expectedTag}.");
+        }
+    }
+
+    private static void EnsureDownloadUriFileNameMatchesAsset(Uri uri, string expectedAssetName)
+    {
+        var fileName = Uri.UnescapeDataString(Path.GetFileName(uri.AbsolutePath));
+        if (!fileName.Equals(expectedAssetName, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"The selected release asset download URL ends with {fileName}, but GitHub advertised {expectedAssetName}.");
         }
     }
 
     private static string GetSafeAssetFileName(string assetName)
     {
         if (string.IsNullOrWhiteSpace(assetName)
+            || assetName.Length > MaxAssetFileNameCharacters
+            || assetName.Any(char.IsControl)
             || assetName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0
             || !string.Equals(Path.GetFileName(assetName), assetName, StringComparison.Ordinal)
             || !assetName.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)
@@ -494,85 +1120,30 @@ internal sealed class GitHubReleaseClient : IDisposable
 
     private static bool AssetNameMatchesRelease(string assetName, SemanticVersion version, bool prerelease)
     {
-        if (!HasVersionToken(assetName, version))
-        {
-            return false;
-        }
-
-        var hasPrereleaseToken = HasPrereleaseChannelToken(assetName);
-        return prerelease ? hasPrereleaseToken : !hasPrereleaseToken;
+        var channel = GetAssetChannel(assetName, version);
+        return prerelease
+            ? channel is "alpha" or "beta" or "rc"
+            : channel is "stable";
     }
 
-    private static bool HasVersionToken(string assetName, SemanticVersion version)
+    private static string? GetAssetChannel(string assetName, SemanticVersion version)
     {
-        var name = Path.GetFileNameWithoutExtension(assetName);
-        var expectedVersion = version.ToString();
-        var searchIndex = 0;
-
-        while (searchIndex < name.Length)
+        var fileName = Path.GetFileName(assetName);
+        var versionText = version.ToString();
+        if (fileName.Equals($"muffmode-{versionText}.zip", StringComparison.OrdinalIgnoreCase))
         {
-            var index = name.IndexOf(expectedVersion, searchIndex, StringComparison.OrdinalIgnoreCase);
-            if (index < 0)
-            {
-                return false;
-            }
-
-            var beforeIndex = index - 1;
-            var afterIndex = index + expectedVersion.Length;
-            var startsAtBoundary = IsVersionStartBoundary(name, beforeIndex);
-            var endsAtBoundary = afterIndex >= name.Length || IsVersionDelimiter(name[afterIndex]);
-            if (startsAtBoundary && endsAtBoundary)
-            {
-                return true;
-            }
-
-            searchIndex = index + 1;
+            return "stable";
         }
 
-        return false;
-    }
-
-    private static bool IsVersionStartBoundary(string name, int beforeIndex)
-    {
-        if (beforeIndex < 0)
+        foreach (var channel in new[] { "alpha", "beta", "rc" })
         {
-            return true;
-        }
-
-        if (name[beforeIndex] is 'v' or 'V')
-        {
-            return beforeIndex == 0 || IsVersionDelimiter(name[beforeIndex - 1]);
-        }
-
-        return IsVersionDelimiter(name[beforeIndex]);
-    }
-
-    private static bool IsVersionDelimiter(char value)
-    {
-        return !char.IsLetterOrDigit(value) && value != '.';
-    }
-
-    private static bool HasPrereleaseChannelToken(string assetName)
-    {
-        foreach (var token in Path.GetFileNameWithoutExtension(assetName)
-            .Split(['-', '_', '.'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-        {
-            if (token.Equals("alpha", StringComparison.OrdinalIgnoreCase)
-                || token.Equals("beta", StringComparison.OrdinalIgnoreCase)
-                || token.Equals("preview", StringComparison.OrdinalIgnoreCase))
+            if (fileName.Equals($"muffmode-{versionText}-{channel}.zip", StringComparison.OrdinalIgnoreCase))
             {
-                return true;
-            }
-
-            if (token.Length >= 2
-                && token.StartsWith("rc", StringComparison.OrdinalIgnoreCase)
-                && (token.Length == 2 || token[2..].All(char.IsDigit)))
-            {
-                return true;
+                return channel;
             }
         }
 
-        return false;
+        return null;
     }
 
     private static void TryDeleteFile(string path)
@@ -587,6 +1158,37 @@ internal sealed class GitHubReleaseClient : IDisposable
         catch
         {
             // Temp cleanup failure is non-fatal.
+        }
+    }
+
+    private static void EnsureDirectoryPathHasNoReparsePoints(string directoryPath, string description)
+    {
+        try
+        {
+            var current = Path.GetFullPath(directoryPath);
+            while (!string.IsNullOrWhiteSpace(current))
+            {
+                if (Directory.Exists(current) && IsReparsePoint(current))
+                {
+                    throw new IOException($"The {description} contains a reparse point: {current}");
+                }
+
+                var parent = Directory.GetParent(current);
+                if (parent is null)
+                {
+                    break;
+                }
+
+                current = parent.FullName;
+            }
+        }
+        catch (IOException)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            throw new IOException($"The {description} path was invalid.", ex);
         }
     }
 

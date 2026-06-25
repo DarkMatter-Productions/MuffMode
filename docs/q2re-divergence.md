@@ -1,5 +1,7 @@
 # Where MuffMode's `RS_Q2RE` ruleset diverges from stock Quake II Rerelease
 
+For player-facing ruleset selection and gameplay summaries, use [Muff Mode Rulesets](rulesets.md). This page is a technical parity audit for `q2re` only.
+
 **Scope:** MuffMode running under the default ruleset `g_ruleset 1` (`RS_Q2RE`), compared against
 stock Quake II Rerelease, for **single player**, **deathmatch**, and **CTF**. Sources compared:
 `src/` (MuffMode) vs `q2re-src/` (stock q2re).
@@ -194,7 +196,7 @@ q2re-faithful**; the differences are architectural and opt-in features.
   q2re has no offhand grapple. No change to default play.
 - **Architecture / opt-in features** (not ruleset-gated, don't change a plain pub match):
   q2re's monolithic `ctf/g_ctf.cpp` (3862 lines) is dissolved into MuffMode core files
-  (`src/g_ctf.cpp` is 548 lines, flag core only); MuffMode adds the `GT_STRIKE` (CaptureStrike)
+  (`src/g_ctf.cpp` is 548 lines, flag core only); MuffMode adds the `GT_STRIKE` (Capture Strike)
   gametype and a rewritten round/match lifecycle (`src/muffmode/mm_match*`) replacing q2re's
   `competition`/election/ghost match system; teams use a unified `TEAM_RED`/`TEAM_BLUE` model vs
   q2re's `CTF_TEAM1/2` (cosmetic — same red/blue spawns, skins, auto-balance).

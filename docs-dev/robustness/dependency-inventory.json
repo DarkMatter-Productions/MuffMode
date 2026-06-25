@@ -13,12 +13,12 @@
     }
   },
   "dependency_policy": {
-    "manifest": "src/vcpkg.json",
+    "manifest": "vcpkg.json",
     "vcpkg_baseline": "000d1bda1ffa95a73e0b40334fa4103d6f4d3d48",
     "vcpkg_triplet": "x64-windows-static",
     "notice_file": "THIRD_PARTY_NOTICES.md",
     "policy_doc": "docs/dependencies.md",
-    "model": "vcpkg manifest is authoritative for restore/baseline; vendored headers are compatibility mirrors and must stay version-aligned."
+    "model": "vcpkg manifest is authoritative for restore/baseline; vendored compatibility mirrors live under third_party and must stay version-aligned."
   },
   "packages": [
     {
@@ -29,13 +29,11 @@
       "homepage": "https://github.com/fmtlib/fmt",
       "vcpkg_dependency": "fmt",
       "vendored_paths": [
-        "src/fmt",
-        "src/fmt.cc",
-        "src/format.cc",
-        "src/os.cc"
+        "third_party/fmt/include/fmt",
+        "third_party/fmt/src"
       ],
       "version_evidence": [
-        "src/fmt/core.h FMT_VERSION",
+        "third_party/fmt/include/fmt/core.h FMT_VERSION",
         "vcpkg SPDX package metadata when vcpkg restore has run"
       ],
       "notice_obligations": [
@@ -51,10 +49,10 @@
       "homepage": "https://github.com/open-source-parsers/jsoncpp",
       "vcpkg_dependency": "jsoncpp",
       "vendored_paths": [
-        "src/json"
+        "third_party/jsoncpp/include/json"
       ],
       "version_evidence": [
-        "src/json/version.h JSONCPP_VERSION_STRING",
+        "third_party/jsoncpp/include/json/version.h JSONCPP_VERSION_STRING",
         "vcpkg SPDX package metadata when vcpkg restore has run"
       ],
       "notice_obligations": [
@@ -66,12 +64,9 @@
   "review": {
     "owner": "Maintainer",
     "required_on_changes": [
-      "src/vcpkg.json",
-      "src/fmt/**",
-      "src/json/**",
-      "src/fmt.cc",
-      "src/format.cc",
-      "src/os.cc",
+      "vcpkg.json",
+      "third_party/fmt/**",
+      "third_party/jsoncpp/**",
       "THIRD_PARTY_NOTICES.md",
       "LICENSE",
       "scripts/release.ps1"

@@ -16,34 +16,206 @@ jobs:
         uses: actions/github-script@v9
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}
+          DISCORD_RELEASE_EMOJI: ${{ vars.DISCORD_RELEASE_EMOJI || '<:quake2:1174744083403657316>' }}
+          DISCORD_FEEDBACK_CHANNEL: ${{ vars.DISCORD_FEEDBACK_CHANNEL || '<#1509926054175834133>' }}
         with:
           script: |
             const release = context.payload.release;
+            const { owner, repo } = context.repo;
+            const cleanReleaseName = (release.name || release.tag_name)
+              .replace(/\bMuff\s*Mode\b\s*/ig, "")
+              .replace(/\bMuffMode\b\s*/ig, "")
+              .replace(/\s+/g, " ")
+              .trim() || release.tag_name;
 
             const assets = release.assets || [];
-            const assetLinks = assets.slice(0, 6).map(asset =>
-              `[${asset.name}](${asset.browser_download_url})`
-            );
-
             const notes = (release.body || "")
               .replace(/\r/g, "")
               .trim();
-
-            const description = notes
-              ? (notes.length > 1200 ? `${notes.slice(0, 1197)}...` : notes)
-              : "Release notes and downloads are available on GitHub.";
-
             const isBeta = release.prerelease;
-            const releaseState = isBeta ? "Beta release" : "Stable release";
+            const releaseEmoji = (process.env.DISCORD_RELEASE_EMOJI || "<:quake2:1174744083403657316>").trim();
+            const feedbackChannel = (process.env.DISCORD_FEEDBACK_CHANNEL || "<#1509926054175834133>").trim();
+
+            function stripMarkdown(text) {
+              return (text || "")
+                .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+                .replace(/`([^`]+)`/g, "$1")
+                .replace(/\*\*([^*]+)\*\*/g, "$1")
+                .replace(/[_~>#]/g, "")
+                .replace(/\s+/g, " ")
+                .trim();
+            }
+
+            function extractReleaseIntro(body) {
+              if (!body) {
+                return "";
+              }
+
+              const paragraphs = [];
+              let current = [];
+              for (const rawLine of body.split("\n")) {
+                const line = rawLine.trim();
+                if (!line) {
+                  if (current.length) {
+                    paragraphs.push(current.join(" "));
+                    current = [];
+                  }
+                  continue;
+                }
+                if (/^#\s+/.test(line) || /^<!--/.test(line)) {
+                  continue;
+                }
+                if (/^##\s+/.test(line)) {
+                  break;
+                }
+                if (/^Compare:/i.test(line) || /^These are the centrally logged changes/i.test(line)) {
+                  continue;
+                }
+                if (/^[-*]\s+/.test(line)) {
+                  break;
+                }
+                current.push(line);
+              }
+              if (current.length) {
+                paragraphs.push(current.join(" "));
+              }
+
+              const intro = stripMarkdown(paragraphs.find(paragraph => paragraph.length > 0) || "");
+              return intro.length > 420 ? `${intro.slice(0, 417).trimEnd()}...` : intro;
+            }
+
+            function extractHighlights(body) {
+              if (!body) {
+                return "";
+              }
+
+              const lines = body.split("\n");
+              const highlightsStart = lines.findIndex(line => /^#{2,3}\s+Highlights\s*$/i.test(line.trim()));
+              if (highlightsStart < 0) {
+                return "";
+              }
+
+              const highlightsLines = [];
+              for (const line of lines.slice(highlightsStart + 1)) {
+                if (/^#{2,3}\s+\S/.test(line)) {
+                  break;
+                }
+                highlightsLines.push(line);
+              }
+
+              return highlightsLines
+                .join("\n")
+                .replace(/\n{3,}/g, "\n\n")
+                .trim();
+            }
+
+            function firstHighlightBullet(highlights) {
+              if (!highlights) {
+                return "";
+              }
+
+              const bullet = highlights
+                .split("\n")
+                .find(line => /^\s*[-*]\s+/.test(line));
+              if (!bullet) {
+                return "";
+              }
+
+              const text = stripMarkdown(
+                bullet
+                  .replace(/^\s*[-*]\s+/, "")
+                  .replace(/\s+_?\((major|minor|patch)\)_?\s+-\s+/i, ": ")
+              );
+              return text.length > 300 ? `${text.slice(0, 297).trimEnd()}...` : text;
+            }
+
+            function buildPlayerIntro(body, highlights) {
+              const curatedIntro = extractReleaseIntro(body);
+              if (curatedIntro) {
+                return curatedIntro;
+              }
+
+              const topHighlight = firstHighlightBullet(highlights);
+              const mode = isBeta ? "beta build" : "release";
+              if (topHighlight) {
+                return `Muff Mode ${cleanReleaseName} is live. Headline change: ${topHighlight}`;
+              }
+
+              const lower = body.toLowerCase();
+              if (/(gameplay|balance|weapon|loadout|arena|match|duel|ctf)/.test(lower)) {
+                return `Muff Mode ${cleanReleaseName} is live with gameplay and match-flow changes ready for real server time.`;
+              }
+              if (/(server|host|admin|cvar|config|rotation|vote)/.test(lower)) {
+                return `Muff Mode ${cleanReleaseName} is live with server-hosting and match-control improvements worth checking before the next event.`;
+              }
+              if (/(fix|crash|bug|stability|cleanup)/.test(lower)) {
+                return `Muff Mode ${cleanReleaseName} is live as a steadier ${mode}, with fixes that should make testing and play sessions cleaner.`;
+              }
+
+              return `Muff Mode ${cleanReleaseName} is live. Grab the build, run a few rounds, and send back notes from real play.`;
+            }
+
+            function limitText(text, maxLength) {
+              if (text.length <= maxLength) {
+                return text;
+              }
+              return `${text.slice(0, maxLength - 3).trimEnd()}...`;
+            }
+
+            function escapeRegex(value) {
+              return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+            }
+
+            function buildDownloadLinks() {
+              const version = (release.tag_name || "").replace(/^v/i, "");
+              const versionPattern = version ? escapeRegex(version) : "\\d+\\.\\d+\\.\\d+";
+              const packagePattern = new RegExp(`^muffmode-${versionPattern}(?:-(?:alpha|beta|rc))?\\.zip$`, "i");
+              const installerPattern = new RegExp(`^muffmode-${versionPattern}(?:-(?:alpha|beta|rc))?-windows-installer\\.exe$`, "i");
+              const mapSourcesPattern = new RegExp(`^muffmode-${versionPattern}(?:-(?:alpha|beta|rc))?-map-sources\\.zip$`, "i");
+              const packageZip = assets.find(asset => packagePattern.test(asset.name));
+              const installer = assets.find(asset => installerPattern.test(asset.name));
+              const mapSources = assets.find(asset => mapSourcesPattern.test(asset.name));
+              const links = [];
+
+              if (packageZip) {
+                links.push(`[${packageZip.name}](${packageZip.browser_download_url})`);
+              }
+              if (installer) {
+                links.push(`[Windows Installer](${installer.browser_download_url})`);
+              }
+              if (mapSources) {
+                links.push(`[Map Sources](${mapSources.browser_download_url})`);
+              }
+
+              links.push(`[Source Code](https://github.com/${owner}/${repo}/archive/refs/tags/${release.tag_name}.zip)`);
+              return links;
+            }
+
+            const detailsLink = `[See more details](${release.html_url})`;
+            const highlights = extractHighlights(notes);
+            const intro = buildPlayerIntro(notes, highlights);
+            const feedback = `**Please provide any feedback in ${feedbackChannel}**`;
+            const reservedDescriptionLength = intro.length + feedback.length + detailsLink.length + 8;
+            const highlightsSection = highlights
+              ? limitText(`## Highlights\n\n${highlights}`, Math.max(200, 2200 - reservedDescriptionLength))
+              : "Release notes and downloads are available on GitHub.";
+            const description = limitText([
+              intro,
+              feedback,
+              highlightsSection,
+              detailsLink
+            ].join("\n\n"), 2200);
+
+            const assetLinks = buildDownloadLinks();
 
             const payload = {
               username: "Muff Mode Releases",
               avatar_url: "https://raw.githubusercontent.com/DarkMatter-Productions/MuffMode/main/assets/img/discord-avatar.png",
               allowed_mentions: { parse: [] },
-              content: `**${releaseState} published:** ${release.name || release.tag_name}`,
+              content: `${releaseEmoji} Muff Mode ${cleanReleaseName} is live!`,
               embeds: [
                 {
-                  title: release.name || `Muff Mode ${release.tag_name}`,
+                  title: cleanReleaseName,
                   url: release.html_url,
                   description,
                   color: isBeta ? 0x8fbf26 : 0x5dff5d,

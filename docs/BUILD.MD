@@ -51,18 +51,18 @@ build.bat x64 v145
 ### Release build
 
 ```bat
-msbuild src\MuffMode.sln /p:Configuration=Release /p:Platform=x64
+msbuild projects\msvc\MuffMode.sln /p:Configuration=Release /p:Platform=x64
 ```
 
 ### Debug build
 
 ```bat
-msbuild src\MuffMode.sln /p:Configuration=Debug /p:Platform=x64
+msbuild projects\msvc\MuffMode.sln /p:Configuration=Debug /p:Platform=x64
 ```
 
 ## Output
 
-The build produces `game_x64.dll`.
+The build produces `build\msbuild\x64\<Configuration>\game_x64.dll`.
 After building, copy the DLL into your Quake 2 rerelease `muffmode` game folder to test in-game.
 
 ## Common Issues

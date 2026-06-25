@@ -81,4 +81,4 @@ These configs serve as a solid foundation for any MuffMode server. You can:
 
 ## Understanding MuffMode
 
-For detailed information about how MuffMode works, its features, and advanced configuration options, see the main MuffMode source code and documentation at [https://github.com/themuffinator/muffmode](https://github.com/themuffinator/muffmode)
+For detailed information about how MuffMode works, its features, and advanced configuration options, see the main MuffMode source code and documentation at [https://github.com/DarkMatter-Productions/MuffMode](https://github.com/DarkMatter-Productions/MuffMode)

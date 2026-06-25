@@ -65,10 +65,10 @@ foreach ($requiredDoc in @(
     }
 }
 
-$vcpkgPath = Join-Path $repoRoot "src/vcpkg.json"
+$vcpkgPath = Join-Path $repoRoot "vcpkg.json"
 $vcpkg = Get-Content -LiteralPath $vcpkgPath -Raw | ConvertFrom-Json
 if ($vcpkg.'builtin-baseline' -ne $inventory.dependency_policy.vcpkg_baseline) {
-    Fail-Inventory "src/vcpkg.json baseline does not match dependency inventory."
+    Fail-Inventory "vcpkg.json baseline does not match dependency inventory."
 }
 
 $declaredDependencies = @($vcpkg.dependencies | ForEach-Object {
@@ -77,14 +77,14 @@ $declaredDependencies = @($vcpkg.dependencies | ForEach-Object {
 
 foreach ($dependency in @("fmt", "jsoncpp")) {
     if ($declaredDependencies -notcontains $dependency) {
-        Fail-Inventory "src/vcpkg.json is missing dependency '$dependency'."
+        Fail-Inventory "vcpkg.json is missing dependency '$dependency'."
     }
 }
 
 $fmtPackage = Get-InventoryPackage -Inventory $inventory -Name "fmt"
-$fmtCore = Get-Content -LiteralPath (Join-Path $repoRoot "src/fmt/core.h") -Raw
+$fmtCore = Get-Content -LiteralPath (Join-Path $repoRoot "third_party/fmt/include/fmt/core.h") -Raw
 if ($fmtCore -notmatch "#define\s+FMT_VERSION\s+([0-9]+)") {
-    Fail-Inventory "could not find FMT_VERSION in src/fmt/core.h."
+    Fail-Inventory "could not find FMT_VERSION in third_party/fmt/include/fmt/core.h."
 }
 $fmtActual = [int]$Matches[1]
 $fmtExpected = Convert-FmtVersionToInteger $fmtPackage.version
@@ -93,9 +93,9 @@ if ($fmtActual -ne $fmtExpected) {
 }
 
 $jsonPackage = Get-InventoryPackage -Inventory $inventory -Name "jsoncpp"
-$jsonVersion = Get-Content -LiteralPath (Join-Path $repoRoot "src/json/version.h") -Raw
+$jsonVersion = Get-Content -LiteralPath (Join-Path $repoRoot "third_party/jsoncpp/include/json/version.h") -Raw
 if ($jsonVersion -notmatch '#define\s+JSONCPP_VERSION_STRING\s+"([^"]+)"') {
-    Fail-Inventory "could not find JSONCPP_VERSION_STRING in src/json/version.h."
+    Fail-Inventory "could not find JSONCPP_VERSION_STRING in third_party/jsoncpp/include/json/version.h."
 }
 if ($Matches[1] -ne $jsonPackage.version) {
     Fail-Inventory "vendored JsonCpp version '$($Matches[1])' does not match inventory version '$($jsonPackage.version)'."
@@ -113,7 +113,7 @@ foreach ($needle in @("{fmt}", "JsonCpp", "GPL-2.0-only")) {
     }
 }
 
-$fmtSpdx = Join-Path $repoRoot "src/vcpkg_installed/x64-windows-static/x64-windows-static/share/fmt/vcpkg.spdx.json"
+$fmtSpdx = Join-Path $repoRoot "vcpkg_installed/x64-windows-static/x64-windows-static/share/fmt/vcpkg.spdx.json"
 if (Test-Path -LiteralPath $fmtSpdx) {
     $fmtSpdxText = Get-Content -LiteralPath $fmtSpdx -Raw
     if ($fmtSpdxText -notmatch '"versionInfo"\s*:\s*"10\.1\.1"') {
@@ -121,7 +121,7 @@ if (Test-Path -LiteralPath $fmtSpdx) {
     }
 }
 
-$jsonSpdx = Join-Path $repoRoot "src/vcpkg_installed/x64-windows-static/x64-windows-static/share/jsoncpp/vcpkg.spdx.json"
+$jsonSpdx = Join-Path $repoRoot "vcpkg_installed/x64-windows-static/x64-windows-static/share/jsoncpp/vcpkg.spdx.json"
 if (Test-Path -LiteralPath $jsonSpdx) {
     $jsonSpdxText = Get-Content -LiteralPath $jsonSpdx -Raw
     if ($jsonSpdxText -notmatch '"versionInfo"\s*:\s*"1\.9\.5#2"') {
