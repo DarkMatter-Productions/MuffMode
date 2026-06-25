@@ -11,7 +11,7 @@ This guide explains how to build MuffMode on Windows with Visual Studio/MSBuild.
 - The C++ desktop workload and Windows SDK.
 - MSBuild and a configured Visual C++ environment.
 
-The Visual Studio project uses the vcpkg manifest at [src/vcpkg.json](../src/vcpkg.json). Dependency policy and third-party notice obligations are recorded in [Dependency Policy](dependencies.md).
+The Visual Studio project uses the vcpkg manifest at [vcpkg.json](../vcpkg.json). Dependency policy and third-party notice obligations are recorded in [Dependency Policy](dependencies.md).
 
 The currently supported branch/build matrix is recorded in [Build Matrix](build-matrix.md).
 
@@ -23,7 +23,7 @@ Run commands from the repository root:
 MuffMode/
 ```
 
-The solution file is [src/MuffMode.sln](../src/MuffMode.sln).
+The solution file is [projects/msvc/MuffMode.sln](../projects/msvc/MuffMode.sln).
 
 ## Open A Developer Shell
 
@@ -39,7 +39,7 @@ This ensures `msbuild`, the compiler, and library paths are available.
 Release build:
 
 ```bat
-msbuild src\MuffMode.sln /p:Configuration=Release /p:Platform=x64
+msbuild projects\msvc\MuffMode.sln /p:Configuration=Release /p:Platform=x64
 ```
 
 Canonical CI/local release build:
@@ -57,7 +57,7 @@ Strict warning gate:
 Debug build:
 
 ```bat
-msbuild src\MuffMode.sln /p:Configuration=Debug /p:Platform=x64
+msbuild projects\msvc\MuffMode.sln /p:Configuration=Debug /p:Platform=x64
 ```
 
 ## Analysis Commands
@@ -72,7 +72,7 @@ Run the currently configured analyzer entrypoints:
 
 ```powershell
 ./scripts/ci/run-msvc-analyze.ps1
-./scripts/ci/run-clang-tidy.ps1 -Files src/muffmode/mm_pconfig.cpp
+./scripts/ci/run-clang-tidy.ps1 -Files src/sgame/muffmode/mm_pconfig.cpp
 ./scripts/ci/run-cppcheck.ps1
 ./scripts/ci/run-sanitized-build.ps1 -Sanitizer Address
 ```
@@ -115,10 +115,10 @@ The current fuzz target build is a smoke gate. Runtime fuzzing depends on the lo
 
 ## Output
 
-The build produces `game_x64.dll` in the repository root. To test locally:
+The build produces `build\msbuild\x64\<Configuration>\game_x64.dll`. To test locally after a release build:
 
 1. Back up your Quake II rerelease `baseq2\game_x64.dll`.
-2. Copy the built `game_x64.dll` into the rerelease `baseq2` folder.
+2. Copy `build\msbuild\x64\Release\game_x64.dll` into the rerelease `baseq2` folder.
 3. Launch Quake II and start or join a multiplayer session.
 
 ## Common Issues

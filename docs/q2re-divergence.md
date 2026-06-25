@@ -196,7 +196,7 @@ q2re-faithful**; the differences are architectural and opt-in features.
   q2re has no offhand grapple. No change to default play.
 - **Architecture / opt-in features** (not ruleset-gated, don't change a plain pub match):
   q2re's monolithic `ctf/g_ctf.cpp` (3862 lines) is dissolved into MuffMode core files
-  (`src/g_ctf.cpp` is 548 lines, flag core only); MuffMode adds the `GT_STRIKE` (CaptureStrike)
+  (`src/g_ctf.cpp` is 548 lines, flag core only); MuffMode adds the `GT_STRIKE` (Capture Strike)
   gametype and a rewritten round/match lifecycle (`src/muffmode/mm_match*`) replacing q2re's
   `competition`/election/ghost match system; teams use a unified `TEAM_RED`/`TEAM_BLUE` model vs
   q2re's `CTF_TEAM1/2` (cosmetic — same red/blue spawns, skins, auto-balance).

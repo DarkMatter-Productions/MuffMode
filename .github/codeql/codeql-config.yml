@@ -8,6 +8,5 @@ paths:
   - src
 
 paths-ignore:
-  - src/vcpkg_installed
-  - src/fmt
-  - src/json
+  - vcpkg_installed
+  - third_party

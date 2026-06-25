@@ -19,7 +19,7 @@ Phase two analysis gates are intentionally script-first. CI should call the same
 
 ## Warning Policy
 
-MSVC warning-clean builds are the first enforced warning gate. The active build workflow calls `build-msbuild.ps1 -TreatWarningsAsErrors`, which maps to the project-local `MMTreatWarningsAsErrors` property in `src/ci.analysis.props`.
+MSVC warning-clean builds are the first enforced warning gate. The active build workflow calls `build-msbuild.ps1 -TreatWarningsAsErrors`, which maps to the project-local `MMTreatWarningsAsErrors` property in `projects/msvc/MuffMode.Analysis.props`.
 
 Clang diagnostics are introduced through `clang-tidy` on touched C++ files first. Once the baseline is triaged, the file set should ratchet from touched files to all project compile units.
 

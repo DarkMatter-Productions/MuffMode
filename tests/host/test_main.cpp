@@ -4,6 +4,7 @@
 #include "fake_game_import.h"
 #include "muffmode/mm_command_contracts.h"
 #include "muffmode/mm_horde_ai_rules.h"
+#include "muffmode/mm_loc_parse.h"
 #include "muffmode/mm_parse.h"
 #include "muffmode/mm_red_rover_rules.h"
 
@@ -209,6 +210,61 @@ MM_TEST(horde_adaptive_spawn_mult_bounds_and_direction) {
 	MM_CHECK(coasting > 1.f);
 	MM_CHECK(struggling < 1.f);
 	MM_CHECK_EQ(MM_Horde_ComputeAdaptiveBudgetMult(1.f), 1.f);
+}
+
+MM_TEST(loc_line_parser_extracts_position_and_multiword_label) {
+	float xyz[3] = { 0.f, 0.f, 0.f };
+	std::string label;
+
+	// Real .loc files use "<x> <y> <z> <label>".
+	MM_CHECK(MM_ParseLocLine("6029 435 7361 HIGH RL", xyz, label));
+	MM_CHECK_EQ(xyz[0], 6029.f);
+	MM_CHECK_EQ(xyz[1], 435.f);
+	MM_CHECK_EQ(xyz[2], 7361.f);
+	MM_CHECK_EQ(label, std::string("HIGH RL"));
+
+	label.clear();
+	MM_CHECK(MM_ParseLocLine("\t-2\t3\t4\t  ARENA  \r\n", xyz, label));
+	MM_CHECK_EQ(xyz[0], -2.f);
+	MM_CHECK_EQ(xyz[1], 3.f);
+	MM_CHECK_EQ(xyz[2], 4.f);
+	MM_CHECK_EQ(label, std::string("ARENA"));
+}
+
+MM_TEST(loc_line_parser_rejects_malformed_lines) {
+	float xyz[3] = { 0.f, 0.f, 0.f };
+	std::string label;
+
+	MM_CHECK_FALSE(MM_ParseLocLine(nullptr, xyz, label));
+	MM_CHECK_FALSE(MM_ParseLocLine("", xyz, label));
+	MM_CHECK_FALSE(MM_ParseLocLine("   \r\n", xyz, label));
+	MM_CHECK_FALSE(MM_ParseLocLine("1 2", xyz, label));
+	MM_CHECK_FALSE(MM_ParseLocLine("1 2 3", xyz, label));
+	MM_CHECK_FALSE(MM_ParseLocLine("1 2 x LABEL", xyz, label));
+	MM_CHECK_FALSE(MM_ParseLocLine("1 2 3x LABEL", xyz, label));
+	MM_CHECK_FALSE(MM_ParseLocLine("1 2 nan LABEL", xyz, label));
+	MM_CHECK_FALSE(MM_ParseLocLine("1 2 inf LABEL", xyz, label));
+}
+
+MM_TEST(loc_body_requires_macro_and_substitutes_location) {
+	MM_CHECK(MM_BuildLocBody(nullptr, "WATER").empty());
+	MM_CHECK(MM_BuildLocBody("", "WATER").empty());
+	MM_CHECK(MM_BuildLocBody("need backup", "WATER").empty());
+
+	MM_CHECK_EQ(MM_BuildLocBody("at %l", "ARENA"), std::string("at [ARENA]"));
+	MM_CHECK_EQ(MM_BuildLocBody("ENEMY at %l", "MEGA"), std::string("ENEMY at [MEGA]"));
+	MM_CHECK_EQ(MM_BuildLocBody("%L then %l", "RAIL"), std::string("[RAIL] then [RAIL]"));
+	MM_CHECK_EQ(MM_BuildLocBody("\"hold %l\"", "BOX"), std::string("hold [BOX]"));
+
+	MM_CHECK_FALSE(MM_BuildLocBody("%h %a", "WATER").empty());
+	MM_CHECK_EQ(MM_BuildLocBody("at %l %h", "MEGA"), std::string("at [MEGA] %h"));
+	MM_CHECK(MM_LocBodyHasMacro("need %w now"));
+	MM_CHECK_FALSE(MM_LocBodyHasMacro("just plain text"));
+}
+
+MM_TEST(loc_body_caps_length) {
+	std::string long_text = "%l " + std::string(400, 'x');
+	MM_CHECK(MM_BuildLocBody(long_text.c_str(), "WATER").size() <= 150);
 }
 
 } // namespace

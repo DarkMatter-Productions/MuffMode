@@ -109,12 +109,10 @@ Use `callvote <command> [arg]` or `cv <command> [arg]`.
 | `3` | `tdm` | Team Deathmatch |
 | `4` | `ctf` | Capture the Flag |
 | `5` | `ca` | Clan Arena |
-| `6` | `ft` | Freeze Tag |
-| `7` | `strike` | CaptureStrike |
+| `7` | `strike` | Capture Strike |
 | `8` | `rr` | Red Rover |
 | `9` | `lms` | Last Man Standing |
 | `10` | `horde` | Horde Mode |
-| `11` | `ball` | ProBall |
 | `12` | `instagib` | Instagib |
 | `13` | `nadefest` | NadeFest |
 
@@ -224,6 +222,8 @@ For player-facing differences between these options, see the [Rulesets](rulesets
 | `g_map_pool` | empty | Additional voting map pool. |
 | `g_gametype_cfg` | `1` | Executes `gt-[GAMETYPE].cfg` on gametype changes. |
 | `g_dm_exec_level_cfg` | `0` | Executes level-specific configs when enabled. |
+| `g_loc` | `1` | Enables the `loc` teammate callout command. |
+| `g_loc_items` | `1` | Allows `loc` to derive a fallback location from visible weapons, powerups, or mega health when no map `.loc` file exists. |
 | `g_motd_filename` | `motd.txt` | Message of the day file. |
 | `g_entity_override_dir` | `maps` | Directory for entity override `.ent` files. |
 | `g_entity_override_load` | `1` | Loads entity override files on map load. |
@@ -297,12 +297,10 @@ When `g_gametype_cfg` is enabled, MuffMode executes a config named for the activ
 | Team Deathmatch | `gt-TDM.cfg` |
 | Capture the Flag | `gt-CTF.cfg` |
 | Clan Arena | `gt-CA.cfg` |
-| Freeze Tag | `gt-FT.cfg` |
-| CaptureStrike | `gt-STRIKE.cfg` |
+| Capture Strike | `gt-STRIKE.cfg` |
 | Red Rover | `gt-REDROVER.cfg` |
 | Last Man Standing | `gt-LMS.cfg` |
 | Horde Mode | `gt-HORDE.cfg` |
-| ProBall | `gt-BALL.cfg` |
 | Instagib | `gt-INSTAGIB.cfg` |
 | NadeFest | `gt-NADEFEST.cfg` |
 

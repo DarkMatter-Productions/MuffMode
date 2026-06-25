@@ -771,6 +771,24 @@ function New-DeterministicHtmlReadme {
     h2 { color: var(--slime-bright); margin-top: 2rem; }
     h3 { color: var(--amber); margin-top: 1.2rem; }
     .lede { max-width: 760px; color: var(--concrete); font-size: 1.1rem; }
+    .support-copy { max-width: 760px; color: #dfe7dc; }
+    .support-actions { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-top: 1rem; }
+    .support-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 2.7rem;
+      padding: 0.65rem 0.95rem;
+      border: 1px solid rgba(238, 243, 233, 0.22);
+      border-radius: 8px;
+      color: #ffffff;
+      background: linear-gradient(135deg, #c13a86, var(--rust));
+      box-shadow: 0 10px 26px rgba(0, 0, 0, 0.24);
+      font-weight: 800;
+      text-decoration: none;
+    }
+    .support-button.kofi { background: linear-gradient(135deg, #d84c46, var(--amber)); color: #151b1f; }
+    .support-button:hover, .support-button:focus { outline: 2px solid var(--slime-bright); outline-offset: 3px; }
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1rem; margin: 1.5rem 0; }
     .card {
       background: linear-gradient(180deg, rgba(46, 55, 55, 0.96), rgba(28, 34, 35, 0.96));
@@ -798,9 +816,14 @@ function New-DeterministicHtmlReadme {
 </head>
 <body>
   <header>
-    <div class="eyebrow">Quake II Remastered server-side mod</div>
+    <div class="eyebrow">Quake II Rerelease multiplayer mod</div>
     <h1>$encodedLabel</h1>
     <p class="lede">A practical release package for casual games, competitive matches, and the server hosts keeping MuffMode sessions running. This package is flagged as <span class="tag">$Channel</span>.</p>
+    <p class="support-copy">Muff Mode is free for players and server hosts. Optional donations help keep future development moving by supporting the time, testing, tooling, and release work behind the mod.</p>
+    <div class="support-actions" aria-label="Support the MuffMode authors">
+      <a class="support-button" href="https://github.com/sponsors/themuffinator">Sponsor themuffinator</a>
+      <a class="support-button kofi" href="https://ko-fi.com/ozy24">Support ozy on Ko-fi</a>
+    </div>
   </header>
   <main>
     <section>
@@ -842,8 +865,8 @@ function New-DeterministicHtmlReadme {
       <h2>Gametype Overview</h2>
       <div class="grid">
         <article class="card"><strong>Quick public games:</strong> FFA, Instagib, NadeFest, and Horde are easy drop-in choices.</article>
-        <article class="card"><strong>Competitive matches:</strong> Duel, TDM, CTF, Clan Arena, and CaptureStrike benefit most from a locked map pool and a known ruleset.</article>
-        <article class="card"><strong>Community nights:</strong> Red Rover, LMS, Freeze Tag, ProBall, Vampiric Damage, Weapons Frenzy, and Quad Hog change the rhythm without requiring a different install.</article>
+        <article class="card"><strong>Competitive matches:</strong> Duel, TDM, CTF, Clan Arena, and Capture Strike benefit most from a locked map pool and a known ruleset.</article>
+        <article class="card"><strong>Community nights:</strong> Red Rover, LMS, Capture Strike, Vampiric Damage, Weapons Frenzy, and Quad Hog change the rhythm without requiring a different install.</article>
       </div>
     </section>
     <section>
@@ -1026,7 +1049,7 @@ function Get-CurrentSourceVersion {
         return (Get-Content -Raw -LiteralPath $versionFile).Trim()
     }
 
-    $localHeader = Join-Path $RepoRoot "src/g_local.h"
+    $localHeader = Join-Path $RepoRoot "src/sgame/g_local.h"
     if (Test-Path -LiteralPath $localHeader) {
         $content = Get-Content -Raw -LiteralPath $localHeader
         if ($content -match 'GAMEMOD_VERSION\s*=\s*"([^"]+)"') {
@@ -1034,7 +1057,7 @@ function Get-CurrentSourceVersion {
         }
     }
 
-    throw "Could not determine the current source version. Add VERSION or update src/g_local.h."
+    throw "Could not determine the current source version. Add VERSION or update src/sgame/g_local.h."
 }
 
 function Get-LatestReleaseTag {
@@ -1103,7 +1126,7 @@ function Update-VersionFiles {
     $versionFile = Join-Path $RepoRoot "VERSION"
     Set-Content -LiteralPath $versionFile -Value $TargetVersion -Encoding utf8
 
-    $localHeader = Join-Path $RepoRoot "src/g_local.h"
+    $localHeader = Join-Path $RepoRoot "src/sgame/g_local.h"
     $content = Get-Content -Raw -LiteralPath $localHeader
     $replacement = "constexpr const char *GAMEMOD_VERSION = `"$TargetVersion`";"
     $updated = [regex]::Replace(
@@ -1116,7 +1139,7 @@ function Update-VersionFiles {
         if ($content -match "GAMEMOD_VERSION\s*=\s*`"$([regex]::Escape($TargetVersion))`"") {
             return
         }
-        throw "Could not update GAMEMOD_VERSION in src/g_local.h."
+        throw "Could not update GAMEMOD_VERSION in src/sgame/g_local.h."
     }
     Set-Content -LiteralPath $localHeader -Value $updated -Encoding utf8
 }
@@ -1130,10 +1153,10 @@ function Assert-VersionFilesMatch {
         throw "Source version is $($sourceVersion.Text), but target version is $($target.Text). Re-run with -UpdateVersionFiles, commit the change, then create the GitHub release."
     }
 
-    $localHeader = Join-Path $RepoRoot "src/g_local.h"
+    $localHeader = Join-Path $RepoRoot "src/sgame/g_local.h"
     $content = Get-Content -Raw -LiteralPath $localHeader
     if ($content -notmatch "GAMEMOD_VERSION\s*=\s*`"$([regex]::Escape($TargetVersion))`"") {
-        throw "src/g_local.h GAMEMOD_VERSION does not match $TargetVersion."
+        throw "src/sgame/g_local.h GAMEMOD_VERSION does not match $TargetVersion."
     }
 }
 
@@ -1166,11 +1189,17 @@ function Get-GitStatus {
     git -C $RepoRoot status --porcelain
 }
 
+function Get-GameDllBuildPath {
+    param([string]$Configuration, [string]$Platform)
+
+    return Join-Path $RepoRoot "build\msbuild\$Platform\$Configuration\game_x64.dll"
+}
+
 function Build-ReleaseDll {
     param([string]$Configuration, [string]$Platform)
 
     Assert-Command "msbuild"
-    $solution = Join-Path $RepoRoot "src/MuffMode.sln"
+    $solution = Join-Path $RepoRoot "projects/msvc/MuffMode.sln"
     Write-Step "Building $Configuration|$Platform"
     $buildOutput = & msbuild $solution "/p:Configuration=$Configuration" "/p:Platform=$Platform" 2>&1
     $buildExitCode = $LASTEXITCODE
@@ -1179,7 +1208,7 @@ function Build-ReleaseDll {
         throw "MSBuild failed."
     }
 
-    $dll = Join-Path $RepoRoot "game_x64.dll"
+    $dll = Get-GameDllBuildPath -Configuration $Configuration -Platform $Platform
     if (-not (Test-Path -LiteralPath $dll)) {
         throw "Expected build output was not found: $dll"
     }
@@ -1381,13 +1410,14 @@ You are GitHub Copilot helping prepare a public release package for $releaseLabe
 Create a complete standalone HTML document for end users. Use the Markdown documentation and changelog below as source material.
 
 Audience and scope:
-- Primary audience: Quake II Remastered players and server hosts installing this release.
+- Primary audience: Quake II Rerelease players and server hosts installing this release.
 - This project is currently in $Channel channel. Make that release state visible but not alarming.
 - Include installation, first-use guidance, player usage, voting, common host setup, gametype overview, a player-focused ruleset guide, offhand hook bind, debugging pointer, package contents, and the changelog.
 - Use docs/rulesets.md as the authoritative ruleset source. Make every ruleset's unique feel and tradeoffs clear, including Q3A's existing-asset weapon mappings, preserved double jumps, Super Shotgun removal, regular Shotgun Q3 specs, and shared-cell BFG ammo cost.
 - Include a compact "Included Custom Maps" section using the source map guide. Show map title, filename, release status, and good gametype fits, and link to the full Muff Mode Map Guide for history, original release dates, preserved original readmes/BSPs, separate remaster source-map links, and item registers.
 - Explain that original map readmes are included in the main installer/manual zip under rerelease/baseq2/docs/muffmode/maps/original-readmes, while source maps and original BSPs are published as separate supplemental release archives.
 - Explain that most Windows users can use the installer, which presents detected Steam, Epic Games Store, GOG, and Xbox app / Microsoft Store installs, keeps an other-location choice available, shows the resolved target before install, requires a real Quake II folder with a known launcher executable, rejects unsafe system, special-folder, and extracted-package targets, verifies the copied DLL, updater, docs, legal notices, original-map readmes, custom map BSPs, selected entity overrides, version manifest, and exact server/gametype config contents, writes an install receipt, backs up an existing game DLL when needed, and offers Desktop/Start menu shortcuts for the updater, launcher, install guide, changelog, and server config guide. Also include the zip/manual extraction path for users who prefer it.
+- Include elegant support buttons near the top for the authors: themuffinator at https://github.com/sponsors/themuffinator and ozy at https://ko-fi.com/ozy24. Frame donations as optional support that helps promote future development and offsets the real time, testing, tooling, and release costs involved in maintaining the mod.
 - Do not include build instructions, source compilation steps, contributor notes, GitHub badges, or repository development workflow.
 - Keep it polished, friendly, and practical. Avoid marketing fluff.
 
@@ -1883,7 +1913,7 @@ try {
     Write-Step "Target version: $targetVersion ($Channel; GitHub prerelease: $isPrerelease)"
 
     if ($UpdateVersionFiles) {
-        Write-Step "Updating VERSION and src/g_local.h"
+        Write-Step "Updating VERSION and src/sgame/g_local.h"
         Update-VersionFiles -TargetVersion $targetVersion
         Update-ChangelogReleaseVersions -TargetVersion $targetVersion -Path $ChangelogPath
     }
@@ -1903,9 +1933,9 @@ try {
     }
 
     if ($SkipBuild) {
-        $dllPath = Join-Path $RepoRoot "game_x64.dll"
+        $dllPath = Get-GameDllBuildPath -Configuration $Configuration -Platform $Platform
         if (-not (Test-Path -LiteralPath $dllPath)) {
-            throw "-SkipBuild was supplied, but game_x64.dll does not exist at the repository root."
+            throw "-SkipBuild was supplied, but game_x64.dll does not exist at $dllPath."
         }
     }
     else {

@@ -34,7 +34,7 @@ on:
           - rc
           - stable
       commit_version_files:
-        description: Update VERSION and src/g_local.h, commit, and push before publishing.
+        description: Update VERSION and src/sgame/g_local.h, commit, and push before publishing.
         required: true
         type: boolean
         default: true
@@ -142,12 +142,12 @@ jobs:
           .\scripts\release.ps1 @parameters
 
           if ("${{ inputs.commit_version_files }}" -eq "true") {
-            $changes = git status --porcelain VERSION src/g_local.h docs/changelog.md
+            $changes = git status --porcelain VERSION src/sgame/g_local.h docs/changelog.md
             if ($changes) {
               $version = (Get-Content -Raw VERSION).Trim()
               git config user.name "github-actions[bot]"
               git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-              git add VERSION src/g_local.h docs/changelog.md
+              git add VERSION src/sgame/g_local.h docs/changelog.md
               git commit -m "Bump Muff Mode to v$version"
               git push origin "HEAD:${{ github.ref_name }}"
             }
@@ -224,12 +224,11 @@ jobs:
             ${{ github.workspace }}\..\vcpkg\downloads
             ${{ github.workspace }}\..\vcpkg\buildtrees
             ${{ github.workspace }}\..\vcpkg\packages
-          key: vcpkg-${{ runner.os }}-${{ hashFiles('src/vcpkg.json') }}
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}
           restore-keys: vcpkg-${{ runner.os }}-
 
       - name: Install vcpkg Dependencies
         shell: pwsh
-        working-directory: src
         run: '& "$env:VCPKG_ROOT\vcpkg.exe" install --triplet x64-windows-static'
 
       - name: Install Inno Setup

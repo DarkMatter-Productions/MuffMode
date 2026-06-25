@@ -80,12 +80,10 @@ Set `g_gametype` by index, or use the admin command `gametype <shortname>`.
 | `3` | `tdm` | Team Deathmatch |
 | `4` | `ctf` | Capture the Flag |
 | `5` | `ca` | Clan Arena |
-| `6` | `ft` | Freeze Tag |
-| `7` | `strike` | CaptureStrike |
+| `7` | `strike` | Capture Strike |
 | `8` | `rr` | Red Rover |
 | `9` | `lms` | Last Man Standing |
 | `10` | `horde` | Horde Mode |
-| `11` | `ball` | ProBall |
 | `12` | `instagib` | Instagib |
 | `13` | `nadefest` | NadeFest |
 
@@ -166,12 +164,10 @@ Examples:
 | Team Deathmatch | `gt-TDM.cfg` |
 | Capture the Flag | `gt-CTF.cfg` |
 | Clan Arena | `gt-CA.cfg` |
-| Freeze Tag | `gt-FT.cfg` |
-| CaptureStrike | `gt-STRIKE.cfg` |
+| Capture Strike | `gt-STRIKE.cfg` |
 | Red Rover | `gt-REDROVER.cfg` |
 | Last Man Standing | `gt-LMS.cfg` |
 | Horde | `gt-HORDE.cfg` |
-| ProBall | `gt-BALL.cfg` |
 | Instagib | `gt-INSTAGIB.cfg` |
 | NadeFest | `gt-NADEFEST.cfg` |
 

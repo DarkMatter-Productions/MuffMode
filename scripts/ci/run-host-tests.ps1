@@ -17,7 +17,7 @@ $repoRoot = Get-RepoRoot
     -Platform $Platform `
     -Target Build
 
-$exe = Join-Path $repoRoot "tests\host\bin\$Platform\$Configuration\MuffMode.HostTests.exe"
+$exe = Join-Path $repoRoot "build\msbuild\tests\host\$Platform\$Configuration\MuffMode.HostTests.exe"
 if (-not (Test-Path -LiteralPath $exe)) {
     throw "Host test executable was not produced: $exe"
 }

@@ -8,7 +8,18 @@
   [![Stars](https://img.shields.io/github/stars/DarkMatter-Productions/MuffMode?style=flat)](https://github.com/DarkMatter-Productions/MuffMode/stargazers)
   
   <h1>Muff Mode</h1>
-  <p><strong>Server-side multiplayer upgrades for Quake II Remastered.</strong></p>
+  <p><strong>A community multiplayer mod for Quake II Rerelease.</strong></p>
+  <p>
+    Muff Mode is free for players and server hosts. Optional donations help keep future development moving by supporting the time, testing, tooling, and release work behind the mod.
+  </p>
+  <p>
+    <a href="https://github.com/sponsors/themuffinator">
+      <img src="https://img.shields.io/badge/Sponsor-themuffinator-EA4AAA?style=for-the-badge&logo=githubsponsors&logoColor=white" alt="Sponsor themuffinator on GitHub">
+    </a>
+    <a href="https://ko-fi.com/ozy24">
+      <img src="https://img.shields.io/badge/Support-ozy-FF5E5B?style=for-the-badge&logo=kofi&logoColor=white" alt="Support ozy on Ko-fi">
+    </a>
+  </p>
   <p>
     <a href="https://discord.gg/T32mFejwR4">
       <img src="https://img.shields.io/badge/Join%20us%20on-Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Join us on Discord">
@@ -56,7 +67,7 @@ For a more careful walkthrough, use the [Player Guide](docs/player-guide.md) or 
 <h2 align="center">Highlights</h2>
 
  - **Built for every lobby style** — supports **casual public servers**, **private friend sessions**, **pickups**, **scrims**, and more organized competitive events.
- - **A fuller mode lineup** — includes **Deathmatch**, **Duel**, **TDM**, **CTF**, **Clan Arena**, **CaptureStrike**, **Red Rover**, **Last Man Standing**, **Horde**, **Freeze Tag**, **ProBall**, **Instagib**, and **NadeFest**.
+ - **A fuller mode lineup** — includes **Deathmatch**, **Duel**, **TDM**, **CTF**, **Clan Arena**, **Capture Strike**, **Red Rover**, **Last Man Standing**, **Horde**, **Instagib**, and **NadeFest**.
  - **Flexible rulesets** — switch between [**Quake II Rerelease**, **Muff Mode**, **Q2RE Balanced**, **Quake III Arena style**, **Quake style**, and **Quake Champions style**](docs/rulesets.md) depending on the feel you want.
  - **Better match flow** — warmups, ready checks, countdowns, post-match delays, sudden death, overtime, round handling, and timeouts help games start cleanly and stay organized.
  - **Player-friendly interface improvements** — a purpose-built HUD, compact scoreboard, frag messages, timer support, help text, MOTD access, and match-state feedback keep important information visible without overwhelming the screen.

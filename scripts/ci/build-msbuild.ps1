@@ -8,7 +8,7 @@ param(
     [ValidateSet("Build", "Rebuild", "Clean")]
     [string]$Target = "Build",
 
-    [string]$Solution = "src\MuffMode.sln",
+    [string]$Solution = "projects\msvc\MuffMode.sln",
     [string]$PlatformToolset,
     [switch]$TreatWarningsAsErrors,
     [switch]$RunCodeAnalysis,

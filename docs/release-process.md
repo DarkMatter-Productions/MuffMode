@@ -4,7 +4,7 @@
 
 This project is currently in **Beta**. The release script defaults to `-Channel beta`, names packages with the `-beta` suffix, and publishes GitHub releases with the prerelease flag. GitHub does not allow prereleases to be marked as the repository's "Latest" release, so only stable releases force the latest flag.
 
-This project uses [VERSION](../VERSION) as the release version source of truth. The in-game mod version in [src/g_local.h](../src/g_local.h) must match it before publishing a release.
+This project uses [VERSION](../VERSION) as the release version source of truth. The in-game mod version in [src/sgame/g_local.h](../src/sgame/g_local.h) must match it before publishing a release.
 
 The release script is [scripts/release.ps1](../scripts/release.ps1). It builds a beta zip package shaped like the `muffmode-0.22.15-beta.zip` release asset, plus a Windows installer asset:
 
@@ -52,7 +52,7 @@ CI runs `scripts/ci/check-changelog.ps1` to validate the table. On pull requests
 
 Highlight rules are strict: release highlights include only `major` rows. If a release has no `major` rows, the generator falls back to the most relevant smaller rows and says that no major changes are logged.
 
-When `-UpdateVersionFiles` is used, the script updates `VERSION`, `src/g_local.h`, and every `Unreleased` changelog row to the target release version.
+When `-UpdateVersionFiles` is used, the script updates `VERSION`, `src/sgame/g_local.h`, and every `Unreleased` changelog row to the target release version.
 
 The Windows installer is built with [Inno Setup 6](https://jrsoftware.org/isinfo.php). The release script looks for `ISCC.exe` on `PATH`, then in the normal Inno Setup install folders. You can pass `-InnoSetupCompiler "C:\Path\To\ISCC.exe"` to override detection or `-SkipInstaller` for a zip-only local package.
 
@@ -114,7 +114,7 @@ Run from a Visual Studio developer shell:
 .\scripts\release.ps1 -VersionMode auto
 ```
 
-Use `-SkipBuild` only when `game_x64.dll` already exists at the repository root.
+Use `-SkipBuild` only when `build\msbuild\x64\Release\game_x64.dll` already exists.
 Use `-SkipUpdaterBuild` only when `MuffModeUpdater.exe` already exists under the updater publish output.
 Use `-SkipInstaller` only when you intentionally want to create the zip without the Windows installer asset.
 
@@ -184,7 +184,7 @@ Workflow inputs:
 | `version` | Optional exact version, such as `0.23.0`. |
 | `previous_tag` | Optional changelog start tag override. |
 | `channel` | Defaults to `beta`; non-stable channels publish as prereleases. |
-| `commit_version_files` | Updates `VERSION` and `src/g_local.h`, commits, and pushes before publishing. |
+| `commit_version_files` | Updates `VERSION` and `src/sgame/g_local.h`, commits, and pushes before publishing. |
 | `skip_installer` | Creates only the zip package when the installer is intentionally not wanted. |
 | `require_copilot` | Requires GitHub Copilot CLI generation and fails if Copilot authentication is unavailable. Leave disabled to use the deterministic fallback when needed. |
 | `release_intro` | Optional manual intro for the GitHub release notes and Discord announcement. Leave blank to let the script generate one from the most significant changelog entries. |

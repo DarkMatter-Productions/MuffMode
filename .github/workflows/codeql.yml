@@ -33,7 +33,7 @@ jobs:
             vcpkg/downloads
             vcpkg/buildtrees
             vcpkg/packages
-          key: vcpkg-${{ runner.os }}-${{ hashFiles('src/vcpkg.json') }}
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}
           restore-keys: vcpkg-${{ runner.os }}-
 
       - name: Setup vcpkg

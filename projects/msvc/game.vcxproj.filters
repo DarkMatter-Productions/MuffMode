@@ -1,0 +1,624 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClInclude Include="..\..\src\shared\gameplay.h">
+      <Filter>shared</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\cgame\hud_text.h">
+      <Filter>cgame</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\cgame\cgame_local.h">
+      <Filter>cgame</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\cgame\messages.h">
+      <Filter>cgame</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\cgame\screen.h">
+      <Filter>cgame</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\g_local.h">
+      <Filter>sgame</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\core\debug_log.h">
+      <Filter>sgame\core</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\client\menu.h">
+      <Filter>sgame\client</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\client\userinfo.h">
+      <Filter>sgame\client</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\core\statusbar.h">
+      <Filter>sgame\core</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\shared\game.h">
+      <Filter>shared</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\entities\brush_misc.h">
+      <Filter>sgame\entities</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\entities\clock.h">
+      <Filter>sgame\entities</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\entities\shadow_lights.h">
+      <Filter>sgame\entities</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\entities\teleporter.h">
+      <Filter>sgame\entities</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\entities\world_text.h">
+      <Filter>sgame\entities</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\shared\q_std.h">
+      <Filter>shared</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\shared\q_vec3.h">
+      <Filter>shared</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\bots\bot_debug.h">
+      <Filter>sgame\bots</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\bots\bot_exports.h">
+      <Filter>sgame\bots</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\bots\bot_includes.h">
+      <Filter>sgame\bots</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\bots\bot_think.h">
+      <Filter>sgame\bots</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\bots\bot_utils.h">
+      <Filter>sgame\bots</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\monsters\m_actor.h">
+      <Filter>sgame\monsters</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\monsters\m_arachnid.h">
+      <Filter>sgame\monsters</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\monsters\m_berserk.h">
+      <Filter>sgame\monsters</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\monsters\m_boss2.h">
+      <Filter>sgame\monsters</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\monsters\m_boss31.h">
+      <Filter>sgame\monsters</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\monsters\m_boss32.h">
+      <Filter>sgame\monsters</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\monsters\m_brain.h">
+      <Filter>sgame\monsters</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\monsters\m_carrier.h">
+      <Filter>sgame\monsters</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\monsters\m_chick.h">
+      <Filter>sgame\monsters</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\monsters\m_fixbot.h">
+      <Filter>sgame\monsters</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\monsters\m_flash.h">
+      <Filter>sgame\monsters</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\monsters\m_flipper.h">
+      <Filter>sgame\monsters</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\monsters\m_float.h">
+      <Filter>sgame\monsters</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\monsters\m_flyer.h">
+      <Filter>sgame\monsters</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\monsters\m_gekk.h">
+      <Filter>sgame\monsters</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\monsters\m_gladiator.h">
+      <Filter>sgame\monsters</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\monsters\m_guardian.h">
+      <Filter>sgame\monsters</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\monsters\m_gunner.h">
+      <Filter>sgame\monsters</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\monsters\m_hover.h">
+      <Filter>sgame\monsters</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\monsters\m_infantry.h">
+      <Filter>sgame\monsters</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\monsters\m_insane.h">
+      <Filter>sgame\monsters</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\monsters\m_medic.h">
+      <Filter>sgame\monsters</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\monsters\m_mutant.h">
+      <Filter>sgame\monsters</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\monsters\m_parasite.h">
+      <Filter>sgame\monsters</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\monsters\m_player.h">
+      <Filter>sgame\monsters</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\monsters\m_rider.h">
+      <Filter>sgame\monsters</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\monsters\m_shambler.h">
+      <Filter>sgame\monsters</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\monsters\m_soldier.h">
+      <Filter>sgame\monsters</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\monsters\m_stalker.h">
+      <Filter>sgame\monsters</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\monsters\m_supertank.h">
+      <Filter>sgame\monsters</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\monsters\m_tank.h">
+      <Filter>sgame\monsters</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\monsters\m_turret.h">
+      <Filter>sgame\monsters</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\monsters\m_widow.h">
+      <Filter>sgame\monsters</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\monsters\m_widow2.h">
+      <Filter>sgame\monsters</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_admin.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_debug.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_gametype.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_captain.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_ghost.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_horde.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_horde_ai.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_nav_bake.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_horde_ai_rules.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_horde_tables.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_command_contracts.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_loc.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_loc_parse.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_maps.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_match.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_menu.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_pconfig.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_skin.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_motd.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_parse.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_profile.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_red_rover_rules.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_strike.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_team.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_vote.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_vote_menu.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_util.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_vote_types.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\muffmode.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="..\..\src\cgame\api.cpp">
+      <Filter>cgame</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\cgame\messages.cpp">
+      <Filter>cgame</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\cgame\screen.cpp">
+      <Filter>cgame</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\core\ai.cpp">
+      <Filter>sgame\core</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\core\chase_camera.cpp">
+      <Filter>sgame\core</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\core\commands.cpp">
+      <Filter>sgame\core</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\core\combat.cpp">
+      <Filter>sgame\core</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\entities\brush_misc.cpp">
+      <Filter>sgame\entities</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\entities\brush_movers.cpp">
+      <Filter>sgame\entities</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\entities\brush_specials.cpp">
+      <Filter>sgame\entities</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\entities\clock.cpp">
+      <Filter>sgame\entities</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\entities\ctf.cpp">
+      <Filter>sgame\entities</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\entities\gibs.cpp">
+      <Filter>sgame\entities</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\entities\item_powerups.cpp">
+      <Filter>sgame\entities</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\entities\item_registry.cpp">
+      <Filter>sgame\entities</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\entities\items.cpp">
+      <Filter>sgame\entities</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\core\runtime.cpp">
+      <Filter>sgame\core</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\entities\misc.cpp">
+      <Filter>sgame\entities</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\entities\player_targets.cpp">
+      <Filter>sgame\entities</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\entities\secret_doors.cpp">
+      <Filter>sgame\entities</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\entities\shadow_lights.cpp">
+      <Filter>sgame\entities</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\entities\shooter_targets.cpp">
+      <Filter>sgame\entities</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\entities\spawn.cpp">
+      <Filter>sgame\entities</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\entities\spawn_table.cpp">
+      <Filter>sgame\entities</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\entities\targets.cpp">
+      <Filter>sgame\entities</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\entities\teleporter.cpp">
+      <Filter>sgame\entities</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\entities\trains.cpp">
+      <Filter>sgame\entities</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\entities\triggers.cpp">
+      <Filter>sgame\entities</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\entities\turrets.cpp">
+      <Filter>sgame\entities</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\entities\vehicles.cpp">
+      <Filter>sgame\entities</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\entities\world_text.cpp">
+      <Filter>sgame\entities</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\core\game_utils.cpp">
+      <Filter>sgame\core</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\core\monster_runtime.cpp">
+      <Filter>sgame\core</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\core\physics.cpp">
+      <Filter>sgame\core</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\core\savegame.cpp">
+      <Filter>sgame\core</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\core\server_commands.cpp">
+      <Filter>sgame\core</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\core\weapon_projectiles.cpp">
+      <Filter>sgame\core</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\core\weapon_prox.cpp">
+      <Filter>sgame\core</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\core\weapon_tesla.cpp">
+      <Filter>sgame\core</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\client\lifecycle.cpp">
+      <Filter>sgame\client</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\client\death.cpp">
+      <Filter>sgame\client</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\client\spawn_points.cpp">
+      <Filter>sgame\client</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\client\userinfo.cpp">
+      <Filter>sgame\client</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\client\hud.cpp">
+      <Filter>sgame\client</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\shared\movement.cpp">
+      <Filter>shared</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\client\trail.cpp">
+      <Filter>sgame\client</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\client\view.cpp">
+      <Filter>sgame\client</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\client\weapons.cpp">
+      <Filter>sgame\client</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\client\grapple.cpp">
+      <Filter>sgame\client</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\shared\q_std.cpp">
+      <Filter>shared</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\bots\bot_debug.cpp">
+      <Filter>sgame\bots</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\bots\bot_exports.cpp">
+      <Filter>sgame\bots</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\bots\bot_think.cpp">
+      <Filter>sgame\bots</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\bots\bot_utils.cpp">
+      <Filter>sgame\bots</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\core\ai_navigation.cpp">
+      <Filter>sgame\core</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\core\monster_spawning.cpp">
+      <Filter>sgame\core</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\monsters\m_actor.cpp">
+      <Filter>sgame\monsters</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\monsters\m_arachnid.cpp">
+      <Filter>sgame\monsters</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\monsters\m_berserk.cpp">
+      <Filter>sgame\monsters</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\monsters\m_boss2.cpp">
+      <Filter>sgame\monsters</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\monsters\m_boss3.cpp">
+      <Filter>sgame\monsters</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\monsters\m_boss31.cpp">
+      <Filter>sgame\monsters</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\monsters\m_boss32.cpp">
+      <Filter>sgame\monsters</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\monsters\m_brain.cpp">
+      <Filter>sgame\monsters</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\monsters\m_carrier.cpp">
+      <Filter>sgame\monsters</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\monsters\m_chick.cpp">
+      <Filter>sgame\monsters</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\monsters\m_fixbot.cpp">
+      <Filter>sgame\monsters</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\monsters\m_flipper.cpp">
+      <Filter>sgame\monsters</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\monsters\m_float.cpp">
+      <Filter>sgame\monsters</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\monsters\m_flyer.cpp">
+      <Filter>sgame\monsters</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\monsters\m_gekk.cpp">
+      <Filter>sgame\monsters</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\monsters\m_gladiator.cpp">
+      <Filter>sgame\monsters</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\monsters\m_guardian.cpp">
+      <Filter>sgame\monsters</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\monsters\m_guncmdr.cpp">
+      <Filter>sgame\monsters</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\monsters\m_gunner.cpp">
+      <Filter>sgame\monsters</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\monsters\m_hover.cpp">
+      <Filter>sgame\monsters</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\monsters\m_infantry.cpp">
+      <Filter>sgame\monsters</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\monsters\m_insane.cpp">
+      <Filter>sgame\monsters</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\monsters\m_medic.cpp">
+      <Filter>sgame\monsters</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\monsters\m_move.cpp">
+      <Filter>sgame\monsters</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\monsters\m_mutant.cpp">
+      <Filter>sgame\monsters</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\monsters\m_parasite.cpp">
+      <Filter>sgame\monsters</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\monsters\m_shambler.cpp">
+      <Filter>sgame\monsters</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\monsters\m_soldier.cpp">
+      <Filter>sgame\monsters</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\monsters\m_stalker.cpp">
+      <Filter>sgame\monsters</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\monsters\m_supertank.cpp">
+      <Filter>sgame\monsters</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\monsters\m_tank.cpp">
+      <Filter>sgame\monsters</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\monsters\m_turret.cpp">
+      <Filter>sgame\monsters</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\monsters\m_widow.cpp">
+      <Filter>sgame\monsters</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\monsters\m_widow2.cpp">
+      <Filter>sgame\monsters</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\client\menu.cpp">
+      <Filter>sgame\client</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_debug.cpp">
+      <Filter>sgame\muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_captain.cpp">
+      <Filter>sgame\muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_ghost.cpp">
+      <Filter>sgame\muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_loc.cpp">
+      <Filter>sgame\muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_maps.cpp">
+      <Filter>sgame\muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_match.cpp">
+      <Filter>sgame\muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_nav_bake.cpp">
+      <Filter>sgame\muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_menu.cpp">
+      <Filter>sgame\muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_pconfig.cpp">
+      <Filter>sgame\muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_skin.cpp">
+      <Filter>sgame\muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_motd.cpp">
+      <Filter>sgame\muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_strike.cpp">
+      <Filter>sgame\muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_team.cpp">
+      <Filter>sgame\muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_vote.cpp">
+      <Filter>sgame\muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_vote_menu.cpp">
+      <Filter>sgame\muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_admin.cpp">
+      <Filter>sgame\muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_gametype.cpp">
+      <Filter>sgame\muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_horde_ai.cpp">
+      <Filter>sgame\muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_horde_tables.cpp">
+      <Filter>sgame\muffmode</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="sgame">
+      <UniqueIdentifier>{c5c91685-1f09-4210-9834-9a4e9eff0daa}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="sgame\bots">
+      <UniqueIdentifier>{185665ce-b604-4d9a-b22b-02a83797d112}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="sgame\monsters">
+      <UniqueIdentifier>{14e9d741-abb2-49e4-ad94-ca4aee1ffa62}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="sgame\muffmode">
+      <UniqueIdentifier>{3f48d5f5-a89d-4f1c-95af-6976e46ff1a0}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="cgame">
+      <UniqueIdentifier>{fef944d9-a41b-4717-b873-bd6dc39a4eb9}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="sgame\entities">
+      <UniqueIdentifier>{4c0f6296-9754-4f10-b0de-dc118fe6ab8c}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="sgame\core">
+      <UniqueIdentifier>{f7c18bb1-1f06-4a48-a77c-8cbf7a2cd771}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="sgame\client">
+      <UniqueIdentifier>{598427d2-e56f-49a2-981d-6439c058e856}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="shared">
+      <UniqueIdentifier>{0f2db422-4f6b-44d8-aaf4-a255fbe67d56}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

@@ -58,7 +58,7 @@ if (-not (Test-Path -LiteralPath $vcpkgExe)) {
 }
 
 if ($Install) {
-    Invoke-NativeCommand -FilePath $vcpkgExe -Arguments @("install", "--triplet", $Triplet) -WorkingDirectory (Join-Path $repoRoot "src")
+    Invoke-NativeCommand -FilePath $vcpkgExe -Arguments @("install", "--triplet", $Triplet) -WorkingDirectory $repoRoot
 }
 
 Write-Host "VCPKG_ROOT=$VcpkgRoot"

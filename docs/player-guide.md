@@ -41,6 +41,7 @@ If you are joining someone else's server, they control most match settings. Your
 | `captain` | Claim captain if vacant, or show the current captain. |
 | `captain <player>` | Transfer captain status to a teammate. |
 | `readyteam` | Ready your whole team when you are captain or admin. |
+| `loc <message with macros>` | Call out info to teammates (everyone in FFA). Your message must contain at least one macro token. `%l` is your nearest location in brackets, e.g. `bind x "cmd loc at %l"` or `bind c "cmd loc enemy at %l, %h %a"`. Status macros: `%h` health, `%a` armor, `%w` weapon+ammo, `%m` current ammo, `%n` nearby teammates, `%N` nearby players. |
 
 ## Display Commands
 

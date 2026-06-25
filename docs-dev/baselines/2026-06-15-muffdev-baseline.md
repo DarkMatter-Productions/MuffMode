@@ -33,8 +33,8 @@ The audit baseline branch remains frozen at `0853a089d38c0f8528e8dc009ac2bd46315
 | CI workflow | `.github/workflows/build.yml` |
 | CI target branch | `muffdev` |
 | Runner image | `windows-2025-vs2026` |
-| Solution | `src/MuffMode.sln` |
-| Project | `src/game.vcxproj` |
+| Solution | `projects/msvc/MuffMode.sln` |
+| Project | `projects/msvc/game.vcxproj` |
 | CI configuration | `Release|x64` |
 | Local debug configuration | `Debug|x64` |
 | Compiler family | MSVC |
@@ -42,7 +42,7 @@ The audit baseline branch remains frozen at `0853a089d38c0f8528e8dc009ac2bd46315
 | Language standard | C++17 (`stdcpp17`) |
 | Windows SDK selector | `10.0` |
 | vcpkg triplet | `x64-windows-static` |
-| vcpkg manifest | `src/vcpkg.json` |
+| vcpkg manifest | `vcpkg.json` |
 | vcpkg baseline | `000d1bda1ffa95a73e0b40334fa4103d6f4d3d48` |
 | Generated-artifact guard | `scripts/ci/check-generated-artifacts.ps1` |
 | Asset-seed guard | `scripts/ci/check-test-assets.ps1 -RepoOnly` |

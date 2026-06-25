@@ -230,7 +230,7 @@ Phase five implementation notes:
 
 - Replaced the root GPL-3.0 `LICENSE` text with GPL-2.0 text to align repository metadata with source headers and the upstream Quake II Rerelease DLL licensing position. `docs/licensing.md` now records the repo's GPL-2.0-only position and the required release-package license files.
 - Added `THIRD_PARTY_NOTICES.md` and `docs-dev/robustness/dependency-inventory.json` covering `{fmt}` 10.1.1 and JsonCpp 1.9.5, including SPDX identifiers, source paths, notice obligations, and review triggers.
-- Documented the current dual-path dependency model in `docs/dependencies.md`: vcpkg is the manifest/baseline authority, while vendored `src/fmt` and `src/json` material remains a pinned compatibility mirror that must stay version-aligned.
+- Documented the current dual-path dependency model in `docs/dependencies.md`: vcpkg is the manifest/baseline authority, while vendored `third_party/fmt` and `third_party/jsoncpp` material remains a pinned compatibility mirror that must stay version-aligned.
 - Added `scripts/ci/check-dependency-inventory.ps1` and wired it into the build workflow after vcpkg setup.
 - Removed `.github/workflows/build.yml.notused` and legacy `.gitlab-ci.yml` so the active GitHub workflow set is the sole CI/release story.
 - Updated release packaging to include and assert `THIRD_PARTY_NOTICES.md` alongside `LICENSE`.

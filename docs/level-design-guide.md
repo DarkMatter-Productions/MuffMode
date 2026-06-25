@@ -68,7 +68,6 @@ Use `gametype` and `not_gametype` to include or exclude an entity for specific g
 | `team` | Team Deathmatch |
 | `ctf` | Capture the Flag |
 | `ca` | Clan Arena |
-| `ft` | Freeze Tag |
 | `rr` | Red Rover |
 | `lms` | Last Man Standing |
 | `horde` | Horde Mode |
