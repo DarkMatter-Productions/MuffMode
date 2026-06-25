@@ -18,6 +18,7 @@ void MM_CmdLockTeam(gentity_t *ent);
 void MM_CmdUnlockTeam(gentity_t *ent);
 void MM_CmdReady(gentity_t *ent);
 void MM_CmdNotReady(gentity_t *ent);
+void MM_ToggleReadyUp(gentity_t *ent);
 void MM_CmdReadyUp(gentity_t *ent);
 void MM_CmdReadyAll(gentity_t *ent);
 void MM_CmdUnReadyAll(gentity_t *ent);

@@ -2846,7 +2846,7 @@ void Use_Compass(gentity_t *ent, gitem_t *inv) {
 
 	// [MuffMode] Compass toggles ready status in deathmatch
 	if (deathmatch->integer) {
-		MM_CmdReadyUp(ent);
+		MM_ToggleReadyUp(ent);
 		return;
 	}
 	if (!level.valid_poi) {

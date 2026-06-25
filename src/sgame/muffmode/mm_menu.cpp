@@ -557,7 +557,7 @@ void JoinSpectator(gentity_t *ent, menu_hnd_t *)
 
 void ToggleReady(gentity_t *ent, menu_hnd_t *)
 {
-	MM_CmdReadyUp(ent);
+	MM_ToggleReadyUp(ent);
 }
 
 constexpr int kHostName = 0;

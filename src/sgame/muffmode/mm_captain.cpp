@@ -587,11 +587,8 @@ void MM_CmdNotReady(gentity_t *ent) {
 	captain::BroadcastReadyStatus(ent);
 }
 
-void MM_CmdReadyUp(gentity_t *ent) {
+void MM_ToggleReadyUp(gentity_t *ent) {
 	if (!ent || !ent->client)
-		return;
-
-	if (!captain::RequireNoCommandArgs(ent))
 		return;
 
 	if (!captain::ReadyConditions(ent, !ent->client->resp.ready, false))
@@ -599,4 +596,14 @@ void MM_CmdReadyUp(gentity_t *ent) {
 
 	ent->client->resp.ready ^= true;
 	captain::BroadcastReadyStatus(ent);
+}
+
+void MM_CmdReadyUp(gentity_t *ent) {
+	if (!ent || !ent->client)
+		return;
+
+	if (!captain::RequireNoCommandArgs(ent))
+		return;
+
+	MM_ToggleReadyUp(ent);
 }
