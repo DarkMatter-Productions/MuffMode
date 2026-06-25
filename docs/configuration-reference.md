@@ -162,7 +162,7 @@ Deathmatch respawns use a WORR-style danger score instead of raw farthest-only m
 | --- | --- | --- |
 | `g_allow_admin` | `1` | Allows admin powers. |
 | `g_allow_custom_skins` | `1` | Allows custom player models and skins. |
-| `g_allow_skin_overrides` | `1` | Allows players to re-skin enemies/teammates on their own screen via the `eskin`/`tskin` commands (team games only). |
+| `g_allow_skin_overrides` | `1` | Allows players to re-skin enemies/teammates on their own screen via the `eskin`/`tskin` commands (team games; in duel, `eskin` re-skins your opponent). |
 | `g_allow_forfeit` | `1` | Allows Duel forfeits. |
 | `g_allow_kill` | `1` | Allows the `kill` suicide command. |
 | `g_allow_mymap` | `1` | Allows MyMap queueing. |

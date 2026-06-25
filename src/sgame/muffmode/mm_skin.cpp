@@ -131,6 +131,25 @@ gentity_t *MM_EffectiveSkinOverrideViewer(gentity_t *viewer) {
 	return nullptr;
 }
 
+bool MM_SkinOverridesEnabled() {
+	return Teams() || GT(GT_DUEL);
+}
+
+bool MM_IsSkinOverrideEnemy(gentity_t *perspective, gentity_t *target) {
+	if (!MM_IsClientEntity(perspective) || !MM_IsClientEntity(target))
+		return false;
+
+	if (GT(GT_DUEL))
+		return perspective != target &&
+			ClientIsPlaying(perspective->client) &&
+			ClientIsPlaying(target->client);
+
+	if (!Teams())
+		return false;
+
+	return perspective->client->sess.team != target->client->sess.team;
+}
+
 bool MM_ShouldOverrideTarget(gentity_t *viewer, gentity_t *target, const char **skin) {
 	*skin = nullptr;
 
@@ -142,12 +161,18 @@ bool MM_ShouldOverrideTarget(gentity_t *viewer, gentity_t *target, const char **
 	// always belongs to the real viewer entity.
 	gentity_t *team_viewer = MM_EffectiveSkinOverrideViewer(viewer);
 
-	if (!Teams() || !team_viewer || !MM_IsClientEntity(target))
+	if (!MM_SkinOverridesEnabled() || !team_viewer || !MM_IsClientEntity(target))
 		return false;
 	if (team_viewer == target || !ClientIsPlaying(target->client))
 		return false;
 
-	const bool is_enemy = team_viewer->client->sess.team != target->client->sess.team;
+	const bool is_enemy = MM_IsSkinOverrideEnemy(team_viewer, target);
+	const bool is_teammate = !is_enemy && Teams() &&
+		team_viewer->client->sess.team == target->client->sess.team;
+
+	if (!is_enemy && !is_teammate)
+		return false;
+
 	*skin = MM_StoredSkinOverride(viewer, is_enemy);
 
 	return **skin != 0;
@@ -172,6 +197,12 @@ void MM_CmdSkinOverride(gentity_t *ent, bool is_enemy, const char *label, const 
 
 	if (!g_allow_skin_overrides->integer) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "Skin overrides are disabled on this server.\n");
+		return;
+	}
+
+	if (!is_enemy && GT(GT_DUEL)) {
+		gi.LocClient_Print(ent, PRINT_HIGH,
+			"tskin is not available in duel. Use eskin to re-skin your opponent on your screen.\n");
 		return;
 	}
 
@@ -228,7 +259,10 @@ void MM_CmdSkinOverride(gentity_t *ent, bool is_enemy, const char *label, const 
 } // namespace
 
 void MM_CmdEnemySkin(gentity_t *ent) {
-	MM_CmdSkinOverride(ent, true, "Enemy", "enemies", "eskin");
+	if (GT(GT_DUEL))
+		MM_CmdSkinOverride(ent, true, "Opponent", "your opponent", "eskin");
+	else
+		MM_CmdSkinOverride(ent, true, "Enemy", "enemies", "eskin");
 }
 
 void MM_CmdTeamSkin(gentity_t *ent) {
