@@ -2,6 +2,7 @@
 // Licensed under the GNU General Public License 2.0.
 
 #include "clock.h"
+#include "muffmode/mm_util.h"
 
 #include <ctime>
 #include <string_view>
@@ -59,13 +60,13 @@ void func_clock_format_countdown(gentity_t *self)
 void func_clock_format_time_of_day(gentity_t *self)
 {
 	const std::time_t now = std::time(nullptr);
-	const std::tm *local_time = std::localtime(&now);
-	if (!local_time) {
+	std::tm local_time = {};
+	if (!muffmode::LocalTimeSnapshot(now, local_time)) {
 		self->clock_message[0] = '\0';
 		return;
 	}
 
-	G_FmtTo(self->clock_message, "{:2}:{:02}:{:02}", local_time->tm_hour, local_time->tm_min, local_time->tm_sec);
+	G_FmtTo(self->clock_message, "{:2}:{:02}:{:02}", local_time.tm_hour, local_time.tm_min, local_time.tm_sec);
 }
 
 bool func_clock_elapsed(const gentity_t *self)

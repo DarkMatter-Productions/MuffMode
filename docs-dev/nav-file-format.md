@@ -8,7 +8,7 @@ section sizes, and EOF all reconcile exactly).
 This is the format the **KEX engine** loads for bot navigation via
 `gi.GetPathToGoal(...)`. The game DLL never reads or writes it directly — the
 engine compiles/loads it per map. MuffMode's `sv nav_bake` command
-(`src/muffmode/mm_nav_bake.cpp`) writes this format.
+(`src/sgame/muffmode/mm_nav_bake.cpp`) writes this format.
 
 > Endianness: little-endian throughout. Coordinates are standard Quake world
 > units (X, Y, Z). All offsets are byte offsets from start of file.

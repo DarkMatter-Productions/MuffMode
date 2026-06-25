@@ -29,10 +29,10 @@ constexpr float kSpawnMinPlayerDistance = 192.0f;
 
 struct AdaptiveState {
 	int     wave = -1;
-	int     wave_budget_start = 0;
-	int     player_deaths_wave = 0;
-	int     monsters_killed_at_start = 0;
-	gtime_t wave_start_time = 0_ms;
+	int     waveBudgetStart = 0;
+	int     playerDeathsWave = 0;
+	int     monstersKilledAtStart = 0;
+	gtime_t waveStartTime = 0_ms;
 };
 
 AdaptiveState adaptive_state;
@@ -210,14 +210,14 @@ float AdaptivePressureMult()
 
 	const float health_frac = FighterHealthFraction();
 	const int   fighters = max(1, MM_Horde_CountFighters());
-	const float death_pressure = static_cast<float>(adaptive_state.player_deaths_wave) / static_cast<float>(fighters);
+	const float death_pressure = static_cast<float>(adaptive_state.playerDeathsWave) / static_cast<float>(fighters);
 
-	const int killed = max(0, level.killed_monsters - adaptive_state.monsters_killed_at_start);
-	const float elapsed = (level.time - adaptive_state.wave_start_time).seconds();
+	const int killed = max(0, level.killed_monsters - adaptive_state.monstersKilledAtStart);
+	const float elapsed = (level.time - adaptive_state.waveStartTime).seconds();
 	const float clear_rate = elapsed > 0.0f ? static_cast<float>(killed) / elapsed : 0.0f;
 	// Compare monsters/sec cleared against an expected monsters/sec derived from budget, not raw points.
-	const float expected_monsters = adaptive_state.wave_budget_start > 0
-		? static_cast<float>(adaptive_state.wave_budget_start) / kAdaptivePointsPerMonster
+	const float expected_monsters = adaptive_state.waveBudgetStart > 0
+		? static_cast<float>(adaptive_state.waveBudgetStart) / kAdaptivePointsPerMonster
 		: 0.0f;
 	const float expected_rate = expected_monsters / kAdaptiveWaveSeconds;
 	const float clear_ratio = expected_rate > 0.0f ? clear_rate / expected_rate : 1.0f;
@@ -239,10 +239,10 @@ void Adaptive_BeginWave()
 			max(1, static_cast<int>(level.horde_spawn_points_remaining * budget_mult));
 
 	adaptive_state.wave = level.round_number;
-	adaptive_state.wave_budget_start = level.horde_spawn_points_remaining;
-	adaptive_state.player_deaths_wave = 0;
-	adaptive_state.monsters_killed_at_start = level.killed_monsters;
-	adaptive_state.wave_start_time = level.time;
+	adaptive_state.waveBudgetStart = level.horde_spawn_points_remaining;
+	adaptive_state.playerDeathsWave = 0;
+	adaptive_state.monstersKilledAtStart = level.killed_monsters;
+	adaptive_state.waveStartTime = level.time;
 	adaptive_last_wave_pressure = 1.0f;
 }
 
@@ -257,7 +257,7 @@ void Adaptive_RecordWaveEnd()
 void Adaptive_RecordPlayerDeath()
 {
 	if (g_horde_enhanced_ai->integer)
-		adaptive_state.player_deaths_wave++;
+		adaptive_state.playerDeathsWave++;
 }
 
 select_spawn_result_t SelectSpawnPoint(vec3_t avoid_point)

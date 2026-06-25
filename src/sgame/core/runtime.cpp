@@ -17,9 +17,12 @@
 #include "muffmode/mm_profile.h"
 #include "muffmode/mm_red_rover_rules.h"
 #include "muffmode/mm_team.h"
+#include "muffmode/mm_util.h"
 #include "muffmode/mm_vote.h"
 #include "bots/bot_includes.h"
 #include "monsters/m_player.h"	// match starts
+
+#include <ctime>
 
 CHECK_GCLIENT_INTEGRITY;
 CHECK_ENTITY_INTEGRITY;
@@ -1987,13 +1990,16 @@ void ExitLevel() {
 
 	// Take screenshot at match end (when exiting level)
 	if (deathmatch->integer && g_dm_intermission_shots->integer && level.num_playing_human_clients > 0) {
-		struct tm *ltime;
-		time_t gmtime;
-
-		time(&gmtime);
-		ltime = localtime(&gmtime);
-		time(&gmtime);
-		ltime = localtime(&gmtime);
+		std::tm local_time = {};
+		const std::time_t now = std::time(nullptr);
+		std::string timestamp = "unknown-time";
+		if (muffmode::LocalTimeSnapshot(now, local_time)) {
+			timestamp = std::string(G_Fmt("{}_{:02}_{:02}-{:02}_{:02}_{:02}",
+				1900 + local_time.tm_year, local_time.tm_mon + 1, local_time.tm_mday,
+				local_time.tm_hour, local_time.tm_min, local_time.tm_sec));
+		} else {
+			MuffModeLog("WARN", "ExitLevel: unable to resolve local time for screenshot filename");
+		}
 
 		// Helper lambda to sanitize filename components (replace spaces and invalid chars)
 		auto sanitize_name = [](const char *name, const char *fallback = "player") -> std::string {
@@ -2038,8 +2044,8 @@ void ExitLevel() {
 			std::string n1 = sanitize_name((e1 && e1->client && e1->inuse) ? e1->client->resp.netname : "", "player1");
 			std::string n2 = sanitize_name((e2 && e2->client && e2->inuse) ? e2->client->resp.netname : "", "player2");
 
-			std::string filename = std::string(G_Fmt("{}-vs-{}-{}-{}_{:02}_{:02}-{:02}_{:02}_{:02}",
-				n1.c_str(), n2.c_str(), safe_mapname.c_str(), 1900 + ltime->tm_year, ltime->tm_mon + 1, ltime->tm_mday, ltime->tm_hour, ltime->tm_min, ltime->tm_sec));
+			std::string filename = std::string(G_Fmt("{}-vs-{}-{}-{}",
+				n1.c_str(), n2.c_str(), safe_mapname.c_str(), timestamp.c_str()));
 			if (filename.length() > MAX_SCREENSHOT_FILENAME)
 				filename.resize(MAX_SCREENSHOT_FILENAME);
 			screenshot_cmd = std::string(G_Fmt("screenshot {}\n", filename));
@@ -2055,8 +2061,8 @@ void ExitLevel() {
 			}
 			std::string name = sanitize_name(raw_name);
 
-			std::string filename = std::string(G_Fmt("{}-{}-{}-{}_{:02}_{:02}-{:02}_{:02}_{:02}", gt_short_name_upper[g_gametype->integer],
-				name.c_str(), safe_mapname.c_str(), 1900 + ltime->tm_year, ltime->tm_mon + 1, ltime->tm_mday, ltime->tm_hour, ltime->tm_min, ltime->tm_sec));
+			std::string filename = std::string(G_Fmt("{}-{}-{}-{}", gt_short_name_upper[g_gametype->integer],
+				name.c_str(), safe_mapname.c_str(), timestamp.c_str()));
 			if (filename.length() > MAX_SCREENSHOT_FILENAME)
 				filename.resize(MAX_SCREENSHOT_FILENAME);
 			screenshot_cmd = std::string(G_Fmt("screenshot {}\n", filename));

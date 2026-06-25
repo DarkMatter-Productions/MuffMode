@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdio>
+#include <ctime>
 #include <cstring>
 #include <limits>
 #include <memory>
@@ -64,6 +65,15 @@ inline float CvarValue(const cvar_t *cvar) noexcept
 inline bool CvarEnabled(const cvar_t *cvar) noexcept
 {
 	return CvarInteger(cvar) != 0;
+}
+
+inline bool LocalTimeSnapshot(std::time_t value, std::tm &out) noexcept
+{
+#ifdef _WIN32
+	return localtime_s(&out, &value) == 0;
+#else
+	return localtime_r(&value, &out) != nullptr;
+#endif
 }
 
 struct FileCloser {

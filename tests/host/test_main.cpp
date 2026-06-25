@@ -12,6 +12,7 @@
 #include <exception>
 #include <functional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -61,6 +62,12 @@ void check(bool condition, const char *expression, const char *file, int line) {
 #define MM_CHECK_FALSE(expr) check(!(expr), "!(" #expr ")", __FILE__, __LINE__)
 #define MM_CHECK_EQ(lhs, rhs) check(((lhs) == (rhs)), #lhs " == " #rhs, __FILE__, __LINE__)
 
+MM_TEST(parse_helpers_trim_ascii_whitespace_without_touching_inner_text) {
+	MM_CHECK_EQ(std::string(MM_TrimAsciiWhitespace(std::string_view(" \tARENA\r\n"))), std::string("ARENA"));
+	MM_CHECK_EQ(std::string(MM_TrimAsciiWhitespace(std::string_view("A B"))), std::string("A B"));
+	MM_CHECK(MM_TrimAsciiWhitespace(std::string_view(" \t\r\n")).empty());
+}
+
 MM_TEST(parse_int_rejects_malformed_values) {
 	MM_CHECK_EQ(*MM_ParseIntArg("42"), 42);
 	MM_CHECK_EQ(*MM_ParseIntArg("-7"), -7);
@@ -85,6 +92,9 @@ MM_TEST(parse_float_rejects_non_finite_and_trailing_values) {
 	MM_CHECK_FALSE(MM_ParseFloatArg("inf"));
 	MM_CHECK_FALSE(MM_ParseFloatArg(" 1.0"));
 	MM_CHECK_FALSE(MM_ParseFloatArg("1.0x"));
+
+	const char embedded_null[] = { '1', '.', '0', '\0', '2' };
+	MM_CHECK_FALSE(MM_ParseFloatArg(std::string_view(embedded_null, sizeof(embedded_null))));
 }
 
 MM_TEST(parse_cfg_int_accepts_quoted_or_plain_values) {
@@ -92,8 +102,10 @@ MM_TEST(parse_cfg_int_accepts_quoted_or_plain_values) {
 	MM_CHECK_EQ(*MM_ParseCfgIntArg(" \t16\t "), 16);
 	MM_CHECK_EQ(*MM_ParseCfgIntArg("\r\n16\r\n"), 16);
 	MM_CHECK_EQ(*MM_ParseCfgIntArg("\"8\""), 8);
+	MM_CHECK_EQ(*MM_ParseCfgIntArg("\" 8 \""), 8);
 	MM_CHECK_EQ(*MM_ParseCfgIntArg(" \"4\" \t\r\n"), 4);
 	MM_CHECK_FALSE(MM_ParseCfgIntArg("\"4"));
+	MM_CHECK_FALSE(MM_ParseCfgIntArg("\"\""));
 	MM_CHECK_FALSE(MM_ParseCfgIntArg("4 extra"));
 	MM_CHECK_FALSE(MM_ParseCfgIntArg("\"4\" extra"));
 }
@@ -244,6 +256,7 @@ MM_TEST(loc_line_parser_rejects_malformed_lines) {
 	MM_CHECK_FALSE(MM_ParseLocLine("1 2 3x LABEL", xyz, label));
 	MM_CHECK_FALSE(MM_ParseLocLine("1 2 nan LABEL", xyz, label));
 	MM_CHECK_FALSE(MM_ParseLocLine("1 2 inf LABEL", xyz, label));
+	MM_CHECK_FALSE(MM_ParseLocLine("1 2 1e1000 LABEL", xyz, label));
 }
 
 MM_TEST(loc_body_requires_macro_and_substitutes_location) {
@@ -255,6 +268,8 @@ MM_TEST(loc_body_requires_macro_and_substitutes_location) {
 	MM_CHECK_EQ(MM_BuildLocBody("ENEMY at %l", "MEGA"), std::string("ENEMY at [MEGA]"));
 	MM_CHECK_EQ(MM_BuildLocBody("%L then %l", "RAIL"), std::string("[RAIL] then [RAIL]"));
 	MM_CHECK_EQ(MM_BuildLocBody("\"hold %l\"", "BOX"), std::string("hold [BOX]"));
+	MM_CHECK_EQ(MM_BuildLocBody("  at %l  ", "ARENA"), std::string("at [ARENA]"));
+	MM_CHECK_EQ(MM_BuildLocBody(" \"hold %l\" ", "BOX"), std::string("hold [BOX]"));
 
 	MM_CHECK_FALSE(MM_BuildLocBody("%h %a", "WATER").empty());
 	MM_CHECK_EQ(MM_BuildLocBody("at %l %h", "MEGA"), std::string("at [MEGA] %h"));
