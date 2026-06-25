@@ -5,10 +5,8 @@
 
 #include "mm_parse.h"
 
-#include <cmath>
-#include <cstdlib>
-#include <cstring>
 #include <string>
+#include <string_view>
 
 // Parse one line of a Quake .loc file of the form:
 //
@@ -31,15 +29,15 @@ inline bool MM_ParseLocLine(const char *line, float out_xyz[3], std::string &out
 		if (!*p)
 			return false;
 
-		char *end = nullptr;
-		const float v = std::strtof(p, &end);
-		if (end == p || !std::isfinite(v))
-			return false;
-		if (*end && !MM_IsAsciiWhitespace(*end))
+		const char *token_begin = p;
+		while (*p && !MM_IsAsciiWhitespace(*p))
+			p++;
+
+		const auto parsed = MM_ParseFloatArg(std::string_view(token_begin, static_cast<size_t>(p - token_begin)));
+		if (!parsed)
 			return false;
 
-		vals[i] = v;
-		p = end;
+		vals[i] = *parsed;
 	}
 
 	while (MM_IsAsciiWhitespace(*p))
@@ -71,7 +69,7 @@ inline constexpr const char *MM_LOC_MACRO_TOKENS[] = {
 	"%N",       // nearby players
 };
 
-inline bool MM_LocBodyHasMacro(const std::string &body)
+inline bool MM_LocBodyHasMacro(std::string_view body)
 {
 	for (const char *tok : MM_LOC_MACRO_TOKENS) {
 		if (body.find(tok) != std::string::npos)
@@ -88,10 +86,12 @@ inline std::string MM_BuildLocBody(const char *args, const char *label)
 	constexpr const char *MM_LOC_LOCATION_TOKENS[] = { "%l", "%L" };
 	const std::string repl = std::string("[") + (label ? label : "") + "]";
 
-	std::string body = (args && *args) ? args : "";
+	std::string body(MM_TrimAsciiWhitespace((args && *args) ? std::string_view(args) : std::string_view()));
 
-	if (body.size() >= 2 && body.front() == '"' && body.back() == '"')
-		body = body.substr(1, body.size() - 2);
+	if (body.size() >= 2 && body.front() == '"' && body.back() == '"') {
+		const std::string_view inner(body.data() + 1, body.size() - 2);
+		body = std::string(MM_TrimAsciiWhitespace(inner));
+	}
 
 	if (!MM_LocBodyHasMacro(body))
 		return std::string();

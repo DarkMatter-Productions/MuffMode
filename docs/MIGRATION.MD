@@ -6,7 +6,13 @@ This document tracks migration progress from a monolithic fork style toward thin
 
 - Base: `quake2-rerelease-dll/rerelease`
 - Mod target: `MuffMode/src`
-- Goal: keep vanilla-named files as thin hooks and move MuffMode behavior into `src/muffmode/`.
+- Goal: keep vanilla-named files as thin hooks and move MuffMode behavior into
+  `src/sgame/muffmode/`.
+
+> Historical note: early entries use the pre-split `src/muffmode/`, `g_*.cpp`, and `p_*.cpp`
+> paths that existed when the migration was performed. The current tree keeps server-side
+> MuffMode modules under `src/sgame/muffmode/`, server vanilla adapters under `src/sgame/`, and
+> shared movement/API code under `src/shared/`.
 
 ## Progress So Far
 
@@ -425,8 +431,9 @@ Validated against vanilla Q2RE source (`q2re-src/`): every Phase 7 target is Muf
 
 ## Current Thin-Hook Pattern
 
-- Keep vanilla files (`g_main.cpp`, `g_svcmds.cpp`) as orchestration points.
-- Place feature body logic in `src/muffmode/*.cpp`.
+- Keep server adapter files such as `src/sgame/core/runtime.cpp` and
+  `src/sgame/core/server_commands.cpp` as orchestration points.
+- Place feature body logic in `src/sgame/muffmode/*.cpp`.
 - Keep behavior unchanged for each extraction slice.
 - Validate each slice with build + in-game smoke tests before moving on.
 
@@ -434,7 +441,7 @@ Validated against vanilla Q2RE source (`q2re-src/`): every Phase 7 target is Muf
 
 **Status:** Thin-vanilla refactor complete — Phases 1–6, Tier 1–2, header boundaries, and Phase 7 (R1–R8 remaining extraction, validated against vanilla Q2RE source).
 
-Cohesive MuffMode feature bodies live in `src/muffmode/` (22 modules). Remaining vanilla code is intentionally thin: the intermission/exit orchestration hub in `g_main.cpp`, the command dispatch table with thin wrappers in `g_cmds.cpp`, 1–3 line `GT()`/`RS()`/`GTF()` gates, shared types/state in `g_local.h`, and cvar registration in `InitGame`. Removing every gametype/ruleset conditional from vanilla files is explicitly **out of scope** (see [`THIN_VANILLA_PRINCIPLES.md`](THIN_VANILLA_PRINCIPLES.md)).
+Cohesive MuffMode feature bodies live in `src/sgame/muffmode/` (22 modules). Remaining vanilla code is intentionally thin: the intermission/exit orchestration hub in `src/sgame/core/runtime.cpp`, the command dispatch table with thin wrappers in `src/sgame/core/commands.cpp`, 1–3 line `GT()`/`RS()`/`GTF()` gates, shared types/state in `src/sgame/g_local.h`, and cvar registration in `InitGame`. Removing every gametype/ruleset conditional from vanilla files is explicitly **out of scope** (see [`THIN_VANILLA_PRINCIPLES.md`](THIN_VANILLA_PRINCIPLES.md)).
 
 ### Vanilla adapter table
 

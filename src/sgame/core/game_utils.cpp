@@ -8,6 +8,7 @@
 #include "muffmode/mm_profile.h"
 #include "muffmode/mm_skin.h"
 #include "muffmode/mm_team.h"
+#include "muffmode/mm_util.h"
 #include <cerrno>
 #include <ctime>
 
@@ -1216,21 +1217,19 @@ Return a stable timestamp string for file naming.
 =============
 */
 const char *stime() {
-	struct tm *ltime;
-	time_t gmtime;
+	std::tm local_time = {};
+	std::time_t now = {};
 	static char buffer[32];
 
-	time(&gmtime);
-	ltime = localtime(&gmtime);
-
-	if (!ltime) {
+	std::time(&now);
+	if (!muffmode::LocalTimeSnapshot(now, local_time)) {
 		buffer[0] = '\0';
 		return buffer;
 	}
 
 	G_FmtTo(buffer, "{}{:02}{:02}{:02}{:02}{:02}",
-		1900 + ltime->tm_year, ltime->tm_mon + 1, ltime->tm_mday,
-		ltime->tm_hour, ltime->tm_min, ltime->tm_sec);
+		1900 + local_time.tm_year, local_time.tm_mon + 1, local_time.tm_mday,
+		local_time.tm_hour, local_time.tm_min, local_time.tm_sec);
 
 	return buffer;
 }

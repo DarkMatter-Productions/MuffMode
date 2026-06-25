@@ -9,7 +9,6 @@
 #include <cstdio>
 #include <ctime>
 #include <fstream>
-#include <optional>
 #include <string>
 #ifdef _WIN32
 #include <io.h>
@@ -27,23 +26,14 @@ constexpr const char *kLogFile = "muffmode_debug.log";
 std::ofstream log_stream;
 bool log_initialized = false;
 
-std::optional<std::tm> LocalTimeSnapshot(std::time_t time)
-{
-	const std::tm *time_info = std::localtime(&time);
-	if (!time_info)
-		return std::nullopt;
-
-	return *time_info;
-}
-
 std::string FormatLocalTime(std::time_t time, const char *format)
 {
 	std::array<char, 64> timestamp = {};
-	const auto time_info = LocalTimeSnapshot(time);
-	if (!time_info)
+	std::tm time_info = {};
+	if (!muffmode::LocalTimeSnapshot(time, time_info))
 		return "";
 
-	if (!std::strftime(timestamp.data(), timestamp.size(), format, &*time_info))
+	if (!std::strftime(timestamp.data(), timestamp.size(), format, &time_info))
 		return "";
 
 	return timestamp.data();
@@ -65,19 +55,19 @@ bool ShouldTruncateLog()
 	}
 
 	// Get file modification time.
-	const auto file_date = LocalTimeSnapshot(fileInfo.st_mtime);
-	if (!file_date)
+	std::tm file_date = {};
+	if (!muffmode::LocalTimeSnapshot(fileInfo.st_mtime, file_date))
 		return true;
 
 	// Get current time.
-	const auto now_date = LocalTimeSnapshot(std::time(nullptr));
-	if (!now_date)
+	std::tm now_date = {};
+	if (!muffmode::LocalTimeSnapshot(std::time(nullptr), now_date))
 		return false;
 
 	// If file date is different from today, truncate.
-	return file_date->tm_year != now_date->tm_year ||
-		file_date->tm_mon != now_date->tm_mon ||
-		file_date->tm_mday != now_date->tm_mday;
+	return file_date.tm_year != now_date.tm_year ||
+		file_date.tm_mon != now_date.tm_mon ||
+		file_date.tm_mday != now_date.tm_mday;
 }
 
 void EnsureLogInitialized()
