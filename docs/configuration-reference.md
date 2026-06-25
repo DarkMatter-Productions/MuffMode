@@ -247,6 +247,7 @@ Deathmatch respawns use a WORR-style danger score instead of raw farthest-only m
 | `g_knockback_scale` | `1.0` | Scales knockback from damage. |
 | `g_ladder_steps` | `1` | Ladder step sounds: `1` campaigns only, `2` always. |
 | `g_lag_compensation` | `1` | Enables lag compensation. |
+| `g_lag_compensation_enhanced` | `1` | Enables richer lag compensation with historical hitboxes, lag-aware aim projection, frame-based snapshot selection, interpolation, and stale/discontinuous-history cleanup. |
 | `g_mover_speed_scale` | `1.0f` | Scales mover speed for doors, rotators, lifts, and similar entities. |
 | `g_no_powerups` | `0` | Disables powerup pickups. |
 | `g_no_bfg` | `0` | Prevents BFG spawning in maps. |

@@ -745,6 +745,24 @@ constexpr gtime_t operator"" _hz(unsigned long long int s) {
 	return gtime_t::from_ms(static_cast<int64_t>((1.0 / s) * 1000));
 }
 
+struct lag_compensation_sample_t {
+	uint32_t server_frame = 0;
+	gtime_t time;
+	vec3_t origin;
+	vec3_t mins;
+	vec3_t maxs;
+	int32_t viewheight = 0;
+	int32_t pmove_viewheight = 0;
+};
+
+struct lag_compensation_restore_t {
+	vec3_t origin;
+	vec3_t mins;
+	vec3_t maxs;
+	int32_t viewheight = 0;
+	int32_t pmove_viewheight = 0;
+};
+
 #define SERVER_TICK_RATE gi.tick_rate // in hz
 extern gtime_t FRAME_TIME_S;
 extern gtime_t FRAME_TIME_MS;
@@ -1437,7 +1455,7 @@ struct game_locals_t {
 	int32_t airacceleration_modified, gravity_modified;
 	std::array<level_entry_t, MAX_LEVELS_PER_UNIT> level_entries;
 	int32_t max_lag_origins;
-	vec3_t *lag_origins; // maxclients * max_lag_origins
+	lag_compensation_sample_t *lag_samples; // maxclients * max_lag_origins
 
 	std::vector<std::string> mapqueue;
 
@@ -2457,6 +2475,7 @@ extern cvar_t *g_item_bobbing;
 extern cvar_t *g_knockback_scale;
 extern cvar_t *g_ladder_steps;
 extern cvar_t *g_lag_compensation;
+extern cvar_t *g_lag_compensation_enhanced;
 extern cvar_t *g_map_list;
 extern cvar_t *g_map_list_shuffle;
 extern cvar_t *g_map_pool;
@@ -3068,8 +3087,9 @@ void ServerCommand();
 // sgame/client/view.cpp
 //
 void ClientEndServerFrame(gentity_t *ent);
-void G_LagCompensate(gentity_t *from_player, const vec3_t &start, const vec3_t &dir);
+bool G_LagCompensate(gentity_t *from_player, const vec3_t &start, const vec3_t &dir);
 void G_UnLagCompensate();
+void G_ClearLagCompensationHistory(gentity_t *ent);
 
 //
 // sgame/client/hud.cpp
@@ -3691,10 +3711,10 @@ struct gclient_t {
 	gentity_t *sound2_entity;
 	gtime_t  sound2_entity_time;
 	// saved positions for lag compensation
-	uint8_t	 num_lag_origins; // 0 to MAX_LAG_ORIGINS, how many we can go back
-	uint8_t  next_lag_origin; // the next one to write to
+	uint16_t num_lag_origins; // 0 to game.max_lag_origins, how many we can go back
+	uint16_t next_lag_origin; // the next one to write to
 	bool     is_lag_compensated;
-	vec3_t	 lag_restore_origin;
+	lag_compensation_restore_t lag_restore;
 	// for high tickrate weapon angles
 	vec3_t	 slow_view_angles;
 	gtime_t	 slow_view_angle_time;

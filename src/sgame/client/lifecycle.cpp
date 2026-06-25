@@ -714,6 +714,9 @@ void ClientSpawn(gentity_t *ent) {
 	if (GTF(GTF_ROUNDS) && GTF(GTF_ELIMINATION) && level.match_state == matchst_t::MATCH_IN_PROGRESS && notGT(GT_HORDE))
 		if (level.round_state == roundst_t::ROUND_IN_PROGRESS || level.round_state == roundst_t::ROUND_ENDED)
 			ClientSetEliminated(ent);
+
+	G_ClearLagCompensationHistory(ent);
+
 	if (GT(GT_HORDE) && level.match_state == matchst_t::MATCH_IN_PROGRESS &&
 		level.round_state == roundst_t::ROUND_IN_PROGRESS && !ent->client->eliminated)
 		ClientSetEliminated(ent);
@@ -1549,6 +1552,8 @@ Will not be called between levels.
 void ClientDisconnect(gentity_t *ent) {
 	if (!ent->client)
 		return;
+
+	G_ClearLagCompensationHistory(ent);
 
 	const bool auto_ghosted = MM_Ghost_CaptureDisconnect(ent);
 	if (!auto_ghosted)

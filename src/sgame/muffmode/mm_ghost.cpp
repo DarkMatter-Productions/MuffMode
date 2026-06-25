@@ -506,7 +506,7 @@ void SanitizeRestoredClient(gentity_t *ent, int ghost_index, bool keep_current_a
 	client->sight_entity = nullptr;
 	client->sound_entity = nullptr;
 	client->sound2_entity = nullptr;
-	client->is_lag_compensated = false;
+	G_ClearLagCompensationHistory(ent);
 	client->awaiting_respawn = false;
 	client->respawn_timeout = 0_ms;
 	client->initial_menu_delay = 0_ms;

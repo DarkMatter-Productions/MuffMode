@@ -251,6 +251,7 @@ cvar_t *g_item_bobbing;
 cvar_t *g_knockback_scale;
 cvar_t *g_ladder_steps;
 cvar_t *g_lag_compensation;
+cvar_t *g_lag_compensation_enhanced;
 cvar_t *g_map_list;
 cvar_t *g_map_list_shuffle;
 cvar_t *g_map_pool;
@@ -688,6 +689,7 @@ static void InitGame() {
 	g_knockback_scale = gi.cvar("g_knockback_scale", "1.0", CVAR_NOFLAGS);
 	g_ladder_steps = gi.cvar("g_ladder_steps", "1", CVAR_NOFLAGS);
 	g_lag_compensation = gi.cvar("g_lag_compensation", "1", CVAR_NOFLAGS);
+	g_lag_compensation_enhanced = gi.cvar("g_lag_compensation_enhanced", "1", CVAR_NOFLAGS);
 	g_map_list = gi.cvar("g_map_list", "", CVAR_NOFLAGS);
 	g_map_list_shuffle = gi.cvar("g_map_list_shuffle", "1", CVAR_NOFLAGS);
 	g_map_pool = gi.cvar("g_map_pool", "", CVAR_NOFLAGS);
@@ -791,9 +793,9 @@ static void InitGame() {
 	memset(game.clients, 0, game.maxclients * sizeof(game.clients[0]));
 	globals.num_entities = game.maxclients + 1;
 
-	// how far back we should support lag origins for
-	game.max_lag_origins = 20 * (0.1f / gi.frame_time_s);
-	game.lag_origins = (vec3_t *)gi.TagMalloc(game.maxclients * sizeof(vec3_t) * game.max_lag_origins, TAG_GAME);
+	// how far back we should support lag compensation samples for
+	game.max_lag_origins = clamp(static_cast<int32_t>(ceilf(2.0f / gi.frame_time_s)), 1, 65535);
+	game.lag_samples = (lag_compensation_sample_t *)gi.TagMalloc(game.maxclients * sizeof(lag_compensation_sample_t) * game.max_lag_origins, TAG_GAME);
 
 	level.start_time = level.time;
 

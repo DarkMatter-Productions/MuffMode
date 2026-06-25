@@ -1078,21 +1078,170 @@ static void P_RunMegaHealth(gentity_t *ent) {
 	}
 }
 
-// [Paril-KEX] push all players' origins back to match their lag compensation
-void G_LagCompensate(gentity_t *from_player, const vec3_t &start, const vec3_t &dir) {
-	uint32_t current_frame = gi.ServerFrame();
+static lag_compensation_sample_t *G_LagCompensationSamples(gentity_t *ent) {
+	if (!game.lag_samples || game.max_lag_origins <= 0 || !ent || ent->s.number <= 0 || ent->s.number > game.maxclients)
+		return nullptr;
 
+	return game.lag_samples + ((ent->s.number - 1) * game.max_lag_origins);
+}
+
+static int32_t G_LagCompensationSampleCount(gentity_t *ent) {
+	if (!ent || !ent->client || game.max_lag_origins <= 0)
+		return 0;
+
+	return min<int32_t>(ent->client->num_lag_origins, game.max_lag_origins);
+}
+
+static bool G_IsEnhancedLagTarget(gentity_t *ent) {
+	return ent && ent->inuse && ent->client && ent->client->pers.connected &&
+		ClientIsPlaying(ent->client) && !ent->client->eliminated &&
+		ent->health > 0 && !ent->deadflag &&
+		!(ent->svflags & SVF_NOCLIENT) && ent->solid != SOLID_NOT;
+}
+
+static bool G_IsLagCompensationShooter(gentity_t *ent) {
+	return G_IsEnhancedLagTarget(ent) && !(ent->svflags & SVF_BOT);
+}
+
+static bool G_LagCompensationFrameDelta(gentity_t *from_player, uint32_t current_frame, int32_t &frames_back) {
+	if (!from_player || !from_player->client)
+		return false;
+	else if (game.max_lag_origins <= 0)
+		return false;
+
+	uint32_t command_frame = from_player->client->cmd.server_frame;
+	if (command_frame >= current_frame)
+		return false;
+
+	uint32_t delta = current_frame - command_frame;
+	if (delta >= static_cast<uint32_t>(game.max_lag_origins))
+		return false;
+
+	frames_back = static_cast<int32_t>(delta);
+	return true;
+}
+
+static bool G_LagSampleByOffset(gentity_t *ent, int32_t frames_back, lag_compensation_sample_t &sample) {
+	if (frames_back < 0)
+		return false;
+
+	lag_compensation_sample_t *samples = G_LagCompensationSamples(ent);
+	if (!samples)
+		return false;
+
+	int32_t sample_count = G_LagCompensationSampleCount(ent);
+	if (sample_count <= frames_back)
+		return false;
+
+	int32_t lag_id = static_cast<int32_t>(ent->client->next_lag_origin) - 1 - frames_back;
+	while (lag_id < 0)
+		lag_id += game.max_lag_origins;
+
+	if (lag_id >= game.max_lag_origins)
+		lag_id %= game.max_lag_origins;
+
+	sample = samples[lag_id];
+	return true;
+}
+
+static lag_compensation_sample_t G_InterpolateLagSamples(
+	const lag_compensation_sample_t &older,
+	const lag_compensation_sample_t &newer,
+	uint32_t target_frame,
+	float frac) {
+	if (frac <= 0.f)
+		return older;
+	else if (frac >= 1.f)
+		return newer;
+
+	lag_compensation_sample_t result = frac < 0.5f ? older : newer;
+	result.server_frame = target_frame;
+	result.time = older.time + ((newer.time - older.time) * frac);
+	result.origin = lerp(older.origin, newer.origin, frac);
+	return result;
+}
+
+static bool G_LagSampleAtFrame(
+	gentity_t *ent,
+	uint32_t target_frame,
+	int32_t frames_back,
+	lag_compensation_sample_t &sample) {
+	int32_t sample_count = G_LagCompensationSampleCount(ent);
+	if (sample_count <= 0)
+		return false;
+
+	lag_compensation_sample_t latest;
+	if (!G_LagSampleByOffset(ent, 0, latest))
+		return false;
+
+	if (target_frame >= latest.server_frame) {
+		sample = latest;
+		return true;
+	}
+
+	lag_compensation_sample_t oldest;
+	if (!G_LagSampleByOffset(ent, sample_count - 1, oldest))
+		return false;
+
+	if (target_frame < oldest.server_frame)
+		return false;
+
+	for (int32_t offset = 0; offset + 1 < sample_count; offset++) {
+		lag_compensation_sample_t newer, older;
+		if (!G_LagSampleByOffset(ent, offset, newer) ||
+			!G_LagSampleByOffset(ent, offset + 1, older))
+			return false;
+
+		if (target_frame <= newer.server_frame && target_frame >= older.server_frame) {
+			uint32_t span = newer.server_frame - older.server_frame;
+			float frac = span ? static_cast<float>(target_frame - older.server_frame) / static_cast<float>(span) : 1.f;
+			sample = G_InterpolateLagSamples(older, newer, target_frame, frac);
+			return true;
+		}
+	}
+
+	return G_LagSampleByOffset(ent, frames_back, sample);
+}
+
+static void G_ApplyLagCompensation(gentity_t *player, const lag_compensation_sample_t &sample, bool restore_bounds) {
+	if (!player->client->is_lag_compensated) {
+		player->client->is_lag_compensated = true;
+		player->client->lag_restore.origin = player->s.origin;
+		player->client->lag_restore.mins = player->mins;
+		player->client->lag_restore.maxs = player->maxs;
+		player->client->lag_restore.viewheight = player->viewheight;
+		player->client->lag_restore.pmove_viewheight = player->client->ps.pmove.viewheight;
+	}
+
+	player->s.origin = sample.origin;
+
+	if (restore_bounds) {
+		player->mins = sample.mins;
+		player->maxs = sample.maxs;
+		player->viewheight = sample.viewheight;
+		player->client->ps.pmove.viewheight = sample.pmove_viewheight;
+	}
+
+	gi.linkentity(player);
+}
+
+static bool G_LagCompensationEnabled(gentity_t *from_player, uint32_t current_frame, int32_t &frames_back) {
 	// if you need this to fight monsters, you need help
 	if (!deathmatch->integer)
-		return;
+		return false;
 	else if (!g_lag_compensation->integer)
-		return;
-	// don't need this
-	else if (from_player->client->cmd.server_frame >= current_frame ||
-		(from_player->svflags & SVF_BOT))
-		return;
+		return false;
+	else if (!G_IsLagCompensationShooter(from_player))
+		return false;
+	else if (!G_LagCompensationFrameDelta(from_player, current_frame, frames_back))
+		return false;
 
-	int32_t frame_delta = (current_frame - from_player->client->cmd.server_frame) + 1;
+	return true;
+}
+
+static bool G_LagCompensateLegacy(gentity_t *from_player, const vec3_t &start, const vec3_t &dir, int32_t frames_back) {
+	int32_t frame_delta = frames_back + 1;
+	bool rewound = false;
 
 	for (auto player : active_clients()) {
 		// we aren't gonna hit ourselves
@@ -1100,57 +1249,146 @@ void G_LagCompensate(gentity_t *from_player, const vec3_t &start, const vec3_t &
 			continue;
 
 		// not enough data, spare them
-		if (player->client->num_lag_origins < frame_delta)
+		if (G_LagCompensationSampleCount(player) < frame_delta)
 			continue;
 
 		// if they're way outside of cone of vision, they won't be captured in this
 		if ((player->s.origin - start).normalized().dot(dir) < 0.75f)
 			continue;
 
-		int32_t lag_id = (player->client->next_lag_origin - 1) - (frame_delta - 1);
-
-		if (lag_id < 0)
-			lag_id = game.max_lag_origins + lag_id;
-
-		if (lag_id < 0 || lag_id >= player->client->num_lag_origins) {
+		lag_compensation_sample_t sample;
+		if (!G_LagSampleByOffset(player, frame_delta - 1, sample)) {
 			gi.Com_PrintFmt("{}: lag compensation error.\n", __FUNCTION__);
 			G_UnLagCompensate();
-			return;
+			return false;
 		}
-
-		const vec3_t &lag_origin = (game.lag_origins + ((player->s.number - 1) * game.max_lag_origins))[lag_id];
 
 		// no way they'd be hit if they aren't in the PVS
-		if (!gi.inPVS(lag_origin, start, false))
+		if (!gi.inPVS(sample.origin, start, false))
 			continue;
 
-		// only back up once
-		if (!player->client->is_lag_compensated) {
-			player->client->is_lag_compensated = true;
-			player->client->lag_restore_origin = player->s.origin;
-		}
-
-		player->s.origin = lag_origin;
-
-		gi.linkentity(player);
+		G_ApplyLagCompensation(player, sample, false);
+		rewound = true;
 	}
+
+	return rewound;
+}
+
+// [Paril-KEX] push all players' origins back to match their lag compensation
+bool G_LagCompensate(gentity_t *from_player, const vec3_t &start, const vec3_t &dir) {
+	uint32_t current_frame = gi.ServerFrame();
+	int32_t frames_back = 0;
+
+	if (!G_LagCompensationEnabled(from_player, current_frame, frames_back))
+		return false;
+
+	if (!g_lag_compensation_enhanced->integer)
+		return G_LagCompensateLegacy(from_player, start, dir, frames_back);
+
+	uint32_t target_frame = current_frame - static_cast<uint32_t>(frames_back);
+	bool rewound = false;
+
+	for (auto player : active_clients()) {
+		// we aren't gonna hit ourselves
+		if (player == from_player)
+			continue;
+
+		if (!G_IsEnhancedLagTarget(player))
+			continue;
+
+		lag_compensation_sample_t sample;
+		if (!G_LagSampleAtFrame(player, target_frame, frames_back, sample))
+			continue;
+
+		// no way they'd be hit if they aren't in the PVS
+		if (!gi.inPVS(sample.origin, start, false))
+			continue;
+
+		G_ApplyLagCompensation(player, sample, true);
+		rewound = true;
+	}
+
+	return rewound;
+}
+
+static void G_RestoreLagCompensatedPlayer(gentity_t *player) {
+	lag_compensation_restore_t restore = player->client->lag_restore;
+	bool restore_bounds = G_IsEnhancedLagTarget(player);
+
+	player->client->is_lag_compensated = false;
+	player->s.origin = restore.origin;
+
+	// Preserve death/spectator shape changes made while the player was rewound.
+	if (restore_bounds) {
+		player->mins = restore.mins;
+		player->maxs = restore.maxs;
+		player->viewheight = restore.viewheight;
+		player->client->ps.pmove.viewheight = restore.pmove_viewheight;
+	}
+
+	player->client->lag_restore = {};
+	gi.linkentity(player);
 }
 
 // [Paril-KEX] pop everybody's lag compensation values
 void G_UnLagCompensate() {
 	for (auto player : active_clients()) {
-		if (player->client->is_lag_compensated) {
-			player->client->is_lag_compensated = false;
-			player->s.origin = player->client->lag_restore_origin;
-			gi.linkentity(player);
-		}
+		if (player->client->is_lag_compensated)
+			G_RestoreLagCompensatedPlayer(player);
 	}
+}
+
+void G_ClearLagCompensationHistory(gentity_t *ent) {
+	if (!ent || !ent->client)
+		return;
+
+	if (ent->client->is_lag_compensated)
+		G_RestoreLagCompensatedPlayer(ent);
+
+	ent->client->num_lag_origins = 0;
+	ent->client->next_lag_origin = 0;
+	ent->client->lag_restore = {};
+}
+
+static bool G_LagCompensationPositionDiscontinuity(gentity_t *ent) {
+	if (!g_lag_compensation_enhanced->integer || G_LagCompensationSampleCount(ent) <= 0)
+		return false;
+
+	lag_compensation_sample_t latest;
+	if (!G_LagSampleByOffset(ent, 0, latest))
+		return false;
+
+	float max_delta = max(512.f, g_maxvelocity->value * gi.frame_time_s * 2.f);
+	return (ent->s.origin - latest.origin).lengthSquared() > (max_delta * max_delta);
 }
 
 // [Paril-KEX] save the current lag compensation value
 static void G_SaveLagCompensation(gentity_t *ent) {
-	(game.lag_origins + ((ent->s.number - 1) * game.max_lag_origins))[ent->client->next_lag_origin] = ent->s.origin;
-	ent->client->next_lag_origin = (ent->client->next_lag_origin + 1) % game.max_lag_origins;
+	if (g_lag_compensation_enhanced->integer && !G_IsEnhancedLagTarget(ent)) {
+		G_ClearLagCompensationHistory(ent);
+		return;
+	}
+
+	lag_compensation_sample_t *samples = G_LagCompensationSamples(ent);
+	if (!samples)
+		return;
+
+	if (G_LagCompensationPositionDiscontinuity(ent))
+		G_ClearLagCompensationHistory(ent);
+
+	int32_t next_lag_origin = static_cast<int32_t>(ent->client->next_lag_origin) % game.max_lag_origins;
+	ent->client->next_lag_origin = static_cast<uint16_t>(next_lag_origin);
+
+	lag_compensation_sample_t &sample = samples[next_lag_origin];
+	sample.server_frame = gi.ServerFrame();
+	sample.time = level.time;
+	sample.origin = ent->s.origin;
+	sample.mins = ent->mins;
+	sample.maxs = ent->maxs;
+	sample.viewheight = ent->viewheight;
+	sample.pmove_viewheight = ent->client->ps.pmove.viewheight;
+
+	ent->client->next_lag_origin = static_cast<uint16_t>((next_lag_origin + 1) % game.max_lag_origins);
 
 	if (ent->client->num_lag_origins < game.max_lag_origins)
 		ent->client->num_lag_origins++;

@@ -30,6 +30,8 @@ static const char *EndMatchVictorString() {
 void MultiplayerScoreboard(gentity_t *ent);
 
 void MoveClientToIntermission(gentity_t *ent) {
+	G_ClearLagCompensationHistory(ent);
+
 	// [Paril-KEX]
 	if (ent->client->ps.pmove.pm_type != PM_FREEZE)
 		ent->s.event = EV_OTHER_TELEPORT;

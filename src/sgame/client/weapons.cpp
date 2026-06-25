@@ -115,7 +115,33 @@ void P_AddWeaponKick(gentity_t *ent, const vec3_t &origin, const vec3_t &angles)
 P_ProjectSource
 ================
 */
-void P_ProjectSource(gentity_t *ent, const vec3_t &angles, vec3_t distance, vec3_t &result_start, vec3_t &result_dir) {
+class scoped_lag_compensation_t {
+public:
+	scoped_lag_compensation_t() = default;
+	scoped_lag_compensation_t(const scoped_lag_compensation_t &) = delete;
+	scoped_lag_compensation_t &operator=(const scoped_lag_compensation_t &) = delete;
+
+	~scoped_lag_compensation_t() {
+		reset();
+	}
+
+	void activate() {
+		active = true;
+	}
+
+	void reset() {
+		if (!active)
+			return;
+
+		active = false;
+		G_UnLagCompensate();
+	}
+
+private:
+	bool active = false;
+};
+
+static void P_ProjectSourceInternal(gentity_t *ent, const vec3_t &angles, vec3_t distance, vec3_t &result_start, vec3_t &result_dir, bool lag_compensate_aim) {
 	if (g_weapon_projection->integer) {
 		distance[1] = 0;
 		if (g_weapon_projection->integer > 1)
@@ -139,7 +165,12 @@ void P_ProjectSource(gentity_t *ent, const vec3_t &angles, vec3_t distance, vec3
 	if (!G_ShouldPlayersCollide(true))
 		mask &= ~CONTENTS_PLAYER;
 
+	scoped_lag_compensation_t aim_lag_compensation;
+	if (lag_compensate_aim && G_LagCompensate(ent, eye_position, forward))
+		aim_lag_compensation.activate();
+
 	trace_t tr = gi.traceline(eye_position, end, ent, mask);
+	aim_lag_compensation.reset();
 
 	// if the point was a monster & close to us, use raw forward
 	// so railgun pierces properly
@@ -151,6 +182,10 @@ void P_ProjectSource(gentity_t *ent, const vec3_t &angles, vec3_t distance, vec3
 	}
 }
 
+void P_ProjectSource(gentity_t *ent, const vec3_t &angles, vec3_t distance, vec3_t &result_start, vec3_t &result_dir) {
+	P_ProjectSourceInternal(ent, angles, distance, result_start, result_dir, false);
+}
+
 static void P_ProjectSourceQ3A(gentity_t *ent, const vec3_t &angles, vec3_t &result_start, vec3_t &result_dir) {
 	AngleVectors(angles, result_dir, nullptr, nullptr);
 
@@ -159,6 +194,20 @@ static void P_ProjectSourceQ3A(gentity_t *ent, const vec3_t &angles, vec3_t &res
 	// Q3 snaps muzzle points before firing.
 	for (size_t i = 0; i < 3; i++)
 		result_start[i] = (float)(int)result_start[i];
+}
+
+// Rewinds players for P_ProjectSource's aim probe in enhanced mode, then starts
+// the caller's immediate-hit compensation from a clean live-world state.
+static void P_ProjectSourceAndLagCompensate(gentity_t *ent, const vec3_t &angles, vec3_t distance, vec3_t &result_start, vec3_t &result_dir, scoped_lag_compensation_t &lag_compensation) {
+	P_ProjectSourceInternal(ent, angles, distance, result_start, result_dir, g_lag_compensation_enhanced->integer != 0);
+	if (G_LagCompensate(ent, result_start, result_dir))
+		lag_compensation.activate();
+}
+
+static void P_ProjectSourceQ3AAndLagCompensate(gentity_t *ent, const vec3_t &angles, vec3_t &result_start, vec3_t &result_dir, scoped_lag_compensation_t &lag_compensation) {
+	P_ProjectSourceQ3A(ent, angles, result_start, result_dir);
+	if (G_LagCompensate(ent, result_start, result_dir))
+		lag_compensation.activate();
 }
 
 /*
@@ -1598,16 +1647,15 @@ static void Weapon_Machinegun_Fire(gentity_t *ent) {
 
 	// get start / end positions
 	vec3_t start, dir;
+	scoped_lag_compensation_t lag_compensation;
 	// Paril: kill sideways angle on hitscan
 	if (RS(RS_Q3A))
-		P_ProjectSourceQ3A(ent, ent->client->v_angle, start, dir);
+		P_ProjectSourceQ3AAndLagCompensate(ent, ent->client->v_angle, start, dir, lag_compensation);
 	else
-		P_ProjectSource(ent, ent->client->v_angle, { 0, 0, -8 }, start, dir);
-	G_LagCompensate(ent, start, dir);
-
+		P_ProjectSourceAndLagCompensate(ent, ent->client->v_angle, { 0, 0, -8 }, start, dir, lag_compensation);
 
 	fire_bullet(ent, start, dir, damage, kick, hs, vs, MOD_MACHINEGUN);
-	G_UnLagCompensate();
+	lag_compensation.reset();
 	Weapon_PowerupSound(ent);
 
 	gi.WriteByte(svc_muzzleflash);
@@ -1678,9 +1726,8 @@ static void Weapon_Chaingun_Fire(gentity_t *ent) {
 		}
 
 		vec3_t start, dir;
-		P_ProjectSourceQ3A(ent, ent->client->v_angle, start, dir);
-
-		G_LagCompensate(ent, start, dir);
+		scoped_lag_compensation_t lag_compensation;
+		P_ProjectSourceQ3AAndLagCompensate(ent, ent->client->v_angle, start, dir, lag_compensation);
 
 		int hspread, vspread;
 		float spread_offset;
@@ -1689,7 +1736,7 @@ static void Weapon_Chaingun_Fire(gentity_t *ent) {
 		for (i = 0; i < shots; i++)
 			fire_bullet(ent, start, dir, damage, kick, hspread, vspread, MOD_CHAINGUN);
 
-		G_UnLagCompensate();
+		lag_compensation.reset();
 		Weapon_PowerupSound(ent);
 
 		gi.WriteByte(svc_muzzleflash);
@@ -1789,9 +1836,8 @@ static void Weapon_Chaingun_Fire(gentity_t *ent) {
 	P_AddWeaponKick(ent, kick_origin, kick_angles);
 
 	vec3_t start, dir;
-	P_ProjectSource(ent, ent->client->v_angle, { 0, 0, -8 }, start, dir);
-
-	G_LagCompensate(ent, start, dir);
+	scoped_lag_compensation_t lag_compensation;
+	P_ProjectSourceAndLagCompensate(ent, ent->client->v_angle, { 0, 0, -8 }, start, dir, lag_compensation);
 	
 	// Determine spread values and offset
 	int hspread, vspread;
@@ -1817,7 +1863,7 @@ static void Weapon_Chaingun_Fire(gentity_t *ent) {
 
 		fire_bullet(ent, start, dir, damage, kick, hspread, vspread, MOD_CHAINGUN);
 	}
-	G_UnLagCompensate();
+	lag_compensation.reset();
 
 	Weapon_PowerupSound(ent);
 
@@ -1852,11 +1898,12 @@ static void Weapon_Shotgun_Fire(gentity_t *ent) {
 	int kick = 8;
 
 	vec3_t start, dir;
+	scoped_lag_compensation_t lag_compensation;
 	// Paril: kill sideways angle on hitscan
 	if (RS(RS_Q3A))
-		P_ProjectSourceQ3A(ent, ent->client->v_angle, start, dir);
+		P_ProjectSourceQ3AAndLagCompensate(ent, ent->client->v_angle, start, dir, lag_compensation);
 	else
-		P_ProjectSource(ent, ent->client->v_angle, { 0, 0, -8 }, start, dir);
+		P_ProjectSourceAndLagCompensate(ent, ent->client->v_angle, { 0, 0, -8 }, start, dir, lag_compensation);
 
 	if (!RS(RS_Q3A))
 		P_AddWeaponKick(ent, ent->client->v_forward * -2, { -2.f, 0.f, 0.f });
@@ -1866,11 +1913,10 @@ static void Weapon_Shotgun_Fire(gentity_t *ent) {
 		kick *= damage_multiplier;
 	}
 
-	G_LagCompensate(ent, start, dir);
 	int pellets = MM_Ruleset_ShotgunPelletCount();
 	int spread = MM_Ruleset_ShotgunSpread();
 	fire_shotgun(ent, start, dir, damage, kick, spread, spread, pellets, MOD_SHOTGUN);
-	G_UnLagCompensate();
+	lag_compensation.reset();
 
 	// send muzzle flash
 	gi.WriteByte(svc_muzzleflash);
@@ -1908,9 +1954,9 @@ static void Weapon_SuperShotgun_Fire(gentity_t *ent) {
 	}
 
 	vec3_t start, dir;
+	scoped_lag_compensation_t lag_compensation;
 	// Paril: kill sideways angle on hitscan
-	P_ProjectSource(ent, ent->client->v_angle, { 0, 0, -8 }, start, dir);
-	G_LagCompensate(ent, start, dir);
+	P_ProjectSourceAndLagCompensate(ent, ent->client->v_angle, { 0, 0, -8 }, start, dir, lag_compensation);
 
 	int pellets = MM_Ruleset_SuperShotgunPelletCount();
 	int hspread, vspread;
@@ -1930,7 +1976,7 @@ static void Weapon_SuperShotgun_Fire(gentity_t *ent) {
 		P_ProjectSource(ent, v, { 0, 0, -8 }, start, dir);
 		fire_shotgun(ent, start, dir, damage, kick, hspread, vspread, pellets / 2, MOD_SSHOTGUN);
 	}
-	G_UnLagCompensate();
+	lag_compensation.reset();
 
 	P_AddWeaponKick(ent, ent->client->v_forward * -2, { -2.f, 0.f, 0.f });
 
@@ -1981,13 +2027,13 @@ static void Weapon_Railgun_Fire(gentity_t *ent) {
 	}
 
 	vec3_t start, dir;
+	scoped_lag_compensation_t lag_compensation;
 	if (RS(RS_Q3A))
-		P_ProjectSourceQ3A(ent, ent->client->v_angle, start, dir);
+		P_ProjectSourceQ3AAndLagCompensate(ent, ent->client->v_angle, start, dir, lag_compensation);
 	else
-		P_ProjectSource(ent, ent->client->v_angle, { 0, 7, -8 }, start, dir);
-	G_LagCompensate(ent, start, dir);
+		P_ProjectSourceAndLagCompensate(ent, ent->client->v_angle, { 0, 7, -8 }, start, dir, lag_compensation);
 	fire_rail(ent, start, dir, damage, kick);
-	G_UnLagCompensate();
+	lag_compensation.reset();
 
 	if (!RS(RS_Q3A))
 		P_AddWeaponKick(ent, ent->client->v_forward * -3, { -3.f, 0.f, 0.f });
@@ -2179,6 +2225,15 @@ static void Weapon_ChainFist_Fire(gentity_t *ent) {
 
 	if (attack_frame) {
 		bool hit = false;
+		bool enhanced_lag_compensation = g_lag_compensation_enhanced->integer != 0;
+		scoped_lag_compensation_t lag_compensation;
+
+		if (enhanced_lag_compensation) {
+			if (RS(RS_Q3A))
+				P_ProjectSourceQ3AAndLagCompensate(ent, ent->client->v_angle, start, dir, lag_compensation);
+			else
+				P_ProjectSourceAndLagCompensate(ent, ent->client->v_angle, { 0, 0, -4 }, start, dir, lag_compensation);
+		}
 
 		if (RS(RS_Q3A)) {
 			trace_t tr = gi.traceline(start, start + (dir * CHAINFIST_REACH), ent, MASK_SHOT);
@@ -2190,6 +2245,8 @@ static void Weapon_ChainFist_Fire(gentity_t *ent) {
 		} else {
 			hit = fire_player_melee(ent, start, dir, CHAINFIST_REACH, damage, kick, MOD_CHAINFIST);
 		}
+
+		lag_compensation.reset();
 
 		if (hit && ent->client->empty_click_sound < level.time) {
 			ent->client->empty_click_sound = level.time + 500_ms;
@@ -2282,7 +2339,9 @@ static void Weapon_Disruptor_Fire(gentity_t *ent) {
 	maxs = { 16, 16, 16 };
 
 	vec3_t start, dir;
-	P_ProjectSource(ent, ent->client->v_angle, { 24, 8, -8 }, start, dir);
+	bool enhanced_lag_compensation = g_lag_compensation_enhanced->integer != 0;
+	scoped_lag_compensation_t lag_compensation;
+	P_ProjectSourceAndLagCompensate(ent, ent->client->v_angle, { 24, 8, -8 }, start, dir, lag_compensation);
 
 	end = start + (dir * 8192);
 	enemy = nullptr;
@@ -2293,15 +2352,16 @@ static void Weapon_Disruptor_Fire(gentity_t *ent) {
 	if (!G_ShouldPlayersCollide(true))
 		mask &= ~CONTENTS_PLAYER;
 
-	G_LagCompensate(ent, start, dir);
 	tr = gi.traceline(start, end, ent, mask);
-	G_UnLagCompensate();
 	if (tr.ent != world) {
 		if ((tr.ent->svflags & SVF_MONSTER) || tr.ent->client || (tr.ent->flags & FL_DAMAGEABLE)) {
 			if (tr.ent->health > 0)
 				enemy = tr.ent;
 		}
 	} else {
+		if (!enhanced_lag_compensation)
+			lag_compensation.reset();
+
 		tr = gi.trace(start, mins, maxs, end, ent, mask);
 		if (tr.ent != world) {
 			if ((tr.ent->svflags & SVF_MONSTER) || tr.ent->client || (tr.ent->flags & FL_DAMAGEABLE)) {
@@ -2310,6 +2370,8 @@ static void Weapon_Disruptor_Fire(gentity_t *ent) {
 			}
 		}
 	}
+	if (enhanced_lag_compensation || tr.ent != world)
+		lag_compensation.reset();
 
 	P_AddWeaponKick(ent, ent->client->v_forward * -2, { -1.f, 0.f, 0.f });
 
@@ -2497,17 +2559,28 @@ static void Weapon_PlasmaBeam_Fire(gentity_t *ent) {
 
 	// This offset is the "view" offset for the beam start (used by trace)
 	vec3_t start, dir;
-	if (RS(RS_Q3A))
-		P_ProjectSourceQ3A(ent, ent->client->v_angle, start, dir);
-	else if (RS(RS_Q1))
-		P_ProjectSource(ent, ent->client->v_angle, { 0, 0, -8 }, start, dir);
-	else
-		P_ProjectSource(ent, ent->client->v_angle, { 7, 2, -3 }, start, dir);
+	bool enhanced_lag_compensation = g_lag_compensation_enhanced->integer != 0;
+	scoped_lag_compensation_t lag_compensation;
+	if (RS(RS_Q3A)) {
+		if (enhanced_lag_compensation)
+			P_ProjectSourceQ3AAndLagCompensate(ent, ent->client->v_angle, start, dir, lag_compensation);
+		else
+			P_ProjectSourceQ3A(ent, ent->client->v_angle, start, dir);
+	} else if (RS(RS_Q1)) {
+		if (enhanced_lag_compensation)
+			P_ProjectSourceAndLagCompensate(ent, ent->client->v_angle, { 0, 0, -8 }, start, dir, lag_compensation);
+		else
+			P_ProjectSource(ent, ent->client->v_angle, { 0, 0, -8 }, start, dir);
+	} else {
+		if (enhanced_lag_compensation)
+			P_ProjectSourceAndLagCompensate(ent, ent->client->v_angle, { 7, 2, -3 }, start, dir, lag_compensation);
+		else
+			P_ProjectSource(ent, ent->client->v_angle, { 7, 2, -3 }, start, dir);
+	}
 
 	// This offset is the entity offset
-	G_LagCompensate(ent, start, dir);
 	fire_plasmabeam(ent, start, dir, RS(RS_Q3A) ? vec3_origin : vec3_t{ 2, 7, -3 }, damage, kick, false);
-	G_UnLagCompensate();
+	lag_compensation.reset();
 	Weapon_PowerupSound(ent);
 
 	// send muzzle flash
