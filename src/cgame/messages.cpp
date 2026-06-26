@@ -441,6 +441,11 @@ void CG_CheckDrawCenterString(const player_state_t *ps, const vrect_t &hud_vrect
 	if (InIntermission(ps))
 		return;
 
+	// Scoreboard (and inventory) use LAYOUTS_LAYOUT / LAYOUTS_INVENTORY; hide centerprint so it
+	// does not overlap the overlay (statusbar overlay HUD is already gated by STAT_SHOW_STATUSBAR).
+	if (ViewingLayout(ps))
+		return;
+
 	auto &data = hud_messages[isplit];
 	if (!data.center_index.has_value())
 		return;

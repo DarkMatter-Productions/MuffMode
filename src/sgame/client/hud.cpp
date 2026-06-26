@@ -3,31 +3,27 @@
 #include "g_local.h"
 #include "core/statusbar.h"
 #include "muffmode/mm_duel.h"
+#include "muffmode/mm_hud_stat_contracts.h"
+#include "muffmode/mm_horde.h"
 #include "muffmode/mm_red_rover_rules.h"
+#include "muffmode/mm_scoreboard_layout.h"
 #include "muffmode/mm_vote_menu.h"
 
-/*
-======================================================================
-
-INTERMISSION
-
-======================================================================
-*/
-
-static const char *EndMatchVictorString() {
-	if (!level.intermission_time)
-		return nullptr;
-
-	const char *s = nullptr;
-
-	if (Teams() && !(GT(GT_RR))) {
-		
-		return s;
-	}
-
-}
-
 void MultiplayerScoreboard(gentity_t *ent);
+
+// Round counter in HUD: during countdown show the upcoming round (matches centerprint).
+static int HudRoundDisplayNumber()
+{
+	if (level.round_state != roundst_t::ROUND_COUNTDOWN)
+		return level.round_number;
+
+	if (GT(GT_HORDE))
+		return MM_Horde_CountdownWaveNumber();
+	if (GT(GT_STRIKE))
+		return level.round_number;
+
+	return level.round_number + 1;
+}
 
 void MoveClientToIntermission(gentity_t *ent) {
 	G_ClearLagCompensationHistory(ent);
@@ -326,47 +322,8 @@ void TeamsScoreboardMessage(gentity_t *ent, gentity_t *killer) {
 	static std::string string;
 	string.clear();
 
-	fmt::format_to(std::back_inserter(string), FMT_STRING("xv 0 yv -40 cstring2 \"{} on {}\" "), level.gametype_name, level.level_name);
-	fmt::format_to(std::back_inserter(string), FMT_STRING("xv 0 yv -30 cstring2 \"Score Limit: {}\" "), GT_ScoreLimit());
-
-	if (level.intermission_time) {
-		//fmt::format_to(std::back_inserter(string), FMT_STRING("xv 0 yv -50 cstring2 \"{} - {}\" "), level.gamemod_name, level.gametype_name);
-		//fmt::format_to(std::back_inserter(string), FMT_STRING("xv 0 yv -40 cstring2 \"[{}] {}\" "), level.mapname, level.level_name);
-		if (level.match_start_time) {
-			int	t = (level.intermission_time - level.match_start_time - 1_sec).milliseconds();
-			fmt::format_to(std::back_inserter(string), FMT_STRING("xv 0 yv -50 cstring2 \"Total Match Time: {}\" "), G_TimeStringMs(t, false));
-		}
-		if (level.intermission_victor_msg[0])
-			fmt::format_to(std::back_inserter(string), FMT_STRING("xv 0 yv -10 cstring2 \"{}\" "), level.intermission_victor_msg);
-
-		fmt::format_to(std::back_inserter(string), FMT_STRING("ifgef {} yb -48 xv 0 loc_cstring2 0 \"$m_eou_press_button\" endif "), (level.intermission_server_frame + (5_sec).frames()));
-	} else if (level.match_state == MATCH_IN_PROGRESS) {
-		if (ent->client && ClientIsPlaying(ent->client) && ent->client->resp.score && level.num_playing_clients > 1) {
-			fmt::format_to(std::back_inserter(string), FMT_STRING("xv 0 yv -10 cstring2 \"{} place with a score of {}\" "),
-				G_PlaceString(ent->client->resp.rank + 1), ent->client->resp.score);
-		}
-		//if (fraglimit->integer && !(GTF(GTF_ROUNDS)))
-		//	fmt::format_to(std::back_inserter(string), FMT_STRING("xv -20 yv -10 loc_string2 1 $g_score_frags \"{}\" "), fraglimit->integer);
-		/*
-		else if (GT(GT_HORDE) && level.round_number > 0)
-			fmt::format_to(std::back_inserter(string), FMT_STRING("xv -20 yv -10 loc_string2 1 Wave: \"{}\" "), level.round_number);
-			*/
-		if (timelimit->value && !level.intermission_time) {
-			//fmt::format_to(std::back_inserter(string), FMT_STRING("xv 340 yv -10 time_limit {} "), gi.ServerFrame() + ((gtime_t::from_min(timelimit->value) - level.time)).milliseconds() / gi.frame_time_ms);
-#if 0
-		//fmt::format_to(std::back_inserter(string), FMT_STRING("xv 340 yv -10 loc_string2 1 {} "), gi.ServerFrame() + level.time.milliseconds() / gi.frame_time_ms);
-			int32_t val = gi.ServerFrame() + ((gtime_t::from_min(timelimit->value) - level.time)).milliseconds() / gi.frame_time_ms;
-			const char *s;
-			int32_t remaining_ms = gtime_t::from_ms(level.time);	// (val - gi.ServerFrame()) *gi.frame_time_ms;
-
-			s = G_Fmt("{:02}:{:02}", (remaining_ms / 1000) / 60, (remaining_ms / 1000) % 60).data();
-
-			fmt::format_to(std::back_inserter(string), FMT_STRING("xv 340 yv -10 loc_string2 1 \"{}\" "), s);
-#endif
-		}
-
-		fmt::format_to(std::back_inserter(string), FMT_STRING("xv 0 yb -48 cstring2 \"{}\" "), "Use inventory bind to toggle menu.");
-	}
+	const bool intermission = level.intermission_time != 0_sec;
+	MM_AppendScoreboardFooter(ent, string, false);
 
 	if (GT(GT_CTF)) {
 		fmt::format_to(std::back_inserter(string),
@@ -440,7 +397,7 @@ void TeamsScoreboardMessage(gentity_t *ent, gentity_t *killer) {
 				fmt::format_to(std::back_inserter(string),
 					FMT_STRING("xv -50 yv {} picn {} "), ty, "sbfctf1");
 
-			if (string.size() + entry.size() < MAX_STRING_CHARS) {
+			if (MM_ScoreboardCanAppend(string.length(), entry.size(), MAX_STRING_CHARS, intermission)) {
 				string += entry;
 				last[0] = i;
 			}
@@ -470,7 +427,7 @@ void TeamsScoreboardMessage(gentity_t *ent, gentity_t *killer) {
 				fmt::format_to(std::back_inserter(string),
 					FMT_STRING("xv 190 yv {} picn {} "), ty, "sbfctf2");
 
-			if (string.size() + entry.size() < MAX_STRING_CHARS) {
+			if (MM_ScoreboardCanAppend(string.length(), entry.size(), MAX_STRING_CHARS, intermission)) {
 				string += entry;
 				last[1] = i;
 			}
@@ -485,7 +442,7 @@ void TeamsScoreboardMessage(gentity_t *ent, gentity_t *killer) {
 	j = (j + 3) * 8 + 42;
 
 	k = n = 0;
-	if (string.size() < MAX_STRING_CHARS - 50) {
+	if (MM_ScoreboardCanAppend(string.length(), 0, MAX_STRING_CHARS, intermission)) {
 		for (i = 0; i < game.maxclients; i++) {
 			cl_ent = g_entities + 1 + i;
 			cl = &game.clients[i];
@@ -507,7 +464,7 @@ void TeamsScoreboardMessage(gentity_t *ent, gentity_t *killer) {
 				cl->resp.score,
 				cl->ping > 999 ? 999 : cl->ping);
 
-			if (string.size() + entry.size() < MAX_STRING_CHARS)
+			if (MM_ScoreboardCanAppend(string.length(), entry.size(), MAX_STRING_CHARS, intermission))
 				string += entry;
 
 			if (n & 1)
@@ -525,50 +482,6 @@ void TeamsScoreboardMessage(gentity_t *ent, gentity_t *killer) {
 
 	gi.WriteByte(svc_layout);
 	gi.WriteString(string.c_str());
-}
-
-static inline void ScoreboardNotice(gentity_t *ent, std::string string) {
-	fmt::format_to(std::back_inserter(string), FMT_STRING("xv 0 yv -40 cstring2 \"{} on {}\" "), level.gametype_name, level.level_name);
-	fmt::format_to(std::back_inserter(string), FMT_STRING("xv 0 yv -30 cstring2 \"Score Limit: {}\" "), GT_ScoreLimit());
-
-	if (level.intermission_time) {
-		//fmt::format_to(std::back_inserter(string), FMT_STRING("xv 0 yv -50 cstring2 \"{} - {}\" "), level.gamemod_name, level.gametype_name);
-		//fmt::format_to(std::back_inserter(string), FMT_STRING("xv 0 yv -40 cstring2 \"[{}] {}\" "), level.mapname, level.level_name);
-		if (level.match_start_time) {
-			int	t = (level.intermission_time - level.match_start_time - 1_sec).milliseconds();
-			fmt::format_to(std::back_inserter(string), FMT_STRING("xv 0 yv -50 cstring2 \"Total Match Time: {}\" "), G_TimeStringMs(t, false));
-		}
-		if (level.intermission_victor_msg[0])
-			fmt::format_to(std::back_inserter(string), FMT_STRING("xv 0 yv -10 cstring2 \"{}\" "), level.intermission_victor_msg);
-
-		fmt::format_to(std::back_inserter(string), FMT_STRING("ifgef {} yb -48 xv 0 loc_cstring2 0 \"$m_eou_press_button\" endif "), (level.intermission_server_frame + (5_sec).frames()));
-	} else if (level.match_state == MATCH_IN_PROGRESS) {
-		if (ent->client && ClientIsPlaying(ent->client) && ent->client->resp.score && level.num_playing_clients > 1) {
-			fmt::format_to(std::back_inserter(string), FMT_STRING("xv 0 yv -10 cstring2 \"{} place with a score of {}\" "),
-				G_PlaceString(ent->client->resp.rank + 1), ent->client->resp.score);
-		}
-		//if (fraglimit->integer && !(GTF(GTF_ROUNDS)))
-		//	fmt::format_to(std::back_inserter(string), FMT_STRING("xv -20 yv -10 loc_string2 1 $g_score_frags \"{}\" "), fraglimit->integer);
-		/*
-		else if (GT(GT_HORDE) && level.round_number > 0)
-			fmt::format_to(std::back_inserter(string), FMT_STRING("xv -20 yv -10 loc_string2 1 Wave: \"{}\" "), level.round_number);
-			*/
-		if (timelimit->value && !level.intermission_time) {
-			//fmt::format_to(std::back_inserter(string), FMT_STRING("xv 340 yv -10 time_limit {} "), gi.ServerFrame() + ((gtime_t::from_min(timelimit->value) - level.time)).milliseconds() / gi.frame_time_ms);
-#if 0
-		//fmt::format_to(std::back_inserter(string), FMT_STRING("xv 340 yv -10 loc_string2 1 {} "), gi.ServerFrame() + level.time.milliseconds() / gi.frame_time_ms);
-			int32_t val = gi.ServerFrame() + ((gtime_t::from_min(timelimit->value) - level.time)).milliseconds() / gi.frame_time_ms;
-			const char *s;
-			int32_t remaining_ms = gtime_t::from_ms(level.time);	// (val - gi.ServerFrame()) *gi.frame_time_ms;
-
-			s = G_Fmt("{:02}:{:02}", (remaining_ms / 1000) / 60, (remaining_ms / 1000) % 60).data();
-
-			fmt::format_to(std::back_inserter(string), FMT_STRING("xv 340 yv -10 loc_string2 1 \"{}\" "), s);
-#endif
-		}
-
-		fmt::format_to(std::back_inserter(string), FMT_STRING("xv 0 yb -48 cstring2 \"{}\" "), "Use inventory bind to toggle menu.");
-	}
 }
 
 /*
@@ -657,48 +570,7 @@ void DeathmatchScoreboardMessage(gentity_t *ent, gentity_t *killer) {
 		entry.clear();
 	}
 
-	fmt::format_to(std::back_inserter(string), FMT_STRING("xv 0 yv -40 cstring2 \"{} on {}\" "), level.gametype_name, level.level_name);
-	fmt::format_to(std::back_inserter(string), FMT_STRING("xv 0 yv -30 cstring2 \"Score Limit: {}\" "), GT_ScoreLimit());
-
-	if (level.intermission_time) {
-		//fmt::format_to(std::back_inserter(string), FMT_STRING("xv 0 yv -50 cstring2 \"{} - {}\" "), level.gamemod_name, level.gametype_name);
-		//fmt::format_to(std::back_inserter(string), FMT_STRING("xv 0 yv -40 cstring2 \"[{}] {}\" "), level.mapname, level.level_name);
-		if (level.match_start_time) {
-			int	t = (level.intermission_time - level.match_start_time - 1_sec).milliseconds();
-			fmt::format_to(std::back_inserter(string), FMT_STRING("xv 0 yv -50 cstring2 \"Total Match Time: {}\" "), G_TimeStringMs(t, false));
-		}
-		if (level.intermission_victor_msg[0])
-			fmt::format_to(std::back_inserter(string), FMT_STRING("xv 0 yv -10 cstring2 \"{}\" "), level.intermission_victor_msg);
-
-		fmt::format_to(std::back_inserter(string), FMT_STRING("ifgef {} yb -48 xv 0 loc_cstring2 0 \"$m_eou_press_button\" endif "), (level.intermission_server_frame + (5_sec).frames()));
-	} else if (level.match_state == MATCH_IN_PROGRESS) {
-		const char *score = G_Fmt("{}", ent->client->resp.score).data();
-		if (ent->client && ClientIsPlaying(ent->client) && ent->client->resp.score && level.num_playing_clients > 1) {
-			fmt::format_to(std::back_inserter(string), FMT_STRING("xv 0 yv -10 cstring2 \"{} place with a score of {}\" "),
-				G_PlaceString(ent->client->resp.rank + 1), score);
-		}
-		//if (fraglimit->integer && !(GTF(GTF_ROUNDS)))
-		//	fmt::format_to(std::back_inserter(string), FMT_STRING("xv -20 yv -10 loc_string2 1 $g_score_frags \"{}\" "), fraglimit->integer);
-		/*
-		else if (GT(GT_HORDE) && level.round_number > 0)
-			fmt::format_to(std::back_inserter(string), FMT_STRING("xv -20 yv -10 loc_string2 1 Wave: \"{}\" "), level.round_number);
-			*/
-		if (timelimit->value && !level.intermission_time) {
-			//fmt::format_to(std::back_inserter(string), FMT_STRING("xv 340 yv -10 time_limit {} "), gi.ServerFrame() + ((gtime_t::from_min(timelimit->value) - level.time)).milliseconds() / gi.frame_time_ms);
-#if 0
-		//fmt::format_to(std::back_inserter(string), FMT_STRING("xv 340 yv -10 loc_string2 1 {} "), gi.ServerFrame() + level.time.milliseconds() / gi.frame_time_ms);
-			int32_t val = gi.ServerFrame() + ((gtime_t::from_min(timelimit->value) - level.time)).milliseconds() / gi.frame_time_ms;
-			const char *s;
-			int32_t remaining_ms = gtime_t::from_ms(level.time);	// (val - gi.ServerFrame()) *gi.frame_time_ms;
-
-			s = G_Fmt("{:02}:{:02}", (remaining_ms / 1000) / 60, (remaining_ms / 1000) % 60).data();
-
-			fmt::format_to(std::back_inserter(string), FMT_STRING("xv 340 yv -10 loc_string2 1 \"{}\" "), s);
-#endif
-		}
-
-		fmt::format_to(std::back_inserter(string), FMT_STRING("xv 0 yb -48 cstring2 \"{}\" "), "Use inventory bind to toggle menu.");
-	}
+	MM_AppendScoreboardFooter(ent, string, true);
 
 	gi.WriteByte(svc_layout);
 	gi.WriteString(string.c_str());
@@ -878,7 +750,8 @@ void Cmd_Help_f(gentity_t *ent) {
 
 // [Paril-KEX] for stats we want to always be set in coop
 // even if we're spectating
-void G_SetCoopStats(gentity_t *ent) {
+// [MuffMode] also drives arena round/role HUD stats in deathmatch gametypes.
+static void G_SetGametypeStats(gentity_t *ent) {
 
 	if (GT(GT_HORDE) && g_horde_lives->integer > 0)
 		ent->client->ps.stats[STAT_LIVES] = ent->client->pers.lives;
@@ -887,20 +760,134 @@ void G_SetCoopStats(gentity_t *ent) {
 	else
 		ent->client->ps.stats[STAT_LIVES] = 0;
 	
-	if (level.match_state == MATCH_IN_PROGRESS) {
-		if (GT(GT_HORDE))
-			ent->client->ps.stats[STAT_MONSTER_COUNT] = level.total_monsters - level.killed_monsters;
-		else if (GT(GT_STRIKE) && ClientIsPlaying(ent->client) && !ent->client->eliminated)
-			// pack this player's attack/defend role into the idle monster-count slot
-			ent->client->ps.stats[STAT_MONSTER_COUNT] =
-				(ent->client->sess.team == (level.strike_red_attacks ? TEAM_RED : TEAM_BLUE)) ? STRIKE_HUD_ATTACKING : STRIKE_HUD_DEFENDING;
-		else
-			ent->client->ps.stats[STAT_MONSTER_COUNT] = 0;
+	if (deathmatch->integer && level.match_state >= MATCH_WARMUP_DELAYED && level.match_state < MATCH_COUNTDOWN
+		&& level.warmup_gametype_hud_time + WARMUP_SPLASH_DURATION > level.time) {
+		gi.configstring(CONFIG_GAMETYPE_HUD, G_Fmt("Gametype: {}", level.gametype_name).data());
+		gi.configstring(CONFIG_RULESET_HUD, G_Fmt("Ruleset: {}", rs_long_name[game.ruleset]).data());
+		ent->client->ps.stats[STAT_GAMETYPE_HUD] = CONFIG_GAMETYPE_HUD;
+		ent->client->ps.stats[STAT_RULESET_HUD] = CONFIG_RULESET_HUD;
+	} else if (deathmatch->integer && level.match_state == MATCH_IN_PROGRESS
+		&& (GT(GT_FFA) || GT(GT_TDM) || GT(GT_DUEL) || GT(GT_INSTAGIB) || GT(GT_NADEFEST))) {
+		const int limit = GT_ScoreLimit();
+		if (limit > 0) {
+			gi.configstring(CONFIG_GAMETYPE_HUD, G_Fmt("Fraglimit: {}", limit).data());
+			ent->client->ps.stats[STAT_GAMETYPE_HUD] = CONFIG_GAMETYPE_HUD;
+		} else {
+			ent->client->ps.stats[STAT_GAMETYPE_HUD] = 0;
+		}
+		ent->client->ps.stats[STAT_RULESET_HUD] = 0;
+	} else if (deathmatch->integer && level.match_state == MATCH_IN_PROGRESS && GT(GT_CTF)) {
+		const int limit = GT_ScoreLimit();
+		if (limit > 0) {
+			gi.configstring(CONFIG_GAMETYPE_HUD, G_Fmt("Capturelimit: {}", limit).data());
+			ent->client->ps.stats[STAT_GAMETYPE_HUD] = CONFIG_GAMETYPE_HUD;
+		} else {
+			ent->client->ps.stats[STAT_GAMETYPE_HUD] = 0;
+		}
+		ent->client->ps.stats[STAT_RULESET_HUD] = 0;
+	} else if (level.match_state == MATCH_IN_PROGRESS && GT(GT_HORDE)) {
+		const int display_round = HudRoundDisplayNumber();
+		if (display_round > 0) {
+			const int limit = GT_ScoreLimit();
+			if (limit > 0)
+				gi.configstring(CONFIG_GAMETYPE_HUD, G_Fmt("Wave {} of {}", display_round, limit).data());
+			else
+				gi.configstring(CONFIG_GAMETYPE_HUD, G_Fmt("Wave {}", display_round).data());
+			ent->client->ps.stats[STAT_GAMETYPE_HUD] = CONFIG_GAMETYPE_HUD;
+		} else {
+			ent->client->ps.stats[STAT_GAMETYPE_HUD] = 0;
+		}
+		ent->client->ps.stats[STAT_RULESET_HUD] = 0;
+	} else if (deathmatch->integer && level.match_state == MATCH_IN_PROGRESS && (GT(GT_CA) || GT(GT_RR) || GT(GT_STRIKE))) {
+		const int display_round = HudRoundDisplayNumber();
+		if (display_round > 0) {
+			const int limit = roundlimit->integer;
+			if (limit > 0)
+				gi.configstring(CONFIG_GAMETYPE_HUD, G_Fmt("Round {} of {}", display_round, limit).data());
+			else
+				gi.configstring(CONFIG_GAMETYPE_HUD, G_Fmt("Round {}", display_round).data());
+			ent->client->ps.stats[STAT_GAMETYPE_HUD] = CONFIG_GAMETYPE_HUD;
+		} else {
+			ent->client->ps.stats[STAT_GAMETYPE_HUD] = 0;
+		}
+		if (GT(GT_STRIKE)) {
+			const int capture_limit = GT_ScoreLimit();
+			if (capture_limit > 0) {
+				gi.configstring(CONFIG_RULESET_HUD, G_Fmt("Capturelimit: {}", capture_limit).data());
+				ent->client->ps.stats[STAT_RULESET_HUD] = CONFIG_RULESET_HUD;
+			} else {
+				ent->client->ps.stats[STAT_RULESET_HUD] = 0;
+			}
+		} else {
+			ent->client->ps.stats[STAT_RULESET_HUD] = 0;
+		}
+	} else {
+		ent->client->ps.stats[STAT_GAMETYPE_HUD] = 0;
+		ent->client->ps.stats[STAT_RULESET_HUD] = 0;
+	}
 
-		if (GTF(GTF_ROUNDS))
-			ent->client->ps.stats[STAT_ROUND_NUMBER] = level.round_number;
-		else
+	if (deathmatch->integer
+		&& (level.match_state == MATCH_WARMUP_DEFAULT || level.match_state == MATCH_WARMUP_READYUP)
+		&& level.warmup_requisite
+		&& level.warmup_notice_time + WARMUP_SPLASH_DURATION > level.time) {
+		const char *notice = nullptr;
+
+		switch (level.warmup_requisite) {
+		case warmupreq_t::WARMUP_REQ_MORE_PLAYERS:
+			notice = G_Fmt("More players needed ({} minimum)", minplayers->integer).data();
+			break;
+		case warmupreq_t::WARMUP_REQ_BALANCE:
+			notice = "Teams are imbalanced.";
+			break;
+		case warmupreq_t::WARMUP_REQ_READYUP:
+			notice = "Players must ready up.";
+			break;
+		default:
+			break;
+		}
+
+		if (notice) {
+			gi.configstring(CONFIG_WARMUP_NOTICE, notice);
+			ent->client->ps.stats[STAT_WARMUP_NOTICE] = CONFIG_WARMUP_NOTICE;
+		} else {
+			ent->client->ps.stats[STAT_WARMUP_NOTICE] = 0;
+		}
+	} else {
+		ent->client->ps.stats[STAT_WARMUP_NOTICE] = 0;
+	}
+
+	if (level.match_state == MATCH_IN_PROGRESS) {
+		if (GT(GT_HORDE)) {
+			ent->client->ps.stats[STAT_MONSTER_COUNT] = level.total_monsters - level.killed_monsters;
+		} else if (GTF(GTF_ELIMINATION) && GTF(GTF_TEAMS) && GTF(GTF_CTF) && ClientIsPlaying(ent->client) && !ent->client->eliminated) {
+			const bool attacking = ent->client->sess.team == (level.strike_red_attacks ? TEAM_RED : TEAM_BLUE);
+			ent->client->ps.stats[STAT_MONSTER_COUNT] = MM_EncodeStrikeArenaRole(attacking);
+		} else if (GTF(GTF_ELIMINATION) && GTF(GTF_TEAMS) && !GTF(GTF_CTF) && ClientIsPlaying(ent->client)) {
+			ent->client->ps.stats[STAT_MONSTER_COUNT] = MM_EncodeArenaRoleForClient(false, false, ent->client->eliminated);
+		} else if (GTF(GTF_ELIMINATION) && !GTF(GTF_TEAMS)) {
+			ent->client->ps.stats[STAT_MONSTER_COUNT] = level.num_living_free;
+		} else {
+			ent->client->ps.stats[STAT_MONSTER_COUNT] = 0;
+		}
+
+		if (GTF(GTF_ROUNDS) && !GT(GT_CA) && !GT(GT_RR) && !GT(GT_STRIKE) && !GT(GT_HORDE)) {
+			const int display_round = HudRoundDisplayNumber();
+			if (display_round > 0) {
+				const int limit = GT_ScoreLimit();
+				if (limit > 0)
+					gi.configstring(CONFIG_ROUND_PROGRESS, G_Fmt("Round {} of {}", display_round, limit).data());
+				else
+					gi.configstring(CONFIG_ROUND_PROGRESS, G_Fmt("Round {}", display_round).data());
+				ent->client->ps.stats[STAT_ROUND_NUMBER] = CONFIG_ROUND_PROGRESS;
+			} else {
+				ent->client->ps.stats[STAT_ROUND_NUMBER] = 0;
+			}
+		} else {
 			ent->client->ps.stats[STAT_ROUND_NUMBER] = 0;
+		}
+	} else {
+		ent->client->ps.stats[STAT_MONSTER_COUNT] = 0;
+		ent->client->ps.stats[STAT_ROUND_NUMBER] = 0;
 	}
 
 	// stat for text on what we're doing for respawn
@@ -908,6 +895,30 @@ void G_SetCoopStats(gentity_t *ent) {
 		ent->client->ps.stats[STAT_COOP_RESPAWN] = CONFIG_COOP_RESPAWN_STRING + (ent->client->coop_respawn_state - COOP_RESPAWN_IN_COMBAT);
 	else
 		ent->client->ps.stats[STAT_COOP_RESPAWN] = 0;
+
+	if ((GT(GT_CA) || GT(GT_RR)) && deathmatch->integer && level.match_state == MATCH_IN_PROGRESS
+		&& level.round_state == roundst_t::ROUND_IN_PROGRESS) {
+		int allies = level.num_living_red;
+		int enemies = level.num_living_blue;
+
+		if (ent->client->sess.team == TEAM_BLUE) {
+			allies = level.num_living_blue;
+			enemies = level.num_living_red;
+		}
+
+		const int ci = (int)(ent - g_entities - 1);
+		if (ci >= 0 && (size_t)ci < CONFIG_CA_ALIVE_HUD_SLOTS) {
+			const int cs = (int)(CONFIG_CA_ALIVE_HUD + (size_t)ci);
+			gi.configstring(cs, G_Fmt("{} vs {}", allies, enemies).data());
+			ent->client->ps.stats[STAT_DUEL_HEADER] = cs;
+		}
+	} else if (!GT(GT_DUEL)) {
+		ent->client->ps.stats[STAT_DUEL_HEADER] = 0;
+	}
+}
+
+void G_SetCoopStats(gentity_t *ent) {
+	G_SetGametypeStats(ent);
 }
 
 struct powerup_info_t {
@@ -998,6 +1009,12 @@ static void SetCrosshairIDView(gentity_t *ent) {
 }
 
 
+// Miniscore rows (team logos / FFA avatars + num(3) scores) stay visible from warmup through match play.
+static bool MiniscoreHudActive()
+{
+	return level.match_state >= MATCH_WARMUP_DELAYED && level.match_state <= MATCH_IN_PROGRESS;
+}
+
 static void CTF_SetStats(gentity_t *ent, bool blink) {
 	uint32_t	i;
 	int			p1, p2;
@@ -1084,7 +1101,7 @@ static void CTF_SetStats(gentity_t *ent, bool blink) {
 			ent->client->ps.stats[STAT_MINISCORE_SECOND_PIC] = 0;
 	}
 
-	if (level.match_state >= MATCH_IN_PROGRESS) {
+	if (MiniscoreHudActive()) {
 		ent->client->ps.stats[STAT_MINISCORE_FIRST_SCORE] = level.team_scores[TEAM_RED];
 		ent->client->ps.stats[STAT_MINISCORE_SECOND_SCORE] = level.team_scores[TEAM_BLUE];
 	}
@@ -1100,7 +1117,6 @@ static void CTF_SetStats(gentity_t *ent, bool blink) {
 		(blink))
 		ent->client->ps.stats[STAT_CTF_FLAG_PIC] = ii_teams_red_default;
 }
-
 
 static void SetMiniScoreStats(gentity_t *ent) {
 	bool teams = Teams() && notGT(GT_RR);
@@ -1206,26 +1222,17 @@ static void SetMiniScoreStats(gentity_t *ent) {
 		CTF_SetStats(ent, blink);
 	} else {
 		if (teams) {
-			if (level.match_state >= MATCH_IN_PROGRESS) {
+			if (MiniscoreHudActive()) {
 				ent->client->ps.stats[STAT_MINISCORE_FIRST_PIC] = ii_teams_red_default;
 				ent->client->ps.stats[STAT_MINISCORE_FIRST_SCORE] = level.team_scores[TEAM_RED];
 				ent->client->ps.stats[STAT_MINISCORE_SECOND_PIC] = ii_teams_blue_default;
 				ent->client->ps.stats[STAT_MINISCORE_SECOND_SCORE] = level.team_scores[TEAM_BLUE];
 			}
-
-			if (GTF(GTF_ROUNDS)) {
-				//TODO: configstrings??
-				ent->client->ps.stats[STAT_MINISCORE_FIRST_VAL] = 0;	// level.num_playing_red - level.num_eliminated_red;
-				ent->client->ps.stats[STAT_MINISCORE_SECOND_VAL] = 0;	//level.num_playing_blue - level.num_eliminated_blue;
-			} else {
-				ent->client->ps.stats[STAT_MINISCORE_FIRST_VAL] = 0;
-				ent->client->ps.stats[STAT_MINISCORE_SECOND_VAL] = 0;
-			}
 		} else {
 			int16_t pic1 = 0, pic2 = 0;
 
 			ent->client->ps.stats[STAT_MINISCORE_FIRST_SCORE] = -999;
-			if (level.match_state == MATCH_IN_PROGRESS) {
+			if (MiniscoreHudActive()) {
 				if (pos1_num >= 0) {
 					pic1 = game.clients[pos1_num].pers.skin_icon_index;
 					ent->client->ps.stats[STAT_MINISCORE_FIRST_SCORE] = game.clients[pos1_num].resp.score;
@@ -1235,7 +1242,7 @@ static void SetMiniScoreStats(gentity_t *ent) {
 				ent->client->ps.stats[STAT_MINISCORE_FIRST_PIC] = 0;
 
 			ent->client->ps.stats[STAT_MINISCORE_SECOND_SCORE] = -999;
-			if (level.match_state == MATCH_IN_PROGRESS) {
+			if (MiniscoreHudActive()) {
 				if (pos2_num >= 0) {
 					pic2 = game.clients[pos2_num].pers.skin_icon_index;
 					ent->client->ps.stats[STAT_MINISCORE_SECOND_SCORE] = game.clients[pos2_num].resp.score;
@@ -1249,7 +1256,7 @@ static void SetMiniScoreStats(gentity_t *ent) {
 	// highlight miniscores position/team
 	ent->client->ps.stats[STAT_MINISCORE_FIRST_POS] = 0;
 	ent->client->ps.stats[STAT_MINISCORE_SECOND_POS] = 0;
-	if (level.match_state == MATCH_IN_PROGRESS) {
+	if (MiniscoreHudActive()) {
 		if (teams) {
 			if (ent->client->sess.team == TEAM_RED)
 				ent->client->ps.stats[STAT_MINISCORE_FIRST_POS] = ii_highlight;
@@ -1303,8 +1310,8 @@ void G_SetStats(gentity_t *ent) {
 	// Engine team identity for lobby say_team and client team border HUD.
 	P_PublishEngineTeam(ent);
 
-	// Red Rover: persistent team logo on the HUD (rendered top-centre by the
-	// statusbar) so the player always knows which side they're on after a defect.
+	// Red Rover: persistent team logo on the HUD (centre stack below match timer)
+	// so the player always knows which side they're on after a defect.
 	// Works on any client since it rides the normal statusbar/stats protocol.
 	if (GT(GT_RR)) {
 		if (ent->client->sess.team == TEAM_RED)
@@ -1662,13 +1669,13 @@ void G_SetStats(gentity_t *ent) {
 		int ft = floor(t * 1000);
 		
 		if (ent->client->last_match_timer_update != ft) {
-			const char *s, *s1, *s2 = "";
+			const char *s, *s1;
 
 			ent->client->last_match_timer_update = ft;
 
 			switch (level.match_state) {
 			case matchst_t::MATCH_WARMUP_DELAYED:
-				if (level.warmup_notice_time + 5_sec > level.time) {
+				if (level.warmup_notice_time + WARMUP_SPLASH_DURATION > level.time) {
 					s1 = G_Fmt("{} v{}", GAMEMOD_TITLE, GAMEMOD_VERSION).data();
 				} else {
 					s1 = "";
@@ -1710,23 +1717,8 @@ void G_SetStats(gentity_t *ent) {
 				break;
 			}
 			}
-			if (level.match_state == matchst_t::MATCH_WARMUP_DEFAULT || level.match_state == matchst_t::MATCH_WARMUP_READYUP) {
-				if (level.warmup_requisite && level.warmup_notice_time + 3_sec > level.time) {
-					switch (level.warmup_requisite) {
-					case warmupreq_t::WARMUP_REQ_MORE_PLAYERS:
-						s2 = G_Fmt(": More players needed ({} players min.)", minplayers->integer).data();
-						break;
-					case warmupreq_t::WARMUP_REQ_BALANCE:
-						s2 = ": Teams are imbalanced.";
-						break;
-					case warmupreq_t::WARMUP_REQ_READYUP:
-						s2 = ": Players must ready up.";
-						break;
-					}
-				}
-			}
 
-			s = G_Fmt("{}{}", s1, s2).data();
+			s = s1;
 
 			ent->client->ps.stats[STAT_MATCH_STATE] = CONFIG_MATCH_STATE;
 			gi.configstring(CONFIG_MATCH_STATE, s);

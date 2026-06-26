@@ -66,6 +66,12 @@ enum {
 
 	CONFIG_STORY_SCORELIMIT,	// this is also used for scorelimit display in dm
 
+	CONFIG_GAMETYPE_HUD,	// DM HUD: "Gametype: …"
+	CONFIG_RULESET_HUD,		// DM HUD: "Ruleset: …"
+	CONFIG_ROUND_PROGRESS,	// DM HUD: "Round x of y" / "Wave x of y"
+	CONFIG_WARMUP_NOTICE,	// DM HUD: warmup requisite detail (e.g. more players needed)
+	CONFIG_CA_ALIVE_HUD,	// CA HUD pool base: "X vs Y" living counts (CONFIG_CA_ALIVE_HUD + client_index)
+
 	CONFIG_LAST
 };
 
@@ -252,13 +258,11 @@ enum player_stat_t {
 
 	STAT_COUNTDOWN,
 
-	STAT_MINISCORE_FIRST_VAL,
-	STAT_MINISCORE_SECOND_VAL,
-
 	STAT_MONSTER_COUNT,
+	STAT_GAMETYPE_HUD,
+	STAT_RULESET_HUD,
 	STAT_ROUND_NUMBER,
-
-	STAT_MEDAL,
+	STAT_WARMUP_NOTICE,
 
 	// don't use; just for verification
 	STAT_LAST
@@ -266,11 +270,15 @@ enum player_stat_t {
 
 static_assert(STAT_LAST <= MAX_STATS + 1, "stats list overflow");
 
-// Capture Strike packs its per-player HUD role into the STAT_MONSTER_COUNT slot,
-// which is hard-set to 0 in every non-Horde mode (see G_SetCoopStats). Stored as
-// bit flags rather than a value so future strike HUD state can share the same
-// stat without spending a new STAT_ index. Rendered via the "ifbit" statusbar op.
-enum strike_hud_flags_t : uint16_t {
-	STRIKE_HUD_ATTACKING = bit_v<0>,	// local player's team is on offense this turn
-	STRIKE_HUD_DEFENDING = bit_v<1>,	// local player's team is on defense this turn
+// Arena HUD packs per-player role/state into STAT_MONSTER_COUNT in elimination modes
+// (see G_SetGametypeStats). Horde uses the same slot as a monster count (num op).
+// Strike/CA/LMS use bit flags rendered via the "ifbit" statusbar op; LMS FFA uses num.
+enum arena_hud_role_t : uint16_t {
+	ARENA_ROLE_ATTACKING  = bit_v<0>,	// local player's team is on offense this turn
+	ARENA_ROLE_DEFENDING  = bit_v<1>,	// local player's team is on defense this turn
+	ARENA_ROLE_ELIMINATED = bit_v<2>,	// player eliminated this round (CA / LMS)
 };
+
+using strike_hud_flags_t = arena_hud_role_t;
+static constexpr arena_hud_role_t STRIKE_HUD_ATTACKING = ARENA_ROLE_ATTACKING;
+static constexpr arena_hud_role_t STRIKE_HUD_DEFENDING = ARENA_ROLE_DEFENDING;

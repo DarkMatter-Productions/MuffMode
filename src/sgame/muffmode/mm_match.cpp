@@ -449,6 +449,7 @@ void Match_Start() {
 	level.match_state_timer = level.time;
 	level.warmup_requisite = warmupreq_t::WARMUP_REQ_NONE;
 	level.warmup_notice_time = 0_sec;
+	level.warmup_gametype_hud_time = 0_sec;
 
 	level.team_scores[TEAM_RED] = level.team_scores[TEAM_BLUE] = 0;
 
@@ -522,6 +523,7 @@ void Match_Reset() {
 	level.match_state = matchst_t::MATCH_WARMUP_DEFAULT;
 	level.warmup_requisite = warmupreq_t::WARMUP_REQ_NONE;
 	level.warmup_notice_time = 0_sec;
+	level.warmup_gametype_hud_time = level.time;
 	level.match_state_timer = 0_sec;
 	level.intermission_queued = 0_sec;
 	level.intermission_exit = false;
@@ -1049,6 +1051,7 @@ void TickWarmupState() {
 		level.match_state_timer = level.time + 5_sec;
 		level.warmup_requisite = warmupreq_t::WARMUP_REQ_NONE;
 		level.warmup_notice_time = level.time;
+		level.warmup_gametype_hud_time = level.time;
 		return;
 	}
 
@@ -1118,10 +1121,13 @@ void TickWarmupState() {
 			}
 
 			if (level.match_state != matchst_t::MATCH_WARMUP_DEFAULT) {
+				const matchst_t prev_state = level.match_state;
 				level.match_state = matchst_t::MATCH_WARMUP_DEFAULT;
 				level.match_state_timer = 0_sec;
 				level.warmup_requisite = warmupreq_t::WARMUP_REQ_BALANCE;
 				level.warmup_notice_time = level.time;
+				if (prev_state == matchst_t::MATCH_COUNTDOWN || prev_state == matchst_t::MATCH_WARMUP_READYUP)
+					level.warmup_gametype_hud_time = level.time;
 			}
 		}
 		return; // still waiting for players
@@ -1145,10 +1151,13 @@ void TickWarmupState() {
 				}
 
 				if (level.match_state != matchst_t::MATCH_WARMUP_DEFAULT) {
+					const matchst_t prev_state = level.match_state;
 					level.match_state = matchst_t::MATCH_WARMUP_DEFAULT;
 					level.match_state_timer = 0_sec;
 					level.warmup_requisite = warmupreq_t::WARMUP_REQ_MORE_PLAYERS;
 					level.warmup_notice_time = level.time;
+					if (prev_state == matchst_t::MATCH_COUNTDOWN || prev_state == matchst_t::MATCH_WARMUP_READYUP)
+						level.warmup_gametype_hud_time = level.time;
 				}
 			}
 			level.match_cancel_delay_timer = 0_ms; // reset
@@ -1184,6 +1193,7 @@ void TickWarmupState() {
 		level.match_state = matchst_t::MATCH_WARMUP_DEFAULT;
 		level.warmup_requisite = warmupreq_t::WARMUP_REQ_NONE;
 		level.warmup_notice_time = 0_sec;
+		level.warmup_gametype_hud_time = level.time;
 		level.prepare_to_fight = false;
 		return;
 	}
