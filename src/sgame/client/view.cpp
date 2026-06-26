@@ -1516,7 +1516,7 @@ void ClientEndServerFrame(gentity_t *ent) {
 	current_client = e->client;
 
 	if (deathmatch->integer) {
-		int limit = GT_ScoreLimit();
+		int limit = level.match_state >= MATCH_IN_PROGRESS ? GT_ScoreLimit() : 0;
 		ent->client->ps.stats[STAT_SCORELIMIT] = limit;
 		if (limit != (int)strtoul(gi.get_configstring(CONFIG_STORY_SCORELIMIT), nullptr, 10)) {
 			gi.configstring(CONFIG_STORY_SCORELIMIT, limit ? G_Fmt("{}", limit).data() : "");

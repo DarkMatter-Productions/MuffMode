@@ -171,6 +171,7 @@
     <ClInclude Include="..\..\src\sgame\muffmode\mm_admin.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_captain.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_command_contracts.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_hud_stat_contracts.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_combat_heatmap.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_debug.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_duel.h" />
@@ -194,6 +195,7 @@
     <ClInclude Include="..\..\src\sgame\muffmode\mm_pconfig.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_profile.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_red_rover_rules.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_scoreboard_layout.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_ruleset.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_ruleset_weapons.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_skin.h" />

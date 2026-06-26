@@ -1646,6 +1646,7 @@ struct level_locals_t {
 	int			num_eliminated_red;
 	int			num_living_blue;
 	int			num_eliminated_blue;
+	int			num_living_free;	// FFA elimination modes (e.g. LMS)
 	int			num_playing_red;
 	int			num_playing_blue;
 
@@ -1655,6 +1656,7 @@ struct level_locals_t {
 	matchst_t	match_state;
 	warmupreq_t	warmup_requisite;
 	gtime_t		warmup_notice_time;
+	gtime_t		warmup_gametype_hud_time;	// when gametype/ruleset HUD pulse started (WARMUP_SPLASH_DURATION)
 	gtime_t		match_time;
 	gtime_t		match_start_time;
 	int			match_state_queued;
@@ -3045,6 +3047,7 @@ void CopyToBodyQue(gentity_t *ent);
 void ClientBeginServerFrame(gentity_t *ent);
 void ClientUserinfoChanged(gentity_t *ent, const char *userinfo);
 void P_AssignClientSkinnum(gentity_t *ent);
+void P_PublishEngineTeam(gentity_t *ent);
 void P_ForceFogTransition(gentity_t *ent, bool instant);
 void P_SendLevelPOI(gentity_t *ent);
 unsigned int P_GetLobbyUserNum(const gentity_t *player);
@@ -3316,6 +3319,8 @@ struct height_fog_t {
 };
 
 constexpr gtime_t SELECTED_ITEM_TIME = 3_sec;
+// Warmup splash HUD/center stack (Muff Mode version, gametype/ruleset); matches scr_centertime default hold.
+constexpr gtime_t WARMUP_SPLASH_DURATION = 5_sec;
 
 enum bmodel_animstyle_t : int32_t {
 	BMODEL_ANIM_FORWARDS,

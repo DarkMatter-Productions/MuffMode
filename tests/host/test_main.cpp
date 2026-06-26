@@ -3,6 +3,7 @@
 
 #include "fake_game_import.h"
 #include "muffmode/mm_command_contracts.h"
+#include "muffmode/mm_hud_stat_contracts.h"
 #include "muffmode/mm_horde_ai_rules.h"
 #include "muffmode/mm_lms_rules.h"
 #include "muffmode/mm_loc_parse.h"
@@ -308,6 +309,26 @@ MM_TEST(loc_body_requires_macro_and_substitutes_location) {
 MM_TEST(loc_body_caps_length) {
 	std::string long_text = "%l " + std::string(400, 'x');
 	MM_CHECK(MM_BuildLocBody(long_text.c_str(), "WATER").size() <= 150);
+}
+
+MM_TEST(hud_stat_contract_strike_role_encoding) {
+	MM_CHECK_EQ(MM_EncodeStrikeArenaRole(true), static_cast<uint16_t>(ARENA_ROLE_ATTACKING));
+	MM_CHECK_EQ(MM_EncodeStrikeArenaRole(false), static_cast<uint16_t>(ARENA_ROLE_DEFENDING));
+	MM_CHECK(MM_ArenaRoleHasMask(MM_EncodeStrikeArenaRole(true), ARENA_ROLE_ATTACKING));
+	MM_CHECK_FALSE(MM_ArenaRoleHasMask(MM_EncodeStrikeArenaRole(true), ARENA_ROLE_DEFENDING));
+}
+
+MM_TEST(hud_stat_contract_ca_eliminated_role) {
+	MM_CHECK_EQ(MM_EncodeArenaEliminatedRole(), static_cast<uint16_t>(ARENA_ROLE_ELIMINATED));
+	MM_CHECK(MM_ArenaRoleHasMask(MM_EncodeArenaRoleForClient(false, false, true), ARENA_ROLE_ELIMINATED));
+	MM_CHECK_FALSE(MM_MiniscoreValVisible(MM_EncodeArenaRoleForClient(false, false, false)));
+}
+
+MM_TEST(hud_stat_contract_miniscore_val_visibility) {
+	MM_CHECK_FALSE(MM_MiniscoreValVisible(0));
+	MM_CHECK(MM_MiniscoreValVisible(1));
+	MM_CHECK(MM_StatusbarLayoutLengthWithinBudget(MM_STATUSBAR_LAYOUT_MAX_CHARS));
+	MM_CHECK_FALSE(MM_StatusbarLayoutLengthWithinBudget(MM_STATUSBAR_LAYOUT_MAX_CHARS + 1));
 }
 
 } // namespace

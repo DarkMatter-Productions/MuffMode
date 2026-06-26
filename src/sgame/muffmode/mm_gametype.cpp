@@ -437,10 +437,12 @@ void MM_ChangeGametype(gametype_t gt, bool force_cfg)
 				// initialization path and are re-assigned by CheckDMWarmupState
 				// rather than inheriting TEAM_FREE from the previous gametype (e.g. horde).
 				ec->client->sess.team = TEAM_NONE;
+				P_PublishEngineTeam(ec);
 				ec->client->sess.initialised = false;
 				continue;
 			}
 			ec->client->sess.team = TEAM_NONE;
+			P_PublishEngineTeam(ec);
 			ec->client->sess.duel_queued = false;
 			ec->client->sess.initialised = false;
 			ec->client->initial_menu_shown = false;

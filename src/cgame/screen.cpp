@@ -426,6 +426,16 @@ static void CG_ExecuteLayoutString(const char *s, vrect_t hud_vrect, vrect_t hud
 					if (stat == STAT_MINISCORE_FIRST_PIC || stat == STAT_MINISCORE_SECOND_PIC) {
 						w = 24;
 						h = 24;
+					} else if (stat == STAT_CTF_FLAG_PIC) {
+						const int32_t rr_logo_y = (int32_t)((hud_vrect.y + 38) * scale + hud_safe.y);
+						if (abs(y - rr_logo_y) <= 2 * scale) {
+							// Red Rover centre team reminder (yt 38) — smaller than default flag art.
+							w = 18;
+							h = 18;
+							x = (int32_t)((hud_vrect.x + hud_vrect.width / 2) * scale) - (w * scale) / 2;
+						} else {
+							cgi.Draw_GetPicSize(&w, &h, pic);
+						}
 					} else {
 						cgi.Draw_GetPicSize(&w, &h, pic);
 					}
@@ -674,19 +684,36 @@ static void CG_ExecuteLayoutString(const char *s, vrect_t hud_vrect, vrect_t hud
 			token = COM_Parse(&s);
 
 			if (!skip_depth) {
-				index = CG_ParseLayoutStatIndex(token);
-				index = ps->stats[index];
+				int32_t stat = 0;
+				if (!CG_TryLayoutStatIndex(token, stat))
+					cgi.Com_Error("Bad stat_string index");
+				index = ps->stats[stat];
 
 				if (cgi.CL_ServerProtocol() <= PROTOCOL_VERSION_3XX)
 					index = CS_REMAP(index).start / CS_MAX_STRING_LENGTH;
 
 				if (index < 0 || index >= MAX_CONFIGSTRINGS)
 					cgi.Com_Error("Bad stat_string index");
-				if (!scr_usekfont->integer)
-					CG_DrawString(x, y, scale, cgi.get_configstring(index));
+
+				const char *str = cgi.get_configstring(index);
+
+				if (stat == STAT_MATCH_STATE || stat == STAT_WARMUP_NOTICE || stat == STAT_DUEL_HEADER) {
+					if (!scr_usekfont->integer) {
+						const int w = strlen(str) * CONCHAR_WIDTH * scale;
+						const int cx = (int)((hud_vrect.x + hud_vrect.width / 2) * scale);
+						CG_DrawString(cx - (w / 2), y, scale, str);
+					} else {
+						cgi.SCR_SetAltTypeface(ui_acc_alttypeface->integer && true);
+						const vec2_t size = cgi.SCR_MeasureFontString(str, scale);
+						const int cx = (int)((hud_vrect.x + hud_vrect.width / 2) * scale);
+						cgi.SCR_DrawFontString(str, cx - (int)(size.x / 2), y - (font_y_offset * scale), scale, rgba_white, true, text_align_t::LEFT);
+						cgi.SCR_SetAltTypeface(false);
+					}
+				} else if (!scr_usekfont->integer)
+					CG_DrawString(x, y, scale, str);
 				else {
 					cgi.SCR_SetAltTypeface(ui_acc_alttypeface->integer && true);
-					cgi.SCR_DrawFontString(cgi.get_configstring(index), x, y - (font_y_offset * scale), scale, rgba_white, true, text_align_t::LEFT);
+					cgi.SCR_DrawFontString(str, x, y - (font_y_offset * scale), scale, rgba_white, true, text_align_t::LEFT);
 					cgi.SCR_SetAltTypeface(false);
 				}
 			}

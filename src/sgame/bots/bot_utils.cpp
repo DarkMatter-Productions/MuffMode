@@ -149,9 +149,7 @@ static void Player_UpdateState(gentity_t *player) {
 		player->sv.ent_flags |= SVFL_IS_SPECTATOR;
 	}
 
-	player_skinnum_t pl_skinnum;
-	pl_skinnum.skinnum = player->s.skinnum;
-	player->sv.team = pl_skinnum.team_index;
+	P_PublishEngineTeam(player);
 
 	player->sv.buttons = player->client->buttons;
 
