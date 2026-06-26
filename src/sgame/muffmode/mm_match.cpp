@@ -169,6 +169,7 @@ void ResetEntities(bool reset_players, bool reset_ghost, bool reset_score)
 			// [muff] Restore bot team assignment to keep them playing
 			if (is_bot && ec->client && saved_bot_team != TEAM_NONE) {
 				ec->client->sess.team = saved_bot_team;
+				P_PublishEngineTeam(ec);
 				// Ensure bot SVF flags are preserved
 				if (ec->client->sess.is_a_bot)
 					ec->svflags |= SVF_BOT;

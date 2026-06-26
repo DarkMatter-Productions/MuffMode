@@ -1778,6 +1778,7 @@ static void StopFollowing(gentity_t *ent, bool release) {
 	client = ent->client;
 
 	client->sess.team = TEAM_SPECTATOR;
+	P_PublishEngineTeam(ent);
 	client->sess.spectator_state = SPECTATOR_FREE;
 	if (release) {
 		client->ps.stats[STAT_HEALTH] = ent->health = 1;
@@ -2389,7 +2390,7 @@ void ClientCommand(gentity_t *ent) {
 		Cmd_Say_f(ent, false);
 		return;
 	}
-	if (!Q_strcasecmp(cmd, "say_team") == 0 || !Q_strcasecmp(cmd, "steam")) {
+	if (!Q_strcasecmp(cmd, "say_team") || !Q_strcasecmp(cmd, "steam")) {
 		if (Teams())
 			Cmd_Say_Team_f(ent, gi.args());
 		else

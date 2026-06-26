@@ -538,6 +538,7 @@ bool SetTeam(gentity_t *ent, team_t desired_team, bool inactive, bool force, boo
 	if (notGT(GT_RR))
 		ent->client->resp.score = 0;
 	ent->client->sess.team = desired_team;
+	P_PublishEngineTeam(ent);
 	if (desired_team == TEAM_SPECTATOR)
 		ent->client->eliminated = false;
 	ent->client->resp.ctf_state = 0;

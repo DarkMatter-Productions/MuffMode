@@ -399,6 +399,7 @@ void ClientRespawn(gentity_t *ent) {
 			// the Red Rover round. Keep the team guard so corrupt state never lands on spectator.
 			if ((cur == TEAM_RED || cur == TEAM_BLUE) && (teammates_left > 0 || opponents > 0)) {
 				ent->client->sess.team = other;
+				P_PublishEngineTeam(ent);
 				G_AssignPlayerSkin(ent, ent->client->pers.skin);
 				rr_defected = true;
 			}
@@ -422,9 +423,40 @@ void ClientRespawn(gentity_t *ent) {
 // [Paril-KEX]
 // skinnum was historically used to pack data
 // so we're going to build onto that.
-void P_AssignClientSkinnum(gentity_t *ent) {
-	if (ent->s.modelindex != 255)
+static uint8_t P_CurrentEngineTeamIndex(gentity_t *ent) {
+	if (!ent || !ent->client)
+		return 0;
+
+	if (InCoopStyle())
+		return 1; // all players are teamed in coop
+	if (Teams())
+		return P_EngineTeamIndex(ent->client->sess.team);
+
+	return 0;
+}
+
+void P_PublishEngineTeam(gentity_t *ent) {
+	if (!ent || !ent->client)
 		return;
+
+	const uint8_t team_index = P_CurrentEngineTeamIndex(ent);
+
+	ent->client->ps.team_id = team_index;
+	ent->sv.team = team_index;
+
+	if (ent->s.modelindex == MODELINDEX_PLAYER) {
+		player_skinnum_t packed;
+		packed.skinnum = ent->s.skinnum;
+		packed.team_index = team_index;
+		ent->s.skinnum = packed.skinnum;
+	}
+}
+
+void P_AssignClientSkinnum(gentity_t *ent) {
+	if (ent->s.modelindex != MODELINDEX_PLAYER) {
+		P_PublishEngineTeam(ent);
+		return;
+	}
 
 	player_skinnum_t packed;
 
@@ -435,12 +467,7 @@ void P_AssignClientSkinnum(gentity_t *ent) {
 		packed.vwep_index = 0;
 	packed.viewheight = ent->client->ps.viewoffset.z + ent->client->ps.pmove.viewheight;
 
-	if (InCoopStyle())
-		packed.team_index = 1; // all players are teamed in coop
-	else if (Teams())
-		packed.team_index = P_EngineTeamIndex(ent->client->sess.team);
-	else
-		packed.team_index = 0;
+	packed.team_index = P_CurrentEngineTeamIndex(ent);
 
 	if (ent->deadflag)
 		packed.poi_icon = 1;
@@ -448,8 +475,7 @@ void P_AssignClientSkinnum(gentity_t *ent) {
 		packed.poi_icon = 0;
 
 	ent->s.skinnum = packed.skinnum;
-	ent->client->ps.team_id = packed.team_index;
-	ent->sv.team = packed.team_index;
+	P_PublishEngineTeam(ent);
 }
 
 // [Paril-KEX] send player level POI
@@ -626,6 +652,7 @@ static void MoveClientToFreeCam(gentity_t *ent) {
 	ent->client->ps.damage_blend[3] = ent->client->ps.screen_blend[3] = 0;
 	ent->client->ps.rdflags = RDF_NONE;
 	ent->s.sound = 0;
+	P_PublishEngineTeam(ent);
 
 	gi.linkentity(ent);
 }
@@ -638,6 +665,7 @@ InitPlayerTeam
 static bool InitPlayerTeam(gentity_t *ent) {
 	if (!deathmatch->integer) {
 		ent->client->sess.team = TEAM_FREE;
+		P_PublishEngineTeam(ent);
 		ent->client->ps.stats[STAT_SHOW_STATUSBAR] = 1;
 		return true;
 	}
@@ -647,6 +675,7 @@ static bool InitPlayerTeam(gentity_t *ent) {
 		return true;
 
 	ent->client->sess.team = TEAM_SPECTATOR;
+	P_PublishEngineTeam(ent);
 	MoveClientToFreeCam(ent);
 	
 	if (ent->client->sess.is_a_bot || (ent->svflags & SVF_BOT) || g_dm_force_join->integer || g_dm_auto_join->integer) {
@@ -908,12 +937,9 @@ void ClientSpawn(gentity_t *ent) {
 
 	ent->client->ps.pmove.viewheight = ent->viewheight;
 
-	// [MuffMode] Restore the engine team id right after clearing playerstate, as
-	// stock q2re does. The engine snapshots a player's team for the lobby say_team
-	// chat control during/just after spawn; leaving this 0 until the next frame's
-	// G_SetStats lets the snapshot cache 0, which leaks team chat to everyone for
-	// the rest of the map. This is the regression vs vanilla.
-	ent->client->ps.team_id = P_EngineTeamIndex(ent->client->sess.team);
+	// [MuffMode] Restore engine team identity right after clearing playerstate,
+	// matching stock q2re's timing and keeping KEX lobby team-chat metadata fresh.
+	P_PublishEngineTeam(ent);
 
 	if (!G_ShouldPlayersCollide(false))
 		ent->clipmask &= ~CONTENTS_PLAYER;
@@ -1449,6 +1475,7 @@ bool ClientConnect(gentity_t *ent, char *userinfo, const char *social_id, bool i
 
 	// they can connect
 	ent->client = game.clients + (ent - g_entities - 1);
+	P_PublishEngineTeam(ent);
 
 	// set up userinfo early
 	ClientUserinfoChanged(ent, userinfo);
@@ -1462,6 +1489,7 @@ bool ClientConnect(gentity_t *ent, char *userinfo, const char *social_id, bool i
 			//gi.Com_PrintFmt_("ClientConnect: {} q={}\n", ent->client->resp.netname, ent->client->sess.duel_queued);
 			// force team join
 			ent->client->sess.team = deathmatch->integer ? TEAM_SPECTATOR : TEAM_FREE;
+			P_PublishEngineTeam(ent);
 			//InitPlayerTeam(ent);
 			ent->client->sess.pc.show_id = true;
 			ent->client->sess.pc.show_timer = true;
@@ -2550,6 +2578,7 @@ static bool G_CoopRespawn(gentity_t *ent) {
 			// our thumbs forever
 			CopyToBodyQue(ent);
 			ent->client->sess.team = TEAM_SPECTATOR;
+			P_PublishEngineTeam(ent);
 			MoveClientToFreeCam(ent);
 			gi.linkentity(ent);
 			GetFollowTarget(ent);

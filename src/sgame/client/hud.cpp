@@ -1300,8 +1300,8 @@ void G_SetStats(gentity_t *ent) {
 	}
 	ent->client->ps.stats[STAT_HEALTH] = ent->health;
 
-	// Engine team_id (1/2) for lobby say_team and client team border HUD.
-	ent->client->ps.team_id = P_EngineTeamIndex(ent->client->sess.team);
+	// Engine team identity for lobby say_team and client team border HUD.
+	P_PublishEngineTeam(ent);
 
 	// Red Rover: persistent team logo on the HUD (rendered top-centre by the
 	// statusbar) so the player always knows which side they're on after a defect.
@@ -1768,8 +1768,8 @@ void G_SetSpectatorStats(gentity_t *ent) {
 	if (!cl->follow_target)
 		G_SetStats(ent);
 	else
-		// Still set team_id even when following (in case we follow someone on a team).
-		cl->ps.team_id = P_EngineTeamIndex(cl->sess.team);
+		// Still publish team identity even when following (in case we follow someone on a team).
+		P_PublishEngineTeam(ent);
 
 	cl->ps.stats[STAT_SPECTATOR] = 1;
 

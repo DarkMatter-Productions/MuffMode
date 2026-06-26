@@ -1,8 +1,9 @@
 # `say_team` team chat leaks to everyone (KEX lobby)
 
-**Status:** OPEN / unresolved as of 2026-06-26 (v0.40.2). Multiple fixes attempted,
-none confirmed working in-game. Code currently carries a one-line speculative fix
-(see [Current code state](#current-code-state)).
+**Status:** FIX CANDIDATE as of 2026-06-26. Follow-up RE in
+`../quake2ex_steam/` showed KEX `messagemode2` is lobby/chat-window owned and
+depends on engine chat-control team metadata, so MuffMode now publishes its
+engine-facing team identity whenever `sess.team` changes.
 
 ## Symptom
 
@@ -80,24 +81,30 @@ entity-state publishing below can fix it.
 |---|---------|--------|
 | 1 | Intercept `say_team`/`steam` in `ClientCommand` and unicast `svc_print` to same-team clients (mirroring `mm_loc`, which *does* keep loc callouts team-private). | **No effect.** Confirmed via `[cmddiag]` that `say_team` never reaches the game DLL under KEX. Reverted. |
 | 2 | Publish engine team early + keep it consistent across the board: new `P_PublishEngineTeam`/`P_GetPublishedTeamIndex` helpers setting `ps.team_id` + `sv.team` + skinnum nibble with **no `modelindex==255` gate**; called from `SetTeam` (after `sess.team` set), `P_AssignClientSkinnum` (even pre-spawn), `Player_UpdateState` (authoritative `sv.team` instead of decoding stale skinnum), and `G_SetStats`/`G_SetSpectatorStats`. | **Did not fix.** Also note `SetTeam` calls `ClientSpawn`, whose `memset` wipes the just-published `ps.team_id`. Reverted as over-engineered/fragile. |
-| 3 | Minimal vanilla parity: restore `ps.team_id = P_EngineTeamIndex(sess.team)` in `ClientSpawn` immediately after the `memset` (matches stock q2re `p_client.cpp:2188`). | **Did not fix.** Left in the tree (harmless, correct, matches vanilla). |
+| 3 | Minimal vanilla parity: restore `ps.team_id = P_EngineTeamIndex(sess.team)` in `ClientSpawn` immediately after the `memset` (matches stock q2re `p_client.cpp:2188`). | **Did not fix by itself.** Correct timing, but it did not cover every MuffMode team mutation path. |
+| 4 | Centralized engine-team publication with `P_PublishEngineTeam`: keep `ps.team_id`, `sv.team`, and the skinnum team nibble aligned, call it after `sess.team` writes and from spawn/HUD/spectator paths, and fix the non-KEX `say_team` command condition. | **Current fix candidate.** This differs from attempt #2 by preserving the post-`memset` spawn publication and using the deconstructed KEX chat-control metadata path as the target. |
 
-Common thread: every entity-state/player-state publishing approach leaves the alive
-values correct, yet the lobby still broadcasts — pointing at either a snapshot the
-DLL cannot refresh, or a field (userinfo) we have not identified.
+Common thread: KEX does not route online `messagemode2` through the game DLL command
+handler. It opens the lobby chat UI, and that UI tracks `TeamChat` plus a per-chat
+control `team` metadata value, so stale engine-facing team state can break team
+chat even when MuffMode's internal `sess.team` is correct.
 
 ## Current code state
 
-The tree retains **only attempt #3** (v0.40.2): one line in `ClientSpawn`
-(`src/sgame/client/lifecycle.cpp`, just after the `ps` memset):
+The tree now keeps a single publication helper in `src/sgame/client/lifecycle.cpp`:
 
 ```cpp
-ent->client->ps.team_id = P_EngineTeamIndex(ent->client->sess.team);
+void P_PublishEngineTeam(gentity_t *ent);
 ```
 
-This is correct and matches vanilla, but does **not** by itself resolve the leak. All
-other experimental changes were reverted. No diagnostic (`[cmddiag]`/`[teamdiag]`)
-code remains in the shipped path.
+It maps MuffMode `sess.team` to the engine's 1/2 team index, then writes
+`ps.team_id`, `sv.team`, and the packed `s.skinnum` team nibble when the entity has
+the player model. The helper is called from `SetTeam`, Red Rover defect handling,
+spectator/freecam transitions, gametype team resets, bot team restore, `ClientSpawn`
+immediately after the playerstate clear, bot/entity state publishing, and the HUD
+stats refresh.
+
+No diagnostic (`[cmddiag]`/`[teamdiag]`) code remains in the shipped path.
 
 ## Reference: how `Vanilla` (working) differs
 
@@ -113,27 +120,12 @@ i.e. vanilla's invariant is **"`ps.team_id` is always correct wherever `ps` is
 touched."** MuffMode replaced that with a per-frame `G_SetStats` patch (`hud.cpp`)
 plus skinnum packing, which has a spawn-frame hole.
 
-## Suggested next steps (for whoever resumes)
+## Suggested validation
 
-The decisive datapoint is the engine-side read/snapshot, which needs RE work:
-
-1. **Confirm the snapshot field + timing** via Ghidra at `kexQuakeLobbyMonitor`
-   (`~0x1402C9D6D`, xref `0x1402CA1F6`) and the `mmChatChannel` callback registered
-   in `CL_InitLocal`. Determine whether team is read from `ps.team_id`, skinnum, or a
-   userinfo key, and whether it's per-message (live) or cached at channel
-   registration.
-2. **If snapshot at lobby-join (before team pick):** publish team on `ClientBegin`
-   too — but note the player is a spectator (team 0) then, so this only helps if the
-   engine re-reads on a later trigger. There is **no `game_import_t` API** to force a
-   chat-control refresh.
-3. **If keyed off userinfo:** set a team userinfo key in `ClientUserinfoChanged`
-   (open question in `FINDINGS.md`: "Which userinfo keys does lobby HUD read?"). This
-   is the most promising untried lever because it's the one input class we have NOT
-   yet varied, and the lobby/HUD demonstrably reads userinfo.
-4. **A/B against `Vanilla`:** run the same engine with the stock DLL and a MuffMode
-   DLL instrumented to dump the exact bytes of `ps`, `skinnum`, and userinfo at the
-   moment `UpdateChatControls` logs, to see what stock publishes that MuffMode does
-   not.
+1. In KEX/Steam, start a real team mode with at least one player on each side.
+2. Join RED and BLUE, then use `messagemode2` from each client.
+3. Confirm only teammates receive the message.
+4. Repeat after a team change, a spectator transition, and a Red Rover defect.
 
 ## Related
 
