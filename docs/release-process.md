@@ -11,6 +11,11 @@ The release script is [scripts/release.ps1](../scripts/release.ps1). It builds a
 ```text
 muffmode-<version>-beta/
   README.html
+  README.de.html
+  README.pl.html
+  README.fr.html
+  README.hu.html
+  README.bg.html
   CHANGELOG.md
   LICENSE
   THIRD_PARTY_NOTICES.md
@@ -31,7 +36,8 @@ muffmode-<version>-beta-map-sources.zip
 
 GitHub also adds the automatic source-code archives. Discord announcements keep the primary download list intentionally short and ordered as the installable `muffmode-<version>[-channel].zip`, Windows installer, map sources, then Source Code. Supplemental original-map archives may still be uploaded for preservation, but they are not listed as primary Discord downloads.
 
-Release notes are generated from the central [changelog ledger](changelog.md), not from commit subjects. The script still prefers [GitHub Copilot CLI](https://docs.github.com/copilot/how-tos/set-up/install-copilot-cli) for `README.html` in non-interactive mode. If Copilot is not installed or authenticated, it falls back to a styled deterministic end-user HTML README so packaging can still complete. Pass `-RequireCopilot` when you intentionally want the release to fail unless Copilot README generation succeeds.
+Release notes are generated from the central [changelog ledger](changelog.md), not from commit subjects. The script still prefers [GitHub Copilot CLI](https://docs.github.com/copilot/how-tos/set-up/install-copilot-cli) for the English `README.html` in non-interactive mode. If Copilot is not installed or authenticated, it falls back to a styled deterministic English HTML README. Immediately after the English guide is generated, the script uses Copilot to translate it into German, Polish, French, Hungarian, and Bulgarian as `README.de.html`, `README.pl.html`, `README.fr.html`, `README.hu.html`, and `README.bg.html`. Translation is a required packaging stage: the script validates that protected code snippets, commands, cvars, config names, links, and key constants are preserved before the release package is assembled.
+Pass `-RequireCopilot` when you intentionally want the release to fail unless Copilot also generates the original English README, instead of using the deterministic English fallback.
 It also writes `rerelease/baseq2/muffmode-version.json` and `rerelease/baseq2/muffmode.version` so the Windows updater and launcher can compare the installed version with GitHub releases.
 The package also includes the published Windows updater and launcher executable at the package root.
 
@@ -100,14 +106,16 @@ Place package-only files in [packaging/release-assets](../packaging/release-asse
 packaging/release-assets/
   rerelease/
     baseq2/
-      muff-sv.cfg
-      SERVER_CONFIGS.md
+      server-base.cfg
+      CONFIGS_README.md
+      gt-FFA.cfg
+      gt-DUEL.cfg
       bots/navigation/*.nav
       maps/*.ent
       maps/*.bsp
 ```
 
-The script copies these files into the generated package, then overwrites/adds the built DLL, `README.html`, `CHANGELOG.md`, `LICENSE`, and `THIRD_PARTY_NOTICES.md`.
+The script copies these files into the generated package, then overwrites/adds the built DLL, `README.html`, localized `README.<language>.html` guides, `CHANGELOG.md`, `LICENSE`, and `THIRD_PARTY_NOTICES.md`.
 
 ## Build A Local Package
 
@@ -134,9 +142,10 @@ Installer behavior:
 | Steam | `C:\Program Files (x86)\Steam\steamapps\common\Quake 2` |
 | Epic Games Store | `C:\Program Files\Epic Games\Quake 2` |
 | GOG | `C:\GOG Games\Quake II` |
+| Xbox app / Microsoft Store | Detected app install path when available |
 | Custom or another library | User-selected folder |
 
-The installer checks Steam's install registry and `libraryfolders.vdf`, Epic Games Store manifest files, and GOG registry/common install locations before showing the store choices. It displays whether Steam, Epic Games Store, or GOG was detected and shows the selected path before the folder page. It still offers an **Other location** choice for custom libraries. The installer shows the project license, lets users browse after choosing a preset, warns if `rerelease\baseq2` is not found, corrects accidental `rerelease` or `baseq2` folder selection back to the outer Quake II folder, prompts users to close applications holding files open, offers Desktop and Start menu shortcuts for the updater and launcher, and backs up an existing `rerelease\baseq2\game_x64.dll` under `rerelease\baseq2\MuffModeBackups` before replacing it. The installed root also includes `THIRD_PARTY_NOTICES.md`.
+The installer checks Steam's install registry and `libraryfolders.vdf`, Epic Games Store manifest files, GOG registry/common install locations, and Xbox app / Microsoft Store candidates before showing the store choices. It displays the selected path before the folder page and still offers an **Other location** choice for custom libraries. The installer shows the project license, lets users browse after choosing a preset, warns if `rerelease\baseq2` is not found, corrects accidental `rerelease` or `baseq2` folder selection back to the outer Quake II folder, prompts users to close applications holding files open, offers Desktop and Start menu shortcuts for the updater, launcher, install guide, changelog, and server config guide, verifies installed files, writes an install receipt, and backs up an existing `rerelease\baseq2\game_x64.dll` under `rerelease\baseq2\MuffModeBackups` before replacing it. The installed root also includes `THIRD_PARTY_NOTICES.md`.
 
 Silent installer runs should pass `/DIR="C:\Path\To\Quake 2"` explicitly. In silent mode the installer preserves the supplied destination and refuses to continue unless it points at an outer Quake II folder containing `rerelease\baseq2`.
 
@@ -177,7 +186,7 @@ Optional repository variables:
 | `DISCORD_RELEASE_MENTIONS` | Text appended to the Discord announcement headline. Defaults to `<@&1424165484491964667> <@&1390287267276525628>` for the `@quake2` and `@playtester` roles. Use Discord role mention IDs such as `<@&123456789>` if you want actual role notifications. |
 | `DISCORD_FEEDBACK_CHANNEL` | Channel link used in the feedback line. Defaults to `<#1509926054175834133>` for `#muffmode`. |
 
-`RELEASE_BOT_TOKEN` is accepted as a legacy fallback for Copilot authentication, but the built-in `GITHUB_TOKEN` now handles version-file commits and `gh release create`. If no Copilot token is present, the workflow warns and uses the deterministic documentation generator unless `require_copilot` is enabled. Because releases created with `GITHUB_TOKEN` do not trigger other workflows, this release workflow posts the Discord announcement itself after the GitHub release is published. The separate **Broadcast Release To Discord** workflow remains useful for releases published manually through GitHub.
+`RELEASE_BOT_TOKEN` is accepted as a legacy fallback for Copilot authentication, but the built-in `GITHUB_TOKEN` now handles version-file commits and `gh release create`. If no Copilot token is present, the workflow fails during preflight because localized HTML guide translation is a required release step. Because releases created with `GITHUB_TOKEN` do not trigger other workflows, this release workflow posts the Discord announcement itself after the GitHub release is published. The separate **Broadcast Release To Discord** workflow remains useful for releases published manually through GitHub.
 
 Workflow inputs:
 
@@ -189,10 +198,10 @@ Workflow inputs:
 | `channel` | Defaults to `beta`; non-stable channels publish as prereleases. |
 | `commit_version_files` | Updates `VERSION` and `src/sgame/g_local.h`, commits, and pushes before publishing. |
 | `skip_installer` | Creates only the zip package when the installer is intentionally not wanted. |
-| `require_copilot` | Requires GitHub Copilot CLI generation and fails if Copilot authentication is unavailable. Leave disabled to use the deterministic fallback when needed. |
+| `require_copilot` | Requires GitHub Copilot CLI generation for the original English README and fails if Copilot authentication is unavailable. Leave disabled to allow the deterministic English fallback; localized README translations still require Copilot. |
 | `release_intro` | Optional manual intro for the GitHub release notes and Discord announcement. Leave blank to let the script generate one from the most significant changelog entries. |
 
-When a Copilot token is configured, the release workflow installs the current standalone GitHub Copilot CLI with `npm install -g @github/copilot`, exports `COPILOT_GITHUB_TOKEN`, and primes `copilot --help` before generating the end-user HTML README.
+When a Copilot token is configured, the release workflow installs the current standalone GitHub Copilot CLI with `npm install -g @github/copilot`, exports `COPILOT_GITHUB_TOKEN`, and primes `copilot --help` before generating the end-user HTML README and its localized German, Polish, French, Hungarian, and Bulgarian siblings.
 
 ## Publish Locally
 

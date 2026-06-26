@@ -44,7 +44,7 @@ on:
         type: boolean
         default: false
       require_copilot:
-        description: Fail instead of using the deterministic README when Copilot CLI authentication is unavailable.
+        description: Fail instead of using the deterministic English README fallback. Localized README translations always require Copilot.
         required: true
         type: boolean
         default: false
@@ -75,11 +75,7 @@ jobs:
           DISCORD_RELEASE_WEBHOOK: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}
         run: |
           if ([string]::IsNullOrWhiteSpace($env:COPILOT_GITHUB_TOKEN) -and [string]::IsNullOrWhiteSpace($env:LEGACY_RELEASE_BOT_TOKEN)) {
-            if ("${{ inputs.require_copilot }}" -eq "true") {
-              throw "Set COPILOT_GITHUB_TOKEN to a fine-grained user PAT with the Copilot Requests permission, or disable require_copilot to use deterministic release documentation."
-            }
-
-            Write-Warning "COPILOT_GITHUB_TOKEN is not set. The release package will use deterministic README generation."
+            throw "Set COPILOT_GITHUB_TOKEN to a fine-grained user PAT with the Copilot Requests permission, or provide the legacy RELEASE_BOT_TOKEN fallback. Release packages require Copilot for localized README translations."
           }
 
           if ([string]::IsNullOrWhiteSpace($env:DISCORD_RELEASE_WEBHOOK)) {
@@ -197,7 +193,6 @@ jobs:
           node-version: 22
 
       - name: Install And Prime GitHub Copilot CLI
-        if: ${{ inputs.require_copilot == true || env.COPILOT_TOKEN_PRESENT == 'true' }}
         shell: pwsh
         run: |
           npm install -g @github/copilot

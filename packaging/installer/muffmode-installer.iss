@@ -30,6 +30,21 @@
 #if FileExists(PackageRoot + "\README.html") == 0
   #error PackageRoot is missing README.html.
 #endif
+#if FileExists(PackageRoot + "\README.de.html") == 0
+  #error PackageRoot is missing README.de.html.
+#endif
+#if FileExists(PackageRoot + "\README.pl.html") == 0
+  #error PackageRoot is missing README.pl.html.
+#endif
+#if FileExists(PackageRoot + "\README.fr.html") == 0
+  #error PackageRoot is missing README.fr.html.
+#endif
+#if FileExists(PackageRoot + "\README.hu.html") == 0
+  #error PackageRoot is missing README.hu.html.
+#endif
+#if FileExists(PackageRoot + "\README.bg.html") == 0
+  #error PackageRoot is missing README.bg.html.
+#endif
 #if FileExists(PackageRoot + "\README.md") == 0
   #error PackageRoot is missing README.md.
 #endif
@@ -183,6 +198,11 @@
 #define PackageGameDllHash GetSHA256OfFile(PackageRoot + "\" + GameDllRelativePath)
 #define PackageUpdaterHash GetSHA256OfFile(PackageRoot + "\MuffModeUpdater.exe")
 #define PackageReadmeHash GetSHA256OfFile(PackageRoot + "\README.html")
+#define PackageReadmeDeHash GetSHA256OfFile(PackageRoot + "\README.de.html")
+#define PackageReadmePlHash GetSHA256OfFile(PackageRoot + "\README.pl.html")
+#define PackageReadmeFrHash GetSHA256OfFile(PackageRoot + "\README.fr.html")
+#define PackageReadmeHuHash GetSHA256OfFile(PackageRoot + "\README.hu.html")
+#define PackageReadmeBgHash GetSHA256OfFile(PackageRoot + "\README.bg.html")
 #define PackageAssetReadmeHash GetSHA256OfFile(PackageRoot + "\README.md")
 #define PackageChangelogHash GetSHA256OfFile(PackageRoot + "\CHANGELOG.md")
 #define PackageLicenseHash GetSHA256OfFile(PackageRoot + "\LICENSE")
@@ -1632,6 +1652,56 @@ begin
     AddBackslash(WizardDirValue) + 'README.html',
     '{#PackageReadmeHash}',
     'README.html');
+  if ValidationError <> '' then
+  begin
+    Result := ValidationError;
+    Exit;
+  end;
+
+  ValidationError := VerifyInstalledFileHash(
+    AddBackslash(WizardDirValue) + 'README.de.html',
+    '{#PackageReadmeDeHash}',
+    'README.de.html');
+  if ValidationError <> '' then
+  begin
+    Result := ValidationError;
+    Exit;
+  end;
+
+  ValidationError := VerifyInstalledFileHash(
+    AddBackslash(WizardDirValue) + 'README.pl.html',
+    '{#PackageReadmePlHash}',
+    'README.pl.html');
+  if ValidationError <> '' then
+  begin
+    Result := ValidationError;
+    Exit;
+  end;
+
+  ValidationError := VerifyInstalledFileHash(
+    AddBackslash(WizardDirValue) + 'README.fr.html',
+    '{#PackageReadmeFrHash}',
+    'README.fr.html');
+  if ValidationError <> '' then
+  begin
+    Result := ValidationError;
+    Exit;
+  end;
+
+  ValidationError := VerifyInstalledFileHash(
+    AddBackslash(WizardDirValue) + 'README.hu.html',
+    '{#PackageReadmeHuHash}',
+    'README.hu.html');
+  if ValidationError <> '' then
+  begin
+    Result := ValidationError;
+    Exit;
+  end;
+
+  ValidationError := VerifyInstalledFileHash(
+    AddBackslash(WizardDirValue) + 'README.bg.html',
+    '{#PackageReadmeBgHash}',
+    'README.bg.html');
   if ValidationError <> '' then
   begin
     Result := ValidationError;

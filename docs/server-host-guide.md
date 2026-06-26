@@ -7,12 +7,24 @@ This guide is for lobby owners, dedicated server hosts, event organizers, and ad
 ## Install
 
 1. Download the [latest Muff Mode release](https://github.com/DarkMatter-Productions/MuffMode/releases/latest).
-2. Use the Windows installer when available. It defaults to the Steam Quake II Remastered path and also offers Epic Online Store / Epic Games Store, GOG, and custom library choices.
+2. Use the Windows installer when available. It detects Steam, Epic Games Store, GOG, and Xbox app / Microsoft Store installs, while still offering an Other location choice for custom library folders.
 3. If you use the zip instead, extract it into the outer `Quake 2` install folder and allow file replacements.
 4. Start the game or dedicated server normally.
-5. Execute the bundled server config with `exec muff-sv.cfg` when it is available in the release package.
+5. Execute the bundled baseline config with `exec server-base.cfg`, then execute a gametype preset such as `exec gt-FFA.cfg`.
 
-For ready-to-use per-gametype config examples, see the [MuffMode Server Configs repository](https://github.com/ozy24/muffmode-server-configs).
+The release package installs `server-base.cfg`, `CONFIGS_README.md`, and per-gametype `gt-*.cfg` presets into `rerelease/baseq2`. For additional community-maintained examples, see the [MuffMode Server Configs repository](https://github.com/ozy24/muffmode-server-configs).
+
+## Config Startup Flow
+
+Use the packaged configs as layers:
+
+| Step | Command | Purpose |
+| --- | --- | --- |
+| 1 | `exec server-base.cfg` | Loads shared safety, voting, entity override, and player-limit defaults. |
+| 2 | `exec gt-FFA.cfg` or another `gt-*.cfg` | Applies the mode-specific hostname, limits, map list, ruleset, and gameplay toggles. |
+| 3 | `doctor` | Checks for risky or inconsistent cvar combinations after your changes. |
+
+When `g_gametype_cfg` is enabled, later gametype changes automatically execute the matching `gt-[GAMETYPE].cfg`.
 
 ## Choose A Server Style
 
@@ -25,7 +37,7 @@ For ready-to-use per-gametype config examples, see the [MuffMode Server Configs 
 
 ## Minimal Server Config
 
-This is a small public-server starting point. Adjust the map list, player limits, hostname, voting, and ruleset for your community.
+This is a small public-server starting point if you are writing your own config instead of starting from `server-base.cfg`. Adjust the map list, player limits, hostname, voting, and ruleset for your community.
 
 ```text
 deathmatch 1
@@ -35,12 +47,15 @@ maxplayers 12
 
 g_gametype 1
 g_ruleset 1
+g_gametype_cfg 1
 g_map_list "q2dm1 q2dm3 q2dm5"
 g_map_list_shuffle 1
 
 g_allow_voting 1
 g_allow_vote_midgame 0
 g_allow_spec_vote 0
+g_votable_gametypes "ffa duel tdm ctf ca strike rr horde instagib nadefest"
+g_votable_rulesets "q2re mm q2reb"
 
 g_dm_do_warmup 1
 g_dm_do_readyup 0
@@ -82,12 +97,11 @@ Set `g_gametype` by index, or use the admin command `gametype <shortname>`.
 | `5` | `ca` | Clan Arena |
 | `7` | `strike` | Capture Strike |
 | `8` | `rr` | Red Rover |
-| `9` | `lms` | Last Man Standing |
 | `10` | `horde` | Horde Mode |
 | `12` | `instagib` | Instagib |
 | `13` | `nadefest` | NadeFest |
 
-See [Gametypes](gameplay-reference.md#gametypes) for descriptions and work-in-progress notes.
+Values `6` (`ft`), `9` (`lms`), and `11` (`ball`) are reserved/removed in the current build. See [Gametypes](gameplay-reference.md#gametypes) for descriptions and work-in-progress notes.
 
 ## Rulesets
 
@@ -168,7 +182,6 @@ Examples:
 | Clan Arena | `gt-CA.cfg` |
 | Capture Strike | `gt-STRIKE.cfg` |
 | Red Rover | `gt-REDROVER.cfg` |
-| Last Man Standing | `gt-LMS.cfg` |
 | Horde | `gt-HORDE.cfg` |
 | Instagib | `gt-INSTAGIB.cfg` |
 | NadeFest | `gt-NADEFEST.cfg` |

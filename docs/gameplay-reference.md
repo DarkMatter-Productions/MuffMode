@@ -11,7 +11,7 @@ This reference helps players and hosts choose what to play. Casual players can u
 | A quick public game | Deathmatch, Instagib, NadeFest, or Horde Mode. |
 | A competitive head-to-head match | Duel with a [known ruleset](rulesets.md) and a focused map list. |
 | Organized team play | Team Deathmatch, Capture the Flag, Clan Arena, or Capture Strike. |
-| A different pace for a community night | Red Rover, Vampiric Damage, Weapons Frenzy, Quad Hog, or custom [ruleset](rulesets.md)/map combinations. |
+| A different pace for a community night | Red Rover, Capture Strike, Horde, Vampiric Damage, Weapons Frenzy, Quad Hog, or custom [ruleset](rulesets.md)/map combinations. |
 
 ## Feature Overview
 
@@ -67,10 +67,11 @@ Muff Mode maintains a curated set of final `mm-*` remasters and ports, plus a se
 | `ca` | Clan Arena | Round-based team elimination with no item spawns, no self-damage, and a full arsenal. Good for fast team matches. |
 | `strike` | Capture Strike | Threewave-inspired attack/defend mode: teams alternate offense and defense on CTF maps with a single life per turn and a full arena loadout (100 health / 100 armor). Offense earns 1 team point for the first enemy-flag touch and 2 more for a capture or defender wipe; defense earns no team points. Match ends at `capturelimit` (default 15) after both teams have attacked in the current round-pair. |
 | `rr` | Red Rover | Two teams with the Clan Arena loadout; on death you defect to the opposing team and respawn instantly. An arena mode like CA: each round ends on a team wipe (everyone forced onto one team) or `roundtimelimit`, announces that round's top fragger, and reshuffles for the next one. The match ends on `roundlimit` (primary) or `timelimit` (backstop) and the player with the most frags wins. Scored by individual frags; `fraglimit` is disabled, as in CA. |
-| `lms` | Last Man Standing | Survival-focused elimination mode. |
-| `horde` | Horde Mode | Fight monster waves and stay on top of the scoreboard through up to 16 waves. Good for casual groups. Limited lives are not currently handled. |
+| `horde` | Horde Mode | Fight monster waves and stay on top of the scoreboard through a finite or endless run. Good for casual groups; packaged presets use limited lives and slower non-weapon item respawns. |
 | `instagib` | Instagib | Rail-focused instant-kill combat. |
 | `nadefest` | NadeFest | Grenade-only combat. |
+
+`ft`, `lms`, and `ball` are reserved or removed in the current build and are not exposed as supported play choices.
 
 ## Game Modifications
 

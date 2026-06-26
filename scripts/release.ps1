@@ -49,6 +49,64 @@ $script:ChangelogCategories = @(
     "Internal Maintenance"
 )
 $script:ChangelogMagnitudes = @("major", "minor", "patch")
+$script:ReadmeLanguageEntries = @(
+    [pscustomobject]@{
+        Code = "en"
+        HtmlLang = "en"
+        EnglishName = "English"
+        NativeName = "English"
+        PackageFileName = "README.html"
+        SwitchLabel = "Language options"
+    },
+    [pscustomobject]@{
+        Code = "de"
+        HtmlLang = "de"
+        EnglishName = "German"
+        NativeName = "Deutsch"
+        PackageFileName = "README.de.html"
+        SwitchLabel = "Sprachen"
+    },
+    [pscustomobject]@{
+        Code = "pl"
+        HtmlLang = "pl"
+        EnglishName = "Polish"
+        NativeName = "Polski"
+        PackageFileName = "README.pl.html"
+        SwitchLabel = "Języki"
+    },
+    [pscustomobject]@{
+        Code = "fr"
+        HtmlLang = "fr"
+        EnglishName = "French"
+        NativeName = "Français"
+        PackageFileName = "README.fr.html"
+        SwitchLabel = "Langues"
+    },
+    [pscustomobject]@{
+        Code = "hu"
+        HtmlLang = "hu"
+        EnglishName = "Hungarian"
+        NativeName = "Magyar"
+        PackageFileName = "README.hu.html"
+        SwitchLabel = "Nyelvek"
+    },
+    [pscustomobject]@{
+        Code = "bg"
+        HtmlLang = "bg"
+        EnglishName = "Bulgarian"
+        NativeName = "Български"
+        PackageFileName = "README.bg.html"
+        SwitchLabel = "Езици"
+    }
+)
+
+function Get-ReadmeLanguageEntries {
+    return @($script:ReadmeLanguageEntries)
+}
+
+function Get-ReadmeTranslationLanguages {
+    return @(Get-ReadmeLanguageEntries | Where-Object { $_.Code -ne "en" })
+}
 
 function Write-Step {
     param([string]$Message)
@@ -667,7 +725,7 @@ function Assert-GitHubCopilot {
 
     $output = & copilot --help 2>&1 | Out-String
     if ($LASTEXITCODE -ne 0) {
-        throw "GitHub Copilot CLI is required for release README generation. Install @github/copilot and authenticate it so 'copilot' can run in non-interactive mode.`n$output"
+        throw "GitHub Copilot CLI is required for release README generation and translation. Install @github/copilot and authenticate it so 'copilot' can run in non-interactive mode.`n$output"
     }
 }
 
@@ -761,6 +819,7 @@ function New-DeterministicHtmlReadme {
     $changelogMarkdown = Get-Content -Raw -LiteralPath $ChangelogPath
     $changelogHtml = Convert-SimpleMarkdownToHtml $changelogMarkdown
     $encodedLabel = ConvertTo-HtmlText $releaseLabel
+    $encodedChannel = ConvertTo-HtmlText $Channel
 
     $html = @"
 <!DOCTYPE html>
@@ -772,35 +831,147 @@ function New-DeterministicHtmlReadme {
   <style>
     :root {
       color-scheme: dark;
-      --gunmetal: #151b1f;
-      --steel: #232c31;
-      --panel: #2e3737;
-      --slime: #9ccc2f;
-      --slime-bright: #c5f44e;
-      --rust: #b65a2b;
-      --amber: #e0aa45;
-      --concrete: #b8c0b7;
-      --muted: #879186;
-      --line: rgba(197, 244, 78, 0.22);
+      --void: #050506;
+      --black: #090909;
+      --gunmetal: #121416;
+      --steel: #262a2c;
+      --panel: #161719;
+      --panel-2: #242629;
+      --blue-void: #071121;
+      --blue-deep: #0d2846;
+      --blue-soft: #1e6fb2;
+      --gold: #f2c64a;
+      --gold-bright: #ffe071;
+      --gold-deep: #b8780a;
+      --red: #ef1010;
+      --red-bright: #ff3a2f;
+      --red-deep: #8c0303;
+      --chrome: #c6c8c5;
+      --chrome-bright: #f4f4ee;
+      --muted: #9a9b95;
+      --line: rgba(242, 198, 74, 0.28);
+      --red-line: rgba(239, 16, 16, 0.26);
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      background: radial-gradient(circle at top left, rgba(156, 204, 47, 0.12), transparent 34rem), linear-gradient(135deg, #101417, var(--gunmetal));
+      background:
+        linear-gradient(180deg, rgba(3, 4, 8, 0.08), rgba(3, 4, 8, 0.76)),
+        linear-gradient(116deg, transparent 0 9%, rgba(30, 111, 178, 0.24) 9% 34%, transparent 34% 68%, rgba(239, 16, 16, 0.13) 68% 76%, transparent 76%),
+        linear-gradient(244deg, rgba(239, 16, 16, 0.14) 0 12%, transparent 12% 54%, rgba(30, 111, 178, 0.18) 54% 78%, transparent 78%),
+        repeating-linear-gradient(135deg, rgba(244, 244, 238, 0.035) 0 1px, transparent 1px 58px),
+        repeating-linear-gradient(90deg, rgba(30, 111, 178, 0.075) 0 1px, transparent 1px 118px),
+        linear-gradient(180deg, var(--void), var(--blue-void) 24%, var(--blue-deep) 48%, #08090c 100%);
       color: #eef3e9;
       font: 16px/1.55 "Segoe UI", Arial, sans-serif;
+      background-attachment: fixed;
     }
-    a { color: var(--slime-bright); }
-    code { color: var(--amber); background: rgba(0, 0, 0, 0.28); padding: 0.08rem 0.28rem; border-radius: 4px; }
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background:
+        linear-gradient(90deg, rgba(239, 16, 16, 0.08), transparent 18% 82%, rgba(239, 16, 16, 0.08)),
+        repeating-linear-gradient(180deg, rgba(255, 255, 255, 0.028) 0 1px, transparent 1px 5px);
+      opacity: 0.34;
+    }
+    a { color: var(--gold-bright); }
+    code {
+      color: var(--gold-bright);
+      background: rgba(0, 0, 0, 0.38);
+      border: 1px solid rgba(242, 198, 74, 0.26);
+      padding: 0.08rem 0.28rem;
+      border-radius: 4px;
+      white-space: nowrap;
+    }
     header, main { width: min(1120px, calc(100% - 32px)); margin: 0 auto; }
-    header { padding: 3rem 0 1.5rem; border-bottom: 1px solid var(--line); }
-    .eyebrow { color: var(--slime); text-transform: uppercase; letter-spacing: 0.08em; font-weight: 700; }
+    header {
+      position: relative;
+      overflow: hidden;
+      padding: 3.4rem 0 1.6rem;
+      border-bottom: 1px solid var(--line);
+      background:
+        linear-gradient(90deg, rgba(239, 16, 16, 0.12), transparent 24% 70%, rgba(242, 198, 74, 0.08)),
+        linear-gradient(180deg, rgba(13, 40, 70, 0.52), rgba(5, 5, 6, 0));
+    }
+    header::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 4px;
+      background: linear-gradient(90deg, var(--gold-bright), var(--gold) 32%, var(--red) 70%, var(--red-deep));
+      box-shadow: 0 0 24px rgba(239, 16, 16, 0.38), 0 0 18px rgba(242, 198, 74, 0.28);
+    }
+    header::after {
+      content: "ARENA STATUS // RELEASE PACKAGE";
+      position: absolute;
+      right: 0;
+      bottom: 1.2rem;
+      color: rgba(244, 244, 238, 0.13);
+      font-size: 0.9rem;
+      font-weight: 900;
+    }
+    .eyebrow { color: var(--gold-bright); text-transform: uppercase; letter-spacing: 0; font-weight: 900; }
     h1, h2, h3 { line-height: 1.15; margin: 0 0 0.8rem; }
-    h1 { font-size: clamp(2rem, 6vw, 4rem); }
-    h2 { color: var(--slime-bright); margin-top: 2rem; }
-    h3 { color: var(--amber); margin-top: 1.2rem; }
-    .lede { max-width: 760px; color: var(--concrete); font-size: 1.1rem; }
-    .support-copy { max-width: 760px; color: #dfe7dc; }
+    h1 {
+      color: var(--chrome-bright);
+      background: linear-gradient(96deg, #fff0a2 0 18%, var(--gold-bright) 18% 34%, var(--gold) 34% 45%, var(--red-bright) 58%, var(--red) 76%, var(--red-deep) 100%);
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+      -webkit-text-stroke: 1px rgba(0, 0, 0, 0.82);
+      filter: drop-shadow(0 3px 0 rgba(0, 0, 0, 0.86)) drop-shadow(0 0 16px rgba(239, 16, 16, 0.26));
+      font-size: 3.8rem;
+      font-weight: 900;
+      letter-spacing: 0;
+      margin-bottom: 0.95rem;
+      text-transform: uppercase;
+    }
+    h2 {
+      color: var(--gold-bright);
+      margin-top: 2rem;
+      padding-left: 0.75rem;
+      border-left: 4px solid var(--red);
+      text-transform: uppercase;
+    }
+    h3 { color: var(--gold); margin-top: 1.2rem; }
+    .lede { max-width: 760px; color: var(--chrome); font-size: 1.1rem; }
+    .hud-rail {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+      margin: 1.35rem 0;
+      border: 1px solid var(--red-line);
+      background: linear-gradient(135deg, rgba(36, 38, 41, 0.94), rgba(7, 7, 8, 0.94));
+      box-shadow: 0 18px 52px rgba(0, 0, 0, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    }
+    .hud-cell {
+      padding: 0.75rem 0.9rem;
+      border-left: 1px solid rgba(242, 198, 74, 0.18);
+    }
+    .hud-cell:first-child { border-left: 0; }
+    .hud-cell strong {
+      display: block;
+      color: var(--red-bright);
+      font-size: 0.78rem;
+      font-weight: 900;
+      text-transform: uppercase;
+    }
+    .hud-cell span { color: var(--chrome-bright); font-weight: 800; }
+    .quick-nav { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 1.2rem 0; }
+    .quick-nav a {
+      border: 1px solid rgba(242, 198, 74, 0.28);
+      border-radius: 6px;
+      color: #eef3e9;
+      background: linear-gradient(180deg, rgba(36, 38, 41, 0.82), rgba(9, 9, 9, 0.82));
+      padding: 0.45rem 0.68rem;
+      text-decoration: none;
+      text-transform: uppercase;
+      font-weight: 800;
+    }
+    .support-copy { max-width: 760px; color: #deded7; }
     .support-actions { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-top: 1rem; }
     .support-button {
       display: inline-flex;
@@ -809,45 +980,135 @@ function New-DeterministicHtmlReadme {
       min-height: 2.7rem;
       padding: 0.65rem 0.95rem;
       border: 1px solid rgba(238, 243, 233, 0.22);
-      border-radius: 8px;
+      border-radius: 6px;
       color: #ffffff;
-      background: linear-gradient(135deg, #c13a86, var(--rust));
-      box-shadow: 0 10px 26px rgba(0, 0, 0, 0.24);
+      background: linear-gradient(135deg, var(--red-deep), var(--red-bright));
+      box-shadow: 0 14px 32px rgba(0, 0, 0, 0.34), 0 0 20px rgba(239, 16, 16, 0.20);
       font-weight: 800;
       text-decoration: none;
+      text-transform: uppercase;
     }
-    .support-button.kofi { background: linear-gradient(135deg, #d84c46, var(--amber)); color: #151b1f; }
-    .support-button:hover, .support-button:focus { outline: 2px solid var(--slime-bright); outline-offset: 3px; }
+    .support-button.kofi { background: linear-gradient(135deg, var(--gold), var(--gold-bright)); color: #14110a; }
+    .support-button:hover, .support-button:focus, .quick-nav a:hover, .quick-nav a:focus { outline: 2px solid var(--gold-bright); outline-offset: 3px; }
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1rem; margin: 1.5rem 0; }
     .card {
-      background: linear-gradient(180deg, rgba(46, 55, 55, 0.96), rgba(28, 34, 35, 0.96));
-      border: 1px solid rgba(224, 170, 69, 0.24);
+      position: relative;
+      overflow: hidden;
+      background:
+        linear-gradient(180deg, rgba(36, 38, 41, 0.96), rgba(10, 10, 11, 0.96)),
+        linear-gradient(90deg, rgba(242, 198, 74, 0.11), transparent);
+      border: 1px solid rgba(242, 198, 74, 0.20);
       border-radius: 8px;
       padding: 1rem;
-      box-shadow: 0 18px 50px rgba(0, 0, 0, 0.24);
+      box-shadow: 0 18px 50px rgba(0, 0, 0, 0.30), inset 0 1px 0 rgba(255, 255, 255, 0.05);
     }
-    .card strong { color: #ffffff; }
-    .tag { display: inline-block; color: #18200b; background: var(--slime); border-radius: 999px; padding: 0.18rem 0.55rem; font-weight: 800; }
+    .card::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 3px;
+      background: linear-gradient(90deg, var(--gold-bright), var(--red), var(--red-deep));
+    }
+    .card strong { color: var(--chrome-bright); }
+    .tag {
+      display: inline-block;
+      color: #140e03;
+      background: linear-gradient(90deg, var(--gold-bright), var(--gold) 55%, var(--red-bright));
+      border-radius: 6px;
+      padding: 0.18rem 0.55rem;
+      font-weight: 900;
+      text-transform: uppercase;
+    }
+    .notice {
+      border-left: 4px solid var(--gold);
+      border-right: 1px solid rgba(242, 198, 74, 0.22);
+      background: linear-gradient(90deg, rgba(242, 198, 74, 0.15), rgba(239, 16, 16, 0.08));
+      border-radius: 0 8px 8px 0;
+      padding: 0.85rem 1rem;
+      color: #f8ecd4;
+    }
+    .steps { counter-reset: step; list-style: none; padding-left: 0; }
+    .steps li { counter-increment: step; margin: 0.55rem 0; padding-left: 2.2rem; position: relative; }
+    .steps li::before {
+      content: counter(step);
+      position: absolute;
+      left: 0;
+      top: 0.05rem;
+      width: 1.5rem;
+      height: 1.5rem;
+      border-radius: 6px;
+      background: linear-gradient(135deg, var(--gold-bright), var(--red-bright));
+      color: #120f0b;
+      display: inline-grid;
+      place-items: center;
+      font-weight: 900;
+    }
     section { padding: 1.2rem 0; }
     ul, ol { padding-left: 1.25rem; }
     li { margin: 0.35rem 0; }
-    table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
-    th, td { border-bottom: 1px solid rgba(184, 192, 183, 0.18); padding: 0.65rem; text-align: left; vertical-align: top; }
-    th { color: var(--slime); }
+    .table-wrap { overflow-x: auto; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 1rem 0;
+      border: 1px solid rgba(242, 198, 74, 0.20);
+      background: rgba(7, 11, 15, 0.52);
+    }
+    th, td { border-bottom: 1px solid rgba(184, 192, 183, 0.16); padding: 0.65rem; text-align: left; vertical-align: top; }
+    th {
+      color: var(--gold-bright);
+      background: linear-gradient(90deg, rgba(239, 16, 16, 0.12), rgba(242, 198, 74, 0.10));
+      text-transform: uppercase;
+    }
+    tr:hover td { background: rgba(242, 198, 74, 0.045); }
     .changelog {
-      background: rgba(0, 0, 0, 0.2);
-      border-left: 4px solid var(--rust);
+      background: linear-gradient(180deg, rgba(12, 18, 24, 0.92), rgba(4, 8, 10, 0.92));
+      border-left: 4px solid var(--red);
+      border-top: 1px solid rgba(242, 198, 74, 0.18);
       padding: 1rem;
       border-radius: 0 8px 8px 0;
     }
     footer { color: var(--muted); padding: 2rem 0 3rem; }
+    @media (max-width: 700px) {
+      header, main { width: calc(100% - 24px); }
+      h1 {
+        font-size: 1.95rem;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+        -webkit-text-stroke-width: 0.75px;
+      }
+      header::after { display: none; }
+      code { white-space: normal; overflow-wrap: anywhere; }
+      .hud-rail { grid-template-columns: 1fr; }
+      .hud-cell, .hud-cell:first-child { border-left: 0; border-top: 1px solid rgba(242, 198, 74, 0.16); }
+      .hud-cell:first-child { border-top: 0; }
+      .quick-nav a { flex: 1 1 calc(50% - 0.5rem); text-align: center; }
+      .support-actions { display: grid; }
+      .support-button { width: 100%; text-align: center; white-space: normal; }
+    }
   </style>
 </head>
 <body>
   <header>
     <div class="eyebrow">Quake II Rerelease multiplayer mod</div>
     <h1>$encodedLabel</h1>
-    <p class="lede">A practical release package for casual games, competitive matches, and the server hosts keeping MuffMode sessions running. This package is flagged as <span class="tag">$Channel</span>.</p>
+    <p class="lede">Install Muff Mode, join or host a game, and keep the important server files close at hand. This release is flagged as <span class="tag">$encodedChannel</span>.</p>
+    <div class="hud-rail" aria-label="Release status">
+      <div class="hud-cell"><strong>Target</strong><span>Players + Hosts</span></div>
+      <div class="hud-cell"><strong>Payload</strong><span>Game DLL + Configs</span></div>
+      <div class="hud-cell"><strong>Channel</strong><span>$encodedChannel</span></div>
+    </div>
+    <nav class="quick-nav" aria-label="README sections">
+      <a href="#install">Install</a>
+      <a href="#play">Play</a>
+      <a href="#host">Host</a>
+      <a href="#modes">Modes</a>
+      <a href="#rulesets">Rulesets</a>
+      <a href="#maps">Maps</a>
+      <a href="#changelog">Changelog</a>
+    </nav>
     <p class="support-copy">Muff Mode is free for players and server hosts. Optional donations help keep future development moving by supporting the time, testing, tooling, and release work behind the mod.</p>
     <div class="support-actions" aria-label="Support the MuffMode authors">
       <a class="support-button" href="https://github.com/sponsors/themuffinator">Sponsor themuffinator</a>
@@ -855,53 +1116,62 @@ function New-DeterministicHtmlReadme {
     </div>
   </header>
   <main>
-    <section>
+    <section id="install">
       <h2>Install</h2>
+      <p class="notice">Install into the outer <code>Quake 2</code> folder. The mod files belong under that folder's <code>rerelease/baseq2</code> tree.</p>
       <div class="grid">
         <article class="card">
           <h3>Windows Installer</h3>
-          <p>Use the installer for the cleanest setup. It shows detected Steam, Epic Games Store, GOG, and Xbox app / Microsoft Store installs, keeps an other-location option available, shows the resolved target before install, requires a real Quake II folder with a known launcher executable, rejects unsafe system, special-folder, and extracted-package targets, verifies the copied DLL, updater, docs, legal notices, original-map readmes, custom map BSPs, selected entity overrides, version manifest, and exact server/gametype config contents, writes an install receipt, backs up an existing game DLL when needed, and can create updater, launcher, guide, changelog, and server config shortcuts.</p>
+          <p>Recommended for most Windows users. It detects Steam, Epic Games Store, GOG, and Xbox app / Microsoft Store installs, keeps an Other location option, verifies the copied files, writes an install receipt, and backs up an existing Muff Mode DLL when needed.</p>
         </article>
         <article class="card">
           <h3>Zip Package</h3>
           <p>Extract the zip into the outer <code>Quake 2</code> folder, not directly into <code>rerelease</code> or <code>baseq2</code>. Allow file replacement when prompted.</p>
         </article>
         <article class="card">
-          <h3>Included Files</h3>
-          <p>The installable package contains <code>game_x64.dll</code>, the <code>MuffModeUpdater.exe</code> updater and launcher, version marker files, this README, the release changelog, and preserved original map readmes under <code>rerelease/baseq2/docs/muffmode/maps/original-readmes</code>.</p>
+          <h3>What Gets Installed</h3>
+          <p>The package contains <code>game_x64.dll</code>, <code>MuffModeUpdater.exe</code>, version markers, this README, the release changelog, server configs, map files, selected entity overrides, and preserved original map readmes.</p>
         </article>
       </div>
     </section>
-    <section>
+    <section id="play">
       <h2>First Use</h2>
-      <ul>
+      <ol class="steps">
         <li>Launch Quake II normally after installing.</li>
         <li>Players can use the game menu for team joining, voting, server info, and common actions.</li>
         <li>Useful player commands include <code>team auto</code>, <code>readyup</code>, <code>maplist</code>, <code>motd</code>, <code>callvote</code>, and <code>vote yes</code> / <code>vote no</code>.</li>
         <li>For offhand hook servers, try <code>alias +hook hook</code>, <code>alias -hook unhook</code>, then <code>bind mouse2 +hook</code>.</li>
-      </ul>
+      </ol>
     </section>
-    <section>
+    <section id="host">
       <h2>Server Hosting</h2>
-      <ul>
-        <li>Execute the bundled server config with <code>exec muff-sv.cfg</code> when it is included in the package.</li>
-        <li>Start casual servers with open voting, clear map rotation, and a short MOTD.</li>
-        <li>Start competitive servers with ready-up, controlled voting, known gametypes, known rulesets, captain/admin tools, and timeout rules.</li>
-        <li>Run <code>doctor</code> after changing server settings to catch risky cvar combinations.</li>
-      </ul>
+      <div class="grid">
+        <article class="card">
+          <h3>Load The Baseline</h3>
+          <p>Run <code>exec server-base.cfg</code> for shared safety, voting, entity override, and player-limit defaults.</p>
+        </article>
+        <article class="card">
+          <h3>Choose A Preset</h3>
+          <p>Run a mode config such as <code>exec gt-FFA.cfg</code>, <code>exec gt-DUEL.cfg</code>, <code>exec gt-HORDE.cfg</code>, or another packaged <code>gt-*.cfg</code>.</p>
+        </article>
+        <article class="card">
+          <h3>Check Your Setup</h3>
+          <p>Run <code>doctor</code> after changing cvars. Use <code>g_muffmode_debug 1</code> only while investigating a server issue, then turn it back off.</p>
+        </article>
+      </div>
     </section>
-    <section>
+    <section id="modes">
       <h2>Gametype Overview</h2>
       <div class="grid">
         <article class="card"><strong>Quick public games:</strong> FFA, Instagib, NadeFest, and Horde are easy drop-in choices.</article>
         <article class="card"><strong>Competitive matches:</strong> Duel, TDM, CTF, Clan Arena, and Capture Strike benefit most from a locked map pool and a known ruleset.</article>
-        <article class="card"><strong>Community nights:</strong> Red Rover, LMS, Capture Strike, Vampiric Damage, Weapons Frenzy, and Quad Hog change the rhythm without requiring a different install.</article>
+        <article class="card"><strong>Community nights:</strong> Red Rover, Capture Strike, Vampiric Damage, Weapons Frenzy, and Quad Hog change the rhythm without requiring a different install.</article>
       </div>
     </section>
-    <section>
+    <section id="rulesets">
       <h2>Ruleset Cheat Sheet</h2>
       <p>Rulesets change the feel of the same map: starts, weapon specs, ammo, armor, health, powerups, knockback, and a few movement details. Players can vote with <code>callvote ruleset &lt;shortname&gt;</code> when the server allows it.</p>
-      <table>
+      <div class="table-wrap"><table>
         <thead>
           <tr><th>Pick</th><th>Feel</th><th>What players should notice</th></tr>
         </thead>
@@ -913,13 +1183,13 @@ function New-DeterministicHtmlReadme {
           <tr><td><code>q</code></td><td>Quake style</td><td>Shotgun and Axe-style starts, classic rocket emphasis, raised ammo caps, stronger armor replacement, and remapped map weapon slots.</td></tr>
           <tr><td><code>qc</code></td><td>Quake Champions style</td><td>Random opening weapon, tighter health/armor caps, modernized weapon tuning, and no warmup grant of every visible map weapon.</td></tr>
         </tbody>
-      </table>
+      </table></div>
       <p>Q3A keeps Muff Mode's no-custom-assets rule: Gauntlet uses Chainfist, Lightning Gun uses Plasma Beam, Plasma Gun uses HyperBlaster, and Nailgun uses Ion Ripper. Super Shotgun is removed; the regular Shotgun carries Q3 shotgun specs. Because cells are shared across Q3A energy weapons, BFG costs <code>10</code> cells per shot.</p>
     </section>
-    <section>
+    <section id="maps">
       <h2>Included Custom Maps</h2>
-      <p>The source-side <a href="https://github.com/DarkMatter-Productions/MuffMode/blob/main/docs/maps/index.md">Muff Mode Map Guide</a> tracks the current final <code>mm-*</code> remaster and port set, with original-map history, original release dates where found, preserved original readmes/BSPs, separate source-map links, recommended gametypes, and item registers. The GitHub release also publishes separate map-source and original-map archives for players and map authors who want the historical material.</p>
-      <table>
+      <p>The <a href="https://github.com/DarkMatter-Productions/MuffMode/blob/main/docs/maps/index.md">Muff Mode Map Guide</a> tracks the current final <code>mm-*</code> remaster and port set. Original map readmes are included in this package under <code>rerelease/baseq2/docs/muffmode/maps/original-readmes</code>; source maps and original BSPs are published as separate supplemental release archives.</p>
+      <div class="table-wrap"><table>
         <thead>
           <tr><th>Map</th><th>File</th><th>Status</th><th>Good fits</th></tr>
         </thead>
@@ -948,9 +1218,9 @@ function New-DeterministicHtmlReadme {
           <tr><td>Wicked</td><td><code>mm-wicked</code></td><td>Final</td><td>Duel, Clan Arena, small FFA</td></tr>
           <tr><td>Window Pain</td><td><code>mm-winpain</code></td><td>Final</td><td>Clan Arena, Instagib, FFA warmups</td></tr>
         </tbody>
-      </table>
+      </table></div>
     </section>
-    <section>
+    <section id="changelog">
       <h2>Changelog</h2>
       <div class="changelog">
         $changelogHtml
@@ -1377,7 +1647,8 @@ function Get-ReadmeSourceMarkdown {
         "docs/rulesets.md",
         "docs/maps/index.md",
         "docs/configuration-reference.md",
-        "docs/level-design-guide.md"
+        "docs/level-design-guide.md",
+        "packaging/release-assets/rerelease/baseq2/CONFIGS_README.md"
     )
 
     $chunks = New-Object System.Collections.Generic.List[string]
@@ -1422,6 +1693,282 @@ function Convert-CopilotOutputToHtml {
     return $clean
 }
 
+function Set-HtmlDocumentLanguage {
+    param(
+        [string]$Html,
+        [string]$HtmlLang
+    )
+
+    $match = [regex]::Match($Html, '(?is)<html\b([^>]*)>')
+    if (-not $match.Success) {
+        throw "HTML document is missing an <html> element."
+    }
+
+    $attrs = $match.Groups[1].Value
+    if ($attrs -match '\blang\s*=') {
+        $attrs = [regex]::Replace($attrs, '\s+lang\s*=\s*("[^"]*"|''[^'']*''|[^\s>]+)', " lang=`"$HtmlLang`"", 1)
+    }
+    else {
+        $attrs = " lang=`"$HtmlLang`"$attrs"
+    }
+
+    return "$($Html.Substring(0, $match.Index))<html$attrs>$($Html.Substring($match.Index + $match.Length))"
+}
+
+function Get-HtmlReadmeLanguageSwitcherStyle {
+    return @"
+
+    /* MuffMode generated language switcher */
+    .language-switcher {
+      width: min(1120px, calc(100% - 32px));
+      margin: 0.85rem auto 0;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.45rem;
+      justify-content: flex-end;
+      position: relative;
+      z-index: 1;
+    }
+    .language-switcher a {
+      border: 1px solid rgba(242, 198, 74, 0.28);
+      border-radius: 6px;
+      color: #eef3e9;
+      background: linear-gradient(180deg, rgba(36, 38, 41, 0.82), rgba(9, 9, 9, 0.82));
+      padding: 0.34rem 0.55rem;
+      text-decoration: none;
+      font-size: 0.86rem;
+      font-weight: 800;
+    }
+    .language-switcher a[aria-current="page"] {
+      color: #140e03;
+      background: linear-gradient(90deg, #ffe071, #f2c64a 55%, #ff3a2f);
+    }
+    .language-switcher a:hover,
+    .language-switcher a:focus {
+      outline: 2px solid #ffe071;
+      outline-offset: 3px;
+    }
+    @media (max-width: 700px) {
+      .language-switcher {
+        width: calc(100% - 24px);
+        justify-content: flex-start;
+      }
+      .language-switcher a {
+        flex: 1 1 calc(50% - 0.45rem);
+        text-align: center;
+      }
+    }
+"@
+}
+
+function Add-HtmlReadmeLanguageSwitcher {
+    param(
+        [string]$Html,
+        [string]$CurrentLanguageCode
+    )
+
+    $currentLanguage = Get-ReadmeLanguageEntries | Where-Object { $_.Code -eq $CurrentLanguageCode } | Select-Object -First 1
+    if (-not $currentLanguage) {
+        throw "Unknown README language code '$CurrentLanguageCode'."
+    }
+
+    $htmlWithLanguage = Set-HtmlDocumentLanguage -Html $Html -HtmlLang $currentLanguage.HtmlLang
+    $htmlWithoutSwitcher = [regex]::Replace(
+        $htmlWithLanguage,
+        '(?is)\s*<nav\b[^>]*class\s*=\s*["''][^"'']*\blanguage-switcher\b[^"'']*["''][^>]*>.*?</nav>\s*',
+        "`n"
+    )
+
+    if ($htmlWithoutSwitcher -notmatch 'MuffMode generated language switcher') {
+        $style = Get-HtmlReadmeLanguageSwitcherStyle
+        if ($htmlWithoutSwitcher -match '(?is)</style>') {
+            $htmlWithoutSwitcher = [regex]::Replace($htmlWithoutSwitcher, '(?is)</style>', "$style`n  </style>", 1)
+        }
+        elseif ($htmlWithoutSwitcher -match '(?is)</head>') {
+            $htmlWithoutSwitcher = [regex]::Replace($htmlWithoutSwitcher, '(?is)</head>', "  <style>$style`n  </style>`n</head>", 1)
+        }
+        else {
+            throw "HTML document is missing </head> or </style>; cannot add language switcher styles."
+        }
+    }
+
+    $links = New-Object System.Collections.Generic.List[string]
+    foreach ($language in Get-ReadmeLanguageEntries) {
+        $currentAttrs = if ($language.Code -eq $CurrentLanguageCode) { ' aria-current="page"' } else { "" }
+        $links.Add("      <a href=`"$($language.PackageFileName)`" hreflang=`"$($language.HtmlLang)`" lang=`"$($language.HtmlLang)`"$currentAttrs>$(ConvertTo-HtmlText $language.NativeName)</a>")
+    }
+
+    $switcher = @"
+  <nav class="language-switcher" aria-label="$(ConvertTo-HtmlText $currentLanguage.SwitchLabel)">
+$($links -join "`n")
+  </nav>
+"@
+
+    if ($htmlWithoutSwitcher -notmatch '(?is)<body\b[^>]*>') {
+        throw "HTML document is missing a <body> element."
+    }
+
+    return [regex]::Replace($htmlWithoutSwitcher, '(?is)<body\b[^>]*>', "`$0`n$switcher", 1)
+}
+
+function Get-HtmlCodeTextTokens {
+    param([string]$Html)
+
+    return @([regex]::Matches($Html, '(?is)<(?:code|kbd|samp|pre)\b[^>]*>(.*?)</(?:code|kbd|samp|pre)>') | ForEach-Object {
+        $text = [regex]::Replace($_.Groups[1].Value, '(?is)<[^>]+>', '')
+        ([System.Net.WebUtility]::HtmlDecode($text)).Trim()
+    })
+}
+
+function Get-HtmlHrefValues {
+    param([string]$Html)
+
+    return @([regex]::Matches($Html, '(?is)\bhref\s*=\s*(["''])(.*?)\1') | ForEach-Object {
+        $_.Groups[2].Value
+    })
+}
+
+function Assert-MatchingStringSequence {
+    param(
+        [string[]]$Expected,
+        [string[]]$Actual,
+        [string]$Description
+    )
+
+    if ($Expected.Count -ne $Actual.Count) {
+        throw "$Description count changed during translation. Expected $($Expected.Count), found $($Actual.Count)."
+    }
+
+    for ($i = 0; $i -lt $Expected.Count; $i++) {
+        if ($Expected[$i] -ne $Actual[$i]) {
+            throw "$Description changed during translation at item $($i + 1). Expected '$($Expected[$i])', found '$($Actual[$i])'."
+        }
+    }
+}
+
+function Assert-TranslatedHtmlReadme {
+    param(
+        [string]$SourcePath,
+        [string]$TranslatedPath,
+        [object]$Language
+    )
+
+    if (-not (Test-Path -LiteralPath $TranslatedPath -PathType Leaf)) {
+        throw "Translated README was not generated: $TranslatedPath"
+    }
+
+    $sourceHtml = Get-Content -Raw -LiteralPath $SourcePath
+    $translatedHtml = Get-Content -Raw -LiteralPath $TranslatedPath
+
+    if ($translatedHtml -notmatch '(?is)<html\b' -or $translatedHtml -notmatch '(?is)</html>') {
+        throw "$($Language.EnglishName) README is not a complete HTML document."
+    }
+    if ($translatedHtml -notmatch "(?is)<html\b[^>]*\blang\s*=\s*(`"$([regex]::Escape($Language.HtmlLang))`"|'$([regex]::Escape($Language.HtmlLang))'|$([regex]::Escape($Language.HtmlLang)))(\s|>)") {
+        throw "$($Language.EnglishName) README does not set html lang='$($Language.HtmlLang)'."
+    }
+
+    Assert-MatchingStringSequence `
+        -Expected (Get-HtmlCodeTextTokens $sourceHtml) `
+        -Actual (Get-HtmlCodeTextTokens $translatedHtml) `
+        -Description "$($Language.EnglishName) README protected code/pre text"
+
+    Assert-MatchingStringSequence `
+        -Expected (Get-HtmlHrefValues $sourceHtml) `
+        -Actual (Get-HtmlHrefValues $translatedHtml) `
+        -Description "$($Language.EnglishName) README links"
+
+    $protectedTerms = @(
+        "MuffMode",
+        "Muff Mode",
+        "Quake II",
+        "Quake II Rerelease",
+        "game_x64.dll",
+        "MuffModeUpdater.exe",
+        "server-base.cfg",
+        "gt-*.cfg",
+        "gt-FFA.cfg",
+        "gt-DUEL.cfg",
+        "gt-HORDE.cfg",
+        "g_gametype_cfg",
+        "g_muffmode_debug",
+        "Q3A",
+        "BFG"
+    )
+
+    foreach ($term in $protectedTerms) {
+        if ($sourceHtml.Contains($term) -and -not $translatedHtml.Contains($term)) {
+            throw "$($Language.EnglishName) README changed or removed protected term '$term'."
+        }
+    }
+}
+
+function New-TranslatedHtmlReadmes {
+    param(
+        [string]$SourcePath,
+        [string]$TargetVersion,
+        [string]$Channel,
+        [string]$OutputRoot
+    )
+
+    Write-Step "Adding README language switcher"
+    $sourceHtml = Get-Content -Raw -LiteralPath $SourcePath
+    $sourceHtml = Add-HtmlReadmeLanguageSwitcher -Html $sourceHtml -CurrentLanguageCode "en"
+    Set-Content -LiteralPath $SourcePath -Value $sourceHtml -Encoding utf8
+
+    $translationLanguages = @(Get-ReadmeTranslationLanguages)
+    if ($translationLanguages.Count -eq 0) {
+        return @()
+    }
+
+    Assert-GitHubCopilot
+    $outputRootAbs = Resolve-RepoPath $OutputRoot
+    $results = New-Object System.Collections.Generic.List[object]
+
+    foreach ($language in $translationLanguages) {
+        $outputPath = Join-Path $outputRootAbs ("README-{0}.{1}.html" -f $TargetVersion, $language.Code)
+        $prompt = @"
+You are translating the Muff Mode end-user release README from English to $($language.EnglishName).
+
+Translate the HTML below into natural, polished $($language.EnglishName) for players and server hosts.
+
+Critical preservation rules:
+- Return one complete standalone HTML document only. Start with <!DOCTYPE html>. Do not wrap the output in Markdown fences.
+- Preserve the HTML structure, CSS, class names, ids, URLs, href values, file paths, filenames, and language-switcher links.
+- Set the root <html> lang attribute to "$($language.HtmlLang)".
+- Translate visible human prose and human-readable title/alt/aria text.
+- Do not translate or alter text inside <code>, <pre>, <kbd>, <samp>, <style>, or <script>.
+- Do not translate command names, cvar names, config names, ruleset tokens, gametype tokens, map filenames, DLL/EXE names, path fragments, aliases, binds, URLs, or file extensions. Examples include server-base.cfg, gt-*.cfg, gt-FFA.cfg, gt-DUEL.cfg, gt-HORDE.cfg, g_gametype_cfg, g_muffmode_debug, team auto, readyup, callvote, vote yes, vote no, alias +hook hook, alias -hook unhook, bind mouse2 +hook, doctor, q2re, mm, q3a, q2reb, q, qc, game_x64.dll, and MuffModeUpdater.exe.
+- Preserve product and project names such as MuffMode, Muff Mode, Quake II, Quake II Rerelease, GitHub, Ko-fi, Steam, Epic Games Store, GOG, Xbox app, and Microsoft Store.
+- Keep the tone practical, concise, and friendly.
+
+SOURCE HTML:
+$sourceHtml
+"@
+
+        try {
+            Write-Step "Translating README.html to $($language.EnglishName)"
+            $output = Invoke-GitHubCopilot -Prompt $prompt -Purpose "translating README.html to $($language.Code)"
+            $translatedHtml = Convert-CopilotOutputToHtml $output
+            $translatedHtml = Add-HtmlReadmeLanguageSwitcher -Html $translatedHtml -CurrentLanguageCode $language.Code
+            Set-Content -LiteralPath $outputPath -Value $translatedHtml -Encoding utf8
+            Assert-TranslatedHtmlReadme -SourcePath $SourcePath -TranslatedPath $outputPath -Language $language
+            $results.Add([pscustomobject]@{
+                Code = $language.Code
+                HtmlLang = $language.HtmlLang
+                EnglishName = $language.EnglishName
+                NativeName = $language.NativeName
+                PackageFileName = $language.PackageFileName
+                Path = $outputPath
+            })
+        }
+        catch {
+            throw "Failed to generate $($language.EnglishName) README translation. $($_.Exception.Message)"
+        }
+    }
+
+    return @($results)
+}
+
 function New-CopilotHtmlReadme {
     param(
         [string]$TargetVersion,
@@ -1443,19 +1990,23 @@ Create a complete standalone HTML document for end users. Use the Markdown docum
 Audience and scope:
 - Primary audience: Quake II Rerelease players and server hosts installing this release.
 - This project is currently in $Channel channel. Make that release state visible but not alarming.
-- Include installation, first-use guidance, player usage, voting, common host setup, gametype overview, a player-focused ruleset guide, offhand hook bind, debugging pointer, package contents, and the changelog.
+- Include installation, first-use guidance, player usage, voting, common host setup, packaged server config usage, gametype overview, a player-focused ruleset guide, offhand hook bind, debugging pointer, package contents, and the changelog.
+- Explain that hosts should load server-base.cfg first, then a packaged gt-*.cfg preset such as gt-FFA.cfg, gt-DUEL.cfg, or gt-HORDE.cfg; g_gametype_cfg then auto-executes matching gametype configs on later mode changes.
 - Use docs/rulesets.md as the authoritative ruleset source. Make every ruleset's unique feel and tradeoffs clear, including Q3A's existing-asset weapon mappings, preserved double jumps, Super Shotgun removal, regular Shotgun Q3 specs, and shared-cell BFG ammo cost.
 - Include a compact "Included Custom Maps" section using the source map guide. Show map title, filename, release status, and good gametype fits, and link to the full Muff Mode Map Guide for history, original release dates, preserved original readmes/BSPs, separate remaster source-map links, and item registers.
 - Explain that original map readmes are included in the main installer/manual zip under rerelease/baseq2/docs/muffmode/maps/original-readmes, while source maps and original BSPs are published as separate supplemental release archives.
-- Explain that most Windows users can use the installer, which presents detected Steam, Epic Games Store, GOG, and Xbox app / Microsoft Store installs, keeps an other-location choice available, shows the resolved target before install, requires a real Quake II folder with a known launcher executable, rejects unsafe system, special-folder, and extracted-package targets, verifies the copied DLL, updater, docs, legal notices, original-map readmes, custom map BSPs, selected entity overrides, version manifest, and exact server/gametype config contents, writes an install receipt, backs up an existing game DLL when needed, and offers Desktop/Start menu shortcuts for the updater, launcher, install guide, changelog, and server config guide. Also include the zip/manual extraction path for users who prefer it.
+- Explain that most Windows users can use the installer. Keep this concise: it detects Steam, Epic Games Store, GOG, and Xbox app / Microsoft Store installs, keeps an other-location choice available, verifies installed files, writes an install receipt, backs up an existing Muff Mode DLL when needed, and offers useful shortcuts. Also include the zip/manual extraction path for users who prefer it.
+- Do not describe Last Man Standing as an available mode; it is reserved/removed in the current build.
 - Include elegant support buttons near the top for the authors: themuffinator at https://github.com/sponsors/themuffinator and ozy at https://ko-fi.com/ozy24. Frame donations as optional support that helps promote future development and offsets the real time, testing, tooling, and release costs involved in maintaining the mod.
 - Do not include build instructions, source compilation steps, contributor notes, GitHub badges, or repository development workflow.
 - Keep it polished, friendly, and practical. Avoid marketing fluff.
 
 Visual design:
 - Full standalone HTML with embedded CSS only.
-- Quake II inspired palette: gunmetal, dark steel, slime green, rust, amber lights, muted concrete.
-- Make it elegant and readable: responsive layout, high contrast, cards/tables where helpful, clear headings, no external images or fonts.
+- Use the MuffMode logo palette: black bevels, graphite/chrome metal, metallic gold/yellow for "Muff", hot red for "Mode", and red UI energy/warning elements. Do not use a green/slime palette.
+- Add a soft blue sci-fi arena background like a blurred HUD/stage backdrop: deep navy, diffused blue panels, subtle scanlines, and a faint grid. Keep the blue atmospheric while gold/red/chrome carry the brand identity.
+- Presentation should feel like esports meets sci-fi Quake: angular dark metal panels, strong section rails, compact HUD status rows, red accent bars, readable cards/tables, and high contrast.
+- Make it elegant and readable: responsive layout, practical hierarchy, no external images or fonts.
 
 Output requirements:
 - Return only the HTML document. Start with <!DOCTYPE html>.
@@ -1482,14 +2033,14 @@ $changelog
             if ($RequireCopilot) {
                 throw
             }
-            Write-Warning "GitHub Copilot README generation failed; using deterministic HTML README instead. $($_.Exception.Message)"
+            Write-Warning "GitHub Copilot English README generation failed; using deterministic English HTML README instead. Localized README translation still requires Copilot. $($_.Exception.Message)"
         }
     }
     else {
         if ($RequireCopilot) {
             throw "GitHub Copilot CLI is required because -RequireCopilot was supplied, but 'copilot' was not found on PATH."
         }
-        Write-Warning "GitHub Copilot CLI was not found; using deterministic HTML README instead."
+        Write-Warning "GitHub Copilot CLI was not found; using deterministic English HTML README instead. Localized README translation still requires Copilot."
     }
 
     New-DeterministicHtmlReadme `
@@ -1511,7 +2062,21 @@ function Test-AllowedPackageRelativePath {
         return $false
     }
 
-    foreach ($topLevelFile in @("README.html", "README.md", "CHANGELOG.md", "LICENSE", "THIRD_PARTY_NOTICES.md", "MuffModeUpdater.exe", "MuffMode.version", "VERSION")) {
+    foreach ($topLevelFile in @(
+        "README.html",
+        "README.de.html",
+        "README.pl.html",
+        "README.fr.html",
+        "README.hu.html",
+        "README.bg.html",
+        "README.md",
+        "CHANGELOG.md",
+        "LICENSE",
+        "THIRD_PARTY_NOTICES.md",
+        "MuffModeUpdater.exe",
+        "MuffMode.version",
+        "VERSION"
+    )) {
         if ([string]::Equals($normalized, $topLevelFile, [System.StringComparison]::OrdinalIgnoreCase)) {
             return $true
         }
@@ -1540,6 +2105,11 @@ function Assert-ReleasePackageContents {
 
     foreach ($requiredFile in @(
         "README.html",
+        "README.de.html",
+        "README.pl.html",
+        "README.fr.html",
+        "README.hu.html",
+        "README.bg.html",
         "README.md",
         "CHANGELOG.md",
         "LICENSE",
@@ -1775,6 +2345,7 @@ function New-ReleasePackage {
         [string]$UpdaterPath,
         [string]$ChangelogPath,
         [string]$ReadmeHtmlPath,
+        [object[]]$TranslatedReadmes,
         [string]$OutputRoot,
         [string]$AssetRoot
     )
@@ -1800,6 +2371,9 @@ function New-ReleasePackage {
     Copy-Item -LiteralPath (Resolve-RepoPath "THIRD_PARTY_NOTICES.md") -Destination (Join-Path $packageRoot "THIRD_PARTY_NOTICES.md") -Force
     Copy-Item -LiteralPath $UpdaterPath -Destination (Join-Path $packageRoot "MuffModeUpdater.exe") -Force
     Copy-Item -LiteralPath $ReadmeHtmlPath -Destination (Join-Path $packageRoot "README.html") -Force
+    foreach ($translatedReadme in @($TranslatedReadmes)) {
+        Copy-Item -LiteralPath $translatedReadme.Path -Destination (Join-Path $packageRoot $translatedReadme.PackageFileName) -Force
+    }
     Copy-Item -LiteralPath $ChangelogPath -Destination (Join-Path $packageRoot "CHANGELOG.md") -Force
     Copy-OriginalMapReadmesToPackage -PackageRoot $packageRoot
 
@@ -2019,6 +2593,11 @@ try {
         -Entries $releaseEntries `
         -Intro $resolvedReleaseIntro
     New-CopilotHtmlReadme -TargetVersion $targetVersion -Channel $Channel -ChangelogPath $releaseNotesPath -OutputPath $readmeHtmlPath
+    $translatedReadmes = @(New-TranslatedHtmlReadmes `
+        -SourcePath $readmeHtmlPath `
+        -TargetVersion $targetVersion `
+        -Channel $Channel `
+        -OutputRoot $OutputRoot)
 
     $package = New-ReleasePackage `
         -TargetVersion $targetVersion `
@@ -2027,6 +2606,7 @@ try {
         -UpdaterPath $updaterPath `
         -ChangelogPath $releaseNotesPath `
         -ReadmeHtmlPath $readmeHtmlPath `
+        -TranslatedReadmes $translatedReadmes `
         -OutputRoot $OutputRoot `
         -AssetRoot $AssetRoot
 
@@ -2074,6 +2654,9 @@ try {
     }
     Write-Host "Notes:   $releaseNotesPath"
     Write-Host "README:  $readmeHtmlPath"
+    foreach ($translatedReadme in $translatedReadmes) {
+        Write-Host "README $($translatedReadme.Code): $($translatedReadme.Path)"
+    }
     Write-Host "Updater: $updaterPath"
 
     if ($CreateGitHubRelease) {

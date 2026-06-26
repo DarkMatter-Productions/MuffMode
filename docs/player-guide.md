@@ -15,7 +15,7 @@ This guide is for anyone joining a MuffMode game. You do not need to learn every
 ## Install
 
 1. Download the [latest Muff Mode release](https://github.com/DarkMatter-Productions/MuffMode/releases/latest).
-2. Use the Windows installer when available. It defaults to the Steam Quake II Remastered path and also offers Epic Online Store / Epic Games Store, GOG, and custom library choices.
+2. Use the Windows installer when available. It detects Steam, Epic Games Store, GOG, and Xbox app / Microsoft Store installs, while still offering an Other location choice for custom library folders.
 3. If you use the zip instead, extract it into the outer `Quake 2` folder and allow file replacements.
 4. Launch Quake II normally, then join or host a multiplayer game.
 
@@ -28,6 +28,7 @@ If you are joining someone else's server, they control most match settings. Your
 - Use `ready`, `notready`, or `readyup` when the server uses competitive-style warmups.
 - Use `motd` to read server rules, notes, or event information.
 - Use `maplist` to see maps available in the server rotation.
+- If you disconnect during an active match and return quickly with the same account, Muff Mode usually restores you automatically. If the server gives you a fallback ghost code, rejoin as spectator and use `ghost <code>`.
 
 ## Team Commands
 
@@ -67,6 +68,7 @@ If you are joining someone else's server, they control most match settings. Your
 | `maplist` | Print the current server map list. |
 | `motd` | Print the message of the day. |
 | `forfeit` | Forfeit a duel when `g_allow_forfeit` is enabled. |
+| `ghost <code>` | Restore a saved in-progress match slot when automatic reconnect recovery is not available. |
 | `time-out` | Call a timeout when the server allows timeouts. |
 | `time-in` | End an active timeout early. |
 | `follow <player>` | Spectate a specific player. |
@@ -105,5 +107,5 @@ Use `hook` and `unhook` directly if you prefer separate commands.
 - Some gametypes are works in progress. The [Gameplay Reference](gameplay-reference.md) calls these out.
 - Rulesets change starts, weapons, ammo, armor, health, powerups, and movement feel. The [Rulesets](rulesets.md) guide has the player-facing differences.
 - Custom skins, voting, team picking, timeouts, MyMap, and ready-up behavior are server controlled.
-- During active matches, servers can restore your match state automatically if you reconnect quickly with the same social ID.
+- During active matches, servers can restore your match state automatically if you reconnect quickly with the same social ID. The older `ghost <code>` path remains as a fallback.
 - If something feels misconfigured, ask the host to run `doctor`; it reports risky cvar combinations and suggested fixes.

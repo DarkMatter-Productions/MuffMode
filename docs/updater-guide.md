@@ -10,7 +10,7 @@ On startup, the updater and launcher:
 
 1. Detects Quake 2 install paths from saved settings, Steam library folders, Epic manifests, GOG registry entries, and common store install folders.
 2. Queries `DarkMatter-Productions/MuffMode` GitHub releases.
-3. Shows detected Steam, Epic Online Store, and GOG locations in a source selector, while keeping an other-location path/browse option available.
+3. Shows detected Steam, Epic Games Store, GOG, and Xbox app / Microsoft Store locations in a source selector, while keeping an other-location path/browse option available.
 4. Shows the latest version, local version, release changelog, and actions.
 
 The user can then:

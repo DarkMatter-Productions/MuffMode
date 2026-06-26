@@ -35,7 +35,7 @@
 | --- | --- |
 | Casual players | **Clearer HUD information**, **menu-driven voting**, approachable team joining, and extra modes such as **Horde**, **Instagib**, and **NadeFest**. |
 | Competitive players | **Ready-up flow**, **countdowns**, **timeouts**, **overtime**, support for **Duel / TDM / CA / CTF**, flexible rulesets, and captain-led team control. |
-| Server hosts | **Per-gametype configs**, curated map rotations, voting limits, admin tools, team management, **debug logging**, and built-in diagnostics like `doctor`. |
+| Server hosts | **Packaged server configs**, per-gametype presets, curated map rotations, voting limits, admin tools, team management, **debug logging**, and built-in diagnostics like `doctor`. |
 
 <h2 align="center">Start Here</h2>
 
@@ -58,28 +58,28 @@
 <h2 align="center">Quick Install</h2>
 
 1. Download the [latest Muff Mode release](https://github.com/DarkMatter-Productions/MuffMode/releases/latest).
-2. Use the **Windows installer** when available. It detects **Steam**, **Epic Games Store**, and **GOG** installs, and also offers an **Other location** option for custom library folders.
+2. Use the **Windows installer** when available. It detects **Steam**, **Epic Games Store**, **GOG**, and **Xbox app / Microsoft Store** installs, and also offers an **Other location** option for custom library folders.
 3. If you use the zip instead, extract it into the outer **`Quake 2`** folder and allow file replacements.
-4. Launch the game normally. Server hosts can execute the bundled server config with **`exec muff-sv.cfg`** when it is included in the release package.
+4. Launch the game normally. Server hosts can load the bundled baseline config with **`exec server-base.cfg`**, then execute a gametype preset such as **`exec gt-FFA.cfg`**.
 
 For a more careful walkthrough, use the [Player Guide](docs/player-guide.md) or [Server Host Guide](docs/server-host-guide.md).
 
 <h2 align="center">Highlights</h2>
 
  - **Built for every lobby style** — supports **casual public servers**, **private friend sessions**, **pickups**, **scrims**, and more organized competitive events.
- - **A fuller mode lineup** — includes **Deathmatch**, **Duel**, **TDM**, **CTF**, **Clan Arena**, **Capture Strike**, **Red Rover**, **Last Man Standing**, **Horde**, **Instagib**, and **NadeFest**.
+ - **A fuller mode lineup** — includes **Deathmatch**, **Duel**, **TDM**, **CTF**, **Clan Arena**, **Capture Strike**, **Red Rover**, **Horde**, **Instagib**, and **NadeFest**.
  - **Flexible rulesets** — switch between [**Quake II Rerelease**, **Muff Mode**, **Q2RE Balanced**, **Quake III Arena style**, **Quake style**, and **Quake Champions style**](docs/rulesets.md) depending on the feel you want.
  - **Better match flow** — warmups, ready checks, countdowns, post-match delays, sudden death, overtime, round handling, and timeouts help games start cleanly and stay organized.
  - **Player-friendly interface improvements** — a purpose-built HUD, compact scoreboard, frag messages, timer support, help text, MOTD access, and match-state feedback keep important information visible without overwhelming the screen.
  - **Fast, accessible voting** — use **GUI or console voting** for maps, gametypes, rulesets, server settings, and administrative actions, with host-side controls to keep votes focused.
  - **Stronger teamplay tools** — captains, captain transfer, team locking, auto-balance, forced balance, and team item-drop notices make coordinated play easier to run.
  - **Quality-of-life touches players notice** — **kill beeps**, **offhand hook support**, **EyeCam spectating**, **MyMap queueing**, and smarter auto-switch behavior all help matches feel smoother.
- - **Host controls that scale up** — tune per-gametype configs, map lists and pools, votable options, MOTDs, debug logging, and server diagnostics without needing separate builds for different communities.
+ - **Host controls that scale up** — tune the packaged `server-base.cfg`, per-gametype `gt-*.cfg` files, map lists and pools, votable options, MOTDs, debug logging, and server diagnostics without needing separate builds for different communities.
  - **Modding and map support** — Muff Mode also adds **custom maps**, **entity overrides**, **item replacement**, conditional entity spawning, and new mapper-focused entities for more tailored server content.
 
 <h2 align="center">Included Content</h2>
 
-**Muff Mode** releases are intended to include the **game logic DLL**, **server configuration material**, **bot support files**, **map entity overrides**, and the **Windows updater**. The source repository contains the C++ game code, Visual Studio project files, updater source, documentation, packaging assets, and project media used to ship the mod.
+**Muff Mode** releases are intended to include the **game logic DLL**, **server configuration material**, **bot support files**, **map entity overrides**, preserved map readmes, and the **Windows updater**. The source repository contains the C++ game code, Visual Studio project files, updater source, documentation, packaging assets, and project media used to ship the mod.
 
 <h2 align="center">Development</h2>
 

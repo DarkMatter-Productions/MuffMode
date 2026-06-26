@@ -15,6 +15,7 @@ Release packages must include:
 - `LICENSE`
 - `THIRD_PARTY_NOTICES.md`
 - `README.html`
+- `README.de.html`, `README.pl.html`, `README.fr.html`, `README.hu.html`, and `README.bg.html`
 - `CHANGELOG.md`
 
 The Windows installer displays `LICENSE` through Inno Setup. The zip package carries both `LICENSE` and `THIRD_PARTY_NOTICES.md` at the package root.

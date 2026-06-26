@@ -68,9 +68,34 @@ Use `gametype` and `not_gametype` to include or exclude an entity for specific g
 | `team` | Team Deathmatch |
 | `ctf` | Capture the Flag |
 | `ca` | Clan Arena |
+| `freeze` | Reserved Freeze Tag token |
+| `strike` | Capture Strike |
 | `rr` | Red Rover |
-| `lms` | Last Man Standing |
+| `lms` | Reserved Last Man Standing token |
 | `horde` | Horde Mode |
+| `ball` | Reserved ProBall token |
+| `instagib` | Instagib |
+| `nadefest` | NadeFest |
+
+### Ruleset Keys
+
+Use `ruleset` and `not_ruleset` to include or exclude an entity for specific rulesets. Values can be comma-separated or space-separated.
+
+```text
+"ruleset" "mm q2reb"
+"not_ruleset" "q3a"
+```
+
+| Value | Ruleset |
+| --- | --- |
+| `q2re` | Quake II Rerelease |
+| `mm` | Muff Mode |
+| `q3a` | Quake III Arena style |
+| `q2reb` | Q2RE Balanced |
+| `q` | Quake style |
+| `qc` | Quake Champions style |
+
+Legacy `notq2` and `notq3a` keys are still understood, but new overrides should prefer `ruleset` and `not_ruleset`.
 
 ### Team Keys
 
