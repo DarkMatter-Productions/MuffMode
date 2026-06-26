@@ -908,6 +908,13 @@ void ClientSpawn(gentity_t *ent) {
 
 	ent->client->ps.pmove.viewheight = ent->viewheight;
 
+	// [MuffMode] Restore the engine team id right after clearing playerstate, as
+	// stock q2re does. The engine snapshots a player's team for the lobby say_team
+	// chat control during/just after spawn; leaving this 0 until the next frame's
+	// G_SetStats lets the snapshot cache 0, which leaks team chat to everyone for
+	// the rest of the map. This is the regression vs vanilla.
+	ent->client->ps.team_id = P_EngineTeamIndex(ent->client->sess.team);
+
 	if (!G_ShouldPlayersCollide(false))
 		ent->clipmask &= ~CONTENTS_PLAYER;
 
