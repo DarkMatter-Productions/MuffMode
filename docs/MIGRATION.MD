@@ -585,4 +585,4 @@ Configs that used the old min/max clamps can set `g_horde_points_min 20` and `g_
 
 - This is a staged refactor, not a rewrite.
 - Focus remains on reducing merge/debug risk while preserving gameplay behavior.
-- **Gametype availability** (`mm_gametype.cpp`): enabled modes are selectable; disabled modes (Strike, RR) keep code but reject selection; removed modes (Freeze, Ball, LMS) have gameplay stripped. `g_gametype` enum indices are unchanged.
+- **Gametype availability** (`mm_gametype.cpp`): enabled modes are selectable (incl. Strike, RR, and LMS); removed modes (Freeze, Ball) have gameplay stripped. `g_gametype` enum indices are unchanged.

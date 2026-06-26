@@ -830,14 +830,17 @@ void TickRoundState() {
 			}
 
 			// Round time limit: the highest-health survivor takes the round; a tie is a draw.
+			// Only fighters currently alive can win the tie-break - with multi-life rounds an
+			// active fighter may be momentarily dead (health <= 0) awaiting respawn, and corpse
+			// health must not decide the round. If nobody is alive at expiry, it is a draw.
 			const bool time_expired = roundtimelimit->value > 0 && level.time >= level.round_state_timer;
 			if (time_expired && participants >= 2) {
 				gentity_t *leader = nullptr;
-				int best_health = -1;
+				int best_health = 0;
 				bool tied = false;
 
 				for (auto ec : active_clients()) {
-					if (!MM_LMS_ClientIsActiveFighter(ec))
+					if (!MM_LMS_ClientIsActiveFighter(ec) || ec->health <= 0)
 						continue;
 					if (ec->health > best_health) {
 						best_health = ec->health;
