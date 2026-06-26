@@ -2623,6 +2623,13 @@ void ClientBeginServerFrame(gentity_t *ent) {
 			return;
 		}
 
+		if (deathmatch->integer && (ent->svflags & SVF_BOT) && ClientIsPlaying(client) && !client->eliminated &&
+				level.time > client->respawn_time && !level.coop_level_restart_time) {
+			ClientRespawn(ent);
+			client->latched_buttons = BUTTON_NONE;
+			return;
+		}
+
 		//muff mode: add minimum delay in dm
 		if (deathmatch->integer && client->respawn_min_time && level.time > client->respawn_min_time && level.time <= client->respawn_time) {
 			if ((client->latched_buttons & BUTTON_ATTACK)) {
