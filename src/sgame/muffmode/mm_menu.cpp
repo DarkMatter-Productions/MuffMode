@@ -1161,11 +1161,9 @@ void Update(gentity_t *ent)
 		entries[index].SelectFunc = nullptr;
 	}
 
-	menu::SetHostName(entries + kHostName);
-	menu::SetGametypeName(entries + kGametype);
+	menu::SetGametypeName(entries + kHostName);
+	menu::SetText(entries + kGametype, "");
 	menu::SetLevelName(entries + kLevel);
-
-	menu::SetGamemodName(entries + kGameMod);
 
 	switch (level.match_state) {
 	case matchst_t::MATCH_NONE:
@@ -1190,6 +1188,8 @@ void Update(gentity_t *ent)
 		menu::SetText(entries[kMatch], menu::kBreaker);
 		break;
 	}
+
+	menu::SetGamemodName(entries + kGameMod);
 
 	int admin_index = teams ? kTeamsAdmin : kFreeAdmin;
 	if (ent->client->sess.admin) {
