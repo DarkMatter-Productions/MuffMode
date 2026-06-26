@@ -8,12 +8,21 @@
 
 #include <string>
 
+inline const char *MM_ScoreboardLimitLabel()
+{
+	if (GT(GT_STRIKE) || GT(GT_CTF))
+		return "Capture Limit";
+	if (GTF(GTF_ROUNDS))
+		return "Round Limit";
+	return "Score Limit";
+}
+
 // Appends the standard scoreboard footer (gametype header, score limit, match time / rank line,
 // menu hint). Byte layout must stay identical to the inline copies in hud.cpp.
 inline void MM_AppendScoreboardFooter(gentity_t *ent, std::string &string, bool use_formatted_score)
 {
 	fmt::format_to(std::back_inserter(string), FMT_STRING("xv 0 yv -40 cstring2 \"{} on {}\" "), level.gametype_name, level.level_name);
-	fmt::format_to(std::back_inserter(string), FMT_STRING("xv 0 yv -30 cstring2 \"Score Limit: {}\" "), GT_ScoreLimit());
+	fmt::format_to(std::back_inserter(string), FMT_STRING("xv 0 yv -30 cstring2 \"{}: {}\" "), MM_ScoreboardLimitLabel(), GT_ScoreLimit());
 
 	if (level.intermission_time) {
 		if (level.match_start_time) {
@@ -26,7 +35,16 @@ inline void MM_AppendScoreboardFooter(gentity_t *ent, std::string &string, bool 
 		fmt::format_to(std::back_inserter(string), FMT_STRING("ifgef {} yb -48 xv 0 loc_cstring2 0 \"$m_eou_press_button\" endif "), (level.intermission_server_frame + (5_sec).frames()));
 	} else if (level.match_state == MATCH_IN_PROGRESS) {
 		if (ent->client && ClientIsPlaying(ent->client) && ent->client->resp.score && level.num_playing_clients > 1) {
-			if (use_formatted_score) {
+			if (GT(GT_LMS)) {
+				if (use_formatted_score) {
+					const char *score = G_Fmt("{}", ent->client->resp.score).data();
+					fmt::format_to(std::back_inserter(string), FMT_STRING("xv 0 yv -10 cstring2 \"{} place with {} round wins\" "),
+						G_PlaceString(ent->client->resp.rank + 1), score);
+				} else {
+					fmt::format_to(std::back_inserter(string), FMT_STRING("xv 0 yv -10 cstring2 \"{} place with {} round wins\" "),
+						G_PlaceString(ent->client->resp.rank + 1), ent->client->resp.score);
+				}
+			} else if (use_formatted_score) {
 				const char *score = G_Fmt("{}", ent->client->resp.score).data();
 				fmt::format_to(std::back_inserter(string), FMT_STRING("xv 0 yv -10 cstring2 \"{} place with a score of {}\" "),
 					G_PlaceString(ent->client->resp.rank + 1), score);

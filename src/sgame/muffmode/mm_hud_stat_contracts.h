@@ -10,14 +10,14 @@
 
 // Server <-> client HUD stat contract (ps.stats[] slots consumed by CS_STATUSBAR layout).
 //
-// STAT_GAMETYPE_HUD      — warmup (not countdown): "Gametype: …"; in-progress: Fraglimit / Capturelimit(CTF) / Round x of y (CA, RR, Strike) / Wave x of y (Horde)
+// STAT_GAMETYPE_HUD      — warmup (not countdown): "Gametype: …"; in-progress: Fraglimit / Capturelimit(CTF) / Round x of y (CA, RR, Strike, LMS) / Wave x of y (Horde)
 // STAT_RULESET_HUD       — warmup: ruleset; Strike in-progress: Capturelimit
-// STAT_DUEL_HEADER       — duel: header pic; CA/RR in-progress: CONFIG_CA_ALIVE_HUD + client (POV "X vs Y" under match timer)
+// STAT_DUEL_HEADER       — duel: header pic; CA/RR in-progress: CONFIG_CA_ALIVE_HUD + client (POV "X vs Y"); LMS: POV "N enemy/enemies remaining"
 // STAT_WARMUP_NOTICE     — CONFIG_WARMUP_NOTICE; WARMUP_SPLASH_DURATION after warmup_notice_time while requisite active
-// STAT_ROUND_NUMBER      — CONFIG_ROUND_PROGRESS; display uses HudRoundDisplayNumber() (+1 during countdown); not used for Horde
+// STAT_ROUND_NUMBER      — CONFIG_ROUND_PROGRESS; display uses HudRoundDisplayNumber() (+1 during countdown); not used for Horde / round-on-gametype HUD modes
 // STAT_MINISCORE_*       — writer: SetMiniScoreStats / CTF_SetStats; visible from MATCH_WARMUP_DELAYED through MATCH_IN_PROGRESS
-// STAT_MONSTER_COUNT    — Horde: remaining monsters (big num); Strike/CA/LMS: arena_hud_role_t (ifbit); LMS FFA: survivors (num)
-// STAT_LIVES            — Horde: lives_num stack; coop: lives_num stack
+// STAT_MONSTER_COUNT    — Horde: remaining monsters (big num); Strike/CA: arena_hud_role_t (ifbit)
+// STAT_LIVES            — Horde/LMS: right stack num(1) at yt 42; coop: lives_num stack at yt 2
 
 inline constexpr size_t MM_STATUSBAR_LAYOUT_MAX_CHARS = 5280; // CS_SIZE(CS_STATUSBAR)
 

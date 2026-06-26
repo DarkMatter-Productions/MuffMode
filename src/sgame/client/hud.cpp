@@ -5,6 +5,7 @@
 #include "muffmode/mm_duel.h"
 #include "muffmode/mm_hud_stat_contracts.h"
 #include "muffmode/mm_horde.h"
+#include "muffmode/mm_lms.h"
 #include "muffmode/mm_red_rover_rules.h"
 #include "muffmode/mm_scoreboard_layout.h"
 #include "muffmode/mm_vote_menu.h"
@@ -753,11 +754,14 @@ void Cmd_Help_f(gentity_t *ent) {
 // [MuffMode] also drives arena round/role HUD stats in deathmatch gametypes.
 static void G_SetGametypeStats(gentity_t *ent) {
 
-	// LMS always grants at least one life per round (MM_LMS_LivesPerRound clamps to >= 1),
-	// so the lives counter is always meaningful - don't gate it on g_lms_lives > 0.
-	if ((GT(GT_HORDE) && g_horde_lives->integer > 0) || GT(GT_LMS))
-		ent->client->ps.stats[STAT_LIVES] = ent->client->pers.lives;
-	else if (InCoopStyle() && g_coop_enable_lives->integer)
+	// Right-stack lives digit (yt 42): raw count in STAT_LIVES, num(1) in layout.
+	if (GT(GT_HORDE) && g_horde_lives->integer > 0) {
+		const int lives = ent->client->pers.lives;
+		ent->client->ps.stats[STAT_LIVES] = lives > 0 ? lives : 0;
+	} else if (GT(GT_LMS) && ClientIsPlaying(ent->client) && !ent->client->eliminated) {
+		const int lives = ent->client->pers.lives > 0 ? ent->client->pers.lives : MM_LMS_LivesPerRound();
+		ent->client->ps.stats[STAT_LIVES] = lives;
+	} else if (InCoopStyle() && g_coop_enable_lives->integer)
 		ent->client->ps.stats[STAT_LIVES] = ent->client->pers.lives + 1;
 	else
 		ent->client->ps.stats[STAT_LIVES] = 0;
@@ -800,7 +804,7 @@ static void G_SetGametypeStats(gentity_t *ent) {
 			ent->client->ps.stats[STAT_GAMETYPE_HUD] = 0;
 		}
 		ent->client->ps.stats[STAT_RULESET_HUD] = 0;
-	} else if (deathmatch->integer && level.match_state == MATCH_IN_PROGRESS && (GT(GT_CA) || GT(GT_RR) || GT(GT_STRIKE))) {
+	} else if (deathmatch->integer && level.match_state == MATCH_IN_PROGRESS && (GT(GT_CA) || GT(GT_RR) || GT(GT_STRIKE) || GT(GT_LMS))) {
 		const int display_round = HudRoundDisplayNumber();
 		if (display_round > 0) {
 			const int limit = roundlimit->integer;
@@ -866,13 +870,11 @@ static void G_SetGametypeStats(gentity_t *ent) {
 			ent->client->ps.stats[STAT_MONSTER_COUNT] = MM_EncodeStrikeArenaRole(attacking);
 		} else if (GTF(GTF_ELIMINATION) && GTF(GTF_TEAMS) && !GTF(GTF_CTF) && ClientIsPlaying(ent->client)) {
 			ent->client->ps.stats[STAT_MONSTER_COUNT] = MM_EncodeArenaRoleForClient(false, false, ent->client->eliminated);
-		} else if (GTF(GTF_ELIMINATION) && !GTF(GTF_TEAMS)) {
-			ent->client->ps.stats[STAT_MONSTER_COUNT] = level.num_living_free;
 		} else {
 			ent->client->ps.stats[STAT_MONSTER_COUNT] = 0;
 		}
 
-		if (GTF(GTF_ROUNDS) && !GT(GT_CA) && !GT(GT_RR) && !GT(GT_STRIKE) && !GT(GT_HORDE)) {
+		if (GTF(GTF_ROUNDS) && !GT(GT_CA) && !GT(GT_RR) && !GT(GT_STRIKE) && !GT(GT_HORDE) && !GT(GT_LMS)) {
 			const int display_round = HudRoundDisplayNumber();
 			if (display_round > 0) {
 				const int limit = GT_ScoreLimit();
@@ -912,6 +914,36 @@ static void G_SetGametypeStats(gentity_t *ent) {
 		if (ci >= 0 && (size_t)ci < CONFIG_CA_ALIVE_HUD_SLOTS) {
 			const int cs = (int)(CONFIG_CA_ALIVE_HUD + (size_t)ci);
 			gi.configstring(cs, G_Fmt("{} vs {}", allies, enemies).data());
+			ent->client->ps.stats[STAT_DUEL_HEADER] = cs;
+		}
+	} else if (GT(GT_LMS) && deathmatch->integer && level.match_state == MATCH_IN_PROGRESS
+		&& level.round_state == roundst_t::ROUND_IN_PROGRESS) {
+		gentity_t *pov = ent;
+		if (ent->client->follow_target && ent->client->follow_target->client)
+			pov = ent->client->follow_target;
+
+		int enemies = 0;
+		if (ClientIsPlaying(pov->client)) {
+			for (auto ec : active_clients()) {
+				if (ec == pov)
+					continue;
+				if (!ClientIsPlaying(ec->client))
+					continue;
+				if (!ec->client->eliminated && ec->client->pers.health > 0)
+					enemies++;
+			}
+		} else {
+			enemies = level.num_living_free;
+		}
+
+		const char *line = enemies == 1
+			? "1 enemy remaining"
+			: G_Fmt("{} enemies remaining", enemies).data();
+
+		const int ci = (int)(ent - g_entities - 1);
+		if (ci >= 0 && (size_t)ci < CONFIG_CA_ALIVE_HUD_SLOTS) {
+			const int cs = (int)(CONFIG_CA_ALIVE_HUD + (size_t)ci);
+			gi.configstring(cs, line);
 			ent->client->ps.stats[STAT_DUEL_HEADER] = cs;
 		}
 	} else if (!GT(GT_DUEL)) {

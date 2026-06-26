@@ -151,6 +151,18 @@ void EmitCoopStackLives(statusbar_t &sb, int32_t *coop_y)
 	EmitCoopStackAdvancePastNum(coop_y);
 }
 
+// Big-digit lives stack (Horde/LMS): right-aligned num at yt, label below.
+// Always emitted in the layout; hidden unless STAT_LIVES is non-zero.
+void EmitRightLivesStack(statusbar_t &sb, int32_t yt)
+{
+	constexpr int32_t kLabelBelowNum = 26;
+
+	sb.ifstat(STAT_LIVES)
+		.xr(MiniscoreAlignedNumXr(1)).yt(yt).num(1, STAT_LIVES)
+		.xr(kRightHudTextXr).yt(yt + kLabelBelowNum).loc_rstring("$g_lives")
+		.endifstat();
+}
+
 void EmitCoopStackScoreLimit(statusbar_t &sb, int32_t *coop_y)
 {
 	EmitCoopStackLabeledNum(sb, coop_y, STAT_SCORELIMIT, ScoreLimitLabel(), kRightHudNumFieldWidth);
@@ -172,24 +184,21 @@ void EmitRoundCounter(statusbar_t &sb, round_counter_profile_t profile, const ch
 	EmitRightLabeledValue(sb, hud_vanchor_t::Top, 2, 22, STAT_ROUND_NUMBER, label);
 }
 
-void EmitHordeLivesMonsterStack(statusbar_t &sb)
+void EmitHordeMonsterStack(statusbar_t &sb)
 {
 	if (!GT(GT_HORDE))
 		return;
 
+	constexpr int32_t kLabelBelowNum = 26;
 	int32_t y = 42;
-	const int32_t text_adj = 26;
 
-	if (g_horde_lives->integer > 0) {
-		sb.ifstat(STAT_LIVES)
-			.xr(MiniscoreAlignedNumXr(1)).yt(y = 42).lives_num(STAT_LIVES)
-			.xr(kRightHudTextXr).yt(y += text_adj).loc_rstring("$g_lives")
-			.endifstat();
-	}
+	// Lives share yt 42 via EmitRightLivesStack (always in layout).
+	if (g_horde_lives->integer > 0)
+		y += kLabelBelowNum;
 
 	sb.ifstat(STAT_MONSTER_COUNT)
 		.xr(MiniscoreAlignedNumXr(kTeamMiniscoreNumFieldWidth)).yt(y += 10).num(kTeamMiniscoreNumFieldWidth, STAT_MONSTER_COUNT)
-		.xr(kRightHudTextXr).yt(y += text_adj).loc_rstring("Monsters")
+		.xr(kRightHudTextXr).yt(y += kLabelBelowNum).loc_rstring("Monsters")
 		.endifstat();
 }
 
@@ -223,7 +232,7 @@ void EmitArenaRoleLabel(statusbar_t &sb, int32_t yt)
 	if (!MM_GametypeHasFlag(GTF_ELIMINATION))
 		return;
 
-	// Strike attack/defend plus CA/LMS eliminated share STAT_MONSTER_COUNT via ifbit.
+	// Strike attack/defend plus CA eliminated share STAT_MONSTER_COUNT via ifbit.
 	sb.ifbit(STAT_MONSTER_COUNT, ARENA_ROLE_ATTACKING).xr(0).yt(yt).loc_rstring("ATTACK").endifstat();
 	sb.ifbit(STAT_MONSTER_COUNT, ARENA_ROLE_DEFENDING).xr(0).yt(yt).loc_rstring("DEFEND").endifstat();
 	sb.ifbit(STAT_MONSTER_COUNT, ARENA_ROLE_ELIMINATED).xr(0).yt(yt).loc_rstring("ELIMINATED").endifstat();
@@ -238,14 +247,6 @@ void EmitTeamHeader(statusbar_t &sb)
 		sb.ifstat(STAT_CTF_FLAG_PIC).xr(-24).yt(26).pic(STAT_CTF_FLAG_PIC).endifstat();
 
 	sb.ifstat(STAT_TEAMPLAY_INFO).xl(0).yb(-88).stat_string(STAT_TEAMPLAY_INFO).endifstat();
-}
-
-void EmitFFASurvivorCount(statusbar_t &sb)
-{
-	if (!MM_GametypeHasFlag(GTF_ELIMINATION) || MM_GametypeHasFlag(GTF_TEAMS))
-		return;
-
-	EmitRightLabeledValue(sb, hud_vanchor_t::Top, 2, 2 + 26, STAT_MONSTER_COUNT, "Remaining");
 }
 
 const char *ScoreLimitLabel()
@@ -297,6 +298,9 @@ void MM_InitStatusbar()
 		sb.ifstat(STAT_SHOW_STATUSBAR).ifstat(STAT_HELPICON).xv(150).pic(STAT_HELPICON).endifstat().endifstat();
 	}
 
+	// Horde/LMS lives digit (yt 42) — not gated on gametype at layout build time.
+	muffmode::statusbar::EmitRightLivesStack(sb, 42);
+
 	if (InCoopStyle()) {
 		int32_t y = 2;
 
@@ -309,10 +313,7 @@ void MM_InitStatusbar()
 			muffmode::statusbar::EmitHordeCoopWaveHeader(sb);
 
 		if (GT(GT_HORDE))
-			muffmode::statusbar::EmitHordeLivesMonsterStack(sb);
-
-		if (GT(GT_HORDE))
-			muffmode::statusbar::EmitHordeLivesMonsterStack(sb);
+			muffmode::statusbar::EmitHordeMonsterStack(sb);
 	}
 	if (!deathmatch->integer) {
 		sb.ifstat(STAT_POWERUP_ICON).yb(-76).endifstat();
@@ -340,17 +341,11 @@ void MM_InitStatusbar()
 		if (MM_GametypeHasFlag(GTF_ELIMINATION) && MM_GametypeHasFlag(GTF_TEAMS)) {
 			if (!GT(GT_STRIKE))
 				muffmode::statusbar::EmitArenaRoleLabel(sb, 48);
-		} else if (MM_GametypeHasFlag(GTF_ELIMINATION) && !MM_GametypeHasFlag(GTF_TEAMS)) {
-			muffmode::statusbar::EmitFFASurvivorCount(sb);
-			if (GT(GT_LMS)) {
-				int32_t lms_y = 2;
-				muffmode::statusbar::EmitCoopStackLives(sb, &lms_y);
-			}
 		}
 
 		sb.ifstat(STAT_COUNTDOWN).yb(-256).num(3, STAT_COUNTDOWN).endifstat();
 		sb.ifstat(STAT_MATCH_STATE).xv(0).yt(14).stat_string(STAT_MATCH_STATE).endifstat();
-		if (GT(GT_CA) || GT(GT_RR))
+		if (GT(GT_CA) || GT(GT_RR) || GT(GT_LMS))
 			sb.ifstat(STAT_DUEL_HEADER).xv(0).yt(26).stat_string(STAT_DUEL_HEADER).endifstat();
 		// Red Rover: current-team reminder below alive line (compact, centred — see cgame pic draw).
 		if (GT(GT_RR))

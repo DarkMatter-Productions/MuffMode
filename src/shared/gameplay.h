@@ -70,7 +70,7 @@ enum {
 	CONFIG_RULESET_HUD,		// DM HUD: "Ruleset: …"
 	CONFIG_ROUND_PROGRESS,	// DM HUD: "Round x of y" / "Wave x of y"
 	CONFIG_WARMUP_NOTICE,	// DM HUD: warmup requisite detail (e.g. more players needed)
-	CONFIG_CA_ALIVE_HUD,	// CA HUD pool base: "X vs Y" living counts (CONFIG_CA_ALIVE_HUD + client_index)
+	CONFIG_CA_ALIVE_HUD,	// CA/RR POV pool base (CONFIG_CA_ALIVE_HUD + client); LMS: POV "N enemy/enemies remaining"
 
 	CONFIG_LAST
 };
