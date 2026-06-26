@@ -213,8 +213,12 @@ void G_ReportMatchDetails(bool is_end) {
 		static std::array<gentity_t *, MAX_CLIENTS> sorted_players;
 		size_t num_active_players = 0;
 
-		for (auto player : active_clients())
+		for (auto player : active_clients()) {
+			// [MuffMode] never write past sorted_players[] (std::array<.., MAX_CLIENTS>).
+			if (num_active_players >= sorted_players.size())
+				break;
 			sorted_players[num_active_players++] = player;
+		}
 
 		std::sort(sorted_players.begin(), sorted_players.begin() + num_active_players, [](const gentity_t *a, const gentity_t *b) { return b->client->resp.score < a->client->resp.score; });
 
@@ -227,7 +231,10 @@ void G_ReportMatchDetails(bool is_end) {
 				current_score = sorted_players[i]->client->resp.score;
 			}
 
-			player_ranks[sorted_players[i]->s.number - 1] = current_rank;
+			// [MuffMode] s.number-1 indexes player_ranks[] (std::array<.., MAX_CLIENTS>); skip if out of range.
+			const int rank_slot = sorted_players[i]->s.number - 1;
+			if (rank_slot >= 0 && rank_slot < (int)player_ranks.size())
+				player_ranks[rank_slot] = current_rank;
 		}
 
 		gi.WriteByte(0);
@@ -255,9 +262,13 @@ void G_ReportMatchDetails(bool is_end) {
 			if (teams && !ClientIsPlaying(player->client))
 				continue;
 
+			// [MuffMode] guard the same player_ranks[] read against an out-of-range client slot.
+			const int rank_slot = player->s.number - 1;
+			const uint32_t rank = (rank_slot >= 0 && rank_slot < (int)player_ranks.size()) ? player_ranks[rank_slot] : 0;
+
 			gi.WriteByte(player->s.number - 1);
 			gi.WriteLong(player->client->resp.score);
-			gi.WriteByte(player_ranks[player->s.number - 1]);
+			gi.WriteByte(rank);
 
 			if (teams)
 				gi.WriteByte(player->client->sess.team == TEAM_RED ? 0 : 1);
@@ -301,6 +312,10 @@ void TeamsScoreboardMessage(gentity_t *ent, gentity_t *killer) {
 			team = 1;
 		else
 			continue; // unknown team?
+
+		// [MuffMode] sorted[]/sortedscores[] hold MAX_CLIENTS entries per team; never insert past the end.
+		if (total[team] >= MAX_CLIENTS)
+			continue;
 
 		score = game.clients[i].resp.score;
 		for (j = 0; j < total[team]; j++)

@@ -61,4 +61,9 @@ inline bool MM_ArenaRoleHasMask(uint16_t role, arena_hud_role_t mask)
 }
 
 // Per-client CA alive strings (allies vs enemies from local POV). CONFIG_CA_ALIVE_HUD is the pool base.
-inline constexpr size_t CONFIG_CA_ALIVE_HUD_SLOTS = MAX_GENERAL - CONFIG_CA_ALIVE_HUD;
+// CONFIG_CA_ALIVE_HUD is an *absolute* configstring index (CS_GENERAL + offset), so the number of pool
+// slots is what remains in the general region after the base - NOT MAX_GENERAL - CONFIG_CA_ALIVE_HUD,
+// which underflows size_t and makes the callers' bounds checks dead.
+static_assert(CONFIG_CA_ALIVE_HUD >= CS_GENERAL && CONFIG_CA_ALIVE_HUD < CS_GENERAL + MAX_GENERAL,
+	"CONFIG_CA_ALIVE_HUD pool base must live inside the general configstring region");
+inline constexpr size_t CONFIG_CA_ALIVE_HUD_SLOTS = (CS_GENERAL + MAX_GENERAL) - CONFIG_CA_ALIVE_HUD;
