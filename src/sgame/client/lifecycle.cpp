@@ -7,6 +7,7 @@
 #include "muffmode/mm_captain.h"
 #include "muffmode/mm_ghost.h"
 #include "muffmode/mm_horde.h"
+#include "muffmode/mm_lms.h"
 #include "muffmode/mm_menu.h"
 #include "muffmode/mm_parse.h"
 #include "muffmode/mm_pconfig.h"
@@ -713,7 +714,11 @@ void ClientSpawn(gentity_t *ent) {
 
 	if (GTF(GTF_ROUNDS) && GTF(GTF_ELIMINATION) && level.match_state == matchst_t::MATCH_IN_PROGRESS && notGT(GT_HORDE))
 		if (level.round_state == roundst_t::ROUND_IN_PROGRESS || level.round_state == roundst_t::ROUND_ENDED)
-			ClientSetEliminated(ent);
+			// LMS uses the Horde-style lives model: a mid-round (re)spawn with lives left is a
+			// living respawn, not an elimination. Only auto-eliminate LMS spawners who are out
+			// of lives (latecomers/round-joiners get no lives, so they spectate until next round).
+			if (notGT(GT_LMS) || ent->client->pers.lives <= 0)
+				ClientSetEliminated(ent);
 
 	G_ClearLagCompensationHistory(ent);
 
@@ -2617,6 +2622,16 @@ void ClientBeginServerFrame(gentity_t *ent) {
 		}
 
 		if (deathmatch->integer && GT(GT_HORDE) && ClientIsPlaying(client) && !client->eliminated &&
+				level.round_state == roundst_t::ROUND_IN_PROGRESS &&
+				level.time > client->respawn_time && !level.coop_level_restart_time) {
+			ClientRespawn(ent);
+			return;
+		}
+
+		// LMS: a fighter who died but still has a life left respawns mid-round with the arena
+		// loadout (eliminated fighters are handled above by ClientArenaEliminationRound, which
+		// transitions them to a spectator until the next round).
+		if (deathmatch->integer && GT(GT_LMS) && ClientIsPlaying(client) && !client->eliminated &&
 				level.round_state == roundst_t::ROUND_IN_PROGRESS &&
 				level.time > client->respawn_time && !level.coop_level_restart_time) {
 			ClientRespawn(ent);

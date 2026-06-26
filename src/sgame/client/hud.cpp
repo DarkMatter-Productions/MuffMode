@@ -880,7 +880,7 @@ void Cmd_Help_f(gentity_t *ent) {
 // even if we're spectating
 void G_SetCoopStats(gentity_t *ent) {
 
-	if (GT(GT_HORDE) && g_horde_lives->integer > 0)
+	if ((GT(GT_HORDE) && g_horde_lives->integer > 0) || (GT(GT_LMS) && g_lms_lives->integer > 0))
 		ent->client->ps.stats[STAT_LIVES] = ent->client->pers.lives;
 	else if (InCoopStyle() && g_coop_enable_lives->integer)
 		ent->client->ps.stats[STAT_LIVES] = ent->client->pers.lives + 1;

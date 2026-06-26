@@ -216,6 +216,7 @@ cvar_t *g_horde_player_scale;
 cvar_t *g_horde_player_scale_factor;
 cvar_t *g_horde_player_scale_max;
 cvar_t *g_horde_lives;
+cvar_t *g_lms_lives;
 cvar_t *g_horde_mark_monsters_threshold;
 cvar_t *g_horde_mark_monsters_max;
 cvar_t *g_horde_map_scale;
@@ -374,7 +375,7 @@ int _gt[] = {
 	/* GT_FREEZE */ 0, // removed
 	/* GT_STRIKE */ GTF_TEAMS | GTF_ARENA | GTF_ROUNDS | GTF_CTF | GTF_ELIMINATION,
 	/* GT_RR */ GTF_TEAMS | GTF_ARENA | GTF_ROUNDS | GTF_FRAGS,
-	/* GT_LMS */ 0, // removed
+	/* GT_LMS */ GTF_ARENA | GTF_ROUNDS | GTF_ELIMINATION,
 	/* GT_HORDE */ GTF_ROUNDS,
 	/* GT_BALL */ 0, // removed
 	/* GT_INSTAGIB */ GTF_FRAGS,
@@ -506,6 +507,7 @@ static void InitGame() {
 	g_horde_player_scale_factor = gi.cvar("g_horde_player_scale_factor", "0.4", CVAR_NOFLAGS);
 	g_horde_player_scale_max = gi.cvar("g_horde_player_scale_max", "8", CVAR_NOFLAGS);
 	g_horde_lives = gi.cvar("g_horde_lives", "1", CVAR_NOFLAGS);
+	g_lms_lives = gi.cvar("g_lms_lives", "1", CVAR_NOFLAGS);
 	g_horde_mark_monsters_threshold = gi.cvar("g_horde_mark_monsters_threshold", "3", CVAR_NOFLAGS);
 	g_horde_mark_monsters_max = gi.cvar("g_horde_mark_monsters_max", "8", CVAR_NOFLAGS);
 	g_horde_map_scale = gi.cvar("g_horde_map_scale", "1", CVAR_NOFLAGS);

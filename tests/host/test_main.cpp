@@ -4,6 +4,7 @@
 #include "fake_game_import.h"
 #include "muffmode/mm_command_contracts.h"
 #include "muffmode/mm_horde_ai_rules.h"
+#include "muffmode/mm_lms_rules.h"
 #include "muffmode/mm_loc_parse.h"
 #include "muffmode/mm_parse.h"
 #include "muffmode/mm_red_rover_rules.h"
@@ -182,6 +183,33 @@ MM_TEST(red_rover_round_ends_only_when_one_team_is_cleared) {
 	MM_CHECK_FALSE(MM_RedRoverRoundShouldEnd(1, 0));
 	MM_CHECK_FALSE(MM_RedRoverRoundShouldEnd(0, 1));
 	MM_CHECK_FALSE(MM_RedRoverRoundShouldEnd(0, 0));
+}
+
+MM_TEST(lms_round_resolves_to_last_active_fighter) {
+	// a winner is declared when exactly one active fighter remains (>= 2 participated)
+	MM_CHECK(MM_LMSRoundHasWinner(1, 2));
+	MM_CHECK(MM_LMSRoundHasWinner(1, 8));
+
+	// more than one fighter left, or none left: not yet a single winner
+	MM_CHECK_FALSE(MM_LMSRoundHasWinner(2, 3));
+	MM_CHECK_FALSE(MM_LMSRoundHasWinner(0, 2));
+
+	// a lone participant (everyone else gone) must not be handed a round win
+	MM_CHECK_FALSE(MM_LMSRoundHasWinner(1, 1));
+	MM_CHECK_FALSE(MM_LMSRoundHasWinner(0, 1));
+}
+
+MM_TEST(lms_round_is_a_draw_only_on_mutual_elimination) {
+	// every fighter eliminated with >= 2 participants is a draw
+	MM_CHECK(MM_LMSRoundIsDraw(0, 2));
+	MM_CHECK(MM_LMSRoundIsDraw(0, 5));
+
+	// survivors remain: not a draw
+	MM_CHECK_FALSE(MM_LMSRoundIsDraw(1, 2));
+	MM_CHECK_FALSE(MM_LMSRoundIsDraw(2, 4));
+
+	// lone participant can neither win nor draw the round
+	MM_CHECK_FALSE(MM_LMSRoundIsDraw(0, 1));
 }
 
 MM_TEST(scoreboard_footer_reserve_keeps_layout_room_available) {

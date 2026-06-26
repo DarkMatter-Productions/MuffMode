@@ -2407,6 +2407,7 @@ extern cvar_t *g_coop_health_scaling;
 extern cvar_t *g_coop_instanced_items;
 extern cvar_t *g_coop_num_lives;
 extern cvar_t *g_horde_lives;
+extern cvar_t *g_lms_lives;
 extern cvar_t *g_horde_start_chainsaw;
 extern cvar_t *g_horde_item_respawn_scale;
 extern cvar_t *g_coop_player_collision;

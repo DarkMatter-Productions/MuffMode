@@ -8,6 +8,8 @@
 #include "muffmode/mm_gametype.h"
 #include "muffmode/mm_ghost.h"
 #include "muffmode/mm_horde.h"
+#include "muffmode/mm_lms.h"
+#include "muffmode/mm_lms_rules.h"
 #include "muffmode/mm_match.h"
 #include "muffmode/mm_red_rover_rules.h"
 #include "muffmode/mm_strike.h"
@@ -343,6 +345,10 @@ bool StartNewRound()
 	if (!MM_Horde_ShouldSkipEntitiesReset())
 		ResetEntities(true, false, false);
 
+	// LMS: re-arm each player's per-round lives after the reset respawned them.
+	if (GT(GT_LMS))
+		MM_LMS_GrantRoundLives();
+
 	// Red Rover: re-split the teams evenly at the start of every round, so each round opens
 	// balanced after the previous one funnelled everyone onto one side.
 	if (GT(GT_RR))
@@ -595,7 +601,7 @@ CheckLastManStanding
 namespace muffmode::match {
 
 static void CheckLastManStanding() {
-	if (notGT(GT_CA) && notGT(GT_STRIKE) && notGT(GT_RR) && notGT(GT_HORDE))
+	if (notGT(GT_CA) && notGT(GT_STRIKE) && notGT(GT_RR) && notGT(GT_HORDE) && notGT(GT_LMS))
 		return;
 
 	auto announce_survivor = [](gentity_t *survivor) {
@@ -603,11 +609,11 @@ static void CheckLastManStanding() {
 		survivor->client->last_standing_clear_time = level.time + 3_sec;
 	};
 
-	// Horde is co-op survival: all fighters share one side against the monsters, so the
-	// "last one standing" is the final fighter still in the wave. Count fighters who have
-	// not been eliminated (out of lives) rather than current health - a fighter who is
+	// Horde is co-op survival and LMS is free-for-all: both put every fighter on TEAM_FREE,
+	// so the "last one standing" is the final fighter still in the round. Count fighters who
+	// have not been eliminated (out of lives) rather than current health - a fighter who is
 	// briefly dead but still has lives will respawn, so they are not yet the last survivor.
-	if (GT(GT_HORDE)) {
+	if (GT(GT_HORDE) || GT(GT_LMS)) {
 		gentity_t *survivor = nullptr;
 		int count = 0;
 
@@ -790,6 +796,70 @@ void TickRoundState() {
 			if (MM_Horde_UpdateRoundInProgress())
 				Round_End();
 			return;
+
+		case GT_LMS:
+		{
+			// Free-for-all elimination: count participants and the active fighters among them
+			// (alive, or dead but still holding a life). The round resolves to the last fighter
+			// standing, a draw on mutual elimination, or a most-health tie-break at the time limit.
+			int participants = 0, active = 0;
+			gentity_t *survivor = nullptr;
+
+			for (auto ec : active_clients()) {
+				if (!ClientIsPlaying(ec->client))
+					continue;
+				participants++;
+				if (MM_LMS_ClientIsActiveFighter(ec)) {
+					active++;
+					survivor = ec;
+				}
+			}
+
+			if (MM_LMSRoundHasWinner(active, participants)) {
+				G_AdjustPlayerScore(survivor->client, 1, false, 0);
+				gi.LocBroadcast_Print(PRINT_CENTER, "{} wins the round!\n", survivor->client->resp.netname);
+				AnnouncerSound(world, "round_won", "ctf/flagcap.wav", true);
+				Round_End();
+				return;
+			}
+
+			if (MM_LMSRoundIsDraw(active, participants)) {
+				gi.LocBroadcast_Print(PRINT_CENTER, "Round draw!");
+				Round_End();
+				return;
+			}
+
+			// Round time limit: the highest-health survivor takes the round; a tie is a draw.
+			const bool time_expired = roundtimelimit->value > 0 && level.time >= level.round_state_timer;
+			if (time_expired && participants >= 2) {
+				gentity_t *leader = nullptr;
+				int best_health = -1;
+				bool tied = false;
+
+				for (auto ec : active_clients()) {
+					if (!MM_LMS_ClientIsActiveFighter(ec))
+						continue;
+					if (ec->health > best_health) {
+						best_health = ec->health;
+						leader = ec;
+						tied = false;
+					} else if (ec->health == best_health) {
+						tied = true;
+					}
+				}
+
+				if (leader && !tied) {
+					G_AdjustPlayerScore(leader->client, 1, false, 0);
+					gi.LocBroadcast_Print(PRINT_CENTER, "{} wins the round!\n(most health remaining)\n", leader->client->resp.netname);
+					AnnouncerSound(world, "round_won", "ctf/flagcap.wav", true);
+				} else {
+					gi.LocBroadcast_Print(PRINT_CENTER, "Round draw!");
+				}
+				Round_End();
+				return;
+			}
+			return;
+		}
 
 		case GT_RR:
 		{

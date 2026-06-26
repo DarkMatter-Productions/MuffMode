@@ -5,6 +5,7 @@
 #include "monsters/m_player.h"
 #include "muffmode/mm_captain.h"
 #include "muffmode/mm_horde.h"
+#include "muffmode/mm_lms.h"
 
 static bool ShouldShowRampageMessages();
 
@@ -616,11 +617,14 @@ DIE(player_die) (gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 
 	if (attacker && attacker->client && level.match_state == matchst_t::MATCH_IN_PROGRESS) {
 		if (attacker == self || mod.friendly_fire) {
-			if (!mod.no_point_loss)
+			// LMS: resp.score is the round-win tally and the match-win quantity, so no
+			// kill/suicide frag adjustments may touch it - only round wins move the score.
+			if (!mod.no_point_loss && notGT(GT_LMS))
 				G_AdjustPlayerScore(attacker->client, -1, GT(GT_TDM), -1);
 			attacker->client->resp.kill_count = 0;
 		} else {
-			G_AdjustPlayerScore(attacker->client, 1, GT(GT_TDM), 1);
+			if (notGT(GT_LMS))
+				G_AdjustPlayerScore(attacker->client, 1, GT(GT_TDM), 1);
 			if (attacker->health > 0)
 				attacker->client->resp.kill_count++;
 
@@ -656,7 +660,8 @@ DIE(player_die) (gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 			}
 		}
 	} else {
-		if (!mod.no_point_loss)
+		// LMS: never dock round-win score for an environmental / no-attacker death.
+		if (!mod.no_point_loss && notGT(GT_LMS))
 			G_AdjustPlayerScore(self->client, -1, GT(GT_TDM), -1);
 	}
 	MS_Adjust(self->client, MSTAT_DEATHS_TOTAL, 1);
@@ -673,7 +678,7 @@ DIE(player_die) (gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 	if (GTF(GTF_ROUNDS) && GTF(GTF_ELIMINATION) &&
 			level.match_state == matchst_t::MATCH_IN_PROGRESS &&
 			level.round_state == roundst_t::ROUND_IN_PROGRESS &&
-			notGT(GT_HORDE) && ClientIsPlaying(self->client) &&
+			notGT(GT_HORDE) && notGT(GT_LMS) && ClientIsPlaying(self->client) &&
 			!self->client->eliminated) {
 		ClientSetEliminated(self);
 		CalculateRanks();
@@ -697,11 +702,15 @@ DIE(player_die) (gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 
 		if (GT(GT_HORDE))
 			MM_Horde_OnPlayerDeath(self);
-		if (GT(GT_HORDE) && self->client->eliminated)
+		if (GT(GT_LMS))
+			MM_LMS_OnPlayerDeath(self);
+		if ((GT(GT_HORDE) || GT(GT_LMS)) && self->client->eliminated)
 			self->client->respawn_time = level.time + 1_sec;
 
 		CTF_ScoreBonuses(self, inflictor, attacker);
-		if (!(GT(GT_HORDE) && self->client->eliminated))
+		// Arena loadout modes (Horde/LMS) don't scatter a full kit when the fighter is
+		// eliminated; they keep spectating until the next round/wave.
+		if (!((GT(GT_HORDE) || GT(GT_LMS)) && self->client->eliminated))
 			TossClientItems(self);
 		Weapon_Grapple_DoReset(self->client);
 
