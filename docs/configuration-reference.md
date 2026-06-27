@@ -73,7 +73,7 @@ Use `callvote <command> [arg]` or `cv <command> [arg]`.
 | `ruleset` | `<q2re|mm|q3a|q2reb|q|qc>` | Change ruleset. |
 | `powerups` | `<0|1>` | Disable or enable powerups. |
 | `friendlyfire` | `<0|1>` | Disable or enable friendly fire in team modes. |
-| `techs` | `<0|1>` | Disable or enable techs (FFA/TDM/CTF only). |
+| `techs` | `<0|1>` | Disable or enable techs (FFA/TDM/CTF/Horde only). |
 | `handicap` | `<player> <weapon> <on|off>` | Restrict duel weapons for a player. Weapons: `railgun`, `chaingun`, `rlauncher`, or `all`. |
 | `readyall` | none | Ready all players during ready-up warmup. |
 
@@ -171,7 +171,7 @@ Deathmatch respawns use a WORR-style danger score instead of raw farthest-only m
 | `g_allow_kill` | `1` | Allows the `kill` suicide command. |
 | `g_allow_mymap` | `1` | Allows MyMap queueing. |
 | `g_allow_spec_vote` | `0` | Allows spectators to vote. |
-| `g_allow_techs` | `auto` | Controls tech pickups in FFA/TDM/CTF. `auto` follows mode defaults; votes can force `0` or `1`. |
+| `g_allow_techs` | `auto` | Controls tech pickups in FFA/TDM/CTF/Horde. `auto` follows mode defaults; votes can force `0` or `1`. |
 | `g_allow_vote_midgame` | `0` | Allows votes during active matches. |
 | `g_allow_voting` | `1` | Enables voting globally. |
 | `g_inactivity` | `120` | Seconds before inactive players are moved to spectators. |
