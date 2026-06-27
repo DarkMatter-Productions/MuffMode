@@ -47,20 +47,19 @@ int DigitChars(int value)
 constexpr int32_t kRightHudFieldRight = -6;
 constexpr int32_t kRightHudNumFieldWidth = 2;
 
-// Two-row team miniscore geometry (round wins, alive counts) — shared by top and bottom anchors.
-constexpr int32_t kTeamMiniscorePicXr = -26;
-constexpr int32_t kTeamMiniscoreNumXr = -78;
-constexpr int32_t kTeamMiniscoreHighlightXr = -28;
-constexpr int32_t kTeamMiniscoreHighlightYInset = -2;
-constexpr int32_t kTeamMiniscoreNumFieldWidth = 3;
-constexpr int32_t kTeamMiniscoreRowStep = 27;
+// Two-row miniscore geometry — see muffmode::hud in mm_hud_stat_contracts.h.
+using muffmode::hud::kBottomMiniscoreRow1Yb;
+using muffmode::hud::kBottomMiniscoreRow2Yb;
+using muffmode::hud::kMiniscoreHighlightXr;
+using muffmode::hud::kMiniscoreHighlightYInset;
+using muffmode::hud::kMiniscoreNumFieldWidth;
+using muffmode::hud::kMiniscoreNumXr;
+using muffmode::hud::kMiniscorePicXr;
+using muffmode::hud::kMiniscoreRowStep;
 
 constexpr int32_t kHudDigitWidth = 16;
 // Right HUD stack column right edge (text + digits). Test: -8 (miniscore score digits stay at -28).
 constexpr int32_t kRightHudStackRightXr = -2;
-
-constexpr int32_t kBottomMiniscoreRow1Yb = -110;
-constexpr int32_t kBottomMiniscoreRow2Yb = kBottomMiniscoreRow1Yb + kTeamMiniscoreRowStep;
 
 enum class hud_vanchor_t {
 	Top,
@@ -100,19 +99,19 @@ void EmitRightLabeledValue(statusbar_t &sb, hud_vanchor_t anchor, int32_t label_
 
 void EmitTeamMiniscoreRow(statusbar_t &sb, hud_vanchor_t anchor, int32_t y, player_stat_t pic_stat, player_stat_t num_stat, player_stat_t highlight_stat)
 {
-	sb.ifstat(pic_stat).xr(kTeamMiniscorePicXr);
+	sb.ifstat(pic_stat).xr(kMiniscorePicXr);
 
 	if (anchor == hud_vanchor_t::Top)
-		sb.yt(y).pic(pic_stat).xr(kTeamMiniscoreNumXr).yt(y).num(kTeamMiniscoreNumFieldWidth, num_stat).endifstat();
+		sb.yt(y).pic(pic_stat).xr(kMiniscoreNumXr).yt(y).num(kMiniscoreNumFieldWidth, num_stat).endifstat();
 	else
-		sb.yb(y).pic(pic_stat).xr(kTeamMiniscoreNumXr).yb(y).num(kTeamMiniscoreNumFieldWidth, num_stat).endifstat();
+		sb.yb(y).pic(pic_stat).xr(kMiniscoreNumXr).yb(y).num(kMiniscoreNumFieldWidth, num_stat).endifstat();
 
-	sb.ifstat(highlight_stat).xr(kTeamMiniscoreHighlightXr);
+	sb.ifstat(highlight_stat).xr(kMiniscoreHighlightXr);
 
 	if (anchor == hud_vanchor_t::Top)
-		sb.yt(y + kTeamMiniscoreHighlightYInset).pic(highlight_stat).endifstat();
+		sb.yt(y + kMiniscoreHighlightYInset).pic(highlight_stat).endifstat();
 	else
-		sb.yb(y + kTeamMiniscoreHighlightYInset).pic(highlight_stat).endifstat();
+		sb.yb(y + kMiniscoreHighlightYInset).pic(highlight_stat).endifstat();
 }
 
 enum class round_counter_profile_t {
@@ -184,7 +183,7 @@ void EmitRoundCounter(statusbar_t &sb, round_counter_profile_t profile, const ch
 	EmitRightLabeledValue(sb, hud_vanchor_t::Top, 2, 22, STAT_ROUND_NUMBER, label);
 }
 
-void EmitHordeMonsterStack(statusbar_t &sb)
+void EmitHordeRemainingStack(statusbar_t &sb)
 {
 	if (!GT(GT_HORDE))
 		return;
@@ -196,46 +195,59 @@ void EmitHordeMonsterStack(statusbar_t &sb)
 	if (g_horde_lives->integer > 0)
 		y += kLabelBelowNum;
 
-	sb.ifstat(STAT_MONSTER_COUNT)
-		.xr(MiniscoreAlignedNumXr(kTeamMiniscoreNumFieldWidth)).yt(y += 10).num(kTeamMiniscoreNumFieldWidth, STAT_MONSTER_COUNT)
+	sb.ifstat(STAT_HORDE_REMAINING)
+		.xr(MiniscoreAlignedNumXr(kMiniscoreNumFieldWidth)).yt(y += 10).num(kMiniscoreNumFieldWidth, STAT_HORDE_REMAINING)
 		.xr(kRightHudTextXr).yt(y += kLabelBelowNum).loc_rstring("Monsters")
 		.endifstat();
 }
 
+// VANILLA_BASE — top-right text stack (gametype / ruleset / round progress).
+constexpr int32_t kTopRightHudFirstYt = 2;
+constexpr int32_t kTopRightHudLineSpacing = 10;
+
 void EmitHordeCoopWaveHeader(statusbar_t &sb)
 {
-	sb.ifstat(STAT_GAMETYPE_HUD).xr(kRightHudTextXr).yt(14).loc_stat_rstring(STAT_GAMETYPE_HUD).endifstat();
-	sb.ifstat(STAT_RULESET_HUD).xr(kRightHudTextXr).yt(24).loc_stat_rstring(STAT_RULESET_HUD).endifstat();
+	sb.ifstat(STAT_GAMETYPE_HUD).xr(kRightHudTextXr).yt(kTopRightHudFirstYt).loc_stat_rstring(STAT_GAMETYPE_HUD).endifstat();
+	sb.ifstat(STAT_RULESET_HUD).xr(kRightHudTextXr).yt(kTopRightHudFirstYt + kTopRightHudLineSpacing).loc_stat_rstring(STAT_RULESET_HUD).endifstat();
 }
 
-// Top-right info stack (all deathmatch gametypes): gametype, ruleset, then round/wave progress.
-void EmitMatchInfoStack(statusbar_t &sb)
+// VANILLA_BASE — top-right gametype, ruleset, round progress, Strike side role.
+void EmitRedRoverTeamBadge(statusbar_t &sb)
 {
-	constexpr int32_t kGametypeYt = 14;
-	constexpr int32_t kRulesetYt = 24;
-	constexpr int32_t kRoundProgressYt = 34;
+	if (!GT(GT_RR))
+		return;
+
+	// Row 3 of the top-right stack (below round + alive lines).
+	constexpr int32_t kBadgeYt = kTopRightHudFirstYt + kTopRightHudLineSpacing * 2;
+	sb.ifstat(STAT_CTF_FLAG_PIC).xr(kMiniscorePicXr).yt(kBadgeYt).pic(STAT_CTF_FLAG_PIC).endifstat();
+}
+
+void EmitTopRightMatchInfo(statusbar_t &sb)
+{
+	constexpr int32_t kGametypeYt = kTopRightHudFirstYt;
+	constexpr int32_t kRulesetYt = kTopRightHudFirstYt + kTopRightHudLineSpacing;
+	constexpr int32_t kRoundProgressYt = kTopRightHudFirstYt + kTopRightHudLineSpacing * 2;
 
 	sb.ifstat(STAT_GAMETYPE_HUD).xr(kRightHudTextXr).yt(kGametypeYt).loc_stat_rstring(STAT_GAMETYPE_HUD).endifstat();
 	if (GT(GT_STRIKE)) {
 		sb.ifstat(STAT_RULESET_HUD).xr(kRightHudTextXr).yt(kRulesetYt).loc_stat_rstring(STAT_RULESET_HUD).endifstat();
-		sb.ifbit(STAT_MONSTER_COUNT, ARENA_ROLE_ATTACKING).xr(kRightHudTextXr).yt(kRoundProgressYt).loc_rstring("OFFENSE").endifstat();
-		sb.ifbit(STAT_MONSTER_COUNT, ARENA_ROLE_DEFENDING).xr(kRightHudTextXr).yt(kRoundProgressYt).loc_rstring("DEFENSE").endifstat();
+		sb.ifstat(STAT_ARENA_ROLE).xr(kRightHudTextXr).yt(kRoundProgressYt).loc_stat_rstring(STAT_ARENA_ROLE).endifstat();
 	} else {
 		sb.ifstat(STAT_RULESET_HUD).xr(kRightHudTextXr).yt(kRulesetYt).loc_stat_rstring(STAT_RULESET_HUD).endifstat();
-		if (!GT(GT_HORDE))
+		if (!GT(GT_HORDE) && !GT(GT_CA) && !GT(GT_RR))
 			sb.ifstat(STAT_ROUND_NUMBER).xr(kRightHudTextXr).yt(kRoundProgressYt).loc_stat_rstring(STAT_ROUND_NUMBER).endifstat();
 	}
+
+	EmitRedRoverTeamBadge(sb);
 }
 
-void EmitArenaRoleLabel(statusbar_t &sb, int32_t yt)
+// VANILLA_BASE — centre eliminated label (CA/RR team modes, not Strike).
+void EmitCenterArenaRole(statusbar_t &sb, int32_t yt)
 {
 	if (!MM_GametypeHasFlag(GTF_ELIMINATION))
 		return;
 
-	// Strike attack/defend plus CA eliminated share STAT_MONSTER_COUNT via ifbit.
-	sb.ifbit(STAT_MONSTER_COUNT, ARENA_ROLE_ATTACKING).xr(0).yt(yt).loc_rstring("ATTACK").endifstat();
-	sb.ifbit(STAT_MONSTER_COUNT, ARENA_ROLE_DEFENDING).xr(0).yt(yt).loc_rstring("DEFEND").endifstat();
-	sb.ifbit(STAT_MONSTER_COUNT, ARENA_ROLE_ELIMINATED).xr(0).yt(yt).loc_rstring("ELIMINATED").endifstat();
+	sb.ifstat(STAT_ARENA_ROLE).xv(0).yt(yt).loc_stat_rstring(STAT_ARENA_ROLE).endifstat();
 }
 
 void EmitTeamHeader(statusbar_t &sb)
@@ -264,9 +276,29 @@ void EmitBottomTeamMiniscoreRows(statusbar_t &sb)
 	EmitTeamMiniscoreRow(sb, hud_vanchor_t::Bottom, kBottomMiniscoreRow2Yb, STAT_MINISCORE_SECOND_PIC, STAT_MINISCORE_SECOND_SCORE, STAT_MINISCORE_SECOND_POS);
 }
 
+// CA/RR: team-relative alive line below the two-row miniscore stack.
+void EmitArenaAliveUnderMiniscore(statusbar_t &sb)
+{
+	if (!GT(GT_CA) && !GT(GT_RR))
+		return;
+
+	constexpr int32_t kAliveYb = kBottomMiniscoreRow2Yb + kMiniscoreRowStep;
+	sb.ifstat(STAT_ROUND_NUMBER).xr(kRightHudTextXr).yb(kAliveYb).loc_stat_rstring(STAT_ROUND_NUMBER).endifstat();
+}
+
 void EmitStandardTeamMiniscore(statusbar_t &sb)
 {
 	EmitBottomTeamMiniscoreRows(sb);
+	EmitArenaAliveUnderMiniscore(sb);
+}
+
+// Team flag miniscore is vanilla-safe; FFA/Duel/RR player skin icons are MM cgame only.
+static bool MiniscoreRowsInVanillaLayout()
+{
+	if (GT(GT_HORDE))
+		return true;
+
+	return Teams() && !GT(GT_RR);
 }
 
 } // namespace muffmode::statusbar
@@ -313,7 +345,7 @@ void MM_InitStatusbar()
 			muffmode::statusbar::EmitHordeCoopWaveHeader(sb);
 
 		if (GT(GT_HORDE))
-			muffmode::statusbar::EmitHordeMonsterStack(sb);
+			muffmode::statusbar::EmitHordeRemainingStack(sb);
 	}
 	if (!deathmatch->integer) {
 		sb.ifstat(STAT_POWERUP_ICON).yb(-76).endifstat();
@@ -336,21 +368,21 @@ void MM_InitStatusbar()
 		if (Teams())
 			muffmode::statusbar::EmitTeamHeader(sb);
 
-		muffmode::statusbar::EmitMatchInfoStack(sb);
+		muffmode::statusbar::EmitTopRightMatchInfo(sb);
 
 		if (MM_GametypeHasFlag(GTF_ELIMINATION) && MM_GametypeHasFlag(GTF_TEAMS)) {
 			if (!GT(GT_STRIKE))
-				muffmode::statusbar::EmitArenaRoleLabel(sb, 48);
+				muffmode::statusbar::EmitCenterArenaRole(sb, 48);
 		}
 
-		sb.ifstat(STAT_COUNTDOWN).yb(-256).num(3, STAT_COUNTDOWN).endifstat();
-		sb.ifstat(STAT_MATCH_STATE).xv(0).yt(14).stat_string(STAT_MATCH_STATE).endifstat();
-		if (GT(GT_CA) || GT(GT_RR) || GT(GT_LMS))
-			sb.ifstat(STAT_DUEL_HEADER).xv(0).yt(26).stat_string(STAT_DUEL_HEADER).endifstat();
-		// Red Rover: current-team reminder below alive line (compact, centred — see cgame pic draw).
-		if (GT(GT_RR))
-			sb.ifstat(STAT_CTF_FLAG_PIC).xv(0).yt(38).pic(STAT_CTF_FLAG_PIC).endifstat();
-		sb.ifstat(STAT_WARMUP_NOTICE).xv(0).yt(34).stat_string(STAT_WARMUP_NOTICE).endifstat();
+		// Vanilla num(3) right-aligns in a 50px field (2 + 3*16). Digit centre: xv + 50 - 8*l.
+		// hx=160 → l=1 needs xv(118), l=2 needs xv(126). Use 118 for 3…2…1 (brief "10" sits ~8px left).
+		sb.ifstat(STAT_COUNTDOWN).xv(118).yb(-256).num(3, STAT_COUNTDOWN).endifstat();
+		// Match timer / warmup — bottom-centre (xv 0 yb -78, classic MuffMode placement).
+		sb.ifstat(STAT_MATCH_STATE).xv(0).yb(-78).stat_string(STAT_MATCH_STATE).endifstat();
+		if (GT(GT_LMS))
+			sb.ifstat(STAT_CENTER_LINE).xv(0).yt(26).stat_string(STAT_CENTER_LINE).endifstat();
+		sb.ifstat(STAT_WARMUP_NOTICE).xv(0).yb(-90).stat_string(STAT_WARMUP_NOTICE).endifstat();
 		sb.ifstat(STAT_CHASE).xv(0).yb(-68).string("FOLLOWING").xv(80).stat_string(STAT_CHASE).endifstat();
 		sb.ifstat(STAT_SPECTATOR).xv(0).yb(-58).string2("SPECTATOR MODE").endifstat();
 
@@ -359,15 +391,23 @@ void MM_InitStatusbar()
 
 		sb.endifstat();
 
-		if (GT(GT_HORDE))
-			muffmode::statusbar::EmitBottomTeamMiniscoreRows(sb);
-		else
-			muffmode::statusbar::EmitStandardTeamMiniscore(sb);
+		if (muffmode::statusbar::MiniscoreRowsInVanillaLayout()) {
+			if (GT(GT_HORDE))
+				muffmode::statusbar::EmitBottomTeamMiniscoreRows(sb);
+			else
+				muffmode::statusbar::EmitStandardTeamMiniscore(sb);
+		} else {
+			// FFA/Duel/RR: skin-icon miniscore omitted — MM cgame draws via CG_DrawMuffModeHudEnhancements.
+			muffmode::statusbar::EmitArenaAliveUnderMiniscore(sb);
+		}
 	}
 
 	const std::string layout = sb.sb.str();
 	if (!MM_StatusbarLayoutLengthWithinBudget(layout.length()))
 		gi.Com_PrintFmt("WARNING: CS_STATUSBAR length {} exceeds budget {}\n", layout.length(), MM_STATUSBAR_LAYOUT_MAX_CHARS);
+
+	if (MM_StatusbarLayoutContainsBannedToken(layout))
+		gi.Com_Error("CS_STATUSBAR layout contains banned token (ifbit)");
 
 	muffmode::statusbar::g_last_layout = layout;
 
@@ -403,7 +443,8 @@ bool MM_DumpStatusbar(std::string *out_path)
 	MM_HUD_STAT(STAT_TECH) MM_HUD_STAT(STAT_HELPICON)
 	MM_HUD_STAT(STAT_COOP_RESPAWN) MM_HUD_STAT(STAT_LIVES)
 	MM_HUD_STAT(STAT_GAMETYPE_HUD) MM_HUD_STAT(STAT_RULESET_HUD)
-	MM_HUD_STAT(STAT_ROUND_NUMBER) MM_HUD_STAT(STAT_MONSTER_COUNT)
+	MM_HUD_STAT(STAT_ROUND_NUMBER) MM_HUD_STAT(STAT_HORDE_REMAINING)
+	MM_HUD_STAT(STAT_ARENA_ROLE)
 	MM_HUD_STAT(STAT_SCORELIMIT)
 	MM_HUD_STAT(STAT_KEY_A) MM_HUD_STAT(STAT_KEY_B) MM_HUD_STAT(STAT_KEY_C)
 	MM_HUD_STAT(STAT_HEALTH_BARS)
@@ -412,7 +453,7 @@ bool MM_DumpStatusbar(std::string *out_path)
 	MM_HUD_STAT(STAT_MINISCORE_FIRST_POS)
 	MM_HUD_STAT(STAT_MINISCORE_SECOND_PIC) MM_HUD_STAT(STAT_MINISCORE_SECOND_SCORE)
 	MM_HUD_STAT(STAT_MINISCORE_SECOND_POS)
-	MM_HUD_STAT(STAT_COUNTDOWN) MM_HUD_STAT(STAT_MATCH_STATE) MM_HUD_STAT(STAT_DUEL_HEADER) MM_HUD_STAT(STAT_WARMUP_NOTICE)
+	MM_HUD_STAT(STAT_COUNTDOWN) MM_HUD_STAT(STAT_MATCH_STATE) MM_HUD_STAT(STAT_CENTER_LINE) MM_HUD_STAT(STAT_WARMUP_NOTICE)
 	MM_HUD_STAT(STAT_CHASE) MM_HUD_STAT(STAT_SPECTATOR)
 	MM_HUD_STAT(STAT_CROSSHAIR_ID_VIEW) MM_HUD_STAT(STAT_CROSSHAIR_ID_VIEW_COLOR)
 #undef MM_HUD_STAT

@@ -3,6 +3,8 @@
 #include "screen.h"
 #include "hud_text.h"
 #include "messages.h"
+#include "mm_hud_enhancements.h"
+#include "muffmode/mm_hud_stat_contracts.h"
 #include "muffmode/mm_parse.h"
 
 #include <array>
@@ -169,6 +171,47 @@ static void CG_DrawString(int x, int y, int scale, const char *s, bool alt = fal
 
 /*
 ==============
+CG_DrawFieldHudCentered
+==============
+*/
+static void CG_DrawFieldHudCentered(vrect_t hud_vrect, int y, int color, int width, int value, int scale) {
+	char    num[16], *ptr;
+	int     l;
+	int     frame;
+
+	if (width < 1)
+		return;
+
+	if (width > 5)
+		width = 5;
+
+	auto result = std::to_chars(num, num + sizeof(num) - 1, value);
+	*(result.ptr) = '\0';
+
+	l = (result.ptr - num);
+
+	if (l > width)
+		l = width;
+
+	int32_t x = ((hud_vrect.x + hud_vrect.width / 2) * scale) - ((l * CHAR_WIDTH) / 2) * scale;
+
+	ptr = num;
+	while (*ptr && l) {
+		if (*ptr == '-')
+			frame = STAT_MINUS;
+		else
+			frame = *ptr - '0';
+		int w, h;
+		cgi.Draw_GetPicSize(&w, &h, sb_nums[color][frame]);
+		cgi.SCR_DrawPic(x, y, w * scale, h * scale, sb_nums[color][frame]);
+		x += CHAR_WIDTH * scale;
+		ptr++;
+		l--;
+	}
+}
+
+/*
+==============
 CG_DrawField
 ==============
 */
@@ -193,48 +236,6 @@ static void CG_DrawField(int x, int y, int color, int width, int value, int scal
 		l = width;
 
 	x += (2 + CHAR_WIDTH * (width - l)) * scale;
-
-	ptr = num;
-	while (*ptr && l) {
-		if (*ptr == '-')
-			frame = STAT_MINUS;
-		else
-			frame = *ptr - '0';
-		int w, h;
-		cgi.Draw_GetPicSize(&w, &h, sb_nums[color][frame]);
-		cgi.SCR_DrawPic(x, y, w * scale, h * scale, sb_nums[color][frame]);
-		x += CHAR_WIDTH * scale;
-		ptr++;
-		l--;
-	}
-}
-
-/*
-==============
-CG_DrawFieldHudCentered
-==============
-*/
-// [MuffMode] Draw digits centered on hud_vrect horizontal axis (countdown timer)
-static void CG_DrawFieldHudCentered(vrect_t hud_vrect, int y, int color, int width, int value, int scale) {
-	char    num[16], *ptr;
-	int     l;
-	int     frame;
-
-	if (width < 1)
-		return;
-
-	if (width > 5)
-		width = 5;
-
-	auto result = std::to_chars(num, num + sizeof(num) - 1, value);
-	*(result.ptr) = '\0';
-
-	l = (result.ptr - num);
-
-	if (l > width)
-		l = width;
-
-	int32_t x = ((hud_vrect.x + hud_vrect.width / 2) * scale) - ((l * CHAR_WIDTH) / 2) * scale;
 
 	ptr = num;
 	while (*ptr && l) {
@@ -427,15 +428,7 @@ static void CG_ExecuteLayoutString(const char *s, vrect_t hud_vrect, vrect_t hud
 						w = 24;
 						h = 24;
 					} else if (stat == STAT_CTF_FLAG_PIC) {
-						const int32_t rr_logo_y = (int32_t)((hud_vrect.y + 38) * scale + hud_safe.y);
-						if (abs(y - rr_logo_y) <= 2 * scale) {
-							// Red Rover centre team reminder (yt 38) — smaller than default flag art.
-							w = 18;
-							h = 18;
-							x = (int32_t)((hud_vrect.x + hud_vrect.width / 2) * scale) - (w * scale) / 2;
-						} else {
-							cgi.Draw_GetPicSize(&w, &h, pic);
-						}
+						cgi.Draw_GetPicSize(&w, &h, pic);
 					} else {
 						cgi.Draw_GetPicSize(&w, &h, pic);
 					}
@@ -576,9 +569,7 @@ static void CG_ExecuteLayoutString(const char *s, vrect_t hud_vrect, vrect_t hud
 					cgi.Com_Error("Bad num stat index");
 
 				value = ps->stats[stat];
-				//muff: little hacky hack to conditionally hide text for muffmode connoisseurs
 				if (value != -999) {
-					// [MuffMode] match countdown centered on HUD width (any aspect ratio)
 					if (stat == STAT_COUNTDOWN)
 						CG_DrawFieldHudCentered(hud_vrect, y, 0, width, value, scale);
 					else
@@ -697,19 +688,7 @@ static void CG_ExecuteLayoutString(const char *s, vrect_t hud_vrect, vrect_t hud
 
 				const char *str = cgi.get_configstring(index);
 
-				if (stat == STAT_MATCH_STATE || stat == STAT_WARMUP_NOTICE || stat == STAT_DUEL_HEADER) {
-					if (!scr_usekfont->integer) {
-						const int w = strlen(str) * CONCHAR_WIDTH * scale;
-						const int cx = (int)((hud_vrect.x + hud_vrect.width / 2) * scale);
-						CG_DrawString(cx - (w / 2), y, scale, str);
-					} else {
-						cgi.SCR_SetAltTypeface(ui_acc_alttypeface->integer && true);
-						const vec2_t size = cgi.SCR_MeasureFontString(str, scale);
-						const int cx = (int)((hud_vrect.x + hud_vrect.width / 2) * scale);
-						cgi.SCR_DrawFontString(str, cx - (int)(size.x / 2), y - (font_y_offset * scale), scale, rgba_white, true, text_align_t::LEFT);
-						cgi.SCR_SetAltTypeface(false);
-					}
-				} else if (!scr_usekfont->integer)
+				if (!scr_usekfont->integer)
 					CG_DrawString(x, y, scale, str);
 				else {
 					cgi.SCR_SetAltTypeface(ui_acc_alttypeface->integer && true);
@@ -801,24 +780,6 @@ static void CG_ExecuteLayoutString(const char *s, vrect_t hud_vrect, vrect_t hud
 			// skip to endif
 			int32_t stat = 0;
 			if (!skip_depth && (!CG_TryLayoutStatIndex(token, stat) || !ps->stats[stat])) {
-				skip_depth = true;
-				endif_depth = if_depth;
-			}
-
-			continue;
-		}
-
-		if (!strcmp(token, "ifbit")) {
-			// if (stats[stat] & mask) stmt
-			token = COM_Parse(&s);
-			const bool has_stat = CG_TryLayoutStatIndex(token, index);
-			token = COM_Parse(&s);
-			int mask = CG_ParseLayoutInt(token);
-
-			if_depth++;
-
-			// skip to endif if the bit isn't set
-			if (!skip_depth && (!has_stat || !(ps->stats[index] & mask))) {
 				skip_depth = true;
 				endif_depth = if_depth;
 			}
@@ -1379,6 +1340,90 @@ static void CG_DrawTeamBorder(const player_state_t *ps, vrect_t hud_vrect, int32
 	cgi.SCR_DrawColorPic(x, y + h - border_width, w, border_width, "_white", border_color);
 }
 
+static int32_t CG_HudLayoutRightX(const vrect_t &hud_vrect, int32_t xr, int32_t scale, int32_t safe_x)
+{
+	return (hud_vrect.x + hud_vrect.width + xr) * scale - safe_x;
+}
+
+static int32_t CG_HudLayoutBottomY(const vrect_t &hud_vrect, int32_t yb, int32_t scale, int32_t safe_y)
+{
+	return (hud_vrect.y + hud_vrect.height + yb) * scale - safe_y;
+}
+
+static bool CG_MiniscorePicIsPlayerSkin(int32_t pic_index)
+{
+	if (pic_index <= 0)
+		return false;
+
+	const char *const pic = cgi.get_configstring(CS_IMAGES + pic_index);
+	// Player head icons from SetMiniScoreStats: /players/{skin}_i
+	return pic && strncmp(pic, "/players/", 9) == 0;
+}
+
+static void CG_DrawMiniscorePicSized(int32_t x, int32_t y, int32_t pic_index, int32_t scale)
+{
+	const char *const pic = cgi.get_configstring(CS_IMAGES + pic_index);
+
+	if (!pic || !*pic)
+		return;
+
+	const int32_t size = muffmode::hud::kMiniscorePicSize * scale;
+	cgi.SCR_DrawPic(x, y, size, size, pic);
+}
+
+static void CG_DrawFfaMiniscoreRow(const player_state_t *ps, const vrect_t &hud_vrect, int32_t yb, int32_t scale, int32_t safe_x, int32_t safe_y,
+	player_stat_t pic_stat, player_stat_t score_stat, player_stat_t highlight_stat)
+{
+	const int32_t pic_index = ps->stats[pic_stat];
+	const int32_t score = ps->stats[score_stat];
+	const int32_t highlight_index = ps->stats[highlight_stat];
+
+	if (!CG_MiniscorePicIsPlayerSkin(pic_index))
+		return;
+
+	if (pic_index <= 0 || score == -999)
+		return;
+
+	const int32_t y = CG_HudLayoutBottomY(hud_vrect, yb, scale, safe_y);
+	const int32_t pic_x = CG_HudLayoutRightX(hud_vrect, muffmode::hud::kMiniscorePicXr, scale, safe_x);
+	const int32_t num_x = CG_HudLayoutRightX(hud_vrect, muffmode::hud::kMiniscoreNumXr, scale, safe_x);
+
+	CG_DrawMiniscorePicSized(pic_x, y, pic_index, scale);
+	CG_DrawField(num_x, y, 0, muffmode::hud::kMiniscoreNumFieldWidth, score, scale);
+
+	if (highlight_index <= 0)
+		return;
+
+	// i_ctfj frame: native size, centred on the 24×24 skin icon (layout xr/yb offsets target full-size pics).
+	const char *const highlight_pic = cgi.get_configstring(CS_IMAGES + highlight_index);
+	if (!highlight_pic || !*highlight_pic)
+		return;
+
+	const int32_t pic_size = muffmode::hud::kMiniscorePicSize * scale;
+	int32_t hw = 0, hh = 0;
+	cgi.Draw_GetPicSize(&hw, &hh, highlight_pic);
+	cgi.SCR_DrawPic(
+		pic_x + (pic_size - hw * scale) / 2,
+		y + (pic_size - hh * scale) / 2,
+		hw * scale,
+		hh * scale,
+		highlight_pic);
+}
+
+void CG_DrawMuffModeHudEnhancements(const player_state_t *ps, vrect_t hud_vrect, vrect_t hud_safe, int32_t scale, int32_t playernum)
+{
+	(void)playernum;
+
+	if (ps->stats[STAT_LAYOUTS] & LAYOUTS_HIDE_HUD)
+		return;
+
+	// FFA/Duel/RR skin-icon miniscore: omitted from CS_STATUSBAR for vanilla clients.
+	CG_DrawFfaMiniscoreRow(ps, hud_vrect, muffmode::hud::kBottomMiniscoreRow1Yb, scale, hud_safe.x, hud_safe.y,
+		STAT_MINISCORE_FIRST_PIC, STAT_MINISCORE_FIRST_SCORE, STAT_MINISCORE_FIRST_POS);
+	CG_DrawFfaMiniscoreRow(ps, hud_vrect, muffmode::hud::kBottomMiniscoreRow2Yb, scale, hud_safe.x, hud_safe.y,
+		STAT_MINISCORE_SECOND_PIC, STAT_MINISCORE_SECOND_SCORE, STAT_MINISCORE_SECOND_POS);
+}
+
 void CG_DrawHUD(int32_t isplit, const cg_server_data_t *data, vrect_t hud_vrect, vrect_t hud_safe, int32_t scale, int32_t playernum, const player_state_t *ps) {
 	if (cgi.CL_InAutoDemoLoop()) {
 		if (cl_paused->integer) return; // demo is paused, menu is open
@@ -1399,6 +1444,9 @@ void CG_DrawHUD(int32_t isplit, const cg_server_data_t *data, vrect_t hud_vrect,
 
 	// draw notify
 	CG_DrawNotify(isplit, hud_vrect, hud_safe, scale);
+
+	if (!cl_skipHud->integer && !(ps->stats[STAT_LAYOUTS] & LAYOUTS_HIDE_HUD))
+		CG_DrawMuffModeHudEnhancements(ps, hud_vrect, hud_safe, scale, playernum);
 
 	// svc_layout still drawn with hud off
 	if (ps->stats[STAT_LAYOUTS] & LAYOUTS_LAYOUT)

@@ -311,17 +311,28 @@ MM_TEST(loc_body_caps_length) {
 	MM_CHECK(MM_BuildLocBody(long_text.c_str(), "WATER").size() <= 150);
 }
 
-MM_TEST(hud_stat_contract_strike_role_encoding) {
-	MM_CHECK_EQ(MM_EncodeStrikeArenaRole(true), static_cast<uint16_t>(ARENA_ROLE_ATTACKING));
-	MM_CHECK_EQ(MM_EncodeStrikeArenaRole(false), static_cast<uint16_t>(ARENA_ROLE_DEFENDING));
-	MM_CHECK(MM_ArenaRoleHasMask(MM_EncodeStrikeArenaRole(true), ARENA_ROLE_ATTACKING));
-	MM_CHECK_FALSE(MM_ArenaRoleHasMask(MM_EncodeStrikeArenaRole(true), ARENA_ROLE_DEFENDING));
+MM_TEST(hud_statusbar_layout_rejects_banned_ifbit_token) {
+	MM_CHECK(MM_StatusbarLayoutContainsBannedToken("ifbit 14 1 loc_rstring OFFENSE endif "));
+	MM_CHECK_FALSE(MM_StatusbarLayoutUsesOnlyVanillaTokens("ifbit 14 1 loc_rstring OFFENSE endif "));
 }
 
-MM_TEST(hud_stat_contract_ca_eliminated_role) {
-	MM_CHECK_EQ(MM_EncodeArenaEliminatedRole(), static_cast<uint16_t>(ARENA_ROLE_ELIMINATED));
-	MM_CHECK(MM_ArenaRoleHasMask(MM_EncodeArenaRoleForClient(false, false, true), ARENA_ROLE_ELIMINATED));
-	MM_CHECK_FALSE(MM_MiniscoreValVisible(MM_EncodeArenaRoleForClient(false, false, false)));
+MM_TEST(hud_statusbar_layout_vanilla_token_whitelist) {
+	// Representative vanilla-base fragments including loc_rstring operands.
+	const char *sample =
+		"if 29 xl 0 yb -78 if 29 stat_string 29 endif "
+		"if 271 xr -24 yt 34 if 271 loc_stat_rstring 271 endif "
+		"if 272 xv 0 yt 48 if 272 loc_stat_rstring 272 endif "
+		"if 264 xr -16 yt 42 if 264 num 3 264 endif "
+		"if 47 xr -24 yt 58 loc_rstring 0 $g_lives endif "
+		"if 264 xr -24 yt 68 loc_rstring 0 Monsters endif "
+		"if 18 xl 0 yb -60 if 18 pic 18 endif endif";
+	MM_CHECK_FALSE(MM_StatusbarLayoutContainsBannedToken(sample));
+	MM_CHECK(MM_StatusbarLayoutUsesOnlyVanillaTokens(sample));
+}
+
+MM_TEST(hud_stat_count_within_max_stats) {
+	MM_CHECK((int)STAT_LAST <= (int)MAX_STATS);
+	MM_CHECK((int)STAT_ARENA_ROLE < (int)MAX_STATS);
 }
 
 MM_TEST(hud_stat_contract_miniscore_val_visibility) {

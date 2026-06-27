@@ -26,6 +26,11 @@ static int HudRoundDisplayNumber()
 	return level.round_number + 1;
 }
 
+static void UpdateCountdownHud(gentity_t *ent)
+{
+	ent->client->ps.stats[STAT_COUNTDOWN] = level.countdown_check.seconds<int>();
+}
+
 void MoveClientToIntermission(gentity_t *ent) {
 	G_ClearLagCompensationHistory(ent);
 
@@ -781,8 +786,7 @@ static void G_SetGametypeStats(gentity_t *ent) {
 	else
 		ent->client->ps.stats[STAT_LIVES] = 0;
 	
-	if (deathmatch->integer && level.match_state >= MATCH_WARMUP_DELAYED && level.match_state < MATCH_COUNTDOWN
-		&& level.warmup_gametype_hud_time + WARMUP_SPLASH_DURATION > level.time) {
+	if (deathmatch->integer && level.match_state >= MATCH_WARMUP_DELAYED && level.match_state < MATCH_COUNTDOWN) {
 		gi.configstring(CONFIG_GAMETYPE_HUD, G_Fmt("Gametype: {}", level.gametype_name).data());
 		gi.configstring(CONFIG_RULESET_HUD, G_Fmt("Ruleset: {}", rs_long_name[game.ruleset]).data());
 		ent->client->ps.stats[STAT_GAMETYPE_HUD] = CONFIG_GAMETYPE_HUD;
@@ -839,7 +843,7 @@ static void G_SetGametypeStats(gentity_t *ent) {
 			} else {
 				ent->client->ps.stats[STAT_RULESET_HUD] = 0;
 			}
-		} else {
+		} else if (!GT(GT_CA) && !GT(GT_RR)) {
 			ent->client->ps.stats[STAT_RULESET_HUD] = 0;
 		}
 	} else {
@@ -879,14 +883,29 @@ static void G_SetGametypeStats(gentity_t *ent) {
 
 	if (level.match_state == MATCH_IN_PROGRESS) {
 		if (GT(GT_HORDE)) {
-			ent->client->ps.stats[STAT_MONSTER_COUNT] = level.total_monsters - level.killed_monsters;
-		} else if (GTF(GTF_ELIMINATION) && GTF(GTF_TEAMS) && GTF(GTF_CTF) && ClientIsPlaying(ent->client) && !ent->client->eliminated) {
-			const bool attacking = ent->client->sess.team == (level.strike_red_attacks ? TEAM_RED : TEAM_BLUE);
-			ent->client->ps.stats[STAT_MONSTER_COUNT] = MM_EncodeStrikeArenaRole(attacking);
-		} else if (GTF(GTF_ELIMINATION) && GTF(GTF_TEAMS) && !GTF(GTF_CTF) && ClientIsPlaying(ent->client)) {
-			ent->client->ps.stats[STAT_MONSTER_COUNT] = MM_EncodeArenaRoleForClient(false, false, ent->client->eliminated);
+			ent->client->ps.stats[STAT_HORDE_REMAINING] = level.total_monsters - level.killed_monsters;
 		} else {
-			ent->client->ps.stats[STAT_MONSTER_COUNT] = 0;
+			ent->client->ps.stats[STAT_HORDE_REMAINING] = 0;
+		}
+
+		ent->client->ps.stats[STAT_ARENA_ROLE] = 0;
+
+		const int ci = (int)(ent - g_entities - 1);
+
+		if (GTF(GTF_ELIMINATION) && GTF(GTF_TEAMS) && GTF(GTF_CTF) && GT(GT_STRIKE)
+			&& ClientIsPlaying(ent->client) && !ent->client->eliminated) {
+			if (ci >= 0 && (size_t)ci < CONFIG_POV_CENTER_POOL_SLOTS) {
+				const bool attacking = ent->client->sess.team == (level.strike_red_attacks ? TEAM_RED : TEAM_BLUE);
+				const int cs = (int)(CONFIG_POV_CENTER_POOL + (size_t)ci);
+				ent->client->ps.stats[STAT_ARENA_ROLE] = cs;
+			}
+		} else if (GTF(GTF_ELIMINATION) && GTF(GTF_TEAMS) && !GTF(GTF_CTF)
+			&& ClientIsPlaying(ent->client) && ent->client->eliminated) {
+			if (ci >= 0 && (size_t)ci < CONFIG_POV_CENTER_POOL_SLOTS) {
+				const int cs = (int)(CONFIG_POV_CENTER_POOL + (size_t)ci);
+				gi.configstring(cs, "ELIMINATED");
+				ent->client->ps.stats[STAT_ARENA_ROLE] = cs;
+			}
 		}
 
 		if (GTF(GTF_ROUNDS) && !GT(GT_CA) && !GT(GT_RR) && !GT(GT_STRIKE) && !GT(GT_HORDE) && !GT(GT_LMS)) {
@@ -905,7 +924,8 @@ static void G_SetGametypeStats(gentity_t *ent) {
 			ent->client->ps.stats[STAT_ROUND_NUMBER] = 0;
 		}
 	} else {
-		ent->client->ps.stats[STAT_MONSTER_COUNT] = 0;
+		ent->client->ps.stats[STAT_HORDE_REMAINING] = 0;
+		ent->client->ps.stats[STAT_ARENA_ROLE] = 0;
 		ent->client->ps.stats[STAT_ROUND_NUMBER] = 0;
 	}
 
@@ -926,11 +946,15 @@ static void G_SetGametypeStats(gentity_t *ent) {
 		}
 
 		const int ci = (int)(ent - g_entities - 1);
-		if (ci >= 0 && (size_t)ci < CONFIG_CA_ALIVE_HUD_SLOTS) {
-			const int cs = (int)(CONFIG_CA_ALIVE_HUD + (size_t)ci);
+		if (ci >= 0 && (size_t)ci < CONFIG_POV_CENTER_POOL_SLOTS) {
+			const int cs = (int)(CONFIG_POV_CENTER_POOL + (size_t)ci);
 			gi.configstring(cs, G_Fmt("{} vs {}", allies, enemies).data());
-			ent->client->ps.stats[STAT_DUEL_HEADER] = cs;
+			ent->client->ps.stats[STAT_ROUND_NUMBER] = cs;
+		} else {
+			ent->client->ps.stats[STAT_ROUND_NUMBER] = 0;
 		}
+	} else if ((GT(GT_CA) || GT(GT_RR)) && deathmatch->integer && level.match_state == MATCH_IN_PROGRESS) {
+		ent->client->ps.stats[STAT_ROUND_NUMBER] = 0;
 	} else if (GT(GT_LMS) && deathmatch->integer && level.match_state == MATCH_IN_PROGRESS
 		&& level.round_state == roundst_t::ROUND_IN_PROGRESS) {
 		gentity_t *pov = ent;
@@ -956,13 +980,13 @@ static void G_SetGametypeStats(gentity_t *ent) {
 			: G_Fmt("{} enemies remaining", enemies).data();
 
 		const int ci = (int)(ent - g_entities - 1);
-		if (ci >= 0 && (size_t)ci < CONFIG_CA_ALIVE_HUD_SLOTS) {
-			const int cs = (int)(CONFIG_CA_ALIVE_HUD + (size_t)ci);
+		if (ci >= 0 && (size_t)ci < CONFIG_POV_CENTER_POOL_SLOTS) {
+			const int cs = (int)(CONFIG_POV_CENTER_POOL + (size_t)ci);
 			gi.configstring(cs, line);
-			ent->client->ps.stats[STAT_DUEL_HEADER] = cs;
+			ent->client->ps.stats[STAT_CENTER_LINE] = cs;
 		}
 	} else if (!GT(GT_DUEL)) {
-		ent->client->ps.stats[STAT_DUEL_HEADER] = 0;
+		ent->client->ps.stats[STAT_CENTER_LINE] = 0;
 	}
 }
 
@@ -1244,7 +1268,7 @@ static void SetMiniScoreStats(gentity_t *ent) {
 		}
 
 		if (GT(GT_DUEL))
-			ent->client->ps.stats[STAT_DUEL_HEADER] = ii_duel_header;
+			ent->client->ps.stats[STAT_CENTER_LINE] = ii_duel_header;
 
 	} else {
 		// logo headers for the frag display
@@ -1320,6 +1344,20 @@ static void SetMiniScoreStats(gentity_t *ent) {
 			}
 		}
 	}
+
+	// Red Rover: current-team badge (top-right layout row 3); hidden until match is live.
+	if (GT(GT_RR)) {
+		if (level.match_state == MATCH_IN_PROGRESS) {
+			if (ent->client->sess.team == TEAM_RED)
+				ent->client->ps.stats[STAT_CTF_FLAG_PIC] = ii_teams_red_default;
+			else if (ent->client->sess.team == TEAM_BLUE)
+				ent->client->ps.stats[STAT_CTF_FLAG_PIC] = ii_teams_blue_default;
+			else
+				ent->client->ps.stats[STAT_CTF_FLAG_PIC] = 0;
+		} else {
+			ent->client->ps.stats[STAT_CTF_FLAG_PIC] = 0;
+		}
+	}
 }
 
 /*
@@ -1358,18 +1396,6 @@ void G_SetStats(gentity_t *ent) {
 
 	// Engine team identity for lobby say_team and client team border HUD.
 	P_PublishEngineTeam(ent);
-
-	// Red Rover: persistent team logo on the HUD (centre stack below match timer)
-	// so the player always knows which side they're on after a defect.
-	// Works on any client since it rides the normal statusbar/stats protocol.
-	if (GT(GT_RR)) {
-		if (ent->client->sess.team == TEAM_RED)
-			ent->client->ps.stats[STAT_CTF_FLAG_PIC] = ii_teams_red_default;
-		else if (ent->client->sess.team == TEAM_BLUE)
-			ent->client->ps.stats[STAT_CTF_FLAG_PIC] = ii_teams_blue_default;
-		else
-			ent->client->ps.stats[STAT_CTF_FLAG_PIC] = 0;
-	}
 
 	//ent->client->ps.stats[STAT_SHOW_STATUSBAR] = ent->client->showscores ? 0 : ent->client->follow_target ? 1 : 0;
 	if (!minhud) {
@@ -1703,7 +1729,7 @@ void G_SetStats(gentity_t *ent) {
 	}
 
 	// match countdown
-	ent->client->ps.stats[STAT_COUNTDOWN] = level.countdown_check.seconds<int>();
+	UpdateCountdownHud(ent);
 	//
 	// match timer
 	//

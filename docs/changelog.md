@@ -8,6 +8,7 @@ This is the central change ledger for MuffMode. Every implementation should leav
 
 | Release | Category | Magnitude | Summary | Details |
 | --- | --- | --- | --- | --- |
+| Unreleased | Player Experience | minor | HUD stays vanilla-safe while MuffMode clients get richer overlays | Splits FFA/Duel/Red Rover miniscore out of the shared statusbar so stock clients avoid mis-sized skin icons, draws those rows only in the MuffMode cgame enhancement hook with 24×24 icons and centered highlight frames, recenters the match countdown for vanilla digit math, and moves match timer and Horde remaining stats into vanilla-compatible layout slots. |
 | Unreleased | Fixes | patch | Bots respawn without needing attack input | Lets dead playing bots respawn once their deathmatch respawn timer has elapsed, preventing match resets or normal deaths from leaving them hidden/dead and unable to resume moving when the engine does not generate an attack-button edge. |
 | Unreleased | Fixes | patch | Parser and timestamp utility edges are hardened | Shares ASCII trimming for command/config parsers, tightens `.loc` coordinate and callout whitespace handling, switches local-time formatting to a portable snapshot helper, removes duplicate screenshot timestamp lookup, and refreshes split-tree documentation references. |
 | Unreleased | Internal Maintenance | patch | Private horde state members prefer camelCase | Renames implementation-private Horde adaptive-state members to camelCase while leaving public/header descriptor members untouched for source compatibility. |

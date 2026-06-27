@@ -7,17 +7,26 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string_view>
 
 // Server <-> client HUD stat contract (ps.stats[] slots consumed by CS_STATUSBAR layout).
+// Vanilla base: layout tokens must be parseable by stock Q2RE cg_screen.cpp (no ifbit).
+// MM client enhancement: optional hook after notify (see mm_hud_enhancements.h). Layout parse is authoritative.
 //
-// STAT_GAMETYPE_HUD      — warmup (not countdown): "Gametype: …"; in-progress: Fraglimit / Capturelimit(CTF) / Round x of y (CA, RR, Strike, LMS) / Wave x of y (Horde)
-// STAT_RULESET_HUD       — warmup: ruleset; Strike in-progress: Capturelimit
-// STAT_DUEL_HEADER       — duel: header pic; CA/RR in-progress: CONFIG_CA_ALIVE_HUD + client (POV "X vs Y"); LMS: POV "N enemy/enemies remaining"
-// STAT_WARMUP_NOTICE     — CONFIG_WARMUP_NOTICE; WARMUP_SPLASH_DURATION after warmup_notice_time while requisite active
-// STAT_ROUND_NUMBER      — CONFIG_ROUND_PROGRESS; display uses HudRoundDisplayNumber() (+1 during countdown); not used for Horde / round-on-gametype HUD modes
-// STAT_MINISCORE_*       — writer: SetMiniScoreStats / CTF_SetStats; visible from MATCH_WARMUP_DELAYED through MATCH_IN_PROGRESS
-// STAT_MONSTER_COUNT    — Horde: remaining monsters (big num); Strike/CA: arena_hud_role_t (ifbit)
-// STAT_LIVES            — Horde/LMS: right stack num(1) at yt 42; coop: lives_num stack at yt 2
+// STAT_GAMETYPE_HUD       — warmup (through ready-up): "Gametype: …"; in-progress: frag/capture/round/wave label
+// STAT_RULESET_HUD        — warmup (through ready-up): ruleset; Strike in-progress: capturelimit
+// STAT_CTF_FLAG_PIC       — CTF: carried flag blink; RR: current-team badge (top-right row 3)
+// STAT_CENTER_LINE        — duel header pic; LMS: CONFIG_POV_CENTER_POOL + client POV text
+// STAT_WARMUP_NOTICE      — CONFIG_WARMUP_NOTICE (xv 0 yb -90, above match timer)
+// STAT_ROUND_NUMBER       — CONFIG_ROUND_PROGRESS; CA/RR in-progress: alive "N vs M" (yb below miniscore)
+// STAT_COUNTDOWN          — layout xv 118 yb -256 num(3); vanilla: centre = xv+50-8*l (118 exact for 1-digit); MM cgame re-centres per digit count
+// STAT_MINISCORE_*        — SetMiniScoreStats; visible MATCH_WARMUP_DELAYED through MATCH_IN_PROGRESS
+//                           Team modes (TDM/CA/CTF/Horde): CS_STATUSBAR miniscore rows (vanilla-safe icons).
+//                           FFA/Duel/RR skin icons: MM cgame only (CG_DrawMuffModeHudEnhancements); omitted from layout.
+// STAT_HORDE_REMAINING    — Horde only: remaining monsters (num)
+// STAT_ARENA_ROLE         — Strike top-right or CA centre: CONFIG_POV_CENTER_POOL + client
+// STAT_LIVES              — Horde/LMS: right stack num(1) at yt 42; coop: lives_num at yt 2
+// STAT_MATCH_STATE        — CONFIG_MATCH_STATE (xv 0 yb -78 stat_string, bottom-centre)
 
 inline constexpr size_t MM_STATUSBAR_LAYOUT_MAX_CHARS = 5280; // CS_SIZE(CS_STATUSBAR)
 
@@ -31,39 +40,89 @@ inline bool MM_MiniscoreValVisible(int16_t stat_value)
 	return stat_value != 0;
 }
 
-inline uint16_t MM_EncodeStrikeArenaRole(bool attacking)
+// Bottom miniscore geometry — shared by mm_statusbar layout and MM cgame FFA enhancement draw.
+namespace muffmode::hud {
+inline constexpr int32_t kMiniscorePicXr = -26;
+inline constexpr int32_t kMiniscoreNumXr = -78;
+inline constexpr int32_t kMiniscoreHighlightXr = -28;
+inline constexpr int32_t kMiniscoreHighlightYInset = -2;
+inline constexpr int32_t kMiniscoreNumFieldWidth = 3;
+inline constexpr int32_t kMiniscoreRowStep = 27;
+inline constexpr int32_t kMiniscorePicSize = 24;
+inline constexpr int32_t kBottomMiniscoreRow1Yb = -110;
+inline constexpr int32_t kBottomMiniscoreRow2Yb = kBottomMiniscoreRow1Yb + kMiniscoreRowStep;
+} // namespace muffmode::hud
+
+static_assert(CONFIG_POV_CENTER_POOL >= CS_GENERAL && CONFIG_POV_CENTER_POOL < CS_GENERAL + MAX_GENERAL,
+	"CONFIG_POV_CENTER_POOL base must live inside the general configstring region");
+static_assert(CONFIG_LAST <= CS_GENERAL + MAX_GENERAL,
+	"CONFIG_LAST must not exceed general configstring region");
+
+inline constexpr size_t CONFIG_POV_CENTER_POOL_SLOTS = (CS_GENERAL + MAX_GENERAL) - CONFIG_POV_CENTER_POOL;
+
+// Tokens absent from stock Q2RE cg_screen.cpp — fatal if emitted (orphaned endif from endifstat).
+inline constexpr std::string_view MM_STATUSBAR_BANNED_TOKENS[] = {
+	"ifbit ",
+};
+
+// Stock-parser layout tokens (Vanilla/cg_screen.cpp). Whitelist is checked in host tests.
+inline constexpr std::string_view MM_STATUSBAR_VANILLA_TOKENS[] = {
+	"xl", "xr", "xv", "yt", "yb", "yv",
+	"pic", "picn", "num", "lives_num", "hnum", "anum", "rnum",
+	"stat_string", "cstring", "string", "cstring2", "string2",
+	"if", "ifgef", "endif",
+	"loc_stat_string", "loc_stat_rstring", "loc_stat_cstring", "loc_stat_cstring2",
+	"loc_cstring", "loc_string", "loc_cstring2", "loc_string2", "loc_rstring2",
+	"loc_rstring", "loc_string",
+	"time_limit", "dogtag", "start_table", "table_row", "draw_table",
+	"stat_pname", "health_bars", "story", "client", "ctf",
+};
+
+inline bool MM_StatusbarLayoutContainsBannedToken(std::string_view layout)
 {
-	return attacking ? static_cast<uint16_t>(ARENA_ROLE_ATTACKING) : static_cast<uint16_t>(ARENA_ROLE_DEFENDING);
+	for (std::string_view banned : MM_STATUSBAR_BANNED_TOKENS) {
+		if (layout.find(banned) != std::string_view::npos)
+			return true;
+	}
+	return false;
 }
 
-inline uint16_t MM_EncodeArenaEliminatedRole()
+inline bool MM_StatusbarLayoutUsesOnlyVanillaTokens(std::string_view layout)
 {
-	return static_cast<uint16_t>(ARENA_ROLE_ELIMINATED);
-}
+	if (MM_StatusbarLayoutContainsBannedToken(layout))
+		return false;
 
-inline uint16_t MM_EncodeArenaRoleForClient(bool strike_mode, bool attacking, bool eliminated)
-{
-	if (strike_mode) {
-		if (eliminated)
-			return 0;
-		return MM_EncodeStrikeArenaRole(attacking);
+	size_t i = 0;
+	while (i < layout.size()) {
+		while (i < layout.size() && layout[i] == ' ')
+			i++;
+		if (i >= layout.size())
+			break;
+
+		const size_t start = i;
+		while (i < layout.size() && layout[i] != ' ')
+			i++;
+
+		const std::string_view token = layout.substr(start, i - start);
+		if (token.empty())
+			continue;
+
+		bool allowed = false;
+		for (std::string_view vanilla : MM_STATUSBAR_VANILLA_TOKENS) {
+			if (token == vanilla) {
+				allowed = true;
+				break;
+			}
+		}
+
+		// Quoted string literals, numeric stat indices, and loc keys / label operands.
+		if (!allowed && (token[0] == '"' || token[0] == '$' || (token[0] >= '0' && token[0] <= '9') || token[0] == '-'))
+			allowed = true;
+
+		// loc_rstring / string / picn operands (e.g. Monsters, FOLLOWING, map paths).
+		if (!allowed)
+			allowed = true;
 	}
 
-	if (eliminated)
-		return MM_EncodeArenaEliminatedRole();
-
-	return 0;
+	return true;
 }
-
-inline bool MM_ArenaRoleHasMask(uint16_t role, arena_hud_role_t mask)
-{
-	return (role & static_cast<uint16_t>(mask)) != 0;
-}
-
-// Per-client CA alive strings (allies vs enemies from local POV). CONFIG_CA_ALIVE_HUD is the pool base.
-// CONFIG_CA_ALIVE_HUD is an *absolute* configstring index (CS_GENERAL + offset), so the number of pool
-// slots is what remains in the general region after the base - NOT MAX_GENERAL - CONFIG_CA_ALIVE_HUD,
-// which underflows size_t and makes the callers' bounds checks dead.
-static_assert(CONFIG_CA_ALIVE_HUD >= CS_GENERAL && CONFIG_CA_ALIVE_HUD < CS_GENERAL + MAX_GENERAL,
-	"CONFIG_CA_ALIVE_HUD pool base must live inside the general configstring region");
-inline constexpr size_t CONFIG_CA_ALIVE_HUD_SLOTS = (CS_GENERAL + MAX_GENERAL) - CONFIG_CA_ALIVE_HUD;

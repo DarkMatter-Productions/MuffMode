@@ -70,7 +70,8 @@ enum {
 	CONFIG_RULESET_HUD,		// DM HUD: "Ruleset: …"
 	CONFIG_ROUND_PROGRESS,	// DM HUD: "Round x of y" / "Wave x of y"
 	CONFIG_WARMUP_NOTICE,	// DM HUD: warmup requisite detail (e.g. more players needed)
-	CONFIG_CA_ALIVE_HUD,	// CA/RR POV pool base (CONFIG_CA_ALIVE_HUD + client); LMS: POV "N enemy/enemies remaining"
+	CONFIG_POV_CENTER_POOL,	// per-client HUD lines: Strike OFFENSE/DEFENSE, CA/RR/LMS centre POV, ELIMINATED
+	CONFIG_COUNTDOWN_HEADER, // match/round countdown: "Round N\nBegins in..." (centerprint band)
 
 	CONFIG_LAST
 };
@@ -252,33 +253,21 @@ enum player_stat_t {
 	STAT_ACTIVE_WEAPON,
 
 	STAT_SCORELIMIT, // match limit value for miniscore HUD (frag/round/capture); 0 = hidden
-	STAT_DUEL_HEADER,
+	STAT_CENTER_LINE,
 
 	STAT_SHOW_STATUSBAR,
 
 	STAT_COUNTDOWN,
 
-	STAT_MONSTER_COUNT,
+	STAT_HORDE_REMAINING,
 	STAT_GAMETYPE_HUD,
 	STAT_RULESET_HUD,
 	STAT_ROUND_NUMBER,
 	STAT_WARMUP_NOTICE,
+	STAT_ARENA_ROLE,
 
 	// don't use; just for verification
 	STAT_LAST
 };
 
-static_assert(STAT_LAST <= MAX_STATS + 1, "stats list overflow");
-
-// Arena HUD packs per-player role/state into STAT_MONSTER_COUNT in elimination modes
-// (see G_SetGametypeStats). Horde uses the same slot as a monster count (num op).
-// Strike/CA/LMS use bit flags rendered via the "ifbit" statusbar op; LMS FFA uses num.
-enum arena_hud_role_t : uint16_t {
-	ARENA_ROLE_ATTACKING  = bit_v<0>,	// local player's team is on offense this turn
-	ARENA_ROLE_DEFENDING  = bit_v<1>,	// local player's team is on defense this turn
-	ARENA_ROLE_ELIMINATED = bit_v<2>,	// player eliminated this round (CA / LMS)
-};
-
-using strike_hud_flags_t = arena_hud_role_t;
-static constexpr arena_hud_role_t STRIKE_HUD_ATTACKING = ARENA_ROLE_ATTACKING;
-static constexpr arena_hud_role_t STRIKE_HUD_DEFENDING = ARENA_ROLE_DEFENDING;
+static_assert(STAT_LAST <= MAX_STATS, "stats list overflow");

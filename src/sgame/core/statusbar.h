@@ -16,8 +16,6 @@ struct statusbar_t
 	inline auto &xv(int32_t offset) { sb << "xv " << offset << ' '; return *this; }
 
 	inline auto &ifstat(player_stat_t stat) { sb << "if " << stat << ' '; return *this; }
-	// render the enclosed block only if (stats[stat] & mask) is set
-	inline auto &ifbit(player_stat_t stat, uint16_t mask) { sb << "ifbit " << stat << ' ' << mask << ' '; return *this; }
 	inline auto &endifstat() { sb << "endif "; return *this; }
 
 	inline auto &pic(player_stat_t stat) { sb << "pic " << stat << ' '; return *this; }
@@ -30,6 +28,15 @@ struct statusbar_t
 	
 	inline auto &loc_stat_string(player_stat_t stat) { sb << "loc_stat_string " << stat << ' '; return *this; }
 	inline auto &loc_stat_rstring(player_stat_t stat) { sb << "loc_stat_rstring " << stat << ' '; return *this; }
+	inline auto &loc_stat_cstring(player_stat_t stat) { sb << "loc_stat_cstring " << stat << ' '; return *this; }
+	inline auto &loc_cstring(const char *str)
+	{
+		if (str[0] != '"' && (strchr(str, ' ') || strchr(str, '\n')))
+			sb << "loc_cstring 0 \"" << str << "\" ";
+		else
+			sb << "loc_cstring 0 " << str << ' ';
+		return *this;
+	}
 	inline auto &stat_string(player_stat_t stat) { sb << "stat_string " << stat << ' '; return *this; }
 	inline auto &stat_string2(player_stat_t stat) { sb << "stat_string2 " << stat << ' '; return *this; }
 	inline auto &loc_stat_cstring2(player_stat_t stat) { sb << "loc_stat_cstring2 " << stat << ' '; return *this; }
