@@ -27,6 +27,24 @@ static inline void deathmatch_spawn_flags(gentity_t *self) {
 		self->flags |= FL_NO_HUMANS;
 }
 
+static bool IsFiniteVec3(const vec3_t &point) {
+	return std::isfinite(point.x) && std::isfinite(point.y) && std::isfinite(point.z);
+}
+
+static inline void FixStuckPlayerSpawnPoint(gentity_t *self) {
+	vec3_t origin = self->s.origin;
+	if (!IsFiniteVec3(origin) || !gi.trace(origin, PLAYER_MINS, PLAYER_MAXS, origin, self, MASK_SOLID).startsolid)
+		return;
+
+	const stuck_result_t result = G_FixStuckObject_Generic(origin, PLAYER_MINS, PLAYER_MAXS,
+		[self](const vec3_t &start, const vec3_t &mins, const vec3_t &maxs, const vec3_t &end) {
+			return gi.trace(start, mins, maxs, end, self, MASK_SOLID);
+		});
+
+	if (result != stuck_result_t::NO_GOOD_POSITION)
+		self->s.origin = origin;
+}
+
 /*QUAKED info_player_start (1 0 0) (-16 -16 -24) (16 16 32) x x x x x x x x NOT_EASY NOT_MEDIUM NOT_HARD NOT_DM NOT_COOP
 The normal starting point for a level.
 
@@ -35,8 +53,7 @@ The normal starting point for a level.
 */
 void SP_info_player_start(gentity_t *self) {
 	// fix stuck spawn points
-	if (gi.trace(self->s.origin, PLAYER_MINS, PLAYER_MAXS, self->s.origin, self, MASK_SOLID).startsolid)
-		G_FixStuckObject(self, self->s.origin);
+	FixStuckPlayerSpawnPoint(self);
 
 	// [Paril-KEX] on n64, since these can spawn riding elevators,
 	// allow them to "ride" the elevators so respawning works
@@ -61,6 +78,8 @@ void SP_info_player_deathmatch(gentity_t *self) {
 		G_FreeEntity(self);
 		return;
 	}
+
+	FixStuckPlayerSpawnPoint(self);
 	SP_misc_teleporter_dest(self);
 
 	deathmatch_spawn_flags(self);
@@ -73,6 +92,7 @@ A potential Red Team spawning position for CTF games.
 "nohumans" will prevent humans from using this spot.
 */
 void SP_info_player_team_red(gentity_t *self) {
+	FixStuckPlayerSpawnPoint(self);
 	deathmatch_spawn_flags(self);
 }
 
@@ -83,6 +103,7 @@ A potential Blue Team spawning position for CTF games.
 "nohumans" will prevent humans from using this spot.
 */
 void SP_info_player_team_blue(gentity_t *self) {
+	FixStuckPlayerSpawnPoint(self);
 	deathmatch_spawn_flags(self);
 }
 
@@ -109,8 +130,7 @@ void SP_info_player_coop_lava(gentity_t *self) {
 	}
 
 	// fix stuck spawn points
-	if (gi.trace(self->s.origin, PLAYER_MINS, PLAYER_MAXS, self->s.origin, self, MASK_SOLID).startsolid)
-		G_FixStuckObject(self, self->s.origin);
+	FixStuckPlayerSpawnPoint(self);
 }
 
 /*QUAKED info_player_intermission (1 0 1) (-16 -16 -24) (16 16 32) x x x x x x x x NOT_EASY NOT_MEDIUM NOT_HARD NOT_DM NOT_COOP
@@ -150,10 +170,14 @@ muffmode: excludes current client
 ================
 */
 static float PlayersRangeFromSpot(gentity_t *ent, gentity_t *spot) {
+	if (!spot || !IsFiniteVec3(spot->s.origin))
+		return 0.0f;
+
 	float bestplayerdistance = 9999999.0f;
 
 	for (auto ec : active_clients()) {
-		if (!ClientIsPlaying(ec->client) || ec->health <= 0 || ec->client->eliminated)
+		if (!ClientIsPlaying(ec->client) || ec->health <= 0 || ec->client->eliminated ||
+			ec->client->awaiting_respawn || ec->solid == SOLID_NOT || ec->movetype == MOVETYPE_FREECAM)
 			continue;
 		if (ent && ec == ent)
 			continue;
@@ -169,6 +193,9 @@ static float PlayersRangeFromSpot(gentity_t *ent, gentity_t *spot) {
 }
 
 static gentity_t *UnsafeSpawnPosition(vec3_t spot, bool check_players, const gentity_t *ignore = nullptr, bool allow_nudge = true) {
+	if (!IsFiniteVec3(spot))
+		return world;
+
 	contents_t mask = MASK_PLAYERSOLID;
 
 	if (!check_players)
@@ -188,25 +215,10 @@ static gentity_t *UnsafeSpawnPosition(vec3_t spot, bool check_players, const gen
 		tr = gi.trace(spot, PLAYER_MINS, PLAYER_MAXS, spot, ignore_ent, mask);
 	}
 
-	if (tr.startsolid && (!tr.ent || !tr.ent->client)) {
-		const stuck_result_t fix = G_FixStuckObject_Generic(spot, PLAYER_MINS, PLAYER_MAXS,
-			[mask, ignore_ent](const vec3_t &start, const vec3_t &mins, const vec3_t &maxs, const vec3_t &end) {
-				return gi.trace(start, mins, maxs, end, ignore_ent, mask);
-			});
+	if (tr.startsolid || tr.fraction != 1.0f)
+		return tr.ent ? tr.ent : world;
 
-		if (fix == stuck_result_t::NO_GOOD_POSITION)
-			return tr.ent ? tr.ent : world;
-
-		tr = gi.trace(spot, PLAYER_MINS, PLAYER_MAXS, spot, ignore_ent, mask);
-
-		if (tr.startsolid && (!tr.ent || !tr.ent->client))
-			return tr.ent ? tr.ent : world;
-	}
-
-	if (tr.fraction == 1.0f)
-		return nullptr;
-
-	return tr.ent ? tr.ent : world;
+	return nullptr;
 }
 
 static bool SpotIsClearOfSolidsAndPlayers(const vec3_t &spot, bool check_players, const gentity_t *ignore = nullptr, bool allow_nudge = true) {
@@ -222,20 +234,24 @@ static float DeathmatchSpawnSafetyLift() {
 	return DeathmatchSpawnOriginLift() + 1.0f;
 }
 
-static bool SpotIsSafe(gentity_t *spot, bool check_players = true) {
-	if (!spot)
+static bool SpotIsSafe(gentity_t *spot, const gentity_t *ent, bool check_players = true) {
+	if (!spot || !IsFiniteVec3(spot->s.origin))
 		return false;
 
 	const float zlift = deathmatch->integer ? DeathmatchSpawnSafetyLift() : 0.0f;
 	const vec3_t point = spot->s.origin + vec3_t{ 0.0f, 0.0f, zlift };
-	return SpotIsClearOfSolidsAndPlayers(point, check_players, spot, false);
+	return SpotIsClearOfSolidsAndPlayers(point, check_players, ent ? ent : spot, false);
 }
 
 static bool SpawnPointAllowsClient(const gentity_t *ent, const gentity_t *spot) {
+	if (!spot)
+		return false;
+
 	if (!ent || !ent->client)
 		return true;
 
-	if (ent->client->sess.is_a_bot)
+	const bool is_bot = ent->client->sess.is_a_bot || (ent->svflags & SVF_BOT);
+	if (is_bot)
 		return !(spot->flags & FL_NO_BOTS);
 
 	return !(spot->flags & FL_NO_HUMANS);
@@ -254,6 +270,9 @@ static inline bool IsTrap(const gentity_t *ent) {
 }
 
 static bool SpawnPointHasNearbyMines(const vec3_t &origin, float radius) {
+	if (!IsFiniteVec3(origin))
+		return false;
+
 	gentity_t *ent = nullptr;
 	while ((ent = findradius(ent, origin, radius)) != nullptr) {
 		if (IsProxMine(ent) || IsTeslaMine(ent) || IsTrap(ent))
@@ -276,13 +295,15 @@ static bool IsEnemy(const gentity_t *requester, const gentity_t *other) {
 }
 
 static bool AnyDirectEnemyLoS(const gentity_t *requester, const vec3_t &spot, float max_dist) {
-	if (!requester || !requester->client)
+	if (!requester || !requester->client || !IsFiniteVec3(spot))
 		return false;
 
 	const vec3_t to_check = SpawnEye(spot);
 
 	for (auto ec : active_clients()) {
-		if (ec == requester || !ClientIsPlaying(ec->client) || ec->health <= 0 || ec->client->eliminated || !IsEnemy(requester, ec))
+		if (ec == requester || !ClientIsPlaying(ec->client) || ec->health <= 0 || ec->client->eliminated ||
+			ec->client->awaiting_respawn || ec->solid == SOLID_NOT || ec->movetype == MOVETYPE_FREECAM ||
+			!IsEnemy(requester, ec))
 			continue;
 
 		const vec3_t from = SpawnEye(ec->s.origin);
@@ -313,6 +334,9 @@ static bool SpawnAvoidDebugEnabled() {
 }
 
 static bool HasSpawnAvoidPoint(const gentity_t *ent, const vec3_t &avoid_point) {
+	if (!IsFiniteVec3(avoid_point))
+		return false;
+
 	if (ent && ent->client && ent->client->pers.spawned)
 		return true;
 
@@ -330,6 +354,10 @@ static playerspawn_t LegacySpawnMode() {
 	return (playerspawn_t)clamp(g_dm_spawn_farthest ? g_dm_spawn_farthest->integer : 1, 0, 3);
 }
 
+static bool SpawnPointHasUsableOrigin(const gentity_t *spot) {
+	return spot && IsFiniteVec3(spot->s.origin);
+}
+
 static float NormalizeDistancePenalty(float distance, float full_penalty_range) {
 	if (full_penalty_range <= 0.0f)
 		return 0.0f;
@@ -341,7 +369,7 @@ static std::vector<gentity_t *> GatherSpawnPoints(const char *classname) {
 	std::vector<gentity_t *> spawns;
 	gentity_t *spot = nullptr;
 	while ((spot = G_FindByString<&gentity_t::classname>(spot, classname)) != nullptr) {
-		if (spot->inuse)
+		if (spot->inuse && SpawnPointHasUsableOrigin(spot))
 			spawns.push_back(spot);
 	}
 
@@ -380,7 +408,7 @@ static std::vector<gentity_t *> FilterFallbackSpawns(const std::vector<gentity_t
 	for (gentity_t *spot : spawns) {
 		if (!spot || !SpawnPointAllowsClient(ent, spot))
 			continue;
-		if (!SpotIsSafe(spot, !force_spawn))
+		if (!SpotIsSafe(spot, ent, !force_spawn))
 			continue;
 		if (!force_spawn && respect_avoid_point && avoid_radius > 0.0f && (spot->s.origin - avoid_point).length() < avoid_radius) {
 			if (SpawnAvoidDebugEnabled())
@@ -390,6 +418,16 @@ static std::vector<gentity_t *> FilterFallbackSpawns(const std::vector<gentity_t
 
 		out.push_back(spot);
 	}
+
+	return out;
+}
+
+static std::vector<gentity_t *> FilterFallbackSpawnsRelaxingAvoid(const std::vector<gentity_t *> &spawns, const gentity_t *ent, const vec3_t &avoid_point, bool respect_avoid_point, bool force_spawn = false) {
+	std::vector<gentity_t *> out = FilterFallbackSpawns(spawns, ent, avoid_point, respect_avoid_point, force_spawn);
+
+	// Reusing a clear previous spawn is better than force-spawning into another player.
+	if (out.empty() && respect_avoid_point)
+		out = FilterFallbackSpawns(spawns, ent, avoid_point, false, force_spawn);
 
 	return out;
 }
@@ -404,7 +442,7 @@ static std::vector<gentity_t *> FilterEligibleSpawns(const std::vector<gentity_t
 	for (gentity_t *spot : spawns) {
 		if (!spot || !SpawnPointAllowsClient(ent, spot))
 			continue;
-		if (!SpotIsSafe(spot, !force_spawn))
+		if (!SpotIsSafe(spot, ent, !force_spawn))
 			continue;
 
 		if (!force_spawn) {
@@ -436,12 +474,22 @@ static T *PickRandomly(const std::vector<T *> &spawns) {
 }
 
 static float CompositeDangerScore(gentity_t *spot, gentity_t *ent, const vec3_t &avoid_point) {
-	const float heat = muffmode::combat_heatmap::DangerAt(spot->s.origin);
-	const float nearest = std::max(1.0f, PlayersRangeFromSpot(ent, spot));
+	if (!SpawnPointHasUsableOrigin(spot))
+		return FLT_MAX;
+
+	float heat = muffmode::combat_heatmap::DangerAt(spot->s.origin);
+	if (!std::isfinite(heat))
+		heat = 0.0f;
+
+	float nearest = std::max(1.0f, PlayersRangeFromSpot(ent, spot));
+	if (!std::isfinite(nearest))
+		nearest = SPAWN_SCORE_PLAYER_RANGE;
+
 	const float near_penalty = NormalizeDistancePenalty(nearest, SPAWN_SCORE_PLAYER_RANGE);
 	const float los_penalty = AnyDirectEnemyLoS(ent, spot->s.origin, SPAWN_MAX_LOS_DIST) ? 1.0f : 0.0f;
-	const float avoid_distance = (spot->s.origin - avoid_point).length();
-	const float avoid_penalty = HasSpawnAvoidPoint(ent, avoid_point) ? NormalizeDistancePenalty(avoid_distance, SPAWN_SCORE_AVOID_RANGE) : 0.0f;
+	const bool has_avoid_point = HasSpawnAvoidPoint(ent, avoid_point);
+	const float avoid_distance = has_avoid_point ? (spot->s.origin - avoid_point).length() : SPAWN_SCORE_AVOID_RANGE;
+	const float avoid_penalty = has_avoid_point ? NormalizeDistancePenalty(avoid_distance, SPAWN_SCORE_AVOID_RANGE) : 0.0f;
 	const float mine_penalty = SpawnPointHasNearbyMines(spot->s.origin, SPAWN_MINE_RADIUS) ? 1.0f : 0.0f;
 
 	return 0.35f * heat +
@@ -465,20 +513,28 @@ static gentity_t *SelectFromSpawnList(const std::vector<gentity_t *> &spawns, co
 	scored.reserve(spawns.size());
 
 	float best = FLT_MAX;
+	bool has_finite_score = false;
 	for (gentity_t *spot : spawns) {
 		float score = score_fn(spot);
-		if (!std::isfinite(score))
+		if (!std::isfinite(score)) {
 			score = FLT_MAX;
+		} else {
+			has_finite_score = true;
+			best = std::min(best, score);
+		}
 		scored.push_back({ spot, score });
-		best = std::min(best, score);
 	}
 
+	if (!has_finite_score)
+		return PickRandomly(spawns);
+
 	constexpr float epsilon = 0.05f;
+	const float finalist_window = std::max(epsilon, 0.01f * std::max(1.0f, fabsf(best)));
 	std::vector<gentity_t *> finalists;
 	finalists.reserve(spawns.size());
 
 	for (const scored_spawn_t &candidate : scored) {
-		if (candidate.score <= best + std::max(epsilon, 0.01f * fabsf(best)))
+		if (candidate.score <= best + finalist_window)
 			finalists.push_back(candidate.spot);
 	}
 
@@ -491,7 +547,7 @@ static gentity_t *SelectFromSpawnList(const std::vector<gentity_t *> &spawns, co
 static gentity_t *SelectFallbackStartPoint(gentity_t *ent, const vec3_t &avoid_point, bool force_spawn) {
 	const std::vector<gentity_t *> fallback = GatherFallbackSpawnPoints();
 	const bool has_avoid_point = HasSpawnAvoidPoint(ent, avoid_point);
-	const std::vector<gentity_t *> eligible = FilterFallbackSpawns(fallback, ent, avoid_point, has_avoid_point, force_spawn);
+	const std::vector<gentity_t *> eligible = FilterFallbackSpawnsRelaxingAvoid(fallback, ent, avoid_point, has_avoid_point, force_spawn);
 
 	if (eligible.empty())
 		return nullptr;
@@ -527,7 +583,7 @@ static gentity_t *SelectTeamSpawnPoint(gentity_t *ent, team_t team, const vec3_t
 	auto pick_from_list = [ent, &avoid_point, force_spawn, has_avoid_point](const std::vector<gentity_t *> &spawns) {
 		std::vector<gentity_t *> eligible = FilterEligibleSpawns(spawns, ent, avoid_point, force_spawn, has_avoid_point);
 		if (eligible.empty())
-			eligible = FilterFallbackSpawns(spawns, ent, avoid_point, has_avoid_point, force_spawn);
+			eligible = FilterFallbackSpawnsRelaxingAvoid(spawns, ent, avoid_point, has_avoid_point, force_spawn);
 		if (eligible.empty())
 			return static_cast<gentity_t *>(nullptr);
 
@@ -560,7 +616,7 @@ static gentity_t *SelectAnyTeamSpawnPoint(gentity_t *ent, const vec3_t &avoid_po
 	const bool has_avoid_point = HasSpawnAvoidPoint(ent, avoid_point);
 	std::vector<gentity_t *> eligible = FilterEligibleSpawns(team_spawns, ent, avoid_point, force_spawn, has_avoid_point);
 	if (eligible.empty())
-		eligible = FilterFallbackSpawns(team_spawns, ent, avoid_point, has_avoid_point, force_spawn);
+		eligible = FilterFallbackSpawnsRelaxingAvoid(team_spawns, ent, avoid_point, has_avoid_point, force_spawn);
 
 	if (eligible.empty())
 		return nullptr;
@@ -572,7 +628,7 @@ static gentity_t *SelectAnyTeamSpawnPoint(gentity_t *ent, const vec3_t &avoid_po
 
 select_spawn_result_t SelectDeathmatchSpawnPoint(gentity_t *ent, vec3_t avoid_point, [[maybe_unused]] playerspawn_t mode, bool force_spawn, bool fallback_to_ctf_or_start, bool intermission, bool initial) {
 	if (intermission) {
-		if (gentity_t *spot = level.spawn_spots[SPAWN_SPOT_INTERMISSION])
+		if (gentity_t *spot = level.spawn_spots[SPAWN_SPOT_INTERMISSION]; spot && spot->inuse && SpawnPointHasUsableOrigin(spot))
 			return { spot, true };
 	}
 
@@ -609,7 +665,7 @@ select_spawn_result_t SelectDeathmatchSpawnPoint(gentity_t *ent, vec3_t avoid_po
 	}
 
 	if (eligible.empty() && fallback_to_ctf_or_start) {
-		std::vector<gentity_t *> relaxed = FilterFallbackSpawns(base_spawns, ent, avoid_point, has_avoid_point, force_spawn);
+		std::vector<gentity_t *> relaxed = FilterFallbackSpawnsRelaxingAvoid(base_spawns, ent, avoid_point, has_avoid_point, force_spawn);
 		if (!relaxed.empty()) {
 			return { SelectFromSpawnList(relaxed, [ent, avoid_point](gentity_t *spot) {
 				return CompositeDangerScore(spot, ent, avoid_point);
@@ -638,7 +694,7 @@ select_spawn_result_t SelectDeathmatchSpawnPoint(gentity_t *ent, vec3_t avoid_po
 	}
 
 	if (eligible.empty()) {
-		std::vector<gentity_t *> loose = FilterFallbackSpawns(base_spawns, ent, avoid_point, has_avoid_point, force_spawn);
+		std::vector<gentity_t *> loose = FilterFallbackSpawnsRelaxingAvoid(base_spawns, ent, avoid_point, has_avoid_point, force_spawn);
 		if (!loose.empty()) {
 			return { SelectFromSpawnList(loose, [ent, avoid_point](gentity_t *spot) {
 				return CompositeDangerScore(spot, ent, avoid_point);
@@ -652,7 +708,7 @@ select_spawn_result_t SelectDeathmatchSpawnPoint(gentity_t *ent, vec3_t avoid_po
 	}), true };
 }
 
-static gentity_t *SelectLavaCoopSpawnPoint(gentity_t *ent) {
+static gentity_t *SelectLavaCoopSpawnPoint(gentity_t *ent, bool check_players) {
 	int		 index;
 	gentity_t *spot = nullptr;
 	float	 lavatop;
@@ -700,9 +756,14 @@ static gentity_t *SelectLavaCoopSpawnPoint(gentity_t *ent) {
 	while ((spot = G_FindByString<&gentity_t::classname>(spot, "info_player_coop_lava"))) {
 		if (numPoints == 64)
 			break;
+		if (!SpawnPointHasUsableOrigin(spot))
+			continue;
 
 		spawnPoints[numPoints++] = spot;
 	}
+
+	if (!numPoints)
+		return nullptr;
 
 	// walk up the sorted list and return the lowest, open, non-lava spawn point
 	spot = nullptr;
@@ -712,7 +773,8 @@ static gentity_t *SelectLavaCoopSpawnPoint(gentity_t *ent) {
 		if (spawnPoints[index]->s.origin[2] < lavatop)
 			continue;
 
-		if (PlayersRangeFromSpot(ent, spawnPoints[index]) > 32) {
+		if ((!check_players || PlayersRangeFromSpot(ent, spawnPoints[index]) > 32) &&
+			!UnsafeSpawnPosition(spawnPoints[index]->s.origin, check_players, ent)) {
 			if (spawnPoints[index]->s.origin[2] < lowest) {
 				// save the last point
 				pointWithLeastLava = spawnPoints[index];
@@ -729,6 +791,9 @@ static gentity_t *SelectSingleSpawnPoint(gentity_t *ent) {
 	gentity_t *spot = nullptr;
 
 	while ((spot = G_FindByString<&gentity_t::classname>(spot, "info_player_start")) != nullptr) {
+		if (!SpawnPointHasUsableOrigin(spot))
+			continue;
+
 		if (!game.spawnpoint[0] && !spot->targetname)
 			break;
 
@@ -742,34 +807,39 @@ static gentity_t *SelectSingleSpawnPoint(gentity_t *ent) {
 	if (!spot) {
 		// there wasn't a matching targeted spawnpoint, use one that has no targetname
 		while ((spot = G_FindByString<&gentity_t::classname>(spot, "info_player_start")) != nullptr)
-			if (!spot->targetname)
+			if (SpawnPointHasUsableOrigin(spot) && !spot->targetname)
 				return spot;
 	}
 
 	// none at all, so just pick any
-	if (!spot)
-		return G_FindByString<&gentity_t::classname>(spot, "info_player_start");
+	while (!spot || !SpawnPointHasUsableOrigin(spot)) {
+		spot = G_FindByString<&gentity_t::classname>(spot, "info_player_start");
+		if (!spot)
+			return nullptr;
+	}
 
 	return spot;
 }
 
 // [Paril-KEX]
-gentity_t *G_UnsafeSpawnPosition(vec3_t spot, bool check_players) {
-	return UnsafeSpawnPosition(spot, check_players);
+gentity_t *G_UnsafeSpawnPosition(vec3_t spot, bool check_players, const gentity_t *ignore) {
+	return UnsafeSpawnPosition(spot, check_players, ignore);
 }
 
 static gentity_t *SelectCoopSpawnPoint(gentity_t *ent, bool force_spawn, bool check_players) {
 	gentity_t *spot = nullptr;
 	const char *target;
+	const bool randomize_open_coop = !check_players && !g_coop_player_collision->integer;
+	std::vector<gentity_t *> open_coop_spots;
 
 	//  rogue hack, but not too gross...
 	if (!Q_strcasecmp(level.mapname, "rmine2"))
-		return SelectLavaCoopSpawnPoint(ent);
+		return SelectLavaCoopSpawnPoint(ent, check_players);
 
 	// try the main spawn point first
 	spot = SelectSingleSpawnPoint(ent);
 
-	if (spot && !G_UnsafeSpawnPosition(spot->s.origin, check_players))
+	if (spot && !G_UnsafeSpawnPosition(spot->s.origin, check_players, ent))
 		return spot;
 
 	spot = nullptr;
@@ -781,6 +851,8 @@ static gentity_t *SelectCoopSpawnPoint(gentity_t *ent, bool force_spawn, bool ch
 		spot = G_FindByString<&gentity_t::classname>(spot, "info_player_coop");
 		if (!spot)
 			break; // we didn't have enough...
+		if (!SpawnPointHasUsableOrigin(spot))
+			continue;
 
 		target = spot->targetname;
 		if (!target)
@@ -788,65 +860,49 @@ static gentity_t *SelectCoopSpawnPoint(gentity_t *ent, bool force_spawn, bool ch
 		if (Q_strcasecmp(game.spawnpoint, target) == 0) { // this is a coop spawn point for one of the clients here
 			num_valid_spots++;
 
-			if (!G_UnsafeSpawnPosition(spot->s.origin, check_players))
-				return spot; // this is it
+			if (!G_UnsafeSpawnPosition(spot->s.origin, check_players, ent)) {
+				if (randomize_open_coop)
+					open_coop_spots.push_back(spot);
+				else
+					return spot; // this is it
+			}
 		}
 	}
-
-	bool use_targetname = true;
 
 	// if we didn't find any spots, map is probably set up wrong.
 	// use empty targetname ones.
 	if (!num_valid_spots) {
-		use_targetname = false;
-
 		while (1) {
 			spot = G_FindByString<&gentity_t::classname>(spot, "info_player_coop");
 			if (!spot)
 				break; // we didn't have enough...
+			if (!SpawnPointHasUsableOrigin(spot))
+				continue;
 
 			target = spot->targetname;
 			if (!target) {
 				// this is a coop spawn point for one of the clients here
 				num_valid_spots++;
 
-				if (!G_UnsafeSpawnPosition(spot->s.origin, check_players))
-					return spot; // this is it
+				if (!G_UnsafeSpawnPosition(spot->s.origin, check_players, ent)) {
+					if (randomize_open_coop)
+						open_coop_spots.push_back(spot);
+					else
+						return spot; // this is it
+				}
 			}
 		}
 	}
 
-	// if player collision is disabled, just pick a random spot
-	if (!g_coop_player_collision->integer) {
-		spot = nullptr;
-
-		num_valid_spots = irandom(num_valid_spots);
-
-		while (1) {
-			spot = G_FindByString<&gentity_t::classname>(spot, "info_player_coop");
-
-			if (!spot)
-				break; // we didn't have enough...
-
-			target = spot->targetname;
-			if (use_targetname && !target)
-				target = "";
-			if (use_targetname ? (Q_strcasecmp(game.spawnpoint, target) == 0) : !target) { // this is a coop spawn point for one of the clients here
-				num_valid_spots++;
-
-				if (!num_valid_spots)
-					return spot;
-
-				--num_valid_spots;
-			}
-		}
-
-		// if this fails, just fall through to some other spawn.
-	}
+	if (!open_coop_spots.empty())
+		return PickRandomly(open_coop_spots);
 
 	// no safe spots..?
-	if (force_spawn || !g_coop_player_collision->integer)
-		return SelectSingleSpawnPoint(spot);
+	if (force_spawn || (!check_players && !g_coop_player_collision->integer)) {
+		spot = SelectSingleSpawnPoint(ent);
+		if (spot && !G_UnsafeSpawnPosition(spot->s.origin, false, ent))
+			return spot;
+	}
 
 	return nullptr;
 }
@@ -936,7 +992,7 @@ bool SelectSpawnPoint(gentity_t *ent, vec3_t &origin, vec3_t &angles, bool force
 			const playerspawn_t legacy_mode = LegacySpawnMode();
 			select_spawn_result_t result = SelectDeathmatchSpawnPoint(ent, avoid_point, legacy_mode, force_spawn, true, intermission, initial_spawn);
 
-			if (!result.spot && !force_spawn)
+			if (!result.spot && !force_spawn && !wants_player_spawn)
 				result = SelectDeathmatchSpawnPoint(ent, avoid_point, legacy_mode, true, true, intermission, initial_spawn);
 
 			if (!result.spot) {
@@ -1014,10 +1070,16 @@ SelectSpectatorSpawnPoint
 ============
 */
 static bool SelectSpectatorSpawnPoint(vec3_t &origin, vec3_t &angles) {
-	if (!level.spawn_spots[SPAWN_SPOT_INTERMISSION])
+	gentity_t *spot = level.spawn_spots[SPAWN_SPOT_INTERMISSION];
+	if ((!spot || !spot->inuse || !SpawnPointHasUsableOrigin(spot)) && !level.level_intermission_set)
+		SetIntermissionPoint();
+
+	spot = level.spawn_spots[SPAWN_SPOT_INTERMISSION];
+	if (spot && spot->inuse && SpawnPointHasUsableOrigin(spot))
+		FindIntermissionPoint();
+	else if (!level.level_intermission_set)
 		return false;
 
-	FindIntermissionPoint();
 	origin = level.intermission_origin;
 	angles = level.intermission_angle;
 

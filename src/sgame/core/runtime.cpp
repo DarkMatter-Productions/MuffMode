@@ -22,6 +22,7 @@
 #include "bots/bot_includes.h"
 #include "monsters/m_player.h"	// match starts
 
+#include <cmath>
 #include <ctime>
 
 CHECK_GCLIENT_INTEGRITY;
@@ -875,9 +876,48 @@ FindIntermissionPoint
 This is also used for spectator spawns
 ==================
 */
+static bool IntermissionEntityUsable(const gentity_t *ent) {
+	return ent && ent->inuse && std::isfinite(ent->s.origin.x) && std::isfinite(ent->s.origin.y) && std::isfinite(ent->s.origin.z);
+}
+
+static gentity_t *FindUsableIntermissionEntity(gentity_t *from) {
+	gentity_t *ent = from;
+	while ((ent = G_FindByString<&gentity_t::classname>(ent, "info_player_intermission")) != nullptr) {
+		if (IntermissionEntityUsable(ent))
+			return ent;
+	}
+
+	return nullptr;
+}
+
+static gentity_t *FindUsableSpawnEntity(const char *classname) {
+	gentity_t *ent = nullptr;
+	while ((ent = G_FindByString<&gentity_t::classname>(ent, classname)) != nullptr) {
+		if (IntermissionEntityUsable(ent))
+			return ent;
+	}
+
+	return nullptr;
+}
+
+static bool SetIntermissionAngleTowardTarget(gentity_t *ent) {
+	if (!ent || !ent->target)
+		return false;
+
+	gentity_t *target = G_PickTarget(ent->target);
+	if (!IntermissionEntityUsable(target))
+		return false;
+
+	const vec3_t delta = target->s.origin - ent->s.origin;
+	if (!delta)
+		return false;
+
+	level.intermission_angle = vectoangles(delta);
+	return true;
+}
+
 void FindIntermissionPoint(void) {
-	gentity_t *ent, *target;
-	vec3_t	dir;
+	gentity_t *ent;
 	bool	is_landmark = false;
 
 	if (level.intermission_spot) // search only once
@@ -888,10 +928,11 @@ void FindIntermissionPoint(void) {
 	// find the intermission spot
 	ent = level.spawn_spots[SPAWN_SPOT_INTERMISSION];
 
-	if (!ent) { // the map creator forgot to put in an intermission point...
+	if (!IntermissionEntityUsable(ent)) { // the map creator forgot to put in an intermission point...
 		SelectSpawnPoint(NULL, level.intermission_origin, level.intermission_angle, false, is_landmark);
 	} else {
 		level.intermission_origin = ent->s.origin;
+		level.intermission_angle = ent->s.angles;
 
 		// ugly hax!
 		if (!Q_strncasecmp(level.mapname, "campgrounds", 11)) {
@@ -902,19 +943,13 @@ void FindIntermissionPoint(void) {
 			gvec3_t v = { -1256, -1672, -136 };
 			if (ent->s.origin == v)
 				level.intermission_angle = { 15, 135, 0 };
-		} else {
-			level.intermission_angle = ent->s.angles;
 		}
 
 		// if it has a target, look towards it
 		if (ent->target) {
 			gi.Com_Print("FindIntermissionPoint target\n");
-			target = G_PickTarget(ent->target);
-			if (target) {
+			if (SetIntermissionAngleTowardTarget(ent)) {
 				gi.Com_Print("FindIntermissionPoint target 2\n");
-				dir = (target->s.origin - level.intermission_origin).normalized();
-				AngleVectors(dir);
-				level.intermission_angle = dir;
 			}
 		}
 	}
@@ -936,23 +971,24 @@ void SetIntermissionPoint(void) {
 
 	gentity_t *ent;
 	// find an intermission spot
-	ent = G_FindByString<&gentity_t::classname>(nullptr, "info_player_intermission");
+	ent = FindUsableIntermissionEntity(nullptr);
 	if (!ent) { // the map creator forgot to put in an intermission point...
-		ent = G_FindByString<&gentity_t::classname>(nullptr, "info_player_start");
+		ent = FindUsableSpawnEntity("info_player_start");
 		if (!ent)
-			ent = G_FindByString<&gentity_t::classname>(nullptr, "info_player_deathmatch");
+			ent = FindUsableSpawnEntity("info_player_deathmatch");
 	} else { // choose one of four spots
 		int32_t i = irandom(4);
 		while (i--) {
-			ent = G_FindByString<&gentity_t::classname>(ent, "info_player_intermission");
+			ent = FindUsableIntermissionEntity(ent);
 			if (!ent) // wrap around the list
-				ent = G_FindByString<&gentity_t::classname>(ent, "info_player_intermission");
+				ent = FindUsableIntermissionEntity(nullptr);
 		}
 	}
 
 	if (ent) {
 		level.intermission_origin = ent->s.origin;
 		level.spawn_spots[SPAWN_SPOT_INTERMISSION] = ent;
+		level.intermission_angle = ent->s.angles;
 	}
 	
 	// ugly hax!
@@ -966,17 +1002,7 @@ void SetIntermissionPoint(void) {
 			level.intermission_angle = { 15, 135, 0 };
 	} else {
 		// if it has a target, look towards it
-		if (ent && ent->target) {
-			gentity_t *target = G_PickTarget(ent->target);
-
-			if (target) {
-				//gi.Com_Print("HAS TARGET\n");
-				vec3_t	dir = (target->s.origin - level.intermission_origin).normalized();
-				AngleVectors(dir);
-				level.intermission_angle = dir;
-			}
-		}
-		if (ent && !level.intermission_angle)
+		if (ent && !SetIntermissionAngleTowardTarget(ent) && !level.intermission_angle)
 			level.intermission_angle = ent->s.angles;
 	}
 	

@@ -15,7 +15,7 @@
 #include "muffmode/mm_team.h"
 #include "muffmode/mm_vote.h"
 
-gentity_t *G_UnsafeSpawnPosition(vec3_t spot, bool check_players);
+gentity_t *G_UnsafeSpawnPosition(vec3_t spot, bool check_players, const gentity_t *ignore = nullptr);
 void TossClientItems(gentity_t *self);
 bool ClientArenaEliminationCorpse(const gclient_t *client);
 
@@ -796,7 +796,8 @@ void ClientSpawn(gentity_t *ent) {
 		}
 
 		// find a spot to place us
-		//SetIntermissionPoint();
+		if (!level.intermission_spot && !level.level_intermission_set)
+			SetIntermissionPoint();
 
 		ent->s.origin = level.intermission_origin;
 		ent->client->ps.pmove.origin = level.intermission_origin;
@@ -1008,7 +1009,7 @@ void ClientSpawn(gentity_t *ent) {
 	// intersecting spawns, so we'll do a sanity check here...
 	if (spawn_from_begin) {
 		if (coop->integer) {
-			gentity_t *collision = G_UnsafeSpawnPosition(ent->s.origin, true);
+			gentity_t *collision = G_UnsafeSpawnPosition(ent->s.origin, true, ent);
 
 			if (collision) {
 				gi.linkentity(ent);
@@ -2612,7 +2613,11 @@ void ClientBeginServerFrame(gentity_t *ent) {
 	client = ent->client;
 
 	if (client->awaiting_respawn) {
-		if ((level.time.milliseconds() % 500) == 0)
+		int32_t retry_frames = gi.frame_time_ms > 0 ? 500 / gi.frame_time_ms : 5;
+		if (retry_frames < 1)
+			retry_frames = 1;
+
+		if ((gi.ServerFrame() % retry_frames) == 0 || level.time > client->respawn_timeout)
 			ClientSpawn(ent);
 		return;
 	}

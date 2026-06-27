@@ -2,6 +2,7 @@
 // Licensed under the GNU General Public License 2.0.
 
 #include <cerrno>
+#include <cmath>
 #include <limits>
 
 #include "g_local.h"
@@ -996,17 +997,44 @@ static void PrecacheForRandomRespawn() {
 
 static void G_LocateSpawnSpots(void) {
 	gentity_t *ent;
-	int			n;
+	int			n = 0;
 	const char *s = "info_player_";
 	const size_t sl = strlen(s);
 	gentity_t *end = &g_entities[G_SpawnEntityLimit()];
 
 	level.spawn_spots[SPAWN_SPOT_INTERMISSION] = nullptr;
+	level.num_spawn_spots = 0;
 	level.num_spawn_spots_free = 0;
 	level.num_spawn_spots_team = 0;
+	bool spawn_spot_overflow_warned = false;
+
+	auto spawn_origin_usable = [](const gentity_t *spot) {
+		return spot && std::isfinite(spot->s.origin.x) && std::isfinite(spot->s.origin.y) && std::isfinite(spot->s.origin.z);
+	};
+
+	auto cache_spawn_spot = [&](gentity_t *spot, team_t team) {
+		if (!spawn_origin_usable(spot))
+			return;
+
+		if (n >= SPAWN_SPOT_INTERMISSION) {
+			if (!spawn_spot_overflow_warned) {
+				gi.Com_Print("G_LocateSpawnSpots: too many player spawn spots; ignoring extras for legacy spawn cache\n");
+				spawn_spot_overflow_warned = true;
+			}
+			return;
+		}
+
+		level.spawn_spots[n++] = spot;
+		spot->fteam = team;
+		spot->count = 1; // means its not initial spawn point
+
+		if (team == TEAM_FREE)
+			level.num_spawn_spots_free++;
+		else
+			level.num_spawn_spots_team++;
+	};
 
 	// locate all spawn spots
-	n = 0;
 	for (ent = g_entities; ent < end; ent++) {
 
 		if (!ent->inuse || !ent->classname)
@@ -1018,6 +1046,9 @@ static void G_LocateSpawnSpots(void) {
 		// intermission/ffa spots
 		if (!Q_strncasecmp(ent->classname, s, sl)) {
 			if (!Q_strcasecmp(ent->classname + sl, "intermission")) {
+				if (!spawn_origin_usable(ent))
+					continue;
+
 				if (level.spawn_spots[SPAWN_SPOT_INTERMISSION] == NULL) {
 					level.spawn_spots[SPAWN_SPOT_INTERMISSION] = ent; // put in the last slot
 					ent->fteam = TEAM_FREE;
@@ -1026,36 +1057,26 @@ static void G_LocateSpawnSpots(void) {
 					if (ent->target) {
 						gentity_t *target = G_PickTarget(ent->target);
 
-						if (target) {
-							vec3_t	dir = (target->s.origin - level.intermission_origin).normalized();
-							AngleVectors(dir);
-							level.intermission_angle = dir;
-							return;
+						if (spawn_origin_usable(target) && (target->s.origin - ent->s.origin)) {
+							level.intermission_angle = vectoangles(target->s.origin - ent->s.origin);
+						} else {
+							level.intermission_angle = ent->s.angles;
 						}
-					}
-					level.intermission_angle = ent->s.angles;
+					} else
+						level.intermission_angle = ent->s.angles;
 				}
 				continue;
 			}
 			if (!Q_strcasecmp(ent->classname + sl, "deathmatch")) {
-				level.spawn_spots[n] = ent; n++;
-				level.num_spawn_spots_free++;
-				ent->fteam = TEAM_FREE;
-				ent->count = 1; // means its not initial spawn point
+				cache_spawn_spot(ent, TEAM_FREE);
 				continue;
 			}
 			if (!Q_strcasecmp(ent->classname + sl, "team_red")) {
-				level.spawn_spots[n] = ent; n++;
-				level.num_spawn_spots_team++;
-				ent->fteam = TEAM_RED;
-				ent->count = 1; // means its not initial spawn point
+				cache_spawn_spot(ent, TEAM_RED);
 				continue;
 			}
 			if (!Q_strcasecmp(ent->classname + sl, "team_blue")) {
-				level.spawn_spots[n] = ent; n++;
-				level.num_spawn_spots_team++;
-				ent->fteam = TEAM_BLUE;
-				ent->count = 1; // means its not initial spawn point
+				cache_spawn_spot(ent, TEAM_BLUE);
 				continue;
 			}
 			continue;
