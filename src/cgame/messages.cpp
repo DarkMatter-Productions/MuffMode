@@ -441,6 +441,11 @@ void CG_CheckDrawCenterString(const player_state_t *ps, const vrect_t &hud_vrect
 	if (InIntermission(ps))
 		return;
 
+	// Scoreboard (and inventory) use LAYOUTS_LAYOUT / LAYOUTS_INVENTORY; hide centerprint so it
+	// does not overlap the overlay (statusbar overlay HUD is already gated by STAT_SHOW_STATUSBAR).
+	if (ViewingLayout(ps))
+		return;
+
 	auto &data = hud_messages[isplit];
 	if (!data.center_index.has_value())
 		return;
@@ -448,18 +453,22 @@ void CG_CheckDrawCenterString(const player_state_t *ps, const vrect_t &hud_vrect
 	auto &center = data.centers[data.center_index.value()];
 
 	if (center.finished && center.time_off < cgi.CL_ClientRealTime()) {
-		center.lines.clear();
+		if (ps->stats[STAT_COUNTDOWN] > 0) {
+			center.time_off = cgi.CL_ClientRealTime() + static_cast<uint64_t>(scr_centertime->value * 1000);
+		} else {
+			center.lines.clear();
 
-		const size_t next_index = (data.center_index.value() + 1) % kMaxCenterPrints;
-		auto &next_center = data.centers[next_index];
+			const size_t next_index = (data.center_index.value() + 1) % kMaxCenterPrints;
+			auto &next_center = data.centers[next_index];
 
-		if (next_center.lines.empty()) {
-			data.center_index.reset();
-			return;
+			if (next_center.lines.empty()) {
+				data.center_index.reset();
+				return;
+			}
+
+			data.center_index = next_index;
+			next_center.current_line = next_center.line_count = 0;
 		}
-
-		data.center_index = next_index;
-		next_center.current_line = next_center.line_count = 0;
 	}
 
 	if (!data.center_index.has_value())

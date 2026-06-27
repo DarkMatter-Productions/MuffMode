@@ -3,7 +3,9 @@
 
 #include "fake_game_import.h"
 #include "muffmode/mm_command_contracts.h"
+#include "muffmode/mm_hud_stat_contracts.h"
 #include "muffmode/mm_horde_ai_rules.h"
+#include "muffmode/mm_lms_rules.h"
 #include "muffmode/mm_loc_parse.h"
 #include "muffmode/mm_parse.h"
 #include "muffmode/mm_red_rover_rules.h"
@@ -184,6 +186,33 @@ MM_TEST(red_rover_round_ends_only_when_one_team_is_cleared) {
 	MM_CHECK_FALSE(MM_RedRoverRoundShouldEnd(0, 0));
 }
 
+MM_TEST(lms_round_resolves_to_last_active_fighter) {
+	// a winner is declared when exactly one active fighter remains (>= 2 participated)
+	MM_CHECK(MM_LMSRoundHasWinner(1, 2));
+	MM_CHECK(MM_LMSRoundHasWinner(1, 8));
+
+	// more than one fighter left, or none left: not yet a single winner
+	MM_CHECK_FALSE(MM_LMSRoundHasWinner(2, 3));
+	MM_CHECK_FALSE(MM_LMSRoundHasWinner(0, 2));
+
+	// a lone participant (everyone else gone) must not be handed a round win
+	MM_CHECK_FALSE(MM_LMSRoundHasWinner(1, 1));
+	MM_CHECK_FALSE(MM_LMSRoundHasWinner(0, 1));
+}
+
+MM_TEST(lms_round_is_a_draw_only_on_mutual_elimination) {
+	// every fighter eliminated with >= 2 participants is a draw
+	MM_CHECK(MM_LMSRoundIsDraw(0, 2));
+	MM_CHECK(MM_LMSRoundIsDraw(0, 5));
+
+	// survivors remain: not a draw
+	MM_CHECK_FALSE(MM_LMSRoundIsDraw(1, 2));
+	MM_CHECK_FALSE(MM_LMSRoundIsDraw(2, 4));
+
+	// lone participant can neither win nor draw the round
+	MM_CHECK_FALSE(MM_LMSRoundIsDraw(0, 1));
+}
+
 MM_TEST(scoreboard_footer_reserve_keeps_layout_room_available) {
 	MM_CHECK_EQ(MM_ScoreboardFooterReserve(false), 96u);
 	MM_CHECK_EQ(MM_ScoreboardFooterReserve(true), 320u);
@@ -280,6 +309,37 @@ MM_TEST(loc_body_requires_macro_and_substitutes_location) {
 MM_TEST(loc_body_caps_length) {
 	std::string long_text = "%l " + std::string(400, 'x');
 	MM_CHECK(MM_BuildLocBody(long_text.c_str(), "WATER").size() <= 150);
+}
+
+MM_TEST(hud_statusbar_layout_rejects_banned_ifbit_token) {
+	MM_CHECK(MM_StatusbarLayoutContainsBannedToken("ifbit 14 1 loc_rstring OFFENSE endif "));
+	MM_CHECK_FALSE(MM_StatusbarLayoutUsesOnlyVanillaTokens("ifbit 14 1 loc_rstring OFFENSE endif "));
+}
+
+MM_TEST(hud_statusbar_layout_vanilla_token_whitelist) {
+	// Representative vanilla-base fragments including loc_rstring operands.
+	const char *sample =
+		"if 29 xl 0 yb -78 if 29 stat_string 29 endif "
+		"if 271 xr -24 yt 34 if 271 loc_stat_rstring 271 endif "
+		"if 272 xv 0 yt 48 if 272 loc_stat_rstring 272 endif "
+		"if 264 xr -16 yt 42 if 264 num 3 264 endif "
+		"if 47 xr -24 yt 58 loc_rstring 0 $g_lives endif "
+		"if 264 xr -24 yt 68 loc_rstring 0 Monsters endif "
+		"if 18 xl 0 yb -60 if 18 pic 18 endif endif";
+	MM_CHECK_FALSE(MM_StatusbarLayoutContainsBannedToken(sample));
+	MM_CHECK(MM_StatusbarLayoutUsesOnlyVanillaTokens(sample));
+}
+
+MM_TEST(hud_stat_count_within_max_stats) {
+	MM_CHECK((int)STAT_LAST <= (int)MAX_STATS);
+	MM_CHECK((int)STAT_ARENA_ROLE < (int)MAX_STATS);
+}
+
+MM_TEST(hud_stat_contract_miniscore_val_visibility) {
+	MM_CHECK_FALSE(MM_MiniscoreValVisible(0));
+	MM_CHECK(MM_MiniscoreValVisible(1));
+	MM_CHECK(MM_StatusbarLayoutLengthWithinBudget(MM_STATUSBAR_LAYOUT_MAX_CHARS));
+	MM_CHECK_FALSE(MM_StatusbarLayoutLengthWithinBudget(MM_STATUSBAR_LAYOUT_MAX_CHARS + 1));
 }
 
 } // namespace

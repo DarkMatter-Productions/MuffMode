@@ -36,7 +36,7 @@ constexpr gametype_avail_t k_gametype_availability[GT_NUM_GAMETYPES] = {
 	/* GT_FREEZE */ gametype_avail_t::Removed,
 	/* GT_STRIKE */ gametype_avail_t::Enabled,
 	/* GT_RR */ gametype_avail_t::Enabled,
-	/* GT_LMS */ gametype_avail_t::Removed,
+	/* GT_LMS */ gametype_avail_t::Enabled,
 	/* GT_HORDE */ gametype_avail_t::Enabled,
 	/* GT_BALL */ gametype_avail_t::Removed,
 	/* GT_INSTAGIB */ gametype_avail_t::Enabled,
@@ -474,6 +474,8 @@ void MM_ChangeGametype(gametype_t gt, bool force_cfg)
 		if (g_gametype_cfg->integer && deathmatch->integer)
 			muffmode::gametype::MM_ExecGametypeCfg(gt);
 
+		MM_GTSetLongName();
+
 		extern bool g_map_list_shuffled;
 		g_map_list_shuffled = false;
 
@@ -491,6 +493,7 @@ void MM_ChangeGametype(gametype_t gt, bool force_cfg)
 		// reach here, so a same-gametype vote can't clobber settings players have
 		// voted on.
 		muffmode::gametype::MM_ExecGametypeCfg(gt);
+		MM_GTSetLongName();
 	}
 }
 
@@ -700,6 +703,20 @@ void MM_GTSetLongName()
 			} else {
 				s = gt_long_name[GT_RR];
 			}
+		} else if (GT(GT_LMS)) {
+			if (g_instagib->integer) {
+				s = "Insta-LMS";
+			} else if (g_vampiric_damage->integer) {
+				s = "Vampiric LMS";
+			} else if (g_frenzy->integer) {
+				s = "Frenzy LMS";
+			} else if (g_nadefest->integer) {
+				s = "NadeFest LMS";
+			} else if (g_quadhog->integer) {
+				s = "Quad Hog LMS";
+			} else {
+				s = gt_long_name[GT_LMS];
+			}
 		} else if (GT(GT_STRIKE)) {
 			if (g_instagib->integer) {
 				s = "Insta-Strike";
@@ -756,22 +773,21 @@ void MM_GTSetLongName()
 			} else {
 				s = gt_long_name[GT_HORDE];
 			}
-		} else if (deathmatch->integer) {
+		} else {
+			const gametype_t gt = (gametype_t)clamp(g_gametype->integer, (int)GT_FIRST, (int)GT_LAST);
 			if (g_instagib->integer) {
 				s = "InstaGib";
 			} else if (g_vampiric_damage->integer) {
-				s = "Vampiric FFA";
+				s = G_Fmt("Vampiric {}", gt_long_name[(int)gt]).data();
 			} else if (g_frenzy->integer) {
-				s = "Frenzy FFA";
+				s = G_Fmt("Frenzy {}", gt_long_name[(int)gt]).data();
 			} else if (g_nadefest->integer) {
-				s = "NadeFest";
+				s = gt_long_name[GT_NADEFEST];
 			} else if (g_quadhog->integer) {
-				s = "Quad Hog";
+				s = G_Fmt("Quad Hog {}", gt_long_name[(int)gt]).data();
 			} else {
-				s = gt_long_name[GT_FFA];
+				s = gt_long_name[(int)gt];
 			}
-		} else {
-			s = "Unknown Gametype";
 		}
 	} else {
 		if (coop->integer) {

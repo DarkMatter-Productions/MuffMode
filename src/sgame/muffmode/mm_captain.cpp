@@ -4,6 +4,7 @@
 #include "g_local.h"
 #include "muffmode/mm_captain.h"
 #include "muffmode/mm_command_contracts.h"
+#include "muffmode/mm_match.h"
 #include "muffmode/mm_util.h"
 
 #include <algorithm>
@@ -403,7 +404,7 @@ void BroadcastReadyReminderMessage() {
 			continue;
 		if (ec->client->resp.ready)
 			continue;
-		gi.LocCenter_Print(ec, "%bind:+wheel2:Use Compass to toggle your ready status.%MATCH IS IN WARMUP\nYou are NOT ready.");
+		muffmode::match::SendWarmupReadyReminder(ec);
 	}
 }
 
@@ -539,7 +540,7 @@ void BroadcastReadyStatus(gentity_t *ent) {
 	if (!ent || !ent->client)
 		return;
 
-	gi.LocBroadcast_Print(PRINT_CENTER, "%bind:+wheel2:Use Compass to toggle your ready status.%MATCH IS IN WARMUP\n{} is {}ready.", ent->client->resp.netname, ent->client->resp.ready ? "" : "NOT ");
+	gi.LocBroadcast_Print(PRINT_CENTER, "{} is {}ready.\nOpen menu to ready up.", ent->client->resp.netname, ent->client->resp.ready ? "" : "NOT ");
 }
 
 } // namespace muffmode::captain
@@ -565,6 +566,7 @@ void MM_CmdReady(gentity_t *ent) {
 	}
 
 	ent->client->resp.ready = true;
+	ent->client->last_warmup_nudge_time = 0_sec;
 	captain::BroadcastReadyStatus(ent);
 }
 
@@ -595,6 +597,8 @@ void MM_ToggleReadyUp(gentity_t *ent) {
 		return;
 
 	ent->client->resp.ready ^= true;
+	if (ent->client->resp.ready)
+		ent->client->last_warmup_nudge_time = 0_sec;
 	captain::BroadcastReadyStatus(ent);
 }
 

@@ -8,6 +8,8 @@
 #include "muffmode/mm_gametype.h"
 #include "muffmode/mm_ghost.h"
 #include "muffmode/mm_horde.h"
+#include "muffmode/mm_lms.h"
+#include "muffmode/mm_lms_rules.h"
 #include "muffmode/mm_match.h"
 #include "muffmode/mm_red_rover_rules.h"
 #include "muffmode/mm_strike.h"
@@ -344,6 +346,10 @@ bool StartNewRound()
 	if (!MM_Horde_ShouldSkipEntitiesReset())
 		ResetEntities(true, false, false);
 
+	// LMS: re-arm each player's per-round lives after the reset respawned them.
+	if (GT(GT_LMS))
+		MM_LMS_GrantRoundLives();
+
 	// Red Rover: re-split the teams evenly at the start of every round, so each round opens
 	// balanced after the previous one funnelled everyone onto one side.
 	if (GT(GT_RR))
@@ -449,6 +455,7 @@ void Match_Start() {
 	level.match_state_timer = level.time;
 	level.warmup_requisite = warmupreq_t::WARMUP_REQ_NONE;
 	level.warmup_notice_time = 0_sec;
+	level.warmup_gametype_hud_time = 0_sec;
 
 	level.team_scores[TEAM_RED] = level.team_scores[TEAM_BLUE] = 0;
 
@@ -522,6 +529,7 @@ void Match_Reset() {
 	level.match_state = matchst_t::MATCH_WARMUP_DEFAULT;
 	level.warmup_requisite = warmupreq_t::WARMUP_REQ_NONE;
 	level.warmup_notice_time = 0_sec;
+	level.warmup_gametype_hud_time = level.time;
 	level.match_state_timer = 0_sec;
 	level.intermission_queued = 0_sec;
 	level.intermission_exit = false;
@@ -540,6 +548,108 @@ ReadyConditionsMet
 */
 namespace muffmode::match {
 
+void GetWarmupReadyCounts(int &ready_humans, int &playing_humans)
+{
+	ready_humans = 0;
+	playing_humans = 0;
+
+	for (auto ec : active_clients()) {
+		if (!ClientIsPlaying(ec->client))
+			continue;
+		if (ec->svflags & SVF_BOT || ec->client->sess.is_a_bot)
+			continue;
+
+		if (ec->client->resp.ready)
+			ready_humans++;
+		playing_humans++;
+	}
+}
+
+void BroadcastWarmupWaitNotice()
+{
+	if (!deathmatch->integer)
+		return;
+
+	const char *msg = nullptr;
+
+	switch (level.warmup_requisite) {
+	case warmupreq_t::WARMUP_REQ_MORE_PLAYERS:
+		msg = G_Fmt("Waiting for players ({} minimum)", minplayers->integer).data();
+		break;
+	case warmupreq_t::WARMUP_REQ_BALANCE:
+		msg = "Teams are imbalanced.";
+		break;
+	default:
+		return;
+	}
+
+	gi.LocBroadcast_Print(PRINT_CENTER, "{}", msg);
+	level.warmup_notice_time = level.time;
+}
+
+static void SendWarmupReadyNudge(gentity_t *ent)
+{
+	if (!ent || !ent->client)
+		return;
+
+	int ready_humans = 0, playing_humans = 0;
+	GetWarmupReadyCounts(ready_humans, playing_humans);
+
+	if (playing_humans > 0)
+		gi.LocCenter_Print(ent, "%bind:inven:Open menu%You are NOT ready. ({}/{} ready)", ready_humans, playing_humans);
+	else
+		gi.LocCenter_Print(ent, "%bind:inven:Open menu%You are NOT ready.");
+
+	ent->client->last_warmup_nudge_time = level.time;
+}
+
+void SendWarmupReadyReminder(gentity_t *ent)
+{
+	SendWarmupReadyNudge(ent);
+}
+
+static void TickWarmupWaitNudges()
+{
+	if (!deathmatch->integer)
+		return;
+	if (level.match_state != matchst_t::MATCH_WARMUP_DEFAULT)
+		return;
+	if (level.warmup_requisite != warmupreq_t::WARMUP_REQ_MORE_PLAYERS
+		&& level.warmup_requisite != warmupreq_t::WARMUP_REQ_BALANCE)
+		return;
+
+	if (level.warmup_notice_time != 0_sec
+		&& level.time < level.warmup_notice_time + WARMUP_READY_NUDGE_INTERVAL)
+		return;
+
+	BroadcastWarmupWaitNotice();
+}
+
+void TickWarmupReadyNudges()
+{
+	if (!deathmatch->integer || !muffmode::CvarEnabled(g_dm_do_readyup))
+		return;
+	if (level.match_state != matchst_t::MATCH_WARMUP_READYUP)
+		return;
+
+	for (auto ec : active_players()) {
+		if (!ec || !ec->client)
+			continue;
+		if (!ClientIsPlaying(ec->client))
+			continue;
+		if (ec->client->sess.is_a_bot || (ec->svflags & SVF_BOT))
+			continue;
+		if (ec->client->resp.ready)
+			continue;
+
+		if (ec->client->last_warmup_nudge_time != 0_sec
+			&& level.time < ec->client->last_warmup_nudge_time + WARMUP_READY_NUDGE_INTERVAL)
+			continue;
+
+		SendWarmupReadyNudge(ec);
+	}
+}
+
 bool ReadyConditionsMet()
 {
 	if (!muffmode::CvarEnabled(g_dm_do_readyup))
@@ -548,6 +658,7 @@ bool ReadyConditionsMet()
 	int count_ready = 0;
 	int count_humans = 0;
 	int count_bots = 0;
+	GetWarmupReadyCounts(count_ready, count_humans);
 	for (auto ec : active_clients()) {
 		if (!ClientIsPlaying(ec->client))
 			continue;
@@ -555,10 +666,6 @@ bool ReadyConditionsMet()
 			count_bots++;
 			continue;
 		}
-
-		if (ec->client->resp.ready)
-			count_ready++;
-		count_humans++;
 	}
 
 	// wait if no players at all
@@ -596,7 +703,7 @@ CheckLastManStanding
 namespace muffmode::match {
 
 static void CheckLastManStanding() {
-	if (notGT(GT_CA) && notGT(GT_STRIKE) && notGT(GT_RR) && notGT(GT_HORDE))
+	if (notGT(GT_CA) && notGT(GT_STRIKE) && notGT(GT_RR) && notGT(GT_HORDE) && notGT(GT_LMS))
 		return;
 
 	auto announce_survivor = [](gentity_t *survivor) {
@@ -604,11 +711,11 @@ static void CheckLastManStanding() {
 		survivor->client->last_standing_clear_time = level.time + 3_sec;
 	};
 
-	// Horde is co-op survival: all fighters share one side against the monsters, so the
-	// "last one standing" is the final fighter still in the wave. Count fighters who have
-	// not been eliminated (out of lives) rather than current health - a fighter who is
+	// Horde is co-op survival and LMS is free-for-all: both put every fighter on TEAM_FREE,
+	// so the "last one standing" is the final fighter still in the round. Count fighters who
+	// have not been eliminated (out of lives) rather than current health - a fighter who is
 	// briefly dead but still has lives will respawn, so they are not yet the last survivor.
-	if (GT(GT_HORDE)) {
+	if (GT(GT_HORDE) || GT(GT_LMS)) {
 		gentity_t *survivor = nullptr;
 		int count = 0;
 
@@ -791,6 +898,73 @@ void TickRoundState() {
 			if (MM_Horde_UpdateRoundInProgress())
 				Round_End();
 			return;
+
+		case GT_LMS:
+		{
+			// Free-for-all elimination: count participants and the active fighters among them
+			// (alive, or dead but still holding a life). The round resolves to the last fighter
+			// standing, a draw on mutual elimination, or a most-health tie-break at the time limit.
+			int participants = 0, active = 0;
+			gentity_t *survivor = nullptr;
+
+			for (auto ec : active_clients()) {
+				if (!ClientIsPlaying(ec->client))
+					continue;
+				participants++;
+				if (MM_LMS_ClientIsActiveFighter(ec)) {
+					active++;
+					survivor = ec;
+				}
+			}
+
+			if (MM_LMSRoundHasWinner(active, participants)) {
+				G_AdjustPlayerScore(survivor->client, 1, false, 0);
+				gi.LocBroadcast_Print(PRINT_CENTER, "{} wins the round!\n", survivor->client->resp.netname);
+				AnnouncerSound(world, "round_won", "ctf/flagcap.wav", true);
+				Round_End();
+				return;
+			}
+
+			if (MM_LMSRoundIsDraw(active, participants)) {
+				gi.LocBroadcast_Print(PRINT_CENTER, "Round draw!");
+				Round_End();
+				return;
+			}
+
+			// Round time limit: the highest-health survivor takes the round; a tie is a draw.
+			// Only fighters currently alive can win the tie-break - with multi-life rounds an
+			// active fighter may be momentarily dead (health <= 0) awaiting respawn, and corpse
+			// health must not decide the round. If nobody is alive at expiry, it is a draw.
+			const bool time_expired = roundtimelimit->value > 0 && level.time >= level.round_state_timer;
+			if (time_expired && participants >= 2) {
+				gentity_t *leader = nullptr;
+				int best_health = 0;
+				bool tied = false;
+
+				for (auto ec : active_clients()) {
+					if (!MM_LMS_ClientIsActiveFighter(ec) || ec->health <= 0)
+						continue;
+					if (ec->health > best_health) {
+						best_health = ec->health;
+						leader = ec;
+						tied = false;
+					} else if (ec->health == best_health) {
+						tied = true;
+					}
+				}
+
+				if (leader && !tied) {
+					G_AdjustPlayerScore(leader->client, 1, false, 0);
+					gi.LocBroadcast_Print(PRINT_CENTER, "{} wins the round!\n(most health remaining)\n", leader->client->resp.netname);
+					AnnouncerSound(world, "round_won", "ctf/flagcap.wav", true);
+				} else {
+					gi.LocBroadcast_Print(PRINT_CENTER, "Round draw!");
+				}
+				Round_End();
+				return;
+			}
+			return;
+		}
 
 		case GT_RR:
 		{
@@ -1049,6 +1223,7 @@ void TickWarmupState() {
 		level.match_state_timer = level.time + 5_sec;
 		level.warmup_requisite = warmupreq_t::WARMUP_REQ_NONE;
 		level.warmup_notice_time = level.time;
+		level.warmup_gametype_hud_time = level.time;
 		return;
 	}
 
@@ -1118,10 +1293,14 @@ void TickWarmupState() {
 			}
 
 			if (level.match_state != matchst_t::MATCH_WARMUP_DEFAULT) {
+				const matchst_t prev_state = level.match_state;
 				level.match_state = matchst_t::MATCH_WARMUP_DEFAULT;
 				level.match_state_timer = 0_sec;
 				level.warmup_requisite = warmupreq_t::WARMUP_REQ_BALANCE;
 				level.warmup_notice_time = level.time;
+				if (prev_state == matchst_t::MATCH_COUNTDOWN || prev_state == matchst_t::MATCH_WARMUP_READYUP)
+					level.warmup_gametype_hud_time = level.time;
+				BroadcastWarmupWaitNotice();
 			}
 		}
 		return; // still waiting for players
@@ -1145,10 +1324,14 @@ void TickWarmupState() {
 				}
 
 				if (level.match_state != matchst_t::MATCH_WARMUP_DEFAULT) {
+					const matchst_t prev_state = level.match_state;
 					level.match_state = matchst_t::MATCH_WARMUP_DEFAULT;
 					level.match_state_timer = 0_sec;
 					level.warmup_requisite = warmupreq_t::WARMUP_REQ_MORE_PLAYERS;
 					level.warmup_notice_time = level.time;
+					if (prev_state == matchst_t::MATCH_COUNTDOWN || prev_state == matchst_t::MATCH_WARMUP_READYUP)
+						level.warmup_gametype_hud_time = level.time;
+					BroadcastWarmupWaitNotice();
 				}
 			}
 			level.match_cancel_delay_timer = 0_ms; // reset
@@ -1184,6 +1367,7 @@ void TickWarmupState() {
 		level.match_state = matchst_t::MATCH_WARMUP_DEFAULT;
 		level.warmup_requisite = warmupreq_t::WARMUP_REQ_NONE;
 		level.warmup_notice_time = 0_sec;
+		level.warmup_gametype_hud_time = level.time;
 		level.prepare_to_fight = false;
 		return;
 	}
@@ -1254,6 +1438,8 @@ match-end warning.
 */
 void MM_Match_RunFrame() {
 	match::TickWarmupState();
+	match::TickWarmupWaitNudges();
+	match::TickWarmupReadyNudges();
 	match::TickRoundState();
 	match::TickCountdown();
 	match::TickMatchEndWarning();
