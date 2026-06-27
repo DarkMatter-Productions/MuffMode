@@ -17,16 +17,16 @@
 // STAT_RULESET_HUD        — warmup (through ready-up): ruleset; Strike in-progress: capturelimit
 // STAT_CTF_FLAG_PIC       — CTF: carried flag blink; RR: current-team badge (top-right row 3)
 // STAT_CENTER_LINE        — duel header pic; LMS: CONFIG_POV_CENTER_POOL + client POV text
-// STAT_WARMUP_NOTICE      — CONFIG_WARMUP_NOTICE (xv 0 yb -90, above match timer)
+// STAT_WARMUP_NOTICE      — layout slot reserved; warmup guidance uses centerprint (menu-bind band)
 // STAT_ROUND_NUMBER       — CONFIG_ROUND_PROGRESS; CA/RR in-progress: alive "N vs M" (yb below miniscore)
 // STAT_COUNTDOWN          — layout xv 118 yb -256 num(3); vanilla: centre = xv+50-8*l (118 exact for 1-digit); MM cgame re-centres per digit count
 // STAT_MINISCORE_*        — SetMiniScoreStats; visible MATCH_WARMUP_DELAYED through MATCH_IN_PROGRESS
-//                           Team modes (TDM/CA/CTF/Horde): CS_STATUSBAR miniscore rows (vanilla-safe icons).
-//                           FFA/Duel/RR skin icons: MM cgame only (CG_DrawMuffModeHudEnhancements); omitted from layout.
+//                           Team modes (TDM/CA/CTF): CS_STATUSBAR miniscore rows (vanilla-safe icons).
+//                           FFA/Duel/RR/Horde skin icons: MM cgame only (CG_DrawMuffModeHudEnhancements); omitted from layout.
 // STAT_HORDE_REMAINING    — Horde only: remaining monsters (num)
 // STAT_ARENA_ROLE         — Strike top-right or CA centre: CONFIG_POV_CENTER_POOL + client
 // STAT_LIVES              — Horde/LMS: right stack num(1) at yt 42; coop: lives_num at yt 2
-// STAT_MATCH_STATE        — CONFIG_MATCH_STATE (xv 0 yb -78 stat_string, bottom-centre)
+// STAT_MATCH_STATE        — CONFIG_MATCH_STATE (xv 0 yb -78 stat_string, bottom-centre); warmup: WARMUP
 
 inline constexpr size_t MM_STATUSBAR_LAYOUT_MAX_CHARS = 5280; // CS_SIZE(CS_STATUSBAR)
 

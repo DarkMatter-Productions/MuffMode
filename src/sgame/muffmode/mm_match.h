@@ -15,3 +15,9 @@ void TimeoutEnd();
 void MM_TimeoutBeginResumeCountdown();
 void MM_CmdTimeOut(gentity_t *ent);
 void MM_CmdTimeIn(gentity_t *ent);
+
+namespace muffmode::match {
+void GetWarmupReadyCounts(int &ready_humans, int &playing_humans);
+void SendWarmupReadyReminder(gentity_t *ent);
+void BroadcastWarmupWaitNotice();
+} // namespace muffmode::match

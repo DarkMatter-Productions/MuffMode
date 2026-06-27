@@ -851,35 +851,7 @@ static void G_SetGametypeStats(gentity_t *ent) {
 		ent->client->ps.stats[STAT_RULESET_HUD] = 0;
 	}
 
-	if (deathmatch->integer
-		&& (level.match_state == MATCH_WARMUP_DEFAULT || level.match_state == MATCH_WARMUP_READYUP)
-		&& level.warmup_requisite
-		&& level.warmup_notice_time + WARMUP_SPLASH_DURATION > level.time) {
-		const char *notice = nullptr;
-
-		switch (level.warmup_requisite) {
-		case warmupreq_t::WARMUP_REQ_MORE_PLAYERS:
-			notice = G_Fmt("More players needed ({} minimum)", minplayers->integer).data();
-			break;
-		case warmupreq_t::WARMUP_REQ_BALANCE:
-			notice = "Teams are imbalanced.";
-			break;
-		case warmupreq_t::WARMUP_REQ_READYUP:
-			notice = "Players must ready up.";
-			break;
-		default:
-			break;
-		}
-
-		if (notice) {
-			gi.configstring(CONFIG_WARMUP_NOTICE, notice);
-			ent->client->ps.stats[STAT_WARMUP_NOTICE] = CONFIG_WARMUP_NOTICE;
-		} else {
-			ent->client->ps.stats[STAT_WARMUP_NOTICE] = 0;
-		}
-	} else {
-		ent->client->ps.stats[STAT_WARMUP_NOTICE] = 0;
-	}
+	ent->client->ps.stats[STAT_WARMUP_NOTICE] = 0;
 
 	if (level.match_state == MATCH_IN_PROGRESS) {
 		if (GT(GT_HORDE)) {
@@ -1750,18 +1722,14 @@ void G_SetStats(gentity_t *ent) {
 
 			switch (level.match_state) {
 			case matchst_t::MATCH_WARMUP_DELAYED:
-				if (level.warmup_notice_time + WARMUP_SPLASH_DURATION > level.time) {
-					s1 = G_Fmt("{} v{}", GAMEMOD_TITLE, GAMEMOD_VERSION).data();
-				} else {
-					s1 = "";
-				}
+				s1 = "";
 				break;
 			case matchst_t::MATCH_NONE:
 				s1 = "";
 				break;
 			case matchst_t::MATCH_WARMUP_DEFAULT:
 			case matchst_t::MATCH_WARMUP_READYUP:
-							s1 = "WARMUP";
+				s1 = "WARMUP";
 				break;
 			case matchst_t::MATCH_COUNTDOWN:
 				s1 = "COUNTDOWN";

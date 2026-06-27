@@ -995,7 +995,13 @@ static void CG_ExecuteLayoutString(const char *s, vrect_t hud_vrect, vrect_t hud
 				const char *locStr = cgi.Localize(arg_tokens[0], arg_buffers, num_args);
 				int xOffs = 0;
 				if (rightAlign) {
-					xOffs = scr_usekfont->integer ? cgi.SCR_MeasureFontString(locStr, scale).x : (strlen(locStr) * CONCHAR_WIDTH * scale);
+					if (!scr_usekfont->integer)
+						xOffs = strlen(locStr) * CONCHAR_WIDTH * scale;
+					else {
+						cgi.SCR_SetAltTypeface(ui_acc_alttypeface->integer && true);
+						xOffs = cgi.SCR_MeasureFontString(locStr, scale).x;
+						cgi.SCR_SetAltTypeface(false);
+					}
 				}
 
 				if (!scr_usekfont->integer)
@@ -1026,7 +1032,14 @@ static void CG_ExecuteLayoutString(const char *s, vrect_t hud_vrect, vrect_t hud
 				arg_buffers[0] = G_Fmt("{:02}:{:02}", (remaining_ms / 1000) / 60, (remaining_ms / 1000) % 60).data();
 
 				const char *locStr = cgi.Localize("$g_score_time", arg_buffers, 1);
-				int xOffs = scr_usekfont->integer ? cgi.SCR_MeasureFontString(locStr, scale).x : (strlen(locStr) * CONCHAR_WIDTH * scale);
+				int xOffs;
+				if (!scr_usekfont->integer)
+					xOffs = strlen(locStr) * CONCHAR_WIDTH * scale;
+				else {
+					cgi.SCR_SetAltTypeface(ui_acc_alttypeface->integer && true);
+					xOffs = cgi.SCR_MeasureFontString(locStr, scale).x;
+					cgi.SCR_SetAltTypeface(false);
+				}
 				if (!scr_usekfont->integer)
 					CG_DrawString(x - xOffs, y, scale, locStr, green);
 				else {
@@ -1417,7 +1430,7 @@ void CG_DrawMuffModeHudEnhancements(const player_state_t *ps, vrect_t hud_vrect,
 	if (ps->stats[STAT_LAYOUTS] & LAYOUTS_HIDE_HUD)
 		return;
 
-	// FFA/Duel/RR skin-icon miniscore: omitted from CS_STATUSBAR for vanilla clients.
+	// FFA/Duel/RR/Horde skin-icon miniscore: omitted from CS_STATUSBAR for vanilla clients.
 	CG_DrawFfaMiniscoreRow(ps, hud_vrect, muffmode::hud::kBottomMiniscoreRow1Yb, scale, hud_safe.x, hud_safe.y,
 		STAT_MINISCORE_FIRST_PIC, STAT_MINISCORE_FIRST_SCORE, STAT_MINISCORE_FIRST_POS);
 	CG_DrawFfaMiniscoreRow(ps, hud_vrect, muffmode::hud::kBottomMiniscoreRow2Yb, scale, hud_safe.x, hud_safe.y,

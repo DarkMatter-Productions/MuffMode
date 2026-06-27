@@ -228,7 +228,7 @@ void BroadcastTeamChange(gentity_t *ent, int old_team, bool inactive, bool silen
 	if (muffmode::CvarEnabled(g_dm_do_readyup) && level.match_state == matchst_t::MATCH_WARMUP_READYUP) {
 		BroadcastReadyReminderMessage();
 	} else if (!t.empty()) {
-		gi.LocClient_Print(ent, PRINT_CENTER, "%bind:inven:Toggles Menu%{}", t.c_str());
+		gi.LocClient_Print(ent, PRINT_CENTER, "%bind:inven:Open menu%{}", t.c_str());
 	}
 }
 

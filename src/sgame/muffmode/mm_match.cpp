@@ -548,6 +548,108 @@ ReadyConditionsMet
 */
 namespace muffmode::match {
 
+void GetWarmupReadyCounts(int &ready_humans, int &playing_humans)
+{
+	ready_humans = 0;
+	playing_humans = 0;
+
+	for (auto ec : active_clients()) {
+		if (!ClientIsPlaying(ec->client))
+			continue;
+		if (ec->svflags & SVF_BOT || ec->client->sess.is_a_bot)
+			continue;
+
+		if (ec->client->resp.ready)
+			ready_humans++;
+		playing_humans++;
+	}
+}
+
+void BroadcastWarmupWaitNotice()
+{
+	if (!deathmatch->integer)
+		return;
+
+	const char *msg = nullptr;
+
+	switch (level.warmup_requisite) {
+	case warmupreq_t::WARMUP_REQ_MORE_PLAYERS:
+		msg = G_Fmt("Waiting for players ({} minimum)", minplayers->integer).data();
+		break;
+	case warmupreq_t::WARMUP_REQ_BALANCE:
+		msg = "Teams are imbalanced.";
+		break;
+	default:
+		return;
+	}
+
+	gi.LocBroadcast_Print(PRINT_CENTER, "{}", msg);
+	level.warmup_notice_time = level.time;
+}
+
+static void SendWarmupReadyNudge(gentity_t *ent)
+{
+	if (!ent || !ent->client)
+		return;
+
+	int ready_humans = 0, playing_humans = 0;
+	GetWarmupReadyCounts(ready_humans, playing_humans);
+
+	if (playing_humans > 0)
+		gi.LocCenter_Print(ent, "%bind:inven:Open menu%You are NOT ready. ({}/{} ready)", ready_humans, playing_humans);
+	else
+		gi.LocCenter_Print(ent, "%bind:inven:Open menu%You are NOT ready.");
+
+	ent->client->last_warmup_nudge_time = level.time;
+}
+
+void SendWarmupReadyReminder(gentity_t *ent)
+{
+	SendWarmupReadyNudge(ent);
+}
+
+static void TickWarmupWaitNudges()
+{
+	if (!deathmatch->integer)
+		return;
+	if (level.match_state != matchst_t::MATCH_WARMUP_DEFAULT)
+		return;
+	if (level.warmup_requisite != warmupreq_t::WARMUP_REQ_MORE_PLAYERS
+		&& level.warmup_requisite != warmupreq_t::WARMUP_REQ_BALANCE)
+		return;
+
+	if (level.warmup_notice_time != 0_sec
+		&& level.time < level.warmup_notice_time + WARMUP_READY_NUDGE_INTERVAL)
+		return;
+
+	BroadcastWarmupWaitNotice();
+}
+
+void TickWarmupReadyNudges()
+{
+	if (!deathmatch->integer || !muffmode::CvarEnabled(g_dm_do_readyup))
+		return;
+	if (level.match_state != matchst_t::MATCH_WARMUP_READYUP)
+		return;
+
+	for (auto ec : active_players()) {
+		if (!ec || !ec->client)
+			continue;
+		if (!ClientIsPlaying(ec->client))
+			continue;
+		if (ec->client->sess.is_a_bot || (ec->svflags & SVF_BOT))
+			continue;
+		if (ec->client->resp.ready)
+			continue;
+
+		if (ec->client->last_warmup_nudge_time != 0_sec
+			&& level.time < ec->client->last_warmup_nudge_time + WARMUP_READY_NUDGE_INTERVAL)
+			continue;
+
+		SendWarmupReadyNudge(ec);
+	}
+}
+
 bool ReadyConditionsMet()
 {
 	if (!muffmode::CvarEnabled(g_dm_do_readyup))
@@ -556,6 +658,7 @@ bool ReadyConditionsMet()
 	int count_ready = 0;
 	int count_humans = 0;
 	int count_bots = 0;
+	GetWarmupReadyCounts(count_ready, count_humans);
 	for (auto ec : active_clients()) {
 		if (!ClientIsPlaying(ec->client))
 			continue;
@@ -563,10 +666,6 @@ bool ReadyConditionsMet()
 			count_bots++;
 			continue;
 		}
-
-		if (ec->client->resp.ready)
-			count_ready++;
-		count_humans++;
 	}
 
 	// wait if no players at all
@@ -1201,6 +1300,7 @@ void TickWarmupState() {
 				level.warmup_notice_time = level.time;
 				if (prev_state == matchst_t::MATCH_COUNTDOWN || prev_state == matchst_t::MATCH_WARMUP_READYUP)
 					level.warmup_gametype_hud_time = level.time;
+				BroadcastWarmupWaitNotice();
 			}
 		}
 		return; // still waiting for players
@@ -1231,6 +1331,7 @@ void TickWarmupState() {
 					level.warmup_notice_time = level.time;
 					if (prev_state == matchst_t::MATCH_COUNTDOWN || prev_state == matchst_t::MATCH_WARMUP_READYUP)
 						level.warmup_gametype_hud_time = level.time;
+					BroadcastWarmupWaitNotice();
 				}
 			}
 			level.match_cancel_delay_timer = 0_ms; // reset
@@ -1337,6 +1438,8 @@ match-end warning.
 */
 void MM_Match_RunFrame() {
 	match::TickWarmupState();
+	match::TickWarmupWaitNudges();
+	match::TickWarmupReadyNudges();
 	match::TickRoundState();
 	match::TickCountdown();
 	match::TickMatchEndWarning();

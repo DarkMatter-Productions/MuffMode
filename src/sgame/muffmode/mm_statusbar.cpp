@@ -292,12 +292,9 @@ void EmitStandardTeamMiniscore(statusbar_t &sb)
 	EmitArenaAliveUnderMiniscore(sb);
 }
 
-// Team flag miniscore is vanilla-safe; FFA/Duel/RR player skin icons are MM cgame only.
+// Team flag miniscore is vanilla-safe; FFA/Duel/RR/Horde player skin icons are MM cgame only.
 static bool MiniscoreRowsInVanillaLayout()
 {
-	if (GT(GT_HORDE))
-		return true;
-
 	return Teams() && !GT(GT_RR);
 }
 
@@ -391,13 +388,10 @@ void MM_InitStatusbar()
 
 		sb.endifstat();
 
-		if (muffmode::statusbar::MiniscoreRowsInVanillaLayout()) {
-			if (GT(GT_HORDE))
-				muffmode::statusbar::EmitBottomTeamMiniscoreRows(sb);
-			else
-				muffmode::statusbar::EmitStandardTeamMiniscore(sb);
-		} else {
-			// FFA/Duel/RR: skin-icon miniscore omitted — MM cgame draws via CG_DrawMuffModeHudEnhancements.
+		if (muffmode::statusbar::MiniscoreRowsInVanillaLayout())
+			muffmode::statusbar::EmitStandardTeamMiniscore(sb);
+		else {
+			// FFA/Duel/RR/Horde: skin-icon miniscore omitted — MM cgame draws via CG_DrawMuffModeHudEnhancements.
 			muffmode::statusbar::EmitArenaAliveUnderMiniscore(sb);
 		}
 	}

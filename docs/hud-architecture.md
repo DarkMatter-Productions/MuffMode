@@ -50,8 +50,8 @@ Use `ifstat` + configstrings instead (same pattern as `STAT_WARMUP_NOTICE` / `ST
 
 | Stat | Writer | Layout consumer | Notes |
 |------|--------|-----------------|-------|
-| `STAT_MATCH_STATE` | `hud.cpp` / match | `xl 0 yb -78 stat_string` | Stock CTF match row (bottom-left) |
-| `STAT_WARMUP_NOTICE` | `hud.cpp` | `xl 0 yb -90` | One line above match state |
+| `STAT_MATCH_STATE` | `hud.cpp` / match | `xv 0 yb -78 stat_string` | Match phase label (`WARMUP`, timer, etc.) |
+| `STAT_WARMUP_NOTICE` | unused | `xv 0 yb -90` | Reserved; warmup/ready guidance is centerprint (menu-bind band) |
 | `STAT_GAMETYPE_HUD` | `hud.cpp` | top-right `loc_stat_rstring` | Gametype / limit label |
 | `STAT_RULESET_HUD` | `hud.cpp` | top-right | Ruleset or capturelimit |
 | `STAT_ROUND_NUMBER` | `hud.cpp` | top-right | Round progress via `CONFIG_ROUND_PROGRESS` |

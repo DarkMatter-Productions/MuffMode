@@ -854,7 +854,7 @@ static void Cmd_Inven_f(gentity_t *ent) {
 		P_Menu_Close(ent);
 		ent->client->follow_update = true;
 		if (!ent->client->initial_menu_closure) {
-			gi.LocClient_Print(ent, PRINT_CENTER, "%bind:inven:Toggles Menu%{}", " ");
+			gi.LocClient_Print(ent, PRINT_CENTER, "%bind:inven:Open menu%{}", " ");
 			ent->client->initial_menu_closure = true;
 		}
 		return;
