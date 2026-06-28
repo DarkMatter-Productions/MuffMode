@@ -171,7 +171,7 @@ Deathmatch respawns use a WORR-style danger score instead of raw farthest-only m
 | `g_allow_kill` | `1` | Allows the `kill` suicide command. |
 | `g_allow_mymap` | `1` | Allows MyMap queueing. |
 | `g_allow_spec_vote` | `0` | Allows spectators to vote. |
-| `g_allow_techs` | `auto` | Controls tech pickups in FFA/TDM/CTF/Horde. `auto` follows mode defaults; votes can force `0` or `1`. |
+| `g_allow_techs` | `auto` | Controls tech pickups in FFA/TDM/CTF/Horde. `auto` enables techs by default in CTF and Horde (off in FFA/TDM); votes can force `0` or `1` in any of those modes. |
 | `g_allow_vote_midgame` | `0` | Allows votes during active matches. |
 | `g_allow_voting` | `1` | Enables voting globally. |
 | `g_inactivity` | `120` | Seconds before inactive players are moved to spectators. |

@@ -271,9 +271,12 @@ static void Tech_Spawn(gitem_t *item, gentity_t *spot) {
 }
 
 bool AllowTechs() {
-	if (!strcmp(g_allow_techs->string, "auto"))
+	if (!strcmp(g_allow_techs->string, "auto")) {
+		// [MuffMode] "auto" enables techs in the modes built around them: CTF and Horde.
+		if (GT(GT_HORDE))
+			return ItemSpawnsEnabled();
 		return !!(GT(GT_CTF) && !(g_instagib->integer || GT(GT_INSTAGIB)) && !(g_nadefest->integer || GT(GT_NADEFEST)));
-	else
+	} else
 		return !!(g_allow_techs->integer && ItemSpawnsEnabled());
 }
 
