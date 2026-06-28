@@ -733,6 +733,10 @@ function Test-GitHubCopilotCommand {
     return [bool](Get-Command "copilot" -ErrorAction SilentlyContinue)
 }
 
+function Test-ReleaseCopilotUserToken {
+    return -not [string]::IsNullOrWhiteSpace($env:COPILOT_GITHUB_TOKEN)
+}
+
 function ConvertTo-HtmlText {
     param([AllowNull()][string]$Text)
     if ($null -eq $Text) {
@@ -1902,6 +1906,50 @@ function Assert-TranslatedHtmlReadme {
     }
 }
 
+function Set-HtmlDocumentLanguage {
+    param(
+        [string]$Html,
+        [string]$HtmlLang
+    )
+
+    if ($Html -match '(?is)<html\b[^>]*\blang\s*=') {
+        return [regex]::Replace($Html, '(?is)(<html\b[^>]*\blang\s*=\s*)(["''])([^"'']+)\2', "`${1}`"`$HtmlLang`"", 1)
+    }
+
+    return [regex]::Replace($Html, '(?is)<html\b', "<html lang=`"$HtmlLang`"", 1)
+}
+
+function New-EnglishFallbackHtmlReadmes {
+    param(
+        [string]$SourcePath,
+        [string]$TargetVersion,
+        [string]$OutputRoot
+    )
+
+    $outputRootAbs = Resolve-RepoPath $OutputRoot
+    $sourceHtml = Get-Content -Raw -LiteralPath $SourcePath
+    $results = New-Object System.Collections.Generic.List[object]
+
+    foreach ($language in @(Get-ReadmeTranslationLanguages)) {
+        $outputPath = Join-Path $outputRootAbs ("README-{0}.{1}.html" -f $TargetVersion, $language.Code)
+        Write-Step "Using English README copy for $($language.EnglishName)"
+        $localizedHtml = Set-HtmlDocumentLanguage -Html $sourceHtml -HtmlLang $language.HtmlLang
+        $localizedHtml = Add-HtmlReadmeLanguageSwitcher -Html $localizedHtml -CurrentLanguageCode $language.Code
+        Set-Content -LiteralPath $outputPath -Value $localizedHtml -Encoding utf8
+        Assert-TranslatedHtmlReadme -SourcePath $SourcePath -TranslatedPath $outputPath -Language $language
+        $results.Add([pscustomobject]@{
+            Code = $language.Code
+            HtmlLang = $language.HtmlLang
+            EnglishName = $language.EnglishName
+            NativeName = $language.NativeName
+            PackageFileName = $language.PackageFileName
+            Path = $outputPath
+        })
+    }
+
+    return @($results)
+}
+
 function New-TranslatedHtmlReadmes {
     param(
         [string]$SourcePath,
@@ -1918,6 +1966,18 @@ function New-TranslatedHtmlReadmes {
     $translationLanguages = @(Get-ReadmeTranslationLanguages)
     if ($translationLanguages.Count -eq 0) {
         return @()
+    }
+
+    if (-not (Test-ReleaseCopilotUserToken)) {
+        if ($RequireCopilot) {
+            throw "COPILOT_GITHUB_TOKEN is required for localized README translation. Set a fine-grained user PAT with the Copilot Requests permission, or disable require_copilot to use English README copies."
+        }
+
+        Write-Warning "COPILOT_GITHUB_TOKEN is not set. Using English README copies for localized guide files."
+        return New-EnglishFallbackHtmlReadmes `
+            -SourcePath $SourcePath `
+            -TargetVersion $TargetVersion `
+            -OutputRoot $OutputRoot
     }
 
     Assert-GitHubCopilot
@@ -2020,7 +2080,7 @@ CHANGELOG:
 $changelog
 "@
 
-    if (Test-GitHubCopilotCommand) {
+    if ((Test-GitHubCopilotCommand) -and (Test-ReleaseCopilotUserToken)) {
         try {
             Write-Step "Generating end-user README.html with GitHub Copilot"
             $output = Invoke-GitHubCopilot -Prompt $prompt -Purpose "generating README.html"
@@ -2033,14 +2093,21 @@ $changelog
             if ($RequireCopilot) {
                 throw
             }
-            Write-Warning "GitHub Copilot English README generation failed; using deterministic English HTML README instead. Localized README translation still requires Copilot. $($_.Exception.Message)"
+            Write-Warning "GitHub Copilot English README generation failed; using deterministic English HTML README instead. $($_.Exception.Message)"
         }
     }
-    else {
-        if ($RequireCopilot) {
+    elseif ($RequireCopilot) {
+        if (-not (Test-GitHubCopilotCommand)) {
             throw "GitHub Copilot CLI is required because -RequireCopilot was supplied, but 'copilot' was not found on PATH."
         }
-        Write-Warning "GitHub Copilot CLI was not found; using deterministic English HTML README instead. Localized README translation still requires Copilot."
+
+        throw "COPILOT_GITHUB_TOKEN is required because -RequireCopilot was supplied, but no user Copilot token is configured."
+    }
+    elseif (Test-GitHubCopilotCommand) {
+        Write-Warning "COPILOT_GITHUB_TOKEN is not set; using deterministic English HTML README instead."
+    }
+    else {
+        Write-Warning "GitHub Copilot CLI was not found; using deterministic English HTML README instead."
     }
 
     New-DeterministicHtmlReadme `
