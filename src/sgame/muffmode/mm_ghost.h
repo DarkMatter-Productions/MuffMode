@@ -9,8 +9,10 @@ struct gentity_t;
 
 // [MuffMode] Match ghost system: rejoin a match in progress with state intact.
 void MM_Ghost_ClearAll();
+void MM_Ghost_ClearClient(gentity_t *ent);
 void MM_Ghost_Assign(gentity_t *ent);
 void MM_Ghost_DoAssign(gentity_t *ent);
+bool MM_Ghost_CaptureInactive(gentity_t *ent);
 bool MM_Ghost_CaptureDisconnect(gentity_t *ent);
 void MM_Ghost_MakeDisconnectPlaceholder(gentity_t *ent);
 gentity_t *MM_Ghost_ChooseReconnectSlot(const char *social_id, gentity_t **ignore, size_t num_ignore);

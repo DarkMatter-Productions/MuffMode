@@ -137,7 +137,7 @@ void ResetEntities(bool reset_players, bool reset_ghost, bool reset_score)
 			if (reset_score)
 				ec->client->resp.score = 0;
 			if (reset_ghost)
-				ec->client->resp.ghost = nullptr;
+				MM_Ghost_ClearClient(ec);
 
 			if (ClientIsPlaying(ec->client)) {
 				if (reset_ghost) {
@@ -465,7 +465,6 @@ void Match_Start() {
 	}
 
 	MM_Ghost_ClearAll();
-
 	match::ResetEntities(true, true, true);
 	UnReadyAll();
 	ValidateCaptains();
@@ -511,7 +510,8 @@ void Match_Reset() {
 	//	return;
 	//}
 
-	match::ResetEntities(true, true, true);
+	MM_Ghost_ClearAll();
+	match::ResetEntities(true, false, true);
 	UnReadyAll();
 	ValidateCaptains();
 

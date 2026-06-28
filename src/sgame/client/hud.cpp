@@ -1627,7 +1627,7 @@ void G_SetStats(gentity_t *ent) {
 	SetMiniScoreStats(ent);
 
 	// ghosting
-	if (ent->client->resp.ghost) {
+	if (ent->client->resp.ghost && ClientIsPlaying(ent->client) && !(ent->svflags & SVF_BOT) && !ent->client->sess.is_a_bot) {
 		ent->client->resp.ghost->score = ent->client->resp.score;
 		Q_strlcpy(ent->client->resp.ghost->netname, ent->client->resp.netname, sizeof(ent->client->resp.ghost->netname));
 		ent->client->resp.ghost->number = ent->s.number;

@@ -458,6 +458,9 @@ bool SetTeam(gentity_t *ent, team_t desired_team, bool inactive, bool force, boo
 
 	const team_t old_team = ent->client->sess.team;
 	bool queue = false;
+
+	if (desired_team != TEAM_SPECTATOR && ent->client->sess.inactive && MM_Ghost_TryRestore(ent))
+		return true;
 	
 	if (!force) {
 		// Check if this would be a duel queue join (spectator with queue flag)
@@ -515,6 +518,9 @@ bool SetTeam(gentity_t *ent, team_t desired_team, bool inactive, bool force, boo
 
 	P_Menu_Close(ent);
 
+	if (desired_team == TEAM_SPECTATOR && inactive)
+		MM_Ghost_CaptureInactive(ent);
+
 	// vacate captain if leaving a team
 	if (muffmode::team::IsPlayingTeam(old_team) && old_team != desired_team) {
 		if (level.captain[old_team] == ent)
@@ -571,6 +577,8 @@ bool SetTeam(gentity_t *ent, team_t desired_team, bool inactive, bool force, boo
 		// auto-assign captain if team has none
 		if (muffmode::team::IsPlayingTeam(desired_team) && !level.captain[desired_team])
 			SetCaptain(desired_team, ent);
+	} else if (!inactive) {
+		MM_Ghost_ClearClient(ent);
 	}
 
 	ent->client->sess.initialised = true;

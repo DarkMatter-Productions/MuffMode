@@ -530,6 +530,35 @@ void UpdateGhostStatsFromEntity(gentity_t *ent, ghost_t &ghost)
 	muffmode::CopyString(ghost.netname, ent->client->resp.netname);
 }
 
+bool EntityIsBot(gentity_t *ent)
+{
+	return ent && ((ent->svflags & SVF_BOT) || (ent->client && ent->client->sess.is_a_bot));
+}
+
+bool EntityCanOwnGhost(gentity_t *ent)
+{
+	return ent &&
+		ent->client &&
+		deathmatch->integer &&
+		level.match_state == matchst_t::MATCH_IN_PROGRESS &&
+		ClientIsPlaying(ent->client) &&
+		!EntityIsBot(ent);
+}
+
+void ClearEntityGhostSlot(gentity_t *ent)
+{
+	if (!ent || !ent->client) {
+		return;
+	}
+
+	if (int ghost_index = GhostIndex(ent->client->resp.ghost); ghost_index >= 0) {
+		ClearSnapshot(static_cast<size_t>(ghost_index));
+		level.ghosts[ghost_index] = ghost_t{};
+	}
+
+	ent->client->resp.ghost = nullptr;
+}
+
 int AutoGhostTimeoutSeconds()
 {
 	if (!g_auto_ghost_timeout)
@@ -561,6 +590,63 @@ bool StartAutoGhostTimeout(gentity_t *ent)
 		ent->client->resp.netname, G_TimeString(timeout_seconds * 1000, false));
 	gi.positioned_sound(world->s.origin, world, CHAN_RELIABLE | CHAN_NO_PHS_ADD | CHAN_AUX,
 		gi.soundindex("world/klaxon2.wav"), 1, ATTN_NONE, 0);
+	return true;
+}
+
+bool CaptureActivePlayerSnapshot(gentity_t *ent, bool start_auto_timeout)
+{
+	if (!EntityCanOwnGhost(ent)) {
+		ClearEntityGhostSlot(ent);
+		return false;
+	}
+	if (level.intermission_time || level.intermission_queued)
+		return false;
+	if (!HasUsableSocialId(ent->client->pers.social_id))
+		return false;
+	if (level.match_id.empty())
+		return false;
+
+	const int ghost_seconds = AutoGhostDurationSeconds();
+	if (ghost_seconds <= 0)
+		return false;
+
+	const int existing_ghost_index = GhostIndex(ent->client->resp.ghost);
+	ExpireSnapshotsForSocialId(ent->client->pers.social_id, existing_ghost_index);
+	const int max_ghosts = AutoGhostMaxReservations();
+	if (max_ghosts <= 0 || ActiveSnapshotCount(existing_ghost_index) >= max_ghosts)
+		return false;
+
+	if (!ent->client->resp.ghost)
+		MM_Ghost_Assign(ent);
+
+	const int ghost_index = GhostIndex(ent->client->resp.ghost);
+	if (ghost_index < 0)
+		return false;
+
+	ExpireSnapshotsForSocialId(ent->client->pers.social_id, ghost_index);
+	if (!level.ghosts[ghost_index].code)
+		GenerateGhostCode(static_cast<size_t>(ghost_index));
+
+	auto &snapshot = auto_ghosts[ghost_index];
+	snapshot = AutoGhostSnapshot{};
+	snapshot.valid = true;
+	snapshot.match_id = level.match_id;
+	snapshot.remaining = gtime_t::from_sec(ghost_seconds);
+	muffmode::CopyString(snapshot.social_id, ent->client->pers.social_id);
+	snapshot.client = *ent->client;
+	snapshot.client.pers.health = ent->health;
+	snapshot.client.pers.max_health = ent->max_health;
+	snapshot.client.pers.saved_flags = ent->flags & (FL_FLASHLIGHT | FL_GODMODE | FL_NOTARGET | FL_POWER_ARMOR | FL_WANTS_POWER_ARMOR);
+	snapshot.entity = CaptureEntityLife(ent);
+
+	UpdateGhostStatsFromEntity(ent, level.ghosts[ghost_index]);
+	if (start_auto_timeout) {
+		if (!StartAutoGhostTimeout(ent))
+			DropSnapshotFlags(static_cast<size_t>(ghost_index));
+	} else {
+		DropSnapshotFlags(static_cast<size_t>(ghost_index));
+	}
+
 	return true;
 }
 
@@ -627,6 +713,20 @@ void MM_Ghost_ClearAll() {
 		ghost_snapshot::ClearSnapshot(i);
 
 	std::fill(std::begin(level.ghosts), std::end(level.ghosts), ghost_t{});
+
+	if (game.clients) {
+		for (size_t i = 0; i < ghost_snapshot::GhostSlotCapacity(); i++)
+			game.clients[i].resp.ghost = nullptr;
+	}
+}
+
+/*
+================
+MM_Ghost_ClearClient
+================
+*/
+void MM_Ghost_ClearClient(gentity_t *ent) {
+	ghost_snapshot::ClearEntityGhostSlot(ent);
 }
 
 /*
@@ -640,6 +740,10 @@ same-account reconnect recovery.
 void MM_Ghost_Assign(gentity_t *ent) {
 	if (!ent || !ent->client)
 		return;
+	if (!ghost_snapshot::EntityCanOwnGhost(ent)) {
+		ghost_snapshot::ClearEntityGhostSlot(ent);
+		return;
+	}
 
 	ghost_t *slot = ghost_snapshot::AllocateGhostSlot(ent);
 	if (!slot)
@@ -664,6 +768,10 @@ MM_Ghost_DoAssign
 void MM_Ghost_DoAssign(gentity_t *ent) {
 	if (!ent || !ent->client)
 		return;
+	if (!ghost_snapshot::EntityCanOwnGhost(ent)) {
+		ghost_snapshot::ClearEntityGhostSlot(ent);
+		return;
+	}
 
 	// assign a ghost code
 	if (level.match_state == matchst_t::MATCH_IN_PROGRESS) {
@@ -678,6 +786,17 @@ void MM_Ghost_DoAssign(gentity_t *ent) {
 
 /*
 ================
+MM_Ghost_CaptureInactive
+
+Captures a live player's match state before an inactivity move to spectator.
+================
+*/
+bool MM_Ghost_CaptureInactive(gentity_t *ent) {
+	return ghost_snapshot::CaptureActivePlayerSnapshot(ent, false);
+}
+
+/*
+================
 MM_Ghost_CaptureDisconnect
 
 Captures a live player's current match state for same-social-ID reconnect.
@@ -686,52 +805,8 @@ Captures a live player's current match state for same-social-ID reconnect.
 bool MM_Ghost_CaptureDisconnect(gentity_t *ent) {
 	if (!ent || !ent->client || !deathmatch->integer)
 		return false;
-	if ((ent->svflags & SVF_BOT) || ent->client->sess.is_a_bot)
-		return false;
-	if (level.match_state != matchst_t::MATCH_IN_PROGRESS || level.intermission_time || level.intermission_queued)
-		return false;
-	if (!ClientIsPlaying(ent->client) || !ghost_snapshot::HasUsableSocialId(ent->client->pers.social_id))
-		return false;
-	if (level.match_id.empty())
-		return false;
 
-	const int ghost_seconds = ghost_snapshot::AutoGhostDurationSeconds();
-	if (ghost_seconds <= 0)
-		return false;
-
-	const int existing_ghost_index = ghost_snapshot::GhostIndex(ent->client->resp.ghost);
-	ghost_snapshot::ExpireSnapshotsForSocialId(ent->client->pers.social_id, existing_ghost_index);
-	const int max_ghosts = ghost_snapshot::AutoGhostMaxReservations();
-	if (max_ghosts <= 0 || ghost_snapshot::ActiveSnapshotCount(existing_ghost_index) >= max_ghosts)
-		return false;
-
-	if (!ent->client->resp.ghost)
-		MM_Ghost_Assign(ent);
-
-	const int ghost_index = ghost_snapshot::GhostIndex(ent->client->resp.ghost);
-	if (ghost_index < 0)
-		return false;
-
-	ghost_snapshot::ExpireSnapshotsForSocialId(ent->client->pers.social_id, ghost_index);
-	if (!level.ghosts[ghost_index].code)
-		ghost_snapshot::GenerateGhostCode(static_cast<size_t>(ghost_index));
-
-	auto &snapshot = ghost_snapshot::auto_ghosts[ghost_index];
-	snapshot = ghost_snapshot::AutoGhostSnapshot{};
-	snapshot.valid = true;
-	snapshot.match_id = level.match_id;
-	snapshot.remaining = gtime_t::from_sec(ghost_seconds);
-	muffmode::CopyString(snapshot.social_id, ent->client->pers.social_id);
-	snapshot.client = *ent->client;
-	snapshot.client.pers.health = ent->health;
-	snapshot.client.pers.max_health = ent->max_health;
-	snapshot.client.pers.saved_flags = ent->flags & (FL_FLASHLIGHT | FL_GODMODE | FL_NOTARGET | FL_POWER_ARMOR | FL_WANTS_POWER_ARMOR);
-	snapshot.entity = ghost_snapshot::CaptureEntityLife(ent);
-
-	ghost_snapshot::UpdateGhostStatsFromEntity(ent, level.ghosts[ghost_index]);
-	if (!ghost_snapshot::StartAutoGhostTimeout(ent))
-		ghost_snapshot::DropSnapshotFlags(static_cast<size_t>(ghost_index));
-	return true;
+	return ghost_snapshot::CaptureActivePlayerSnapshot(ent, true);
 }
 
 /*
@@ -830,6 +905,8 @@ MM_Ghost_TryRestore
 bool MM_Ghost_TryRestore(gentity_t *ent) {
 	if (!ent || !ent->client)
 		return false;
+	if (ghost_snapshot::EntityIsBot(ent))
+		return false;
 
 	const int ghost_index = ghost_snapshot::FindSnapshotForSocialId(ent->client->pers.social_id);
 	if (ghost_index < 0)
@@ -899,6 +976,8 @@ void MM_CmdGhost(gentity_t *ent) {
 	int n;
 
 	if (!ent || !ent->client)
+		return;
+	if (ghost_snapshot::EntityIsBot(ent))
 		return;
 
 	if (!MM_IsExactArgcValid(gi.argc(), 2)) {
