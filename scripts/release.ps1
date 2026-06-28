@@ -1906,19 +1906,6 @@ function Assert-TranslatedHtmlReadme {
     }
 }
 
-function Set-HtmlDocumentLanguage {
-    param(
-        [string]$Html,
-        [string]$HtmlLang
-    )
-
-    if ($Html -match '(?is)<html\b[^>]*\blang\s*=') {
-        return [regex]::Replace($Html, '(?is)(<html\b[^>]*\blang\s*=\s*)(["''])([^"'']+)\2', "`${1}`"`$HtmlLang`"", 1)
-    }
-
-    return [regex]::Replace($Html, '(?is)<html\b', "<html lang=`"$HtmlLang`"", 1)
-}
-
 function New-EnglishFallbackHtmlReadmes {
     param(
         [string]$SourcePath,
@@ -1933,8 +1920,7 @@ function New-EnglishFallbackHtmlReadmes {
     foreach ($language in @(Get-ReadmeTranslationLanguages)) {
         $outputPath = Join-Path $outputRootAbs ("README-{0}.{1}.html" -f $TargetVersion, $language.Code)
         Write-Step "Using English README copy for $($language.EnglishName)"
-        $localizedHtml = Set-HtmlDocumentLanguage -Html $sourceHtml -HtmlLang $language.HtmlLang
-        $localizedHtml = Add-HtmlReadmeLanguageSwitcher -Html $localizedHtml -CurrentLanguageCode $language.Code
+        $localizedHtml = Add-HtmlReadmeLanguageSwitcher -Html $sourceHtml -CurrentLanguageCode $language.Code
         Set-Content -LiteralPath $outputPath -Value $localizedHtml -Encoding utf8
         Assert-TranslatedHtmlReadme -SourcePath $SourcePath -TranslatedPath $outputPath -Language $language
         $results.Add([pscustomobject]@{
