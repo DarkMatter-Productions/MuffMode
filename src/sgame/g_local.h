@@ -11,7 +11,7 @@
 constexpr const char *GAMEVERSION = "baseq2";
 
 constexpr const char *GAMEMOD_TITLE = "Muff Mode";
-constexpr const char *GAMEMOD_VERSION = "0.40.2";
+constexpr const char *GAMEMOD_VERSION = "0.40.20";
 
 //==================================================================
 
@@ -1646,6 +1646,7 @@ struct level_locals_t {
 	int			num_eliminated_red;
 	int			num_living_blue;
 	int			num_eliminated_blue;
+	int			num_living_free;	// FFA elimination modes (e.g. LMS)
 	int			num_playing_red;
 	int			num_playing_blue;
 
@@ -1655,6 +1656,7 @@ struct level_locals_t {
 	matchst_t	match_state;
 	warmupreq_t	warmup_requisite;
 	gtime_t		warmup_notice_time;
+	gtime_t		warmup_gametype_hud_time;	// reserved: gametype/ruleset HUD pulse anchor
 	gtime_t		match_time;
 	gtime_t		match_start_time;
 	int			match_state_queued;
@@ -2407,6 +2409,7 @@ extern cvar_t *g_coop_health_scaling;
 extern cvar_t *g_coop_instanced_items;
 extern cvar_t *g_coop_num_lives;
 extern cvar_t *g_horde_lives;
+extern cvar_t *g_lms_lives;
 extern cvar_t *g_horde_start_chainsaw;
 extern cvar_t *g_horde_item_respawn_scale;
 extern cvar_t *g_coop_player_collision;
@@ -3316,6 +3319,8 @@ struct height_fog_t {
 };
 
 constexpr gtime_t SELECTED_ITEM_TIME = 3_sec;
+// Unready-player centerprint reminder interval during MATCH_WARMUP_READYUP.
+constexpr gtime_t WARMUP_READY_NUDGE_INTERVAL = 30_sec;
 
 enum bmodel_animstyle_t : int32_t {
 	BMODEL_ANIM_FORWARDS,
@@ -3698,6 +3703,7 @@ struct gclient_t {
 
 	gtime_t invisibility_fade_time; // [Paril-KEX] at this time, the player will be mostly fully cloaked
 	gtime_t chase_msg_time; // to prevent CTF message spamming
+	gtime_t last_warmup_nudge_time; // ready-up centerprint nudge; 0 = none sent yet this phase
 	int32_t menu_sign; // menu sign
 	vec3_t last_ladder_pos; // for ladder step sounds
 	gtime_t last_ladder_sound;

@@ -217,6 +217,7 @@ cvar_t *g_horde_player_scale;
 cvar_t *g_horde_player_scale_factor;
 cvar_t *g_horde_player_scale_max;
 cvar_t *g_horde_lives;
+cvar_t *g_lms_lives;
 cvar_t *g_horde_mark_monsters_threshold;
 cvar_t *g_horde_mark_monsters_max;
 cvar_t *g_horde_map_scale;
@@ -375,7 +376,7 @@ int _gt[] = {
 	/* GT_FREEZE */ 0, // removed
 	/* GT_STRIKE */ GTF_TEAMS | GTF_ARENA | GTF_ROUNDS | GTF_CTF | GTF_ELIMINATION,
 	/* GT_RR */ GTF_TEAMS | GTF_ARENA | GTF_ROUNDS | GTF_FRAGS,
-	/* GT_LMS */ 0, // removed
+	/* GT_LMS */ GTF_ARENA | GTF_ROUNDS | GTF_ELIMINATION,
 	/* GT_HORDE */ GTF_ROUNDS,
 	/* GT_BALL */ 0, // removed
 	/* GT_INSTAGIB */ GTF_FRAGS,
@@ -507,6 +508,7 @@ static void InitGame() {
 	g_horde_player_scale_factor = gi.cvar("g_horde_player_scale_factor", "0.4", CVAR_NOFLAGS);
 	g_horde_player_scale_max = gi.cvar("g_horde_player_scale_max", "8", CVAR_NOFLAGS);
 	g_horde_lives = gi.cvar("g_horde_lives", "1", CVAR_NOFLAGS);
+	g_lms_lives = gi.cvar("g_lms_lives", "1", CVAR_NOFLAGS);
 	g_horde_mark_monsters_threshold = gi.cvar("g_horde_mark_monsters_threshold", "3", CVAR_NOFLAGS);
 	g_horde_mark_monsters_max = gi.cvar("g_horde_mark_monsters_max", "8", CVAR_NOFLAGS);
 	g_horde_map_scale = gi.cvar("g_horde_map_scale", "1", CVAR_NOFLAGS);
@@ -809,6 +811,7 @@ static void InitGame() {
 	level.match_state_timer = 0_sec;
 	level.match_time = level.time;
 	level.warmup_notice_time = level.time;
+	level.warmup_gametype_hud_time = level.time;
 
 	level.locked[TEAM_SPECTATOR] = false;
 	level.locked[TEAM_FREE] = false;
@@ -1207,6 +1210,7 @@ void CalculateRanks() {
 	level.num_eliminated_blue = 0;
 	level.num_living_red = 0;
 	level.num_living_blue = 0;
+	level.num_living_free = 0;
 	level.num_playing_red = 0;
 	level.num_playing_blue = 0;
 
@@ -1239,17 +1243,19 @@ void CalculateRanks() {
 		if (teams) {
 			if (cl->sess.team == TEAM_RED) {
 				level.num_playing_red++;
-				if (cl->pers.health > 0)
+				if (!cl->eliminated && cl->pers.health > 0)
 					level.num_living_red++;
 				else if (cl->eliminated)
 					level.num_eliminated_red++;
 			} else {
 				level.num_playing_blue++;
-				if (cl->pers.health > 0)
+				if (!cl->eliminated && cl->pers.health > 0)
 					level.num_living_blue++;
 				else if (cl->eliminated)
 					level.num_eliminated_blue++;
 			}
+		} else if (!cl->eliminated && cl->pers.health > 0) {
+			level.num_living_free++;
 		}
 	}
 
@@ -1312,8 +1318,6 @@ void CalculateRanks() {
 		level.no_players_time = level.time;
 	else if (level.num_playing_clients)
 		level.no_players_time = 0_sec;
-	
-	level.warmup_notice_time = level.time;
 
 	if (level.match_state == MATCH_IN_PROGRESS) {
 		// Red Rover is decided by the round/time limits, not a frag target, so it skips the
@@ -1856,6 +1860,7 @@ static bool Match_NextMap() {
 	if (level.match_state == matchst_t::MATCH_ENDED) {
 		level.match_state = matchst_t::MATCH_WARMUP_DELAYED;
 		level.warmup_notice_time = level.time;
+		level.warmup_gametype_hud_time = level.time;
 		Match_Reset();
 		return true;
 	}

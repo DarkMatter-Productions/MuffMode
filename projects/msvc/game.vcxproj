@@ -171,6 +171,7 @@
     <ClInclude Include="..\..\src\sgame\muffmode\mm_admin.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_captain.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_command_contracts.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_hud_stat_contracts.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_combat_heatmap.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_debug.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_duel.h" />
@@ -181,6 +182,8 @@
     <ClInclude Include="..\..\src\sgame\muffmode\mm_horde_ai_rules.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_horde_tables.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_items_rules.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_lms.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_lms_rules.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_loc.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_loc_parse.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_maps.h" />
@@ -192,6 +195,7 @@
     <ClInclude Include="..\..\src\sgame\muffmode\mm_pconfig.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_profile.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_red_rover_rules.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_scoreboard_layout.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_ruleset.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_ruleset_weapons.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_skin.h" />
@@ -299,6 +303,7 @@
     <ClCompile Include="..\..\src\sgame\muffmode\mm_horde.cpp" />
     <ClCompile Include="..\..\src\sgame\muffmode\mm_horde_tables.cpp" />
     <ClCompile Include="..\..\src\sgame\muffmode\mm_items_rules.cpp" />
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_lms.cpp" />
     <ClCompile Include="..\..\src\sgame\muffmode\mm_loc.cpp" />
     <ClCompile Include="..\..\src\sgame\muffmode\mm_maps.cpp" />
     <ClCompile Include="..\..\src\sgame\muffmode\mm_match.cpp" />

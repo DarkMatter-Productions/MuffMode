@@ -15,6 +15,7 @@
 #include "muffmode/mm_parse.h"
 #include "muffmode/mm_pconfig.h"
 #include "muffmode/mm_skin.h"
+#include "muffmode/mm_statusbar.h"
 #include "muffmode/mm_team.h"
 #include "muffmode/mm_vote.h"
 #include "muffmode/mm_vote_menu.h"
@@ -853,7 +854,7 @@ static void Cmd_Inven_f(gentity_t *ent) {
 		P_Menu_Close(ent);
 		ent->client->follow_update = true;
 		if (!ent->client->initial_menu_closure) {
-			gi.LocClient_Print(ent, PRINT_CENTER, "%bind:inven:Toggles Menu%{}", " ");
+			gi.LocClient_Print(ent, PRINT_CENTER, "%bind:inven:Open menu%{}", " ");
 			ent->client->initial_menu_closure = true;
 		}
 		return;
@@ -1150,6 +1151,22 @@ static void Cmd_Where_f(gentity_t *ent) {
 	// remote client running "where" would clobber the host's clipboard.
 	if (ent == &g_entities[1])
 		gi.SendToClipBoard(location.c_str());
+}
+
+/*
+=================
+Cmd_HudDump_f
+
+[MuffMode] Dev tooling: write the current gametype's CS_STATUSBAR layout to hud_dump.json
+in the working dir, for loading into the offline HUD previewer (docs-dev/hud-editor).
+=================
+*/
+static void Cmd_HudDump_f(gentity_t *ent) {
+	std::string path;
+	if (MM_DumpStatusbar(&path))
+		gi.LocClient_Print(ent, PRINT_HIGH, "HUD layout dumped to {}\n", path.c_str());
+	else
+		gi.LocClient_Print(ent, PRINT_HIGH, "HUD layout dump failed.\n");
 }
 
 /*
@@ -2273,6 +2290,7 @@ cmds_t client_cmds[] = {
 	{"god",				Cmd_God_f,				CF_ALLOW_SPEC | CF_CHEAT_PROTECT},
 	{"help",			Cmd_Help_f,				CF_ALLOW_DEAD | CF_ALLOW_SPEC},
 	{"hook",			Cmd_Hook_f,				CF_NONE},
+	{"hud_dump",		Cmd_HudDump_f,			CF_ADMIN_ONLY | CF_ALLOW_INT | CF_ALLOW_SPEC | CF_ALLOW_DEAD},
 	{"id",				Cmd_CrosshairID_f,		CF_ALLOW_SPEC | CF_ALLOW_DEAD},
 	{"immortal",		Cmd_Immortal_f,			CF_ALLOW_SPEC | CF_CHEAT_PROTECT},
 	{"invdrop",			Cmd_InvDrop_f,			CF_NONE},

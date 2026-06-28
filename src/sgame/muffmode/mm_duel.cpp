@@ -336,10 +336,15 @@ void MM_Duel_ScoreboardMessage(gentity_t *ent, gentity_t *killer) {
 
 				if (!k) {
 					k = 1;
-					if (!duel::MM_DuelAppendLayout(string, G_Fmt("xv 0 yv {} loc_string2 0 \"Queued Contenders:\" ", j)))
+					if (!duel::MM_DuelAppendLayout(string, G_Fmt("xv 0 yv {} loc_string2 0 \"Queued Contenders\" ", j)))
 						break;
 					j += 8;
-					if (!duel::MM_DuelAppendLayout(string, G_Fmt("xv -40 yv {} loc_string2 0 \"w  l  name\" ", j)))
+					j += 8;
+					// Column headers at ctf stride (27px): x, x+27, x+54
+					if (!duel::MM_DuelAppendLayout(string, G_Fmt(
+						"xv -40 yv {} loc_string2 0 \"w\" "
+						"xv -13 yv {} loc_string2 0 \"l\" "
+						"xv 14 yv {} loc_string2 0 \"name\" ", j, j, j)))
 						break;
 					j += 8;
 				}
@@ -393,8 +398,9 @@ void MM_Duel_ScoreboardMessage(gentity_t *ent, gentity_t *killer) {
 
 				if (!k) {
 					k = 1;
-					if (!duel::MM_DuelAppendLayout(string, G_Fmt("xv 0 yv {} loc_string2 0 \"Spectators:\" ", j)))
+					if (!duel::MM_DuelAppendLayout(string, G_Fmt("xv 0 yv {} loc_string2 0 \"Spectators\" ", j)))
 						break;
+					j += 8;
 					j += 8;
 				}
 

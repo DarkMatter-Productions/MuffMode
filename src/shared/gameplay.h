@@ -66,6 +66,13 @@ enum {
 
 	CONFIG_STORY_SCORELIMIT,	// this is also used for scorelimit display in dm
 
+	CONFIG_GAMETYPE_HUD,	// DM HUD: "Gametype: …"
+	CONFIG_RULESET_HUD,		// DM HUD: "Ruleset: …"
+	CONFIG_ROUND_PROGRESS,	// DM HUD: "Round x of y" / "Wave x of y"
+	CONFIG_WARMUP_NOTICE,	// DM HUD: warmup requisite detail (e.g. more players needed)
+	CONFIG_POV_CENTER_POOL,	// per-client HUD lines: Strike OFFENSE/DEFENSE, CA/RR/LMS centre POV, ELIMINATED
+	CONFIG_COUNTDOWN_HEADER, // match/round countdown: "Round N\nBegins in..." (centerprint band)
+
 	CONFIG_LAST
 };
 
@@ -246,31 +253,21 @@ enum player_stat_t {
 	STAT_ACTIVE_WEAPON,
 
 	STAT_SCORELIMIT, // match limit value for miniscore HUD (frag/round/capture); 0 = hidden
-	STAT_DUEL_HEADER,
+	STAT_CENTER_LINE,
 
 	STAT_SHOW_STATUSBAR,
 
 	STAT_COUNTDOWN,
 
-	STAT_MINISCORE_FIRST_VAL,
-	STAT_MINISCORE_SECOND_VAL,
-
-	STAT_MONSTER_COUNT,
+	STAT_HORDE_REMAINING,
+	STAT_GAMETYPE_HUD,
+	STAT_RULESET_HUD,
 	STAT_ROUND_NUMBER,
-
-	STAT_MEDAL,
+	STAT_WARMUP_NOTICE,
+	STAT_ARENA_ROLE,
 
 	// don't use; just for verification
 	STAT_LAST
 };
 
-static_assert(STAT_LAST <= MAX_STATS + 1, "stats list overflow");
-
-// Capture Strike packs its per-player HUD role into the STAT_MONSTER_COUNT slot,
-// which is hard-set to 0 in every non-Horde mode (see G_SetCoopStats). Stored as
-// bit flags rather than a value so future strike HUD state can share the same
-// stat without spending a new STAT_ index. Rendered via the "ifbit" statusbar op.
-enum strike_hud_flags_t : uint16_t {
-	STRIKE_HUD_ATTACKING = bit_v<0>,	// local player's team is on offense this turn
-	STRIKE_HUD_DEFENDING = bit_v<1>,	// local player's team is on defense this turn
-};
+static_assert(STAT_LAST <= MAX_STATS, "stats list overflow");

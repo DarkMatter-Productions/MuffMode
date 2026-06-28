@@ -190,6 +190,12 @@
     <ClInclude Include="..\..\src\sgame\muffmode\mm_horde.h">
       <Filter>sgame\muffmode</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_lms.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_lms_rules.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\src\sgame\muffmode\mm_horde_ai.h">
       <Filter>sgame\muffmode</Filter>
     </ClInclude>
@@ -203,6 +209,9 @@
       <Filter>sgame\muffmode</Filter>
     </ClInclude>
     <ClInclude Include="..\..\src\sgame\muffmode\mm_command_contracts.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_hud_stat_contracts.h">
       <Filter>sgame\muffmode</Filter>
     </ClInclude>
     <ClInclude Include="..\..\src\sgame\muffmode\mm_combat_heatmap.h">
@@ -239,6 +248,9 @@
       <Filter>sgame\muffmode</Filter>
     </ClInclude>
     <ClInclude Include="..\..\src\sgame\muffmode\mm_red_rover_rules.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_scoreboard_layout.h">
       <Filter>sgame\muffmode</Filter>
     </ClInclude>
     <ClInclude Include="..\..\src\sgame\muffmode\mm_strike.h">
@@ -553,6 +565,9 @@
       <Filter>sgame\muffmode</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\sgame\muffmode\mm_maps.cpp">
+      <Filter>sgame\muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_lms.cpp">
       <Filter>sgame\muffmode</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\sgame\muffmode\mm_match.cpp">
