@@ -11,7 +11,7 @@
 constexpr const char *GAMEVERSION = "baseq2";
 
 constexpr const char *GAMEMOD_TITLE = "Muff Mode";
-constexpr const char *GAMEMOD_VERSION = "0.40.22";
+constexpr const char *GAMEMOD_VERSION = "0.40.23";
 
 //==================================================================
 
@@ -2416,6 +2416,7 @@ extern cvar_t *g_horde_tech_reset_each_wave;
 extern cvar_t *g_horde_tech_relocate;
 extern cvar_t *g_horde_tech_count;
 extern cvar_t *g_horde_tech_drop_on_death;
+extern cvar_t *g_horde_tech_spawn_anywhere;
 extern cvar_t *g_coop_player_collision;
 extern cvar_t *g_coop_squad_respawn;
 extern cvar_t *g_corpse_sink_time;
@@ -2602,6 +2603,8 @@ void		Tech_Reset();
 void		Tech_HordeClear();
 void		Tech_HordeSpawnWave();
 void		Tech_SetupSpawn();
+// [MuffMode] Horde: random validated floor position for scattering techs (impl in mm_horde.cpp).
+bool		MM_Horde_PickTechSpawnPos(vec3_t &out);
 gitem_t		*Tech_Held(gentity_t *ent);
 int			Tech_ApplyDisruptorShield(gentity_t *ent, int dmg);
 int			Tech_ApplyPowerAmp(gentity_t *ent, int dmg);

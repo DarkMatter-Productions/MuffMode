@@ -215,7 +215,7 @@ void Tech_DeadDrop(gentity_t *ent) {
 	}
 }
 
-static void Tech_Spawn(gitem_t *item, gentity_t *spot) {
+static void Tech_SpawnAtOrigin(gitem_t *item, const vec3_t &origin) {
 	gentity_t	*ent = G_Spawn();
 	vec3_t	forward, right;
 	vec3_t	angles = { 0, (float)irandom(360), 0 };
@@ -234,14 +234,19 @@ static void Tech_Spawn(gitem_t *item, gentity_t *spot) {
 	ent->owner = ent;
 
 	AngleVectors(angles, forward, right, nullptr);
-	ent->s.origin = spot->s.origin;
-	ent->s.origin[2] += 16;
+	ent->s.origin = origin;
 	ent->velocity = forward * 100;
 	ent->velocity[2] = 300;
 
 	Tech_ScheduleRelocate(ent);
 
 	gi.linkentity(ent);
+}
+
+static void Tech_Spawn(gitem_t *item, gentity_t *spot) {
+	vec3_t origin = spot->s.origin;
+	origin[2] += 16;
+	Tech_SpawnAtOrigin(item, origin);
 }
 
 bool AllowTechs() {
@@ -358,7 +363,12 @@ void Tech_HordeSpawnWave() {
 		gitem_t *it = GetItemByIndex(tech_ids[order[k]]);
 		if (!it)
 			continue;
-		if (gentity_t *spot = FindTechSpawn())
+		// Prefer scattering anywhere on the map's walkable floor; fall back to a DM
+		// spawn point if no valid free-floor spot is found.
+		vec3_t pos;
+		if (g_horde_tech_spawn_anywhere->integer && MM_Horde_PickTechSpawnPos(pos))
+			Tech_SpawnAtOrigin(it, pos);
+		else if (gentity_t *spot = FindTechSpawn())
 			Tech_Spawn(it, spot);
 	}
 }

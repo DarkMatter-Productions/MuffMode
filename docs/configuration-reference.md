@@ -413,6 +413,7 @@ real in-game time. `gt-HORDE.cfg` ships `g_weapon_respawn_time 60` and `g_horde_
 | `g_horde_tech_relocate` | `0` | `0` = Horde techs stay where they spawn or are dropped. `1` = unpicked techs relocate to a new spot every 60s (the behavior in other modes). |
 | `g_horde_tech_count` | `0` | Number of distinct techs to spawn per Horde wave. `0` = adaptive `ceil(players / 2)`; `1`–`4` = fixed. Clamped to the four tech types. |
 | `g_horde_tech_drop_on_death` | `1` | `1` = a killed player drops their held tech. `0` = they keep it. |
+| `g_horde_tech_spawn_anywhere` | `1` | `1` = scatter techs at random validated floor spots across the play area. `0` = spawn them at deathmatch spawn points (as in other modes). |
 
 ## Horde Late-Wave & Endless
 
