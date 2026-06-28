@@ -245,6 +245,10 @@ cvar_t *g_horde_weight_floor;
 cvar_t *g_horde_theme_min_monsters;
 cvar_t *g_horde_start_chainsaw;
 cvar_t *g_horde_item_respawn_scale;
+cvar_t *g_horde_tech_reset_each_wave;
+cvar_t *g_horde_tech_relocate;
+cvar_t *g_horde_tech_count;
+cvar_t *g_horde_tech_drop_on_death;
 cvar_t *g_horde_enhanced_ai;
 cvar_t *g_huntercam;
 cvar_t *g_inactivity;
@@ -536,6 +540,10 @@ static void InitGame() {
 	g_horde_theme_min_monsters = gi.cvar("g_horde_theme_min_monsters", "2", CVAR_NOFLAGS);
 	g_horde_start_chainsaw = gi.cvar("g_horde_start_chainsaw", "1", CVAR_NOFLAGS);
 	g_horde_item_respawn_scale = gi.cvar("g_horde_item_respawn_scale", "4", CVAR_NOFLAGS);
+	g_horde_tech_reset_each_wave = gi.cvar("g_horde_tech_reset_each_wave", "1", CVAR_NOFLAGS);
+	g_horde_tech_relocate = gi.cvar("g_horde_tech_relocate", "0", CVAR_NOFLAGS);
+	g_horde_tech_count = gi.cvar("g_horde_tech_count", "0", CVAR_NOFLAGS);
+	g_horde_tech_drop_on_death = gi.cvar("g_horde_tech_drop_on_death", "1", CVAR_NOFLAGS);
 	g_horde_enhanced_ai = gi.cvar("g_horde_enhanced_ai", "1", CVAR_NOFLAGS);
 
 	g_huntercam = gi.cvar("g_huntercam", "1", CVAR_SERVERINFO | CVAR_LATCH);

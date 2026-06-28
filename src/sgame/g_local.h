@@ -11,7 +11,7 @@
 constexpr const char *GAMEVERSION = "baseq2";
 
 constexpr const char *GAMEMOD_TITLE = "Muff Mode";
-constexpr const char *GAMEMOD_VERSION = "0.40.21";
+constexpr const char *GAMEMOD_VERSION = "0.40.22";
 
 //==================================================================
 
@@ -2412,6 +2412,10 @@ extern cvar_t *g_horde_lives;
 extern cvar_t *g_lms_lives;
 extern cvar_t *g_horde_start_chainsaw;
 extern cvar_t *g_horde_item_respawn_scale;
+extern cvar_t *g_horde_tech_reset_each_wave;
+extern cvar_t *g_horde_tech_relocate;
+extern cvar_t *g_horde_tech_count;
+extern cvar_t *g_horde_tech_drop_on_death;
 extern cvar_t *g_coop_player_collision;
 extern cvar_t *g_coop_squad_respawn;
 extern cvar_t *g_corpse_sink_time;
@@ -2595,6 +2599,8 @@ void		QuadHog_Spawn(gitem_t *item, gentity_t *spot, bool reset);
 bool		AllowTechs();
 void		Tech_DeadDrop(gentity_t *ent);
 void		Tech_Reset();
+void		Tech_HordeClear();
+void		Tech_HordeSpawnWave();
 void		Tech_SetupSpawn();
 gitem_t		*Tech_Held(gentity_t *ent);
 int			Tech_ApplyDisruptorShield(gentity_t *ent, int dmg);

@@ -409,6 +409,10 @@ real in-game time. `gt-HORDE.cfg` ships `g_weapon_respawn_time 60` and `g_horde_
 | Cvar | Default | Purpose |
 | --- | --- | --- |
 | `g_horde_item_respawn_scale` | `4` | Multiplies non-weapon item respawn time in Horde. `1` disables the slowdown; values below `1` are treated as `1`. Weapons are unaffected. |
+| `g_horde_tech_reset_each_wave` | `1` | When techs are enabled in Horde, `1` clears all techs (world and held) at the countdown to the next wave and spawns a fresh set at wave start. `0` makes techs persist across waves for the whole match (spawned once at map load). |
+| `g_horde_tech_relocate` | `0` | `0` = Horde techs stay where they spawn or are dropped. `1` = unpicked techs relocate to a new spot every 60s (the behavior in other modes). |
+| `g_horde_tech_count` | `0` | Number of distinct techs to spawn per Horde wave. `0` = adaptive `ceil(players / 2)`; `1`–`4` = fixed. Clamped to the four tech types. |
+| `g_horde_tech_drop_on_death` | `1` | `1` = a killed player drops their held tech. `0` = they keep it. |
 
 ## Horde Late-Wave & Endless
 

@@ -155,6 +155,7 @@ bool Tech_Pickup(gentity_t *ent, gentity_t *other) {
 }
 
 static void Tech_Spawn(gitem_t *item, gentity_t *spot);
+static void Tech_ScheduleRelocate(gentity_t *tech);
 
 static gentity_t *FindTechSpawn() {
 	return SelectDeathmatchSpawnPoint(nullptr, vec3_origin, SPAWN_FAR_HALF, true, true, false, true).spot;
@@ -167,15 +168,24 @@ static THINK(Tech_Think) (gentity_t *tech) -> void {
 		Tech_Spawn(tech->item, spot);
 		G_FreeEntity(tech);
 	} else {
-		tech->nextthink = level.time + TECH_TIMEOUT;
-		tech->think = Tech_Think;
+		Tech_ScheduleRelocate(tech);
 	}
+}
+
+// [MuffMode] In Horde, techs stay where they spawn/drop by default (no relocation churn);
+// other modes (and g_horde_tech_relocate 1) keep the periodic relocate to a new spot.
+static void Tech_ScheduleRelocate(gentity_t *tech) {
+	if (GT(GT_HORDE) && !g_horde_tech_relocate->integer) {
+		tech->nextthink = 0_ms; // stay put
+		return;
+	}
+	tech->nextthink = level.time + TECH_TIMEOUT;
+	tech->think = Tech_Think;
 }
 
 static THINK(Tech_Make_Touchable) (gentity_t *tech) -> void {
 	tech->touch = Touch_Item;
-	tech->nextthink = level.time + TECH_TIMEOUT;
-	tech->think = Tech_Think;
+	Tech_ScheduleRelocate(tech);
 }
 
 void Tech_Drop(gentity_t *ent, gitem_t *item) {
@@ -198,8 +208,7 @@ void Tech_DeadDrop(gentity_t *ent) {
 			// hack the velocity to make it bounce random
 			dropped->velocity[0] = crandom_open() * 300;
 			dropped->velocity[1] = crandom_open() * 300;
-			dropped->nextthink = level.time + TECH_TIMEOUT;
-			dropped->think = Tech_Think;
+			Tech_ScheduleRelocate(dropped);
 			dropped->owner = nullptr;
 			ent->client->pers.inventory[tech_ids[i]] = 0;
 		}
@@ -230,8 +239,7 @@ static void Tech_Spawn(gitem_t *item, gentity_t *spot) {
 	ent->velocity = forward * 100;
 	ent->velocity[2] = 300;
 
-	ent->nextthink = level.time + TECH_TIMEOUT;
-	ent->think = Tech_Think;
+	Tech_ScheduleRelocate(ent);
 
 	gi.linkentity(ent);
 }
@@ -275,6 +283,12 @@ void Tech_SetupSpawn() {
 	if (!AllowTechs())
 		return;
 
+	// [MuffMode] In Horde reset mode the wave lifecycle owns tech spawning (cleared at the
+	// countdown, spawned at wave start), so skip the generic map-load spawn to avoid
+	// double-spawning / pre-placing at DM spawn points. Persist mode keeps this spawn.
+	if (GT(GT_HORDE) && g_horde_tech_reset_each_wave->integer)
+		return;
+
 	gentity_t *ent = G_Spawn();
 	ent->nextthink = level.time + 2_sec;
 	ent->think = Tech_SpawnAll;
@@ -292,6 +306,61 @@ void Tech_Reset() {
 	}
 	Tech_SetupSpawn();
 	//Tech_SpawnAll(nullptr);
+}
+
+// [MuffMode] Horde: remove all techs (world entities + held) — called at the countdown to
+// the next wave so none linger during the downtime between waves.
+void Tech_HordeClear() {
+	gentity_t *ent;
+	size_t i;
+	const size_t entity_count = ItemEntityCount();
+
+	for (ent = g_entities + 1, i = 1; i < entity_count; i++, ent++) {
+		if (ent->inuse && ent->item && (ent->item->flags & IF_TECH))
+			G_FreeEntity(ent);
+	}
+
+	for (auto player : active_clients())
+		for (size_t j = 0; j < q_countof(tech_ids); j++)
+			player->client->pers.inventory[tech_ids[j]] = 0;
+}
+
+// How many distinct techs to spawn this Horde wave: fixed (g_horde_tech_count 1-4) or
+// adaptive (0 = ceil(players/2)), clamped to the number of tech types.
+static int Tech_HordeWaveCount() {
+	const int types = static_cast<int>(q_countof(tech_ids));
+	const int configured = g_horde_tech_count->integer;
+	if (configured > 0)
+		return std::min(configured, types);
+
+	const int adaptive = (level.num_playing_human_clients + 1) / 2; // ceil(players / 2)
+	return std::clamp(adaptive, 1, types);
+}
+
+// [MuffMode] Horde: spawn this wave's set of distinct random techs — called at wave start.
+void Tech_HordeSpawnWave() {
+	if (!AllowTechs())
+		return;
+
+	const int types = static_cast<int>(q_countof(tech_ids));
+	const int count = Tech_HordeWaveCount();
+	if (count < 1)
+		return;
+
+	// Shuffle the tech indices, then take the first `count` so the chosen techs are distinct.
+	int order[q_countof(tech_ids)];
+	for (int i = 0; i < types; i++)
+		order[i] = i;
+	for (int i = types - 1; i > 0; i--)
+		std::swap(order[i], order[irandom(i + 1)]);
+
+	for (int k = 0; k < count; k++) {
+		gitem_t *it = GetItemByIndex(tech_ids[order[k]]);
+		if (!it)
+			continue;
+		if (gentity_t *spot = FindTechSpawn())
+			Tech_Spawn(it, spot);
+	}
 }
 
 int Tech_ApplyDisruptorShield(gentity_t *ent, int dmg) {

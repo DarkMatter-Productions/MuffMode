@@ -412,6 +412,11 @@ void MM_Horde_OnRoundCountdown()
 		return;
 
 	horde::GrantWaveLives();
+
+	// [MuffMode] Clear techs at the countdown to the next wave so none linger during downtime;
+	// a fresh set is spawned at wave start (MM_Horde_BeginWave).
+	if (g_horde_tech_reset_each_wave->integer)
+		Tech_HordeClear();
 }
 
 void MM_Horde_OnRoundStarted()
@@ -611,6 +616,11 @@ void MM_Horde_BeginWave()
 		return;
 
 	MM_Horde_CleanWaveTransition();
+
+	// [MuffMode] Horde spawns a fresh set of techs at the start of each wave (cleared at the
+	// previous countdown). Persistence (g_horde_tech_reset_each_wave 0) uses the map-load spawn.
+	if (g_horde_tech_reset_each_wave->integer)
+		Tech_HordeSpawnWave();
 
 	// Pick this wave's theme. Rare (g_horde_theme_chance), never the same as the previous
 	// themed wave, and only themes whose monsters exist by this wave are eligible.
