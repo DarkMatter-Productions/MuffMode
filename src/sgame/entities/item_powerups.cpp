@@ -151,8 +151,12 @@ bool Tech_Pickup(gentity_t *ent, gentity_t *other) {
 
 	other->client->pers.inventory[ent->item->id]++;
 	other->client->tech_regen_time = level.time;
-	// [MuffMode] Horde: techs are timed like Quad (g_horde_tech_duration; 0 = permanent).
-	if (GT(GT_HORDE) && g_horde_tech_duration->integer > 0)
+	// [MuffMode] Horde timed techs: a tech's lifetime travels with it. A dropped tech carries its
+	// remaining deadline (ent->timestamp), so re-grabbing resumes that countdown rather than
+	// refreshing it; a fresh/champion-dropped tech starts a full g_horde_tech_duration window.
+	if (ent->timestamp)
+		other->client->tech_expire_time = ent->timestamp;
+	else if (GT(GT_HORDE) && g_horde_tech_duration->integer > 0)
 		other->client->tech_expire_time = level.time + gtime_t::from_sec(g_horde_tech_duration->integer);
 	else
 		other->client->tech_expire_time = 0_ms;
@@ -204,15 +208,34 @@ static void Tech_ScheduleRelocate(gentity_t *tech) {
 	tech->think = Tech_Think;
 }
 
+// [MuffMode] A dropped tech carrying a timed-tech deadline (tech->timestamp) vanishes when that
+// deadline passes, so its lifetime keeps ticking on the ground and dropping/re-grabbing it can't
+// refresh the timer.
+static THINK(Tech_WorldExpire) (gentity_t *tech) -> void {
+	G_FreeEntity(tech);
+}
+
+// Schedule a dropped tech: if it carries a timer deadline, expire it at that time; otherwise
+// fall back to the normal relocation behavior.
+static void Tech_ScheduleDropped(gentity_t *tech) {
+	if (tech->timestamp) {
+		tech->nextthink = tech->timestamp;
+		tech->think = Tech_WorldExpire;
+	} else {
+		Tech_ScheduleRelocate(tech);
+	}
+}
+
 static THINK(Tech_Make_Touchable) (gentity_t *tech) -> void {
 	tech->touch = Touch_Item;
-	Tech_ScheduleRelocate(tech);
+	Tech_ScheduleDropped(tech);
 }
 
 void Tech_Drop(gentity_t *ent, gitem_t *item) {
 	gentity_t *tech;
 
 	tech = Drop_Item(ent, item);
+	tech->timestamp = ent->client->tech_expire_time; // carry the remaining timer with the tech
 	tech->nextthink = level.time + 1_sec;
 	tech->think = Tech_Make_Touchable;
 	ent->client->pers.inventory[item->id] = 0;
@@ -229,17 +252,19 @@ void Tech_DeadDrop(gentity_t *ent) {
 			// hack the velocity to make it bounce random
 			dropped->velocity[0] = crandom_open() * 300;
 			dropped->velocity[1] = crandom_open() * 300;
-			Tech_ScheduleRelocate(dropped);
+			dropped->timestamp = ent->client->tech_expire_time; // carry the remaining timer
+			Tech_ScheduleDropped(dropped);
 			dropped->owner = nullptr;
 			ent->client->pers.inventory[tech_ids[i]] = 0;
 		}
 	}
 }
 
-static void Tech_SpawnAtOrigin(gitem_t *item, const vec3_t &origin) {
+// Spawn a tech at `origin`. `toss` pops it out with a random horizontal nudge (used at spawn
+// points, which sit in open areas); when false the tech settles straight down onto the spot it
+// was placed at, so a validated random floor position isn't flung into a pit or off a ledge.
+static void Tech_SpawnAtOrigin(gitem_t *item, const vec3_t &origin, bool toss) {
 	gentity_t	*ent = G_Spawn();
-	vec3_t	forward, right;
-	vec3_t	angles = { 0, (float)irandom(360), 0 };
 
 	ent->classname = item->classname;
 	ent->item = item;
@@ -254,10 +279,15 @@ static void Tech_SpawnAtOrigin(gitem_t *item, const vec3_t &origin) {
 	ent->touch = Touch_Item;
 	ent->owner = ent;
 
-	AngleVectors(angles, forward, right, nullptr);
 	ent->s.origin = origin;
-	ent->velocity = forward * 100;
-	ent->velocity[2] = 300;
+
+	if (toss) {
+		vec3_t forward, right;
+		vec3_t angles = { 0, (float)irandom(360), 0 };
+		AngleVectors(angles, forward, right, nullptr);
+		ent->velocity = forward * 100;
+		ent->velocity[2] = 300;
+	}
 
 	Tech_ScheduleRelocate(ent);
 
@@ -267,7 +297,7 @@ static void Tech_SpawnAtOrigin(gitem_t *item, const vec3_t &origin) {
 static void Tech_Spawn(gitem_t *item, gentity_t *spot) {
 	vec3_t origin = spot->s.origin;
 	origin[2] += 16;
-	Tech_SpawnAtOrigin(item, origin);
+	Tech_SpawnAtOrigin(item, origin, true);
 }
 
 bool AllowTechs() {
@@ -398,7 +428,7 @@ void Tech_HordeSpawnWave() {
 		// spawn point if no valid free-floor spot is found.
 		vec3_t pos;
 		if (g_horde_tech_spawn_anywhere->integer && MM_Horde_PickTechSpawnPos(pos))
-			Tech_SpawnAtOrigin(it, pos);
+			Tech_SpawnAtOrigin(it, pos, false); // settle in place on the validated floor spot
 		else if (gentity_t *spot = FindTechSpawn())
 			Tech_Spawn(it, spot);
 	}
