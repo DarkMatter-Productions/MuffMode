@@ -1933,7 +1933,7 @@ function New-EnglishFallbackHtmlReadmes {
         })
     }
 
-    return @($results)
+    return $results.ToArray()
 }
 
 function New-TranslatedHtmlReadmes {
@@ -2012,7 +2012,7 @@ $sourceHtml
         }
     }
 
-    return @($results)
+    return $results.ToArray()
 }
 
 function New-CopilotHtmlReadme {
