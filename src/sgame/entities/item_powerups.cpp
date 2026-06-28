@@ -169,8 +169,10 @@ void Tech_ApplyExpiry(gentity_t *ent) {
 
 	gitem_t *tech = Tech_Held(ent);
 	ent->client->tech_expire_time = 0_ms;
-	if (tech)
+	if (tech) {
 		ent->client->pers.inventory[tech->id] = 0;
+		gi.sound(ent, CHAN_AUTO, gi.soundindex("misc/power2.wav"), 1, ATTN_NORM, 0);
+	}
 }
 
 static void Tech_Spawn(gitem_t *item, gentity_t *spot);
@@ -349,8 +351,8 @@ void Tech_HordeClear() {
 			player->client->pers.inventory[tech_ids[j]] = 0;
 }
 
-// How many distinct techs to spawn this Horde wave: fixed (g_horde_tech_count 1-4) or
-// adaptive (0 = ceil(players/2)), clamped to the number of tech types.
+// How many techs to spawn this Horde wave: fixed (g_horde_tech_count 1-4) or adaptive
+// (0 = ceil(players/2)), clamped to the number of tech types.
 static int Tech_HordeWaveCount() {
 	const int types = static_cast<int>(q_countof(tech_ids));
 	const int configured = g_horde_tech_count->integer;
@@ -361,7 +363,9 @@ static int Tech_HordeWaveCount() {
 	return std::clamp(adaptive, 1, types);
 }
 
-// [MuffMode] Horde: spawn this wave's set of distinct random techs — called at wave start.
+// [MuffMode] Horde: spawn this wave's techs at wave start. By default each is picked
+// independently (duplicates allowed — e.g. three AutoDocs), matching Horde's chaos;
+// g_horde_tech_unique 1 reverts to a distinct, no-repeat random subset.
 void Tech_HordeSpawnWave() {
 	if (!AllowTechs())
 		return;
@@ -371,15 +375,20 @@ void Tech_HordeSpawnWave() {
 	if (count < 1)
 		return;
 
-	// Shuffle the tech indices, then take the first `count` so the chosen techs are distinct.
+	const bool unique = g_horde_tech_unique->integer != 0;
+
+	// Unique mode: shuffle the indices once and take the first `count` (distinct types).
 	int order[q_countof(tech_ids)];
-	for (int i = 0; i < types; i++)
-		order[i] = i;
-	for (int i = types - 1; i > 0; i--)
-		std::swap(order[i], order[irandom(i + 1)]);
+	if (unique) {
+		for (int i = 0; i < types; i++)
+			order[i] = i;
+		for (int i = types - 1; i > 0; i--)
+			std::swap(order[i], order[irandom(i + 1)]);
+	}
 
 	for (int k = 0; k < count; k++) {
-		gitem_t *it = GetItemByIndex(tech_ids[order[k]]);
+		const int idx = unique ? order[k] : irandom(types);
+		gitem_t *it = GetItemByIndex(tech_ids[idx]);
 		if (!it)
 			continue;
 		// Prefer scattering anywhere on the map's walkable floor; fall back to a DM

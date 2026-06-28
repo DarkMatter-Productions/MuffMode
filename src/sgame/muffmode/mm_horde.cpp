@@ -608,6 +608,10 @@ void MM_Horde_Init()
 	}
 
 	horde::PrecacheTableMonsters();
+
+	// [MuffMode] Expiry cue for timed techs (g_horde_tech_duration); precache here since the
+	// power-armor items that normally register it may not be present in a Horde match.
+	gi.soundindex("misc/power2.wav");
 }
 
 void MM_Horde_BeginWave()
@@ -919,7 +923,13 @@ void MM_Horde_RunSpawning()
 			// stay beefy bullet-sponges without becoming one-shot deleters.
 			const bool is_champion = level.horde_champion_pending && !warmup;
 
-			e->item = is_champion ? horde::PickChampionDrop() : horde::PickDropItem(monster_row);
+			// [MuffMode] Champions always drop a random tech when techs are enabled; otherwise
+			// they drop their usual strong item.
+			if (is_champion)
+				e->item = AllowTechs() ? GetItemByIndex(tech_ids[irandom(static_cast<int32_t>(q_countof(tech_ids)))])
+									   : horde::PickChampionDrop();
+			else
+				e->item = horde::PickDropItem(monster_row);
 			st = {};
 			st.health_multiplier = is_champion ? g_horde_champion_health_mult->value : 1.0f;
 			ED_CallSpawn(e);

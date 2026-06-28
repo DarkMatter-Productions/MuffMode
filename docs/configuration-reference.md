@@ -377,7 +377,7 @@ These cvars tune Horde pacing, wave budget, player scaling, and map-size scaling
 
 ## Horde Champions And Themes
 
-Champions are stronger monster variants. Themes bias a wave toward a monster category when enough matching monsters are available.
+Champions are stronger monster variants. Themes bias a wave toward a monster category when enough matching monsters are available. When techs are enabled (see `g_allow_techs`), a champion always drops a random tech on death instead of its usual strong item.
 
 | Cvar | Default | Purpose |
 | --- | --- | --- |
@@ -411,7 +411,8 @@ real in-game time. `gt-HORDE.cfg` ships `g_weapon_respawn_time 60` and `g_horde_
 | `g_horde_item_respawn_scale` | `4` | Multiplies non-weapon item respawn time in Horde. `1` disables the slowdown; values below `1` are treated as `1`. Weapons are unaffected. |
 | `g_horde_tech_reset_each_wave` | `1` | When techs are enabled in Horde, `1` clears all techs (world and held) at the countdown to the next wave and spawns a fresh set at wave start. `0` makes techs persist across waves for the whole match (spawned once at map load). |
 | `g_horde_tech_relocate` | `0` | `0` = Horde techs stay where they spawn or are dropped. `1` = unpicked techs relocate to a new spot every 60s (the behavior in other modes). |
-| `g_horde_tech_count` | `0` | Number of distinct techs to spawn per Horde wave. `0` = adaptive `ceil(players / 2)`; `1`–`4` = fixed. Clamped to the four tech types. |
+| `g_horde_tech_count` | `0` | Number of techs to spawn per Horde wave. `0` = adaptive `ceil(players / 2)`; `1`–`4` = fixed. Clamped to the four tech types. |
+| `g_horde_tech_unique` | `0` | `0` = each wave's techs are picked independently, so duplicates can appear (e.g. three AutoDocs). `1` = pick a distinct, no-repeat random subset. |
 | `g_horde_tech_drop_on_death` | `1` | `1` = a killed player drops their held tech. `0` = they keep it. |
 | `g_horde_tech_spawn_anywhere` | `1` | `1` = scatter techs at random validated floor spots across the play area. `0` = spawn them at deathmatch spawn points (as in other modes). |
 | `g_horde_tech_duration` | `30` | Seconds a tech lasts after pickup before it expires and vanishes (like Quad). `0` = techs are held until dropped/lost. The remaining time shows in the powerup timer slot. |

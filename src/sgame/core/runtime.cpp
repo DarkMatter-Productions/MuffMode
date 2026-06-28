@@ -251,6 +251,7 @@ cvar_t *g_horde_tech_count;
 cvar_t *g_horde_tech_drop_on_death;
 cvar_t *g_horde_tech_spawn_anywhere;
 cvar_t *g_horde_tech_duration;
+cvar_t *g_horde_tech_unique;
 cvar_t *g_horde_enhanced_ai;
 cvar_t *g_huntercam;
 cvar_t *g_inactivity;
@@ -548,6 +549,7 @@ static void InitGame() {
 	g_horde_tech_drop_on_death = gi.cvar("g_horde_tech_drop_on_death", "1", CVAR_NOFLAGS);
 	g_horde_tech_spawn_anywhere = gi.cvar("g_horde_tech_spawn_anywhere", "1", CVAR_NOFLAGS);
 	g_horde_tech_duration = gi.cvar("g_horde_tech_duration", "30", CVAR_NOFLAGS);
+	g_horde_tech_unique = gi.cvar("g_horde_tech_unique", "0", CVAR_NOFLAGS);
 	g_horde_enhanced_ai = gi.cvar("g_horde_enhanced_ai", "1", CVAR_NOFLAGS);
 
 	g_huntercam = gi.cvar("g_huntercam", "1", CVAR_SERVERINFO | CVAR_LATCH);
