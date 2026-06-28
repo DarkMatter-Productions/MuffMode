@@ -414,6 +414,7 @@ real in-game time. `gt-HORDE.cfg` ships `g_weapon_respawn_time 60` and `g_horde_
 | `g_horde_tech_count` | `0` | Number of distinct techs to spawn per Horde wave. `0` = adaptive `ceil(players / 2)`; `1`–`4` = fixed. Clamped to the four tech types. |
 | `g_horde_tech_drop_on_death` | `1` | `1` = a killed player drops their held tech. `0` = they keep it. |
 | `g_horde_tech_spawn_anywhere` | `1` | `1` = scatter techs at random validated floor spots across the play area. `0` = spawn them at deathmatch spawn points (as in other modes). |
+| `g_horde_tech_duration` | `30` | Seconds a tech lasts after pickup before it expires and vanishes (like Quad). `0` = techs are held until dropped/lost. The remaining time shows in the powerup timer slot. |
 
 ## Horde Late-Wave & Endless
 

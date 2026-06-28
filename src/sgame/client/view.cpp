@@ -1586,6 +1586,9 @@ void ClientEndServerFrame(gentity_t *ent) {
 	// auto doc tech
 	Tech_ApplyAutoDoc(ent);
 
+	// [MuffMode] Horde: expire timed techs (g_horde_tech_duration)
+	Tech_ApplyExpiry(ent);
+
 	// apply regeneration powerup
 	Powerup_ApplyRegeneration(ent);
 

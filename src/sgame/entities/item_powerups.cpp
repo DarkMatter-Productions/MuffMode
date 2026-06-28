@@ -151,7 +151,26 @@ bool Tech_Pickup(gentity_t *ent, gentity_t *other) {
 
 	other->client->pers.inventory[ent->item->id]++;
 	other->client->tech_regen_time = level.time;
+	// [MuffMode] Horde: techs are timed like Quad (g_horde_tech_duration; 0 = permanent).
+	if (GT(GT_HORDE) && g_horde_tech_duration->integer > 0)
+		other->client->tech_expire_time = level.time + gtime_t::from_sec(g_horde_tech_duration->integer);
+	else
+		other->client->tech_expire_time = 0_ms;
 	return true;
+}
+
+// [MuffMode] Horde timed techs: remove a held tech once its pickup timer elapses (it simply
+// vanishes, like an expired powerup). No-op when tech_expire_time is 0 (permanent / not timed).
+void Tech_ApplyExpiry(gentity_t *ent) {
+	if (!ent->client || !ent->client->tech_expire_time)
+		return;
+	if (ent->client->tech_expire_time > level.time)
+		return;
+
+	gitem_t *tech = Tech_Held(ent);
+	ent->client->tech_expire_time = 0_ms;
+	if (tech)
+		ent->client->pers.inventory[tech->id] = 0;
 }
 
 static void Tech_Spawn(gitem_t *item, gentity_t *spot);

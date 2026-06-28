@@ -11,7 +11,7 @@
 constexpr const char *GAMEVERSION = "baseq2";
 
 constexpr const char *GAMEMOD_TITLE = "Muff Mode";
-constexpr const char *GAMEMOD_VERSION = "0.40.23";
+constexpr const char *GAMEMOD_VERSION = "0.40.24";
 
 //==================================================================
 
@@ -2417,6 +2417,7 @@ extern cvar_t *g_horde_tech_relocate;
 extern cvar_t *g_horde_tech_count;
 extern cvar_t *g_horde_tech_drop_on_death;
 extern cvar_t *g_horde_tech_spawn_anywhere;
+extern cvar_t *g_horde_tech_duration;
 extern cvar_t *g_coop_player_collision;
 extern cvar_t *g_coop_squad_respawn;
 extern cvar_t *g_corpse_sink_time;
@@ -2599,6 +2600,7 @@ void		QuadHog_SetupSpawn(gtime_t delay);
 void		QuadHog_Spawn(gitem_t *item, gentity_t *spot, bool reset);
 bool		AllowTechs();
 void		Tech_DeadDrop(gentity_t *ent);
+void		Tech_ApplyExpiry(gentity_t *ent);
 void		Tech_Reset();
 void		Tech_HordeClear();
 void		Tech_HordeSpawnWave();
@@ -3694,6 +3696,7 @@ struct gclient_t {
 	gtime_t		tech_regen_time;			// regen tech
 	gtime_t		tech_sound_time;
 	gtime_t		tech_last_message_time;
+	gtime_t		tech_expire_time;			// [MuffMode] Horde timed techs: 0 = permanent
 
 	gtime_t		frenzy_ammoregentime;
 
