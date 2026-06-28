@@ -412,6 +412,11 @@ void MM_Horde_OnRoundCountdown()
 		return;
 
 	horde::GrantWaveLives();
+
+	// [MuffMode] Clear techs at the countdown to the next wave so none linger during downtime;
+	// a fresh set is spawned at wave start (MM_Horde_BeginWave).
+	if (g_horde_tech_reset_each_wave->integer)
+		Tech_HordeClear();
 }
 
 void MM_Horde_OnRoundStarted()
@@ -603,6 +608,10 @@ void MM_Horde_Init()
 	}
 
 	horde::PrecacheTableMonsters();
+
+	// [MuffMode] Expiry cue for timed techs (g_horde_tech_duration); precache here since the
+	// power-armor items that normally register it may not be present in a Horde match.
+	gi.soundindex("misc/power2.wav");
 }
 
 void MM_Horde_BeginWave()
@@ -611,6 +620,11 @@ void MM_Horde_BeginWave()
 		return;
 
 	MM_Horde_CleanWaveTransition();
+
+	// [MuffMode] Horde spawns a fresh set of techs at the start of each wave (cleared at the
+	// previous countdown). Persistence (g_horde_tech_reset_each_wave 0) uses the map-load spawn.
+	if (g_horde_tech_reset_each_wave->integer)
+		Tech_HordeSpawnWave();
 
 	// Pick this wave's theme. Rare (g_horde_theme_chance), never the same as the previous
 	// themed wave, and only themes whose monsters exist by this wave are eligible.
@@ -772,6 +786,50 @@ bool ValidateSpawnOrigin(vec3_t &origin, const vec3_t &check_mins, const vec3_t 
 
 } // namespace muffmode::horde
 
+// [MuffMode] Pick a random validated floor position anywhere within the play area (the AABB of
+// the deathmatch spawn spots) for scattering Horde techs, rather than placing them on the spawn
+// points themselves. Samples a random XY, drops a downward trace to the floor, and reuses
+// horde::ValidateSpawnOrigin (rejects solids/stuck spots and lava/slime floors). Returns false
+// when no valid spot is found in a bounded number of tries (caller falls back to a spawn point).
+bool MM_Horde_PickTechSpawnPos(vec3_t &out)
+{
+	if (notGT(GT_HORDE) || level.num_spawn_spots < 2)
+		return false;
+
+	vec3_t bmin = level.spawn_spots[0]->s.origin;
+	vec3_t bmax = bmin;
+	for (int i = 1; i < level.num_spawn_spots; i++) {
+		const vec3_t &o = level.spawn_spots[i]->s.origin;
+		bmin.x = min(bmin.x, o.x); bmin.y = min(bmin.y, o.y); bmin.z = min(bmin.z, o.z);
+		bmax.x = max(bmax.x, o.x); bmax.y = max(bmax.y, o.y); bmax.z = max(bmax.z, o.z);
+	}
+
+	constexpr vec3_t tech_mins = { -15.f, -15.f, -15.f };
+	constexpr vec3_t tech_maxs = {  15.f,  15.f,  15.f };
+	const float trace_top    = bmax.z + 64.f;
+	const float trace_bottom = bmin.z - 256.f;
+
+	for (int attempt = 0; attempt < 24; attempt++) {
+		vec3_t start = { bmin.x + frandom() * (bmax.x - bmin.x),
+						 bmin.y + frandom() * (bmax.y - bmin.y),
+						 trace_top };
+		vec3_t end = { start.x, start.y, trace_bottom };
+
+		trace_t tr = gi.trace(start, tech_mins, tech_maxs, end, nullptr, MASK_MONSTERSOLID);
+		if (tr.startsolid || tr.allsolid || tr.fraction == 1.0f)
+			continue; // started embedded, or never reached a floor
+
+		vec3_t origin = tr.endpos;
+		if (!horde::ValidateSpawnOrigin(origin, tech_mins, tech_maxs))
+			continue;
+
+		out = origin;
+		return true;
+	}
+
+	return false;
+}
+
 void MM_Horde_RunSpawning()
 {
 	if (notGT(GT_HORDE))
@@ -865,7 +923,13 @@ void MM_Horde_RunSpawning()
 			// stay beefy bullet-sponges without becoming one-shot deleters.
 			const bool is_champion = level.horde_champion_pending && !warmup;
 
-			e->item = is_champion ? horde::PickChampionDrop() : horde::PickDropItem(monster_row);
+			// [MuffMode] Champions always drop a random tech when techs are enabled; otherwise
+			// they drop their usual strong item.
+			if (is_champion)
+				e->item = AllowTechs() ? GetItemByIndex(tech_ids[irandom(static_cast<int32_t>(q_countof(tech_ids)))])
+									   : horde::PickChampionDrop();
+			else
+				e->item = horde::PickDropItem(monster_row);
 			st = {};
 			st.health_multiplier = is_champion ? g_horde_champion_health_mult->value : 1.0f;
 			ED_CallSpawn(e);

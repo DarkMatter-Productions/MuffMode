@@ -885,7 +885,7 @@ void UpdateCallVote(gentity_t *ent)
 	MenuVote_SetText(entries[powerups_index], G_Fmt("Powerups: {}", PowerupsEnabled() ? "ON" : "OFF").data());
 
 	int techs_index = powerups_index + 1;
-	if (GT(GT_FFA) || GT(GT_TDM) || GT(GT_CTF))
+	if (GT(GT_FFA) || GT(GT_TDM) || GT(GT_CTF) || GT(GT_HORDE))
 	{
 		entries[techs_index].SelectFunc = OpenTechs;
 		MenuVote_SetText(entries[techs_index], G_Fmt("Techs: {}", TechsEnabled() ? "ON" : "OFF").data());

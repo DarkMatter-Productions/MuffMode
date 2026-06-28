@@ -818,9 +818,9 @@ void MM_VotePassTechs()
 
 bool MM_VoteValTechs(gentity_t *ent)
 {
-	if (notGT(GT_FFA) && notGT(GT_TDM) && notGT(GT_CTF))
+	if (notGT(GT_FFA) && notGT(GT_TDM) && notGT(GT_CTF) && notGT(GT_HORDE))
 	{
-		gi.LocClient_Print(ent, PRINT_HIGH, "Techs can only be changed in FFA, TDM or CTF gametypes.\n");
+		gi.LocClient_Print(ent, PRINT_HIGH, "Techs can only be changed in FFA, TDM, CTF or Horde gametypes.\n");
 		return false;
 	}
 
@@ -1329,7 +1329,7 @@ vcmds_t vote_cmds[] = {
 	{"ruleset",				MM_VoteValRuleset,			MM_VotePassRuleset,			2048,	2,	"<q2re|mm|q3a|q2reb|q|qc>",			"changes the current ruleset"},
 	{"powerups",			MM_VoteValPowerups,			MM_VotePassPowerups,		4096,	2,	"<0/1>",							"enables or disables powerups"},
 	{"friendlyfire",		MM_VoteValFriendlyFire,		MM_VotePassFriendlyFire,	8192,	2,	"<0/1>",							"enables or disables friendly fire (team modes only)"},
-	{"techs",				MM_VoteValTechs,			MM_VotePassTechs,			65536,	2,	"<0/1>",							"enables or disables techs (FFA/TDM/CTF only)"},
+	{"techs",				MM_VoteValTechs,			MM_VotePassTechs,			65536,	2,	"<0/1>",							"enables or disables techs (FFA/TDM/CTF/Horde only)"},
 	{"readyall",			MM_VoteValReadyAll,			MM_VotePassReadyAll,		32768,	1,	"",									"ready all players (during ready-up warmup)"},
 	{nullptr,				nullptr,					nullptr,					0,		0,	nullptr,								nullptr},
 };

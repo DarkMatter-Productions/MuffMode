@@ -1526,6 +1526,22 @@ void G_SetStats(gentity_t *ent) {
 				ent->client->ps.stats[STAT_POWERUP_ICON] = gi.imageindex(GetItemByIndex(best_powerup->item)->icon);
 				ent->client->ps.stats[STAT_POWERUP_TIME] = value;
 			}
+
+			// [MuffMode] Horde timed techs: surface the held tech's countdown in the powerup
+			// timer slot when it will expire sooner than any active powerup (or none is shown).
+			if (ent->client->tech_expire_time > level.time) {
+				for (size_t i = 0; i < q_countof(tech_ids); i++) {
+					if (!ent->client->pers.inventory[tech_ids[i]])
+						continue;
+					int16_t tech_secs = (int16_t)ceil((ent->client->tech_expire_time - level.time).seconds());
+					if (ent->client->ps.stats[STAT_POWERUP_ICON] == 0 ||
+						tech_secs < ent->client->ps.stats[STAT_POWERUP_TIME]) {
+						ent->client->ps.stats[STAT_POWERUP_ICON] = gi.imageindex(GetItemByIndex(tech_ids[i])->icon);
+						ent->client->ps.stats[STAT_POWERUP_TIME] = tech_secs;
+					}
+					break;
+				}
+			}
 		}
 
 		//
