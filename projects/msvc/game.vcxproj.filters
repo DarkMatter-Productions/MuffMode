@@ -235,6 +235,9 @@
     <ClInclude Include="..\..\src\sgame\muffmode\mm_pconfig.h">
       <Filter>sgame\muffmode</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_pconfig_rules.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\src\sgame\muffmode\mm_skin.h">
       <Filter>sgame\muffmode</Filter>
     </ClInclude>

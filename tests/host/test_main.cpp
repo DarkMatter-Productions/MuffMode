@@ -8,6 +8,7 @@
 #include "muffmode/mm_lms_rules.h"
 #include "muffmode/mm_loc_parse.h"
 #include "muffmode/mm_parse.h"
+#include "muffmode/mm_pconfig_rules.h"
 #include "muffmode/mm_red_rover_rules.h"
 
 #include <cstdio>
@@ -110,6 +111,66 @@ MM_TEST(parse_cfg_int_accepts_quoted_or_plain_values) {
 	MM_CHECK_FALSE(MM_ParseCfgIntArg("\"\""));
 	MM_CHECK_FALSE(MM_ParseCfgIntArg("4 extra"));
 	MM_CHECK_FALSE(MM_ParseCfgIntArg("\"4\" extra"));
+}
+
+MM_TEST(player_config_social_ids_encode_to_safe_unique_path_stems) {
+	using namespace muffmode::pconfig;
+
+	const auto plain = EncodeSocialIdConfigStem("a.b-c_123", 63, 251);
+	const auto path_like = EncodeSocialIdConfigStem("..abc/def\\ghi.", 63, 251);
+	const auto reserved = EncodeSocialIdConfigStem("con", 63, 251);
+	const auto max_fit = EncodeSocialIdConfigStem(std::string(123, 'a'), 123, 251);
+
+	MM_CHECK(plain);
+	MM_CHECK(path_like);
+	MM_CHECK(reserved);
+	MM_CHECK(max_fit);
+	MM_CHECK_EQ(*plain, std::string("sid-612e622d635f313233"));
+	MM_CHECK_EQ(*path_like, std::string("sid-2e2e6162632f6465665c6768692e"));
+	MM_CHECK_EQ(*reserved, std::string("sid-636f6e"));
+	MM_CHECK_FALSE(EncodeSocialIdConfigStem("", 63, 251));
+	MM_CHECK_FALSE(EncodeSocialIdConfigStem(std::string(64, 'a'), 63, 251));
+	MM_CHECK_FALSE(EncodeSocialIdConfigStem(std::string(124, 'a'), 124, 251));
+	MM_CHECK_FALSE(EncodeSocialIdConfigStem("ab", 63, 7));
+	MM_CHECK(*EncodeSocialIdConfigStem("ab", 63, 251) != *EncodeSocialIdConfigStem("a/b", 63, 251));
+}
+
+MM_TEST(player_config_tokens_parse_deterministically) {
+	using namespace muffmode::pconfig;
+
+	MM_CHECK_EQ(*ParseBoolToken("on"), true);
+	MM_CHECK_EQ(*ParseBoolToken("DISABLED"), false);
+	MM_CHECK_FALSE(ParseBoolToken("toggle"));
+
+	MM_CHECK_EQ(*ParseKillBeepToken("off"), 0);
+	MM_CHECK_EQ(*ParseKillBeepToken("beep-boop"), 2);
+	MM_CHECK_EQ(*ParseKillBeepToken("tangtang"), 4);
+	MM_CHECK_FALSE(ParseKillBeepToken("5"));
+}
+
+MM_TEST(player_config_skin_paths_match_command_safety_rules) {
+	using namespace muffmode::pconfig;
+
+	constexpr size_t max_qpath = 64;
+	constexpr size_t max_netname_length = 31;
+	constexpr size_t player_skin_configstring_size = 96;
+	const std::string longest_fit = std::string("model/") + std::string(49, 'a');
+	const std::string too_long = std::string("model/") + std::string(50, 'a');
+
+	MM_CHECK(IsSafeSkinPath("male/grunt"));
+	MM_CHECK(IsSafeSkinPath("players/male/grunt"));
+	MM_CHECK(IsDisableToken("default"));
+	MM_CHECK_FALSE(IsSafeSkinPath("male"));
+	MM_CHECK_FALSE(IsSafeSkinPath("/male/grunt"));
+	MM_CHECK_FALSE(IsSafeSkinPath("male/"));
+	MM_CHECK_FALSE(IsSafeSkinPath("male//grunt"));
+	MM_CHECK_FALSE(IsSafeSkinPath("male/gr.unt"));
+	MM_CHECK(SkinFitsPlayerConfigString(longest_fit, max_netname_length, player_skin_configstring_size));
+	MM_CHECK_FALSE(SkinFitsPlayerConfigString(too_long, max_netname_length, player_skin_configstring_size));
+	MM_CHECK(IsStorableSkinPath(longest_fit, max_qpath, max_netname_length, player_skin_configstring_size));
+	MM_CHECK_FALSE(IsStorableSkinPath(too_long, max_qpath, max_netname_length, player_skin_configstring_size));
+	MM_CHECK_FALSE(IsStorableSkinPath("male/gr.unt", max_qpath, max_netname_length, player_skin_configstring_size));
+	MM_CHECK_FALSE(IsStorableSkinPath(longest_fit, longest_fit.size(), max_netname_length, player_skin_configstring_size));
 }
 
 MM_TEST(command_argument_contracts_match_phase_one_fixes) {

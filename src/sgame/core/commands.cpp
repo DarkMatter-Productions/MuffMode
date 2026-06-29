@@ -93,17 +93,6 @@ static bool CmdClientIndexIsValid(int client_index) {
 	return client_index >= 0 && static_cast<size_t>(client_index) < game.maxclients;
 }
 
-static gentity_t *CmdEntityForClientIndex(int client_index) {
-	if (!CmdClientIndexIsValid(client_index))
-		return nullptr;
-
-	const size_t entity_index = static_cast<size_t>(client_index) + 1;
-	if (entity_index >= CmdClientEntityCount())
-		return nullptr;
-
-	return &g_entities[entity_index];
-}
-
 //=================================================================================
 
 static void SelectNextItem(gentity_t *ent, item_flags_t itflags, bool menu = true) {
@@ -2057,8 +2046,7 @@ Cmd_FollowKiller_f
 =================
 */
 static void Cmd_FollowKiller_f(gentity_t *ent) {
-	ent->client->sess.pc.follow_killer ^= true;
-	gi.LocClient_Print(ent, PRINT_HIGH, "Auto-follow killer: {}\n", ent->client->sess.pc.follow_killer ? "ON" : "OFF");
+	MM_CmdFollowKiller(ent);
 }
 
 /*
@@ -2067,30 +2055,7 @@ Cmd_FollowLeader_f
 =================
 */
 static void Cmd_FollowLeader_f(gentity_t *ent) {
-	ent->client->sess.pc.follow_leader ^= true;
-
-	gentity_t *leader = nullptr;
-
-	if (ent->client->sess.pc.follow_leader) {
-		leader = CmdEntityForClientIndex(level.sorted_clients[0]);
-		if (!level.num_playing_clients || !leader || !leader->inuse || !leader->client || !ClientIsPlaying(leader->client)) {
-			ent->client->sess.pc.follow_leader = false;
-			gi.Client_Print(ent, PRINT_HIGH, "No leader available to follow.\n");
-			gi.LocClient_Print(ent, PRINT_HIGH, "Auto-follow leader: OFF\n");
-			return;
-		}
-	}
-
-	gi.LocClient_Print(ent, PRINT_HIGH, "Auto-follow leader: {}\n", ent->client->sess.pc.follow_leader ? "ON" : "OFF");
-
-	if (!ClientIsPlaying(ent->client) && ent->client->sess.pc.follow_leader && ent->client->follow_target != leader) {
-		ent->client->follow_target = leader;
-		ent->client->follow_update = true;
-		UpdateChaseCam(ent);
-
-		// [MuffMode] Follow target changed; re-evaluate this viewer's skin overrides.
-		MM_RefreshSkinOverridesForViewer(ent);
-	}
+	MM_CmdFollowLeader(ent);
 }
 
 /*
@@ -2099,8 +2064,7 @@ Cmd_FollowPowerup_f
 =================
 */
 static void Cmd_FollowPowerup_f(gentity_t *ent) {
-	ent->client->sess.pc.follow_powerup ^= true;
-	gi.LocClient_Print(ent, PRINT_HIGH, "Auto-follow powerup pick-ups: {}\n", ent->client->sess.pc.follow_powerup ? "ON" : "OFF");
+	MM_CmdFollowPowerup(ent);
 }
 
 /*----------------------------------------------------------------*/

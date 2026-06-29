@@ -1497,14 +1497,7 @@ bool ClientConnect(gentity_t *ent, char *userinfo, const char *social_id, bool i
 			ent->client->sess.team = deathmatch->integer ? TEAM_SPECTATOR : TEAM_FREE;
 			P_PublishEngineTeam(ent);
 			//InitPlayerTeam(ent);
-			ent->client->sess.pc.show_id = true;
-			ent->client->sess.pc.show_timer = true;
-			ent->client->sess.pc.show_fragmessages = true;
-			ent->client->sess.pc.killbeep_num = 1;
-			ent->client->sess.pc.follow_killer = false;
-			ent->client->sess.pc.follow_powerup = false;
-			ent->client->sess.pc.enemy_skin[0] = 0;
-			ent->client->sess.pc.team_skin[0] = 0;
+			ent->client->sess.pc = MM_DefaultClientConfig();
 
 			InitClientResp(ent->client);
 		}

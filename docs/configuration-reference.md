@@ -41,7 +41,7 @@ The most useful player-facing commands are documented in the [Player Guide](play
 
 | Area | Commands |
 | --- | --- |
-| Display | `announcer`, `fm`, `help`, `id`, `kb`, `timer` |
+| Display | `announcer`, `eskin`, `fm`, `help`, `id`, `kb`, `timer`, `tskin` |
 | Match state | `ready`, `notready`, `readyup`, `readyteam`, `forfeit`, `time-out`, `time-in` |
 | Team selection | `team auto`, `team red`, `team blue`, `team free`, `team spectator` |
 | Voting | `callvote`, `cv`, `vote yes`, `vote no` |
@@ -51,6 +51,10 @@ The most useful player-facing commands are documented in the [Player Guide](play
 | Queueing | `mymap` |
 | Reconnect recovery | `ghost <code>` |
 | Captains | `captain`, `captain <player>` |
+
+MuffMode stores server-side player preference files in `baseq2/pcfg/sid-<encoded-social-id>.cfg`, using a safe hex encoding of the engine-provided social ID. Missing or unusually long social IDs keep session-only preferences instead of using fallback filenames. These files are loaded through a restricted player-config parser, not through the general server command buffer. Supported entries are `id`, `timer`, `fm`, `announcer`, `kb`, `followkiller`, `followleader`, `followpowerup`, `eskin`, and `tskin`.
+
+The in-game **Player Settings** menu exposes the same saved preferences for normal play: display toggles, kill beep selection, spectator auto-follow toggles, and quick skin override presets. Free-form skin paths are still entered with `eskin <model/skin>` and `tskin <model/skin>`.
 
 ## Vote Commands
 

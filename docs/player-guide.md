@@ -21,9 +21,11 @@ This guide is for anyone joining a MuffMode game. You do not need to learn every
 
 If you are joining someone else's server, they control most match settings. Your client-side commands still let you adjust your display preferences, ready state, team, votes, and spectator behavior.
 
+Display, skin override, kill beep, and spectator auto-follow preferences are saved per server by your social ID. Open **Player Settings** from the game menu for everyday changes, or use the commands below when you want binds, explicit values, or a custom skin path.
+
 ## First Match
 
-- Use the game menu to join a match, change teams, view server info, or open voting options.
+- Use the game menu to join a match, change teams, view server info, open voting options, or adjust saved player settings.
 - Use `team auto` for the quickest team join on team servers.
 - Use `ready`, `notready`, or `readyup` when the server uses competitive-style warmups.
 - Use `motd` to read server rules, notes, or event information.
@@ -46,15 +48,17 @@ If you are joining someone else's server, they control most match settings. Your
 
 ## Display Commands
 
+The **Player Settings** menu covers crosshair ID, match timer, frag messages, announcer, kill beep, spectator auto-follow toggles, and quick skin override presets. Custom `model/skin` override paths still use `eskin` and `tskin`; a command-entered custom skin appears as `custom` in the menu and can be cycled back to normal or a stock preset there.
+
 | Command | What it does |
 | --- | --- |
-| `announcer` | Toggle Quake Live style match announcer event support. |
+| `announcer [on|off]` | Toggle Quake Live style match announcer event support. |
 | `eskin <model/skin>` or `eskin off` | In team games, re-skin all enemies on your screen only; in duel, re-skin your opponent (e.g. `eskin male/grunt`). No argument shows the current setting. |
-| `fm` | Toggle frag messages. |
+| `fm [on|off]` | Toggle frag messages. |
 | `help` | Toggle help text drawing. |
-| `id` | Toggle crosshair player identification. |
-| `kb` | Toggle kill beeps. |
-| `timer` | Toggle the match timer. |
+| `id [on|off]` | Toggle crosshair player identification. |
+| `kb [0-4]` | Cycle kill beeps, or set one directly. `0`/`off` disables it. Named values are `clang`, `beep-boop`, `insane`, and `tang-tang`. |
+| `timer [on|off]` | Toggle the match timer. |
 | `tskin <model/skin>` or `tskin off` | In team games, re-skin all teammates on your screen only (not available in duel). No argument shows the current setting. |
 
 ## Gameplay Commands
@@ -72,9 +76,9 @@ If you are joining someone else's server, they control most match settings. Your
 | `time-out` | Call a timeout when the server allows timeouts. |
 | `time-in` | End an active timeout early. |
 | `follow <player>` | Spectate a specific player. |
-| `followkiller` | Toggle auto-following killers while spectating. |
-| `followleader` | Toggle auto-following the leading player while spectating. |
-| `followpowerup` | Toggle auto-following players who pick up powerups. |
+| `followkiller [on|off]` | Toggle auto-following killers while spectating. |
+| `followleader [on|off]` | Toggle auto-following the leading player while spectating. |
+| `followpowerup [on|off]` | Toggle auto-following players who pick up powerups. |
 
 ## Voting
 
