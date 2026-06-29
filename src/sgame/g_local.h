@@ -11,7 +11,7 @@
 constexpr const char *GAMEVERSION = "baseq2";
 
 constexpr const char *GAMEMOD_TITLE = "Muff Mode";
-constexpr const char *GAMEMOD_VERSION = "0.60.0";
+constexpr const char *GAMEMOD_VERSION = "0.60.1";
 
 //==================================================================
 
@@ -1013,7 +1013,8 @@ enum monster_attack_state_t {
 enum handedness_t {
 	RIGHT_HANDED,
 	LEFT_HANDED,
-	CENTER_HANDED
+	CENTER_HANDED,
+	CENTER_HANDED_VISIBLE	// [MuffMode] hand 3: centered fire, weapon model still shown
 };
 
 enum class auto_switch_t {

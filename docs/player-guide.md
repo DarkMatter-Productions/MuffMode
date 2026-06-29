@@ -109,3 +109,4 @@ Use `hook` and `unhook` directly if you prefer separate commands.
 - Custom skins, voting, team picking, timeouts, MyMap, and ready-up behavior are server controlled.
 - During active matches, servers can restore your match state automatically if you reconnect quickly with the same social ID. The older `ghost <code>` path remains as a fallback.
 - If something feels misconfigured, ask the host to run `doctor`; it reports risky cvar combinations and suggested fixes.
+- The `hand` cvar sets weapon handedness: `0` right, `1` left, `2` center (fires from screen center, weapon model hidden). Muff Mode adds `hand 3` — centered fire like `hand 2` but with the weapon model still visible. Set it from the console (`hand 3`); the in-game menu only exposes 0–2.
