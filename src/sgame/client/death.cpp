@@ -684,6 +684,13 @@ DIE(player_die) (gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 			!self->client->eliminated) {
 		ClientSetEliminated(self);
 		CalculateRanks();
+		// [MuffMode] Snapshot corpse at kill site before chase cam moves our origin.
+		CopyToBodyQue(self);
+		self->svflags |= SVF_NOCLIENT;
+		self->s.modelindex = 0;
+		self->s.modelindex2 = 0;
+		self->s.modelindex3 = 0;
+		gi.linkentity(self);
 	}
 
 	if (!self->deadflag) {

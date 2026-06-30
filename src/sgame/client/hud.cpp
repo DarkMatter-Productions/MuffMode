@@ -865,10 +865,11 @@ static void G_SetGametypeStats(gentity_t *ent) {
 		const int ci = (int)(ent - g_entities - 1);
 
 		if (GTF(GTF_ELIMINATION) && GTF(GTF_TEAMS) && GTF(GTF_CTF) && GT(GT_STRIKE)
-			&& ClientIsPlaying(ent->client) && !ent->client->eliminated) {
+			&& ClientIsPlaying(ent->client)) {
 			if (ci >= 0 && (size_t)ci < CONFIG_POV_CENTER_POOL_SLOTS) {
 				const bool attacking = ent->client->sess.team == (level.strike_red_attacks ? TEAM_RED : TEAM_BLUE);
 				const int cs = (int)(CONFIG_POV_CENTER_POOL + (size_t)ci);
+				gi.configstring(cs, attacking ? "OFFENSE" : "DEFENSE");
 				ent->client->ps.stats[STAT_ARENA_ROLE] = cs;
 			}
 		} else if (GTF(GTF_ELIMINATION) && GTF(GTF_TEAMS) && !GTF(GTF_CTF)
@@ -1146,10 +1147,8 @@ static void CTF_SetStats(gentity_t *ent, bool blink) {
 			ent->client->ps.stats[STAT_MINISCORE_SECOND_PIC] = 0;
 	}
 
-	if (MiniscoreHudActive()) {
-		ent->client->ps.stats[STAT_MINISCORE_FIRST_SCORE] = level.team_scores[TEAM_RED];
-		ent->client->ps.stats[STAT_MINISCORE_SECOND_SCORE] = level.team_scores[TEAM_BLUE];
-	}
+	ent->client->ps.stats[STAT_MINISCORE_FIRST_SCORE] = level.team_scores[TEAM_RED];
+	ent->client->ps.stats[STAT_MINISCORE_SECOND_SCORE] = level.team_scores[TEAM_BLUE];
 
 	ent->client->ps.stats[STAT_CTF_FLAG_PIC] = 0;
 	if (ent->client->sess.team == TEAM_RED &&
@@ -1267,11 +1266,11 @@ static void SetMiniScoreStats(gentity_t *ent) {
 		CTF_SetStats(ent, blink);
 	} else {
 		if (teams) {
+			ent->client->ps.stats[STAT_MINISCORE_FIRST_SCORE] = level.team_scores[TEAM_RED];
+			ent->client->ps.stats[STAT_MINISCORE_SECOND_SCORE] = level.team_scores[TEAM_BLUE];
 			if (MiniscoreHudActive()) {
 				ent->client->ps.stats[STAT_MINISCORE_FIRST_PIC] = ii_teams_red_default;
-				ent->client->ps.stats[STAT_MINISCORE_FIRST_SCORE] = level.team_scores[TEAM_RED];
 				ent->client->ps.stats[STAT_MINISCORE_SECOND_PIC] = ii_teams_blue_default;
-				ent->client->ps.stats[STAT_MINISCORE_SECOND_SCORE] = level.team_scores[TEAM_BLUE];
 			}
 		} else {
 			int16_t pic1 = 0, pic2 = 0;

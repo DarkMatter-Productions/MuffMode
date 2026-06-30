@@ -376,8 +376,9 @@ void ClientSetEliminated(gentity_t *self) {
 
 void ClientRespawn(gentity_t *ent) {
 	if (deathmatch->integer || coop->integer) {
-		// spectators don't leave bodies
-		if (ClientIsPlaying(ent->client))
+		// spectators don't leave bodies; arena elimination corpses are queued at death
+		if (ClientIsPlaying(ent->client) &&
+				(!ClientArenaEliminationCorpse(ent->client) || ent->s.modelindex))
 			CopyToBodyQue(ent);
 		ent->svflags &= ~SVF_NOCLIENT;
 
