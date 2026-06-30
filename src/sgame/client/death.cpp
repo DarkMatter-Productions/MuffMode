@@ -462,7 +462,9 @@ void TossClientItems(gentity_t *self) {
 	}
 
 	//drop tech
-	Tech_DeadDrop(self);
+	// [MuffMode] Horde can opt out of dropping techs on death via g_horde_tech_drop_on_death.
+	if (!GT(GT_HORDE) || g_horde_tech_drop_on_death->integer)
+		Tech_DeadDrop(self);
 
 	// drop CTF flags
 	CTF_DeadDropFlag(self);

@@ -77,7 +77,7 @@ Use `callvote <command> [arg]` or `cv <command> [arg]`.
 | `ruleset` | `<q2re|mm|q3a|q2reb|q|qc>` | Change ruleset. |
 | `powerups` | `<0|1>` | Disable or enable powerups. |
 | `friendlyfire` | `<0|1>` | Disable or enable friendly fire in team modes. |
-| `techs` | `<0|1>` | Disable or enable techs (FFA/TDM/CTF only). |
+| `techs` | `<0|1>` | Disable or enable techs (FFA/TDM/CTF/Horde only). |
 | `handicap` | `<player> <weapon> <on|off>` | Restrict duel weapons for a player. Weapons: `railgun`, `chaingun`, `rlauncher`, or `all`. |
 | `readyall` | none | Ready all players during ready-up warmup. |
 
@@ -175,7 +175,7 @@ Deathmatch respawns use a WORR-style danger score instead of raw farthest-only m
 | `g_allow_kill` | `1` | Allows the `kill` suicide command. |
 | `g_allow_mymap` | `1` | Allows MyMap queueing. |
 | `g_allow_spec_vote` | `0` | Allows spectators to vote. |
-| `g_allow_techs` | `auto` | Controls tech pickups in FFA/TDM/CTF. `auto` follows mode defaults; votes can force `0` or `1`. |
+| `g_allow_techs` | `auto` | Controls tech pickups in FFA/TDM/CTF/Horde. `auto` enables techs by default in CTF and Horde (off in FFA/TDM); votes can force `0` or `1` in any of those modes. |
 | `g_allow_vote_midgame` | `0` | Allows votes during active matches. |
 | `g_allow_voting` | `1` | Enables voting globally. |
 | `g_inactivity` | `120` | Seconds before inactive players are moved to spectators. |
@@ -381,7 +381,7 @@ These cvars tune Horde pacing, wave budget, player scaling, and map-size scaling
 
 ## Horde Champions And Themes
 
-Champions are stronger monster variants. Themes bias a wave toward a monster category when enough matching monsters are available.
+Champions are stronger monster variants. Themes bias a wave toward a monster category when enough matching monsters are available. When techs are enabled (see `g_allow_techs`), a champion always drops a random tech on death instead of its usual strong item.
 
 | Cvar | Default | Purpose |
 | --- | --- | --- |
@@ -413,6 +413,13 @@ real in-game time. `gt-HORDE.cfg` ships `g_weapon_respawn_time 60` and `g_horde_
 | Cvar | Default | Purpose |
 | --- | --- | --- |
 | `g_horde_item_respawn_scale` | `4` | Multiplies non-weapon item respawn time in Horde. `1` disables the slowdown; values below `1` are treated as `1`. Weapons are unaffected. |
+| `g_horde_tech_reset_each_wave` | `1` | When techs are enabled in Horde, `1` clears all techs (world and held) at the countdown to the next wave and spawns a fresh set at wave start. `0` makes techs persist across waves for the whole match (spawned once at map load). |
+| `g_horde_tech_relocate` | `0` | `0` = Horde techs stay where they spawn or are dropped. `1` = unpicked techs relocate to a new spot every 60s (the behavior in other modes). |
+| `g_horde_tech_count` | `0` | Number of techs to spawn per Horde wave. `0` = adaptive `ceil(players / 2)`; `1`–`4` = fixed. Clamped to the four tech types. |
+| `g_horde_tech_unique` | `0` | `0` = each wave's techs are picked independently, so duplicates can appear (e.g. three AutoDocs). `1` = pick a distinct, no-repeat random subset. |
+| `g_horde_tech_drop_on_death` | `1` | `1` = a killed player drops their held tech. `0` = they keep it. |
+| `g_horde_tech_spawn_anywhere` | `1` | `1` = scatter techs at random validated floor spots across the play area. `0` = spawn them at deathmatch spawn points (as in other modes). |
+| `g_horde_tech_duration` | `30` | Seconds a tech lasts after pickup before it expires and vanishes (like Quad). `0` = techs are held until dropped/lost. The remaining time shows in the powerup timer slot. |
 
 ## Horde Late-Wave & Endless
 

@@ -55,6 +55,7 @@ on:
         default: ""
 permissions:
   contents: write
+  copilot-requests: write
 
 concurrency:
   group: release-muff-mode
@@ -74,8 +75,15 @@ jobs:
           LEGACY_RELEASE_BOT_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN }}
           DISCORD_RELEASE_WEBHOOK: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}
         run: |
-          if ([string]::IsNullOrWhiteSpace($env:COPILOT_GITHUB_TOKEN) -and [string]::IsNullOrWhiteSpace($env:LEGACY_RELEASE_BOT_TOKEN)) {
-            throw "Set COPILOT_GITHUB_TOKEN to a fine-grained user PAT with the Copilot Requests permission, or provide the legacy RELEASE_BOT_TOKEN fallback. Release packages require Copilot for localized README translations."
+          if (-not [string]::IsNullOrWhiteSpace($env:COPILOT_GITHUB_TOKEN)) {
+            Write-Host "Copilot auth: COPILOT_GITHUB_TOKEN repository secret."
+          }
+          elseif (-not [string]::IsNullOrWhiteSpace($env:LEGACY_RELEASE_BOT_TOKEN)) {
+            Write-Host "Copilot auth: RELEASE_BOT_TOKEN repository secret (legacy fallback)."
+          }
+          else {
+            Write-Host "Copilot auth: none. Release will use deterministic English README and English copies for localized guide files."
+            Write-Host "Add COPILOT_GITHUB_TOKEN (fine-grained user PAT with Copilot Requests) for Copilot-generated guides and translations."
           }
 
           if ([string]::IsNullOrWhiteSpace($env:DISCORD_RELEASE_WEBHOOK)) {
@@ -175,8 +183,7 @@ jobs:
 
     env:
       GH_TOKEN: ${{ github.token }}
-      COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN != '' && secrets.COPILOT_GITHUB_TOKEN || secrets.RELEASE_BOT_TOKEN }}
-      COPILOT_TOKEN_PRESENT: ${{ (secrets.COPILOT_GITHUB_TOKEN != '' || secrets.RELEASE_BOT_TOKEN != '') && 'true' || 'false' }}
+      GITHUB_TOKEN: ${{ github.token }}
       VCPKG_ROOT: ${{ github.workspace }}\..\vcpkg
 
     steps:
@@ -186,6 +193,25 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.ref_name }}
           persist-credentials: false
+
+      - name: Configure Copilot Auth
+        shell: pwsh
+        env:
+          SECRET_COPILOT_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+          SECRET_LEGACY_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN }}
+        run: |
+          if (-not [string]::IsNullOrWhiteSpace($env:SECRET_COPILOT_TOKEN)) {
+            "COPILOT_GITHUB_TOKEN=$env:SECRET_COPILOT_TOKEN" >> $env:GITHUB_ENV
+            Write-Host "Copilot auth: COPILOT_GITHUB_TOKEN repository secret."
+          }
+          elseif (-not [string]::IsNullOrWhiteSpace($env:SECRET_LEGACY_TOKEN)) {
+            "COPILOT_GITHUB_TOKEN=$env:SECRET_LEGACY_TOKEN" >> $env:GITHUB_ENV
+            Write-Host "Copilot auth: RELEASE_BOT_TOKEN repository secret (legacy fallback)."
+          }
+          else {
+            Write-Host "Copilot auth: none. Release will use deterministic English README and English copies for localized guide files."
+            Write-Host "Add COPILOT_GITHUB_TOKEN (fine-grained user PAT with Copilot Requests) for Copilot-generated guides and translations."
+          }
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
