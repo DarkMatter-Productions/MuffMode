@@ -97,7 +97,7 @@ bool IsLateWave()
 	return GT(GT_HORDE) && level.round_number > g_horde_content_peak_wave->integer;
 }
 
-int CountThemeCandidates(uint32_t category, int wave)
+int CountThemeCandidates(HordeCategory category, int wave)
 {
 	const bool late_wave = GT(GT_HORDE) && wave > g_horde_content_peak_wave->integer;
 	int        count = 0;
@@ -107,7 +107,7 @@ int CountThemeCandidates(uint32_t category, int wave)
 			continue;
 		if (monster.max_level != -1 && wave > monster.max_level)
 			continue;
-		if (!(monster.categories & category))
+		if ((monster.categories & category) == HordeCategory::None)
 			continue;
 
 		float weight = monster.weight + ((wave - max(1, monster.min_level)) * monster.lvl_w_adjust);
@@ -134,10 +134,10 @@ const ThemeDefinition *FindTheme(Theme theme)
 	return nullptr;
 }
 
-uint32_t ActiveThemeCategory()
+HordeCategory ActiveThemeCategory()
 {
 	const ThemeDefinition *def = FindTheme(static_cast<Theme>(level.horde_wave_theme));
-	return def ? def->category : 0;
+	return def ? def->category : HordeCategory::None;
 }
 
 namespace {
@@ -185,7 +185,7 @@ gitem_t *PickItem()
 	return nullptr;
 }
 
-const char *PickMonster(const WeightedItem **out_row, int remaining_points, uint32_t theme_category, uint32_t roster_mask)
+const char *PickMonster(const WeightedItem **out_row, int remaining_points, HordeCategory theme_category, uint32_t roster_mask)
 {
 	static std::array<PickedItem, kHordeMonsterCount> picked_monsters;
 	size_t                                            num_picked_monsters = 0;
@@ -202,7 +202,7 @@ const char *PickMonster(const WeightedItem **out_row, int remaining_points, uint
 			continue;
 		if (monster.spawn_points > remaining_points)
 			continue;
-		if (theme_category && !(monster.categories & theme_category))
+		if (theme_category != HordeCategory::None && (monster.categories & theme_category) == HordeCategory::None)
 			continue;
 		if (roster_mask && !(roster_mask & (1u << static_cast<size_t>(&monster - kMonsters.data()))))
 			continue;
@@ -239,8 +239,8 @@ const char *PickMonster(const WeightedItem **out_row, int remaining_points, uint
 }
 
 // When weighted pick finds nothing (e.g. all weights zero), use the highest-tier affordable row still
-// valid for this wave. theme_category (0 = any) keeps a themed wave's fallback on-category.
-const char *PickMonsterFallback(const WeightedItem **out_row, int remaining_points, uint32_t theme_category = 0)
+// valid for this wave. HordeCategory::None means any; themed waves keep fallback on-category.
+const char *PickMonsterFallback(const WeightedItem **out_row, int remaining_points, HordeCategory theme_category = HordeCategory::None)
 {
 	const WeightedItem *choice = nullptr;
 
@@ -254,7 +254,7 @@ const char *PickMonsterFallback(const WeightedItem **out_row, int remaining_poin
 			continue;
 		if (monster.spawn_points > remaining_points)
 			continue;
-		if (theme_category && !(monster.categories & theme_category))
+		if (theme_category != HordeCategory::None && (monster.categories & theme_category) == HordeCategory::None)
 			continue;
 
 		const int32_t cap = monster.max_level == -1 ? std::numeric_limits<int32_t>::max() : monster.max_level;
@@ -274,7 +274,7 @@ const char *PickMonsterFallback(const WeightedItem **out_row, int remaining_poin
 				continue;
 			if (monster.spawn_points > remaining_points)
 				continue;
-			if (theme_category && !(monster.categories & theme_category))
+			if (theme_category != HordeCategory::None && (monster.categories & theme_category) == HordeCategory::None)
 				continue;
 
 			const int32_t cap = monster.max_level == -1 ? std::numeric_limits<int32_t>::max() : monster.max_level;
@@ -326,13 +326,13 @@ const char *PickMonsterForWave(const WeightedItem **out_row, int remaining_point
 {
 	// Themed waves and roster waves are mutually exclusive (BeginWave only builds a roster when the
 	// theme is NONE).
-	const uint32_t theme_category = ActiveThemeCategory();
+	const HordeCategory theme_category = ActiveThemeCategory();
 
 	// Themed waves are strict: a category banner means every spawn must be on-category. Try the
 	// weighted pick, then a category-respecting fallback; never fall through to the unrestricted
 	// pool. Returning null ends the wave cleanly (leftover budget forfeited) instead of spawning an
 	// off-theme body under a themed banner.
-	if (theme_category) {
+	if (theme_category != HordeCategory::None) {
 		if (const char *pick = PickMonster(out_row, remaining_points, theme_category, 0))
 			return pick;
 		return PickMonsterFallback(out_row, remaining_points, theme_category);
@@ -341,10 +341,10 @@ const char *PickMonsterForWave(const WeightedItem **out_row, int remaining_point
 	// Non-themed waves bias by this wave's roster, then fall through to the unrestricted pool and the
 	// fallback picker so a wave can never stall.
 	if (level.horde_wave_roster)
-		if (const char *pick = PickMonster(out_row, remaining_points, 0, level.horde_wave_roster))
+		if (const char *pick = PickMonster(out_row, remaining_points, HordeCategory::None, level.horde_wave_roster))
 			return pick;
 
-	if (const char *pick = PickMonster(out_row, remaining_points, 0, 0))
+	if (const char *pick = PickMonster(out_row, remaining_points, HordeCategory::None, 0))
 		return pick;
 
 	static int32_t fallback_warn_wave = -1;

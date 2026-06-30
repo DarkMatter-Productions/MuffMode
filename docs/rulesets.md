@@ -46,7 +46,7 @@ Choose this when you want the rerelease baseline.
 | Starts | Standard Quake II deathmatch start. |
 | Weapons | Baseline rerelease weapon damage, projectile speed, spread, ammo use, and recoil behavior. |
 | Armor and health | Standard armor tiers, normal health rules, no Muff Mode/Q3 cap layer. |
-| Powerups | Haste/DualFire changes fire rate only. Protection fully absorbs remaining direct damage and blocks splash while active. Protection and Invisibility use the faithful long respawn behavior. |
+| Powerups | Haste/DualFire changes fire rate only. Protection fully absorbs remaining direct damage and blocks splash while active. Protection and Invisibility use the faithful long respawn behavior. Activating major powerups plays the stock local use sound. |
 | Pickups | Standard item economy, including Q2-style weapon and ammo relationships. |
 
 Good for: stock-feeling servers, compatibility testing, and players who want the least surprise.

@@ -1621,12 +1621,19 @@ bool Pickup_Pack(gentity_t *ent, gentity_t *other) {
 //======================================================================
 
 static void Use_Powerup_BroadcastMsg(gentity_t *ent, gitem_t *item, const char *sound_name, const char *announcer_name) {
+	if (deathmatch->integer && g_quadhog->integer && item->id == IT_POWERUP_QUAD) {
+		gi.LocBroadcast_Print(PRINT_CENTER, "{} is the Quad Hog!\n", ent->client->resp.netname);
+	//} else {
+	//	gi.LocBroadcast_Print(PRINT_HIGH, "{} got the {}!\n", ent->client->resp.netname, item->pickup_name);
+	}
+
+	// [MuffMode] Q2RE keeps stock local powerup use sounds.
+	if (RS(RS_Q2RE)) {
+		gi.sound(ent, CHAN_ITEM, gi.soundindex(sound_name), 1, ATTN_NORM, 0);
+		return;
+	}
+
 	if (deathmatch->integer) {
-		if (g_quadhog->integer && item->id == IT_POWERUP_QUAD) {
-			gi.LocBroadcast_Print(PRINT_CENTER, "{} is the Quad Hog!\n", ent->client->resp.netname);
-		//} else {
-		//	gi.LocBroadcast_Print(PRINT_HIGH, "{} got the {}!\n", ent->client->resp.netname, item->pickup_name);
-		}
 		if (MM_ShouldAnnouncePowerupUse()) {
 			gi.sound(ent, CHAN_RELIABLE | CHAN_NO_PHS_ADD | CHAN_AUX, gi.soundindex(sound_name), 1, ATTN_NONE, 0);
 			AnnouncerSound(world, announcer_name, nullptr, false);
