@@ -136,7 +136,7 @@ baseline is faithful:
   default to q2re values.
 - **Items** — `src/sgame/muffmode/mm_items_rules.cpp`: armor tiers, health pickup caps/amounts, health
   respawn 30s, mega-health behavior, AutoDoc regen 500ms, breather 30s, adrenaline, powerup respawn
-  (incl. 300s protection/invisibility), powerup-broadcast suppression, smart weapon auto-switch.
+  (incl. 300s protection/invisibility), powerup pickup/respawn broadcast suppression, smart weapon auto-switch.
 - **Combat** — `src/sgame/core/combat.cpp`: armor protection percentages, Protection powerup, and
   rocket splash knockback (`src/sgame/core/weapon_projectiles.cpp`, MM-only branch).
 - **DualFire/haste movement buff** — `MM_RulesetHasteBoostsMovement()` (`src/sgame/muffmode/mm_ruleset.cpp`)
