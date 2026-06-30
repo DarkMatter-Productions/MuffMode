@@ -2500,11 +2500,11 @@ inline std::tuple<gentity_t *, vec3_t> G_FindSquadRespawnTarget() {
 	return { nullptr, {} };
 }
 
-enum respawn_state_t {
-	RESPAWN_NONE,     // invalid state
-	RESPAWN_SPECTATE, // move to spectator
-	RESPAWN_SQUAD,    // move to good squad point
-	RESPAWN_START     // move to start of map
+enum class respawn_state_t {
+	none,     // invalid state
+	spectate, // move to spectator
+	squad,    // move to good squad point
+	start     // move to start of map
 };
 
 // [Paril-KEX] return false to fall back to click-to-respawn behavior.
@@ -2520,18 +2520,18 @@ static bool G_CoopRespawn(gentity_t *ent) {
 	if (!g_coop_squad_respawn->integer && !g_coop_enable_lives->integer)
 		return false;
 
-	respawn_state_t state = RESPAWN_NONE;
+	respawn_state_t state = respawn_state_t::none;
 
 	// first pass: if we have no lives left, just move to spectator
 	if (g_coop_enable_lives->integer) {
 		if (ent->client->pers.lives == 0) {
-			state = RESPAWN_SPECTATE;
+			state = respawn_state_t::spectate;
 			ent->client->coop_respawn_state = COOP_RESPAWN_NO_LIVES;
 		}
 	}
 
 	// second pass: check for where to spawn
-	if (state == RESPAWN_NONE) {
+	if (state == respawn_state_t::none) {
 		// if squad respawn, don't respawn until we can find a good player to spawn on.
 		if (coop->integer && g_coop_squad_respawn->integer) {
 			bool allDead = true;
@@ -2546,12 +2546,12 @@ static bool G_CoopRespawn(gentity_t *ent) {
 			// all dead, so if we ever get here we have lives enabled;
 			// we should just respawn at the start of the level
 			if (allDead)
-				state = RESPAWN_START;
+				state = respawn_state_t::start;
 			else {
 				auto [good_player, good_spot] = G_FindSquadRespawnTarget();
 
 				if (good_player) {
-					state = RESPAWN_SQUAD;
+					state = respawn_state_t::squad;
 
 					squad_respawn_position = good_spot;
 					squad_respawn_angles = good_player->s.angles;
@@ -2559,14 +2559,14 @@ static bool G_CoopRespawn(gentity_t *ent) {
 
 					use_squad_respawn = true;
 				} else {
-					state = RESPAWN_SPECTATE;
+					state = respawn_state_t::spectate;
 				}
 			}
 		} else
-			state = RESPAWN_START;
+			state = respawn_state_t::start;
 	}
 
-	if (state == RESPAWN_SQUAD || state == RESPAWN_START) {
+	if (state == respawn_state_t::squad || state == respawn_state_t::start) {
 		// give us our max health back since it will reset
 		// to pers.health; in instanced items we'd lose the items
 		// we touched so we always want to respawn with our max.
@@ -2577,7 +2577,7 @@ static bool G_CoopRespawn(gentity_t *ent) {
 
 		ent->client->latched_buttons = BUTTON_NONE;
 		use_squad_respawn = false;
-	} else if (state == RESPAWN_SPECTATE) {
+	} else if (state == respawn_state_t::spectate) {
 		if (!ent->client->coop_respawn_state)
 			ent->client->coop_respawn_state = COOP_RESPAWN_WAITING;
 

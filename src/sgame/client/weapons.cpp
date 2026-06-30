@@ -615,21 +615,21 @@ void Think_Weapon(gentity_t *ent) {
 Weapon_AttemptSwitch
 ================
 */
-enum weap_switch_t {
-	WEAP_SWITCH_ALREADY_USING,
-	WEAP_SWITCH_NO_WEAPON,
-	WEAP_SWITCH_NO_AMMO,
-	WEAP_SWITCH_NOT_ENOUGH_AMMO,
-	WEAP_SWITCH_VALID
+enum class weap_switch_t {
+	already_using,
+	no_weapon,
+	no_ammo,
+	not_enough_ammo,
+	valid
 };
 
 static weap_switch_t Weapon_AttemptSwitch(gentity_t *ent, gitem_t *item, bool silent) {
 	if (ent->client->pers.weapon == item)
-		return WEAP_SWITCH_ALREADY_USING;
+		return weap_switch_t::already_using;
 	else if (RS(RS_Q3A) && item->id == IT_WEAPON_SSHOTGUN)
-		return WEAP_SWITCH_NO_WEAPON;
+		return weap_switch_t::no_weapon;
 	else if (!ent->client->pers.inventory[item->id])
-		return WEAP_SWITCH_NO_WEAPON;
+		return weap_switch_t::no_weapon;
 
 	item_id_t ammo_id = MM_Ruleset_WeaponAmmoId(item);
 	if (ammo_id && !g_select_empty->integer && !(item->flags & IF_AMMO)) {
@@ -638,15 +638,15 @@ static weap_switch_t Weapon_AttemptSwitch(gentity_t *ent, gitem_t *item, bool si
 		if (!ent->client->pers.inventory[ammo_id]) {
 			if (!silent)
 				gi.LocClient_Print(ent, PRINT_HIGH, "$g_no_ammo", ammo_item->pickup_name, item->pickup_name_definite);
-			return WEAP_SWITCH_NO_AMMO;
+			return weap_switch_t::no_ammo;
 		} else if (ent->client->pers.inventory[ammo_id] < MM_Ruleset_WeaponAmmoRequired(item)) {
 			if (!silent)
 				gi.LocClient_Print(ent, PRINT_HIGH, "$g_not_enough_ammo", ammo_item->pickup_name, item->pickup_name_definite);
-			return WEAP_SWITCH_NOT_ENOUGH_AMMO;
+			return weap_switch_t::not_enough_ammo;
 		}
 	}
 
-	return WEAP_SWITCH_VALID;
+	return weap_switch_t::valid;
 }
 
 static inline bool Weapon_IsPartOfChain(gitem_t *item, gitem_t *other) {
@@ -662,7 +662,7 @@ Make the weapon ready if there is ammo
 */
 void Use_Weapon(gentity_t *ent, gitem_t *item) {
 	gitem_t			*wanted, *root;
-	weap_switch_t	result = WEAP_SWITCH_NO_WEAPON;
+	weap_switch_t	result = weap_switch_t::no_weapon;
 
 	// if we're switching to a weapon in this chain already,
 	// start from the weapon after this one in the chain
@@ -682,7 +682,7 @@ void Use_Weapon(gentity_t *ent, gitem_t *item) {
 
 	while (true) {
 		// try the weapon currently in the chain
-		if ((result = Weapon_AttemptSwitch(ent, wanted, false)) == WEAP_SWITCH_VALID)
+		if ((result = Weapon_AttemptSwitch(ent, wanted, false)) == weap_switch_t::valid)
 			break;
 
 		// no chains
@@ -696,9 +696,9 @@ void Use_Weapon(gentity_t *ent, gitem_t *item) {
 			break;
 	}
 
-	if (result == WEAP_SWITCH_VALID)
+	if (result == weap_switch_t::valid)
 		ent->client->newweapon = wanted; // change to this weapon when down
-	else if ((result = Weapon_AttemptSwitch(ent, wanted, true)) == WEAP_SWITCH_NO_WEAPON && wanted != ent->client->pers.weapon && wanted != ent->client->newweapon)
+	else if ((result = Weapon_AttemptSwitch(ent, wanted, true)) == weap_switch_t::no_weapon && wanted != ent->client->pers.weapon && wanted != ent->client->newweapon)
 		gi.LocClient_Print(ent, PRINT_HIGH, "$g_out_of_item", wanted->pickup_name);
 }
 
@@ -906,10 +906,10 @@ static inline bool Weapon_HandleNewWeapon(gentity_t *ent, int FRAME_DEACTIVATE_F
 Weapon_HandleReady
 ================
 */
-enum weapon_ready_state_t {
-	READY_NONE,
-	READY_CHANGING,
-	READY_FIRING
+enum class weapon_ready_state_t {
+	none,
+	changing,
+	firing
 };
 
 static inline weapon_ready_state_t Weapon_HandleReady(gentity_t *ent, int FRAME_FIRE_FIRST, int FRAME_IDLE_FIRST, int FRAME_IDLE_LAST, const int *pause_frames) {
@@ -937,31 +937,31 @@ static inline weapon_ready_state_t Weapon_HandleReady(gentity_t *ent, int FRAME_
 				(ent->client->pers.inventory[ammo_id] >= required_ammo)) {
 				ent->client->weaponstate = WEAPON_FIRING;
 				ent->client->last_firing_time = level.time + COOP_DAMAGE_FIRING_TIME;
-				return READY_FIRING;
+				return weapon_ready_state_t::firing;
 			} else {
 				NoAmmoWeaponChange(ent, true);
-				return READY_CHANGING;
+				return weapon_ready_state_t::changing;
 			}
 		} else if (ent->client->weapon_think_time <= level.time) {
 			ent->client->weapon_think_time = level.time + Weapon_AnimationTime(ent);
 
 			if (ent->client->ps.gunframe == FRAME_IDLE_LAST) {
 				ent->client->ps.gunframe = FRAME_IDLE_FIRST;
-				return READY_CHANGING;
+				return weapon_ready_state_t::changing;
 			}
 
 			if (pause_frames)
 				for (int n = 0; pause_frames[n]; n++)
 					if (ent->client->ps.gunframe == pause_frames[n])
 						if (irandom(16))
-							return READY_CHANGING;
+							return weapon_ready_state_t::changing;
 
 			ent->client->ps.gunframe++;
-			return READY_CHANGING;
+			return weapon_ready_state_t::changing;
 		}
 	}
 
-	return READY_NONE;
+	return weapon_ready_state_t::none;
 }
 
 /*
@@ -1006,8 +1006,9 @@ void Weapon_Generic(gentity_t *ent, int FRAME_ACTIVATE_LAST, int FRAME_FIRE_LAST
 		return;
 	else if (Weapon_HandleNewWeapon(ent, FRAME_DEACTIVATE_FIRST, FRAME_DEACTIVATE_LAST))
 		return;
-	else if (auto state = Weapon_HandleReady(ent, FRAME_FIRE_FIRST, FRAME_IDLE_FIRST, FRAME_IDLE_LAST, pause_frames)) {
-		if (state == READY_FIRING) {
+	else if (const auto state = Weapon_HandleReady(ent, FRAME_FIRE_FIRST, FRAME_IDLE_FIRST, FRAME_IDLE_LAST, pause_frames);
+		state != weapon_ready_state_t::none) {
+		if (state == weapon_ready_state_t::firing) {
 			ent->client->ps.gunframe = FRAME_FIRE_FIRST;
 			ent->client->weapon_fire_buffered = false;
 
@@ -1074,7 +1075,7 @@ void Weapon_Repeating(gentity_t *ent, int FRAME_ACTIVATE_LAST, int FRAME_FIRE_LA
 		return;
 	else if (Weapon_HandleNewWeapon(ent, FRAME_DEACTIVATE_FIRST, FRAME_DEACTIVATE_LAST))
 		return;
-	else if (Weapon_HandleReady(ent, FRAME_FIRE_FIRST, FRAME_IDLE_FIRST, FRAME_IDLE_LAST, pause_frames) == READY_CHANGING)
+	else if (Weapon_HandleReady(ent, FRAME_FIRE_FIRST, FRAME_IDLE_FIRST, FRAME_IDLE_LAST, pause_frames) == weapon_ready_state_t::changing)
 		return;
 
 	if (ent->client->weaponstate == WEAPON_FIRING && ent->client->weapon_think_time <= level.time) {
