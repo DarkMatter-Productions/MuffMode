@@ -80,7 +80,11 @@ inline std::optional<std::string> EncodeSocialIdConfigStem(std::string_view soci
 	constexpr std::string_view prefix = "sid-";
 	if (social_id.empty() || social_id.size() > max_social_id_length)
 		return std::nullopt;
-	if (prefix.size() + (social_id.size() * 2) > max_stem_length)
+
+	if (max_stem_length < prefix.size())
+		return std::nullopt;
+	const size_t available_hex_digits = max_stem_length - prefix.size();
+	if (social_id.size() > available_hex_digits / 2)
 		return std::nullopt;
 
 	std::string out;
@@ -141,6 +145,23 @@ inline std::optional<int> ParseKillBeepToken(std::string_view value) noexcept
 	return parsed;
 }
 
+inline std::optional<bool> ParseFollowViewToken(std::string_view value) noexcept
+{
+	if (EqualsI(value, "first") || EqualsI(value, "firstperson") ||
+		EqualsI(value, "first-person") || EqualsI(value, "fp") ||
+		EqualsI(value, "eye") || EqualsI(value, "eyecam")) {
+		return true;
+	}
+
+	if (EqualsI(value, "third") || EqualsI(value, "thirdperson") ||
+		EqualsI(value, "third-person") || EqualsI(value, "tp") ||
+		EqualsI(value, "behind")) {
+		return false;
+	}
+
+	return ParseBoolToken(value);
+}
+
 inline bool IsSafeSkinPath(std::string_view skin) noexcept
 {
 	if (skin.empty())
@@ -173,7 +194,15 @@ inline bool IsSafeSkinPath(std::string_view skin) noexcept
 
 inline bool SkinFitsPlayerConfigString(std::string_view skin, size_t max_netname_length, size_t configstring_size) noexcept
 {
-	return (max_netname_length + 1 + skin.size() + 1 + std::string_view("default").size()) < configstring_size;
+	constexpr size_t fixed_chars = 1 + 1 + std::string_view("default").size();
+	if (max_netname_length >= configstring_size)
+		return false;
+
+	const size_t remaining = configstring_size - max_netname_length;
+	if (remaining <= fixed_chars)
+		return false;
+
+	return skin.size() < (remaining - fixed_chars);
 }
 
 inline bool IsStorableSkinPath(std::string_view skin, size_t max_qpath, size_t max_netname_length, size_t configstring_size) noexcept

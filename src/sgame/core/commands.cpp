@@ -2011,33 +2011,65 @@ Cmd_Follow_f
 =================
 */
 static void Cmd_Follow_f(gentity_t *ent) {
-	if (ClientIsPlaying(ent->client)) {
+	if (ClientIsPlaying(ent->client) && !ent->client->eliminated) {
 		gi.Client_Print(ent, PRINT_HIGH, "You must spectate before you can follow.\n");
 		return;
 	}
 	if (gi.argc() < 2) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "Usage: {} [client name/num]\nFollows the specified player.", gi.argv(0));
+		gi.LocClient_Print(ent, PRINT_HIGH, "Usage: {} <client name/num|next|prev|stop|view>\n", gi.argv(0));
 		return;
 	}
 
-	gentity_t *follow_ent = ClientEntFromString(gi.argv(1));
+	const char *arg = gi.argv(1);
+
+	if (!Q_strcasecmp(arg, "next")) {
+		if (ent->client->follow_target)
+			FollowNext(ent);
+		else
+			GetFollowTarget(ent);
+		return;
+	}
+
+	if (!Q_strcasecmp(arg, "prev") || !Q_strcasecmp(arg, "previous")) {
+		if (ent->client->follow_target)
+			FollowPrev(ent);
+		else
+			FollowCycle(ent, -1);
+		return;
+	}
+
+	if (!Q_strcasecmp(arg, "stop") || !Q_strcasecmp(arg, "off") || !Q_strcasecmp(arg, "free")) {
+		if (ent->client->follow_target)
+			FreeFollower(ent);
+		else
+			gi.Client_Print(ent, PRINT_HIGH, "You are not following anyone.\n");
+		return;
+	}
+
+	if (!Q_strcasecmp(arg, "view")) {
+		ToggleFollowViewMode(ent);
+		return;
+	}
+
+	gentity_t *follow_ent = ClientEntFromString(arg);
 
 	if (!follow_ent || !follow_ent->inuse || !follow_ent->client) {
 		gi.Client_Print(ent, PRINT_HIGH, "Invalid client specified.\n");
 		return;
 	}
 
-	if (!ClientIsPlaying(follow_ent->client)) {
+	if (!ClientIsPlaying(follow_ent->client) || follow_ent->client->eliminated) {
 		gi.Client_Print(ent, PRINT_HIGH, "Specified client is not playing.\n");
 		return;
 	}
 
-	ent->client->follow_target = follow_ent;
-	ent->client->follow_update = true;
-	UpdateChaseCam(ent);
+	if (!FollowTargetAllowed(ent, follow_ent)) {
+		gi.Client_Print(ent, PRINT_HIGH, "You can only follow teammates while eliminated.\n");
+		return;
+	}
 
-	// [MuffMode] Follow target changed; re-evaluate this viewer's skin overrides.
-	MM_RefreshSkinOverridesForViewer(ent);
+	SetFollowTarget(ent, follow_ent);
+	UpdateFollowCamera(ent);
 }
 
 /*
@@ -2065,6 +2097,35 @@ Cmd_FollowPowerup_f
 */
 static void Cmd_FollowPowerup_f(gentity_t *ent) {
 	MM_CmdFollowPowerup(ent);
+}
+
+/*
+=================
+Cmd_FollowView_f
+=================
+*/
+static void Cmd_FollowView_f(gentity_t *ent) {
+	MM_CmdFollowView(ent);
+}
+
+static void Cmd_FollowNext_f(gentity_t *ent) {
+	if (!ent || !ent->client)
+		return;
+
+	if (ent->client->follow_target)
+		FollowNext(ent);
+	else
+		GetFollowTarget(ent);
+}
+
+static void Cmd_FollowPrev_f(gentity_t *ent) {
+	if (!ent || !ent->client)
+		return;
+
+	if (ent->client->follow_target)
+		FollowPrev(ent);
+	else
+		FollowCycle(ent, -1);
 }
 
 /*----------------------------------------------------------------*/
@@ -2245,7 +2306,10 @@ cmds_t client_cmds[] = {
 	{"follow",			Cmd_Follow_f,			CF_ALLOW_SPEC | CF_ALLOW_DEAD},
 	{"followkiller",	Cmd_FollowKiller_f,		CF_ALLOW_SPEC | CF_ALLOW_DEAD},
 	{"followleader",	Cmd_FollowLeader_f,		CF_ALLOW_SPEC | CF_ALLOW_DEAD},
+	{"follownext",		Cmd_FollowNext_f,		CF_ALLOW_SPEC | CF_ALLOW_DEAD},
+	{"followprev",		Cmd_FollowPrev_f,		CF_ALLOW_SPEC | CF_ALLOW_DEAD},
 	{"followpowerup",	Cmd_FollowPowerup_f,	CF_ALLOW_SPEC | CF_ALLOW_DEAD},
+	{"followview",		Cmd_FollowView_f,		CF_ALLOW_SPEC | CF_ALLOW_DEAD},
 	{"forcevote",		Cmd_ForceVote_f,		CF_ADMIN_ONLY | CF_ALLOW_INT | CF_ALLOW_SPEC},
 	{"forfeit",			Cmd_Forfeit_f,			CF_ALLOW_DEAD},
 	{"gametype",		Cmd_Gametype_f,			CF_ALLOW_DEAD | CF_ALLOW_INT | CF_ALLOW_SPEC},	// listing is open to all; changing is gated to admins inside the handler

@@ -247,6 +247,9 @@
     <ClInclude Include="..\..\src\sgame\muffmode\mm_parse.h">
       <Filter>sgame\muffmode</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_time_format.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\src\sgame\muffmode\mm_profile.h">
       <Filter>sgame\muffmode</Filter>
     </ClInclude>
@@ -291,7 +294,7 @@
     <ClCompile Include="..\..\src\sgame\core\ai.cpp">
       <Filter>sgame\core</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\src\sgame\core\chase_camera.cpp">
+    <ClCompile Include="..\..\src\sgame\core\following_camera.cpp">
       <Filter>sgame\core</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\sgame\core\commands.cpp">

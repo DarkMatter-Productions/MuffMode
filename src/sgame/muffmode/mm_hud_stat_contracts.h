@@ -27,6 +27,7 @@
 // STAT_ARENA_ROLE         — Strike top-right or CA centre: CONFIG_POV_CENTER_POOL + client
 // STAT_LIVES              — Horde/LMS: right stack num(1) at yt 42; coop: lives_num at yt 2
 // STAT_MATCH_STATE        — CONFIG_MATCH_STATE (xv 0 yb -78 stat_string, bottom-centre); warmup: WARMUP
+// STAT_SPECTATOR          — CONFIG_SPECTATOR_MODE_* when spectating
 
 inline constexpr size_t MM_STATUSBAR_LAYOUT_MAX_CHARS = 5280; // CS_SIZE(CS_STATUSBAR)
 

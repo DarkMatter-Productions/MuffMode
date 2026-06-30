@@ -1,8 +1,7 @@
 // Copyright (c) ZeniMax Media Inc.
 // Licensed under the GNU General Public License 2.0.
-#include <cerrno>
-
 #include "g_local.h"
+#include "muffmode/mm_parse.h"
 
 constexpr spawnflags_t SPAWNFLAG_TRIGGER_MONSTER = 0x01_spawnflag;
 constexpr spawnflags_t SPAWNFLAG_TRIGGER_NOT_PLAYER = 0x02_spawnflag;
@@ -12,18 +11,11 @@ constexpr spawnflags_t SPAWNFLAG_TRIGGER_LATCHED = 0x10_spawnflag;
 constexpr spawnflags_t SPAWNFLAG_TRIGGER_CLIP = 0x20_spawnflag;
 
 static bool TriggerParseFiniteFloat(const char *token, float &out) {
-	if (!token || !*token) {
+	const auto value = MM_ParseFloatArg(token);
+	if (!value)
 		return false;
-	}
 
-	char *end = nullptr;
-	errno = 0;
-	const float value = strtof(token, &end);
-	if (end == token || *end != '\0' || errno == ERANGE || !std::isfinite(value)) {
-		return false;
-	}
-
-	out = value;
+	out = *value;
 	return true;
 }
 
@@ -271,7 +263,7 @@ static USE(trigger_key_use) (gentity_t *self, gentity_t *other, gentity_t *activ
 
 	if (!self->item)
 		return;
-	if (!activator->client)
+	if (!activator || !activator->client)
 		return;
 
 	index = self->item->id;

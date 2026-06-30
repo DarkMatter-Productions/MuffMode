@@ -47,6 +47,27 @@ inline std::optional<int32_t> MM_ParseIntArg(const char *s) {
 	return MM_ParseIntText(s);
 }
 
+inline std::optional<uint32_t> MM_ParseUInt32Text(std::string_view text) {
+	if (text.empty() || text.front() == '-' || text.front() == '+')
+		return std::nullopt;
+
+	uint32_t value = 0;
+	const char *begin = text.data();
+	const char *end = begin + text.size();
+	const auto [ptr, ec] = std::from_chars(begin, end, value);
+	if (ec != std::errc{} || ptr != end)
+		return std::nullopt;
+
+	return value;
+}
+
+inline std::optional<uint32_t> MM_ParseUInt32Arg(const char *s) {
+	if (!s)
+		return std::nullopt;
+
+	return MM_ParseUInt32Text(s);
+}
+
 inline std::optional<int32_t> MM_ParseNonNegativeIntArg(const char *s) {
 	const auto value = MM_ParseIntArg(s);
 	if (!value || *value < 0)

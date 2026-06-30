@@ -370,6 +370,9 @@ static void brain_tounge_attack(gentity_t *self) {
 	trace_t tr;
 	int		damage;
 
+	if (!self->enemy || !self->enemy->inuse)
+		return;
+
 	AngleVectors(self->s.angles, f, r, nullptr);
 	// offset = { 24, 0, 6 };
 	offset = { 24, 0, 16 };
@@ -442,16 +445,29 @@ constexpr vec3_t brain_leye[] = {
 
 static PRETHINK(brain_right_eye_laser_update) (gentity_t *laser) -> void {
 	gentity_t *self = laser->owner;
+	if (!self || !self->inuse) {
+		G_FreeEntity(laser);
+		return;
+	}
 
 	vec3_t start, forward, right, up, dir;
 
 	// check for max distance
 	AngleVectors(self->s.angles, forward, right, up);
 
+	const int32_t frame_index = self->s.frame - FRAME_walk101;
+	if (frame_index < 0 || frame_index >= static_cast<int32_t>(q_countof(brain_reye)) ||
+		!self->enemy || !self->enemy->inuse) {
+		laser->s.origin = self->s.origin;
+		laser->movedir = forward;
+		gi.linkentity(laser);
+		return;
+	}
+
 	// dis is my right eye
-	start = self->s.origin + (right * brain_reye[self->s.frame - FRAME_walk101].x);
-	start += forward * brain_reye[self->s.frame - FRAME_walk101].y;
-	start += up * brain_reye[self->s.frame - FRAME_walk101].z;
+	start = self->s.origin + (right * brain_reye[frame_index].x);
+	start += forward * brain_reye[frame_index].y;
+	start += up * brain_reye[frame_index].z;
 
 	PredictAim(self, self->enemy, start, 0, false, frandom(0.1f, 0.2f), &dir, nullptr);
 
@@ -462,16 +478,29 @@ static PRETHINK(brain_right_eye_laser_update) (gentity_t *laser) -> void {
 
 static PRETHINK(brain_left_eye_laser_update) (gentity_t *laser) -> void {
 	gentity_t *self = laser->owner;
+	if (!self || !self->inuse) {
+		G_FreeEntity(laser);
+		return;
+	}
 
 	vec3_t start, forward, right, up, dir;
 
 	// check for max distance
 	AngleVectors(self->s.angles, forward, right, up);
 
+	const int32_t frame_index = self->s.frame - FRAME_walk101;
+	if (frame_index < 0 || frame_index >= static_cast<int32_t>(q_countof(brain_leye)) ||
+		!self->enemy || !self->enemy->inuse) {
+		laser->s.origin = self->s.origin;
+		laser->movedir = forward;
+		gi.linkentity(laser);
+		return;
+	}
+
 	// dis is my right eye
-	start = self->s.origin + (right * brain_leye[self->s.frame - FRAME_walk101].x);
-	start += forward * brain_leye[self->s.frame - FRAME_walk101].y;
-	start += up * brain_leye[self->s.frame - FRAME_walk101].z;
+	start = self->s.origin + (right * brain_leye[frame_index].x);
+	start += forward * brain_leye[frame_index].y;
+	start += up * brain_leye[frame_index].z;
 
 	PredictAim(self, self->enemy, start, 0, false, frandom(0.1f, 0.2f), &dir, nullptr);
 
@@ -491,7 +520,7 @@ static void brain_laserbeam(gentity_t *self) {
 
 static void brain_laserbeam_reattack(gentity_t *self) {
 	if (frandom() < 0.5f)
-		if (visible(self, self->enemy))
+		if (self->enemy && self->enemy->inuse && visible(self, self->enemy))
 			if (self->enemy->health > 0)
 				self->s.frame = FRAME_walk101;
 }

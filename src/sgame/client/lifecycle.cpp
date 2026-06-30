@@ -1974,7 +1974,7 @@ void ClientThink(gentity_t *ent, usercmd_t *ucmd) {
 	}
 
 	// [Paril-KEX] pass buttons through even if we are in intermission or
-	// chasing.
+	// following.
 	client->oldbuttons = client->buttons;
 	client->buttons = ucmd->buttons;
 	client->latched_buttons |= client->buttons & ~client->oldbuttons;
@@ -1997,14 +1997,9 @@ void ClientThink(gentity_t *ent, usercmd_t *ucmd) {
 	if (!ClientIsPlaying(client) || client->eliminated) {
 		if (client->follow_queued_target && level.time > client->follow_queued_time + 500_ms) {
 			// eliminated players in team elimination modes may only follow their own team
-			bool queued_allowed = true;
-			if (client->eliminated && Teams() && client->follow_queued_target->client)
-				queued_allowed = (client->follow_queued_target->client->sess.team == client->sess.team);
-
-			if (queued_allowed) {
-				client->follow_target = client->follow_queued_target;
-				client->follow_update = true;
-				UpdateChaseCam(ent);
+			if (FollowTargetAllowed(ent, client->follow_queued_target)) {
+				SetFollowTarget(ent, client->follow_queued_target);
+				UpdateFollowCamera(ent);
 			}
 			client->follow_queued_target = nullptr;
 			client->follow_queued_time = 0_sec;
@@ -2259,6 +2254,20 @@ void ClientThink(gentity_t *ent, usercmd_t *ucmd) {
 	}
 
 	// fire weapon from final position if needed
+	if ((client->latched_buttons & BUTTON_USE) && client->follow_target && (!ClientIsPlaying(client) || (client->eliminated && !client->sess.is_a_bot))) {
+		if (!client->menu) {
+			client->latched_buttons &= ~BUTTON_USE;
+			ToggleFollowViewMode(ent);
+		}
+	}
+
+	if ((client->latched_buttons & BUTTON_CROUCH) && client->follow_target && (!ClientIsPlaying(client) || (client->eliminated && !client->sess.is_a_bot))) {
+		if (!client->menu) {
+			client->latched_buttons &= ~BUTTON_CROUCH;
+			FollowPrev(ent);
+		}
+	}
+
 	if (client->latched_buttons & BUTTON_ATTACK) {
 		if (!ClientIsPlaying(client) || (client->eliminated && !client->sess.is_a_bot)) {
 			if (!client->menu) {
@@ -2298,10 +2307,10 @@ void ClientThink(gentity_t *ent, usercmd_t *ucmd) {
 		}
 	}
 
-	// update chase cam if being followed
+	// update follow camera if being followed
 	for (auto ec : active_clients())
 		if (ec->client->follow_target == ent)
-			UpdateChaseCam(ec);
+			UpdateFollowCamera(ec);
 
 	// perform once-a-second actions
 	ClientTimerActions(ent);

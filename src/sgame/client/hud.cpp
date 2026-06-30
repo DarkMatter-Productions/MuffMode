@@ -1787,19 +1787,19 @@ void G_SetStats(gentity_t *ent) {
 	}
 	
 	if (ent->client->pers.medal_time + 3_sec > level.time) {
-		ent->client->ps.stats[STAT_CHASE] = 0;	// CONFIG_TEAMINFO;
+		ent->client->ps.stats[STAT_FOLLOW] = 0;	// CONFIG_TEAMINFO;
 	} else {
-		ent->client->ps.stats[STAT_CHASE] = 0;
+		ent->client->ps.stats[STAT_FOLLOW] = 0;
 	}
 
 }
 
 /*
 ===============
-G_CheckChaseStats
+G_CheckFollowStats
 ===============
 */
-void G_CheckChaseStats(gentity_t *ent) {
+void G_CheckFollowStats(gentity_t *ent) {
 	for (auto player : active_clients()) {
 		if (player->client->follow_target != ent)
 			continue;
@@ -1822,8 +1822,6 @@ void G_SetSpectatorStats(gentity_t *ent) {
 		// Still publish team identity even when following (in case we follow someone on a team).
 		P_PublishEngineTeam(ent);
 
-	cl->ps.stats[STAT_SPECTATOR] = 1;
-
 	// layouts are independant in spectator
 	cl->ps.stats[STAT_LAYOUTS] = 0;
 	if (cl->pers.health <= 0 || level.intermission_time || cl->showscores)
@@ -1832,9 +1830,13 @@ void G_SetSpectatorStats(gentity_t *ent) {
 		cl->ps.stats[STAT_LAYOUTS] |= LAYOUTS_INVENTORY;
 
 	if (cl->follow_target && cl->follow_target->inuse) {
-		cl->ps.stats[STAT_CHASE] = CONFIG_CHASE_PLAYER_NAME +
+		cl->ps.stats[STAT_SPECTATOR] = FollowFirstPersonEnabled(ent) ?
+			CONFIG_SPECTATOR_MODE_FOLLOW_FIRST :
+			CONFIG_SPECTATOR_MODE_FOLLOW_THIRD;
+		cl->ps.stats[STAT_FOLLOW] = CONFIG_FOLLOW_PLAYER_NAME +
 			(cl->follow_target - g_entities) - 1;
 	} else {
-		cl->ps.stats[STAT_CHASE] = 0;
+		cl->ps.stats[STAT_SPECTATOR] = CONFIG_SPECTATOR_MODE_FREE;
+		cl->ps.stats[STAT_FOLLOW] = 0;
 	}
 }

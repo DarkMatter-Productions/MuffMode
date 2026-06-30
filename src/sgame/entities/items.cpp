@@ -1166,12 +1166,8 @@ bool Pickup_Powerup(gentity_t *ent, gentity_t *other) {
 
 	for (auto ec : active_clients()) {
 		if (!ClientIsPlaying(ec->client) && ec->client->sess.pc.follow_powerup) {
-			ec->client->follow_target = other;
-			ec->client->follow_update = true;
-			UpdateChaseCam(ec);
-
-			// [MuffMode] Auto-switched follow target; re-evaluate this viewer's skin overrides.
-			MM_RefreshSkinOverridesForViewer(ec);
+			SetFollowTarget(ec, other);
+			UpdateFollowCamera(ec);
 		}
 	}
 	/*
@@ -2105,8 +2101,8 @@ bool Entity_IsVisibleToPlayer(gentity_t *ent, gentity_t *player) {
 		return false;
 	}
 
-	// Q2Eaks make eyecam chase target invisible, but keep other client visible
-	if (g_eyecam->integer && player->client->follow_target && ent == player->client->follow_target)
+	// First-person following hides only the followed player from that viewer.
+	if (FollowFirstPersonEnabled(player) && player->client->follow_target && ent == player->client->follow_target)
 		return false;
 	else if (ent->client)
 		return true;
@@ -2555,7 +2551,7 @@ bool CheckItemEnabled(gitem_t *item) {
 		if (g_no_armor->integer && item->flags & (IF_ARMOR | IF_POWER_ARMOR))
 			return false;
 
-		if (g_no_powerups->integer && item->flags & IF_POWERUP || ((InCoopStyle() || !deathmatch->integer) && skill->integer > 3))
+		if ((g_no_powerups->integer && (item->flags & IF_POWERUP)) || ((InCoopStyle() || !deathmatch->integer) && skill->integer > 3))
 			return false;
 
 		if (g_no_items->integer) {

@@ -29,6 +29,10 @@ static cached_soundindex sound_chantlow;
 static cached_soundindex sound_chantmid;
 static cached_soundindex sound_chanthigh;
 
+static bool gekk_has_live_enemy(const gentity_t *self) {
+	return self && self->enemy && self->enemy->inuse;
+}
+
 void gekk_swim(gentity_t *self);
 
 void gekk_jump_takeoff(gentity_t *self);
@@ -61,7 +65,7 @@ bool gekk_check_jump(gentity_t *self);
 //
 
 static bool gekk_check_melee(gentity_t *self) {
-	if (!self->enemy || self->enemy->health <= 0 || self->monsterinfo.melee_debounce_time > level.time)
+	if (!gekk_has_live_enemy(self) || self->enemy->health <= 0 || self->monsterinfo.melee_debounce_time > level.time)
 		return false;
 
 	return range_to(self, self->enemy) <= RANGE_MELEE;
@@ -70,6 +74,9 @@ static bool gekk_check_melee(gentity_t *self) {
 bool gekk_check_jump(gentity_t *self) {
 	vec3_t v;
 	float  distance;
+
+	if (!gekk_has_live_enemy(self))
+		return false;
 
 	// don't jump if there's no way we can reach standing height
 	if (self->absmin[2] + 125 < self->enemy->absmin[2])
@@ -95,6 +102,9 @@ static bool gekk_check_jump_close(gentity_t *self) {
 	vec3_t v;
 	float  distance;
 
+	if (!gekk_has_live_enemy(self))
+		return false;
+
 	v[0] = self->s.origin[0] - self->enemy->s.origin[0];
 	v[1] = self->s.origin[1] - self->enemy->s.origin[1];
 	v[2] = 0;
@@ -111,7 +121,7 @@ static bool gekk_check_jump_close(gentity_t *self) {
 }
 
 MONSTERINFO_CHECKATTACK(gekk_checkattack) (gentity_t *self) -> bool {
-	if (!self->enemy || self->enemy->health <= 0)
+	if (!gekk_has_live_enemy(self) || self->enemy->health <= 0)
 		return false;
 
 	if (gekk_check_melee(self)) {
@@ -571,7 +581,7 @@ MMOVE_T(gekk_move_run_start) = { FRAME_stand_01, FRAME_stand_02, gekk_frames_run
 //
 
 void gekk_hit_left(gentity_t *self) {
-	if (!self->enemy)
+	if (!gekk_has_live_enemy(self))
 		return;
 
 	vec3_t aim = { MELEE_DISTANCE, self->mins[0], 8 };
@@ -584,7 +594,7 @@ void gekk_hit_left(gentity_t *self) {
 }
 
 void gekk_hit_right(gentity_t *self) {
-	if (!self->enemy)
+	if (!gekk_has_live_enemy(self))
 		return;
 
 	vec3_t aim = { MELEE_DISTANCE, self->maxs[0], 8 };
@@ -597,7 +607,7 @@ void gekk_hit_right(gentity_t *self) {
 }
 
 static void gekk_check_refire(gentity_t *self) {
-	if (!self->enemy || !self->enemy->inuse || self->enemy->health <= 0)
+	if (!gekk_has_live_enemy(self) || self->enemy->health <= 0)
 		return;
 
 	if (range_to(self, self->enemy) <= RANGE_MELEE &&
@@ -610,8 +620,10 @@ static void gekk_check_refire(gentity_t *self) {
 }
 
 static TOUCH(loogie_touch) (gentity_t *self, gentity_t *other, const trace_t &tr, bool other_touching_self) -> void {
+	const bool owner_alive = self->owner && self->owner->inuse;
+	gentity_t *attacker = owner_alive ? self->owner : self;
 
-	if (other == self->owner)
+	if (owner_alive && other == self->owner)
 		return;
 
 	if (tr.surface && (tr.surface->flags & SURF_SKY)) {
@@ -619,11 +631,11 @@ static TOUCH(loogie_touch) (gentity_t *self, gentity_t *other, const trace_t &tr
 		return;
 	}
 
-	if (self->owner->client)
+	if (owner_alive && self->owner->client)
 		PlayerNoise(self->owner, self->s.origin, PNOISE_IMPACT);
 
-	if (other->takedamage)
-		T_Damage(other, self, self->owner, self->velocity, self->s.origin, tr.plane.normal, self->dmg, 1, DAMAGE_ENERGY, MOD_GEKK);
+	if (other && other->takedamage)
+		T_Damage(other, self, attacker, self->velocity, self->s.origin, tr.plane.normal, self->dmg, 1, DAMAGE_ENERGY, MOD_GEKK);
 
 	gi.sound(self, CHAN_AUTO, loogie_hit, 1.0f, ATTN_NORM, 0);
 
@@ -669,7 +681,7 @@ static void loogie(gentity_t *self) {
 	vec3_t dir;
 	vec3_t gekkoffset = { -18, -0.8f, 24 };
 
-	if (!self->enemy || self->enemy->health <= 0)
+	if (!gekk_has_live_enemy(self) || self->enemy->health <= 0)
 		return;
 
 	AngleVectors(self->s.angles, forward, right, up);
@@ -693,7 +705,7 @@ static void reloogie(gentity_t *self) {
 		return;
 	}
 
-	if (self->enemy->health >= 0)
+	if (gekk_has_live_enemy(self) && self->enemy->health >= 0)
 		if (frandom() > 0.7f && (range_to(self, self->enemy) <= RANGE_NEAR))
 			M_SetAnimation(self, &gekk_move_spit);
 }
@@ -794,7 +806,7 @@ mframe_t gekk_frames_leapatk2[] = {
 MMOVE_T(gekk_move_leapatk2) = { FRAME_leapatk_01, FRAME_leapatk_19, gekk_frames_leapatk2, gekk_run_start };
 
 void gekk_bite(gentity_t *self) {
-	if (!self->enemy)
+	if (!gekk_has_live_enemy(self))
 		return;
 
 	vec3_t aim = { MELEE_DISTANCE, 0, 0 };
@@ -857,7 +869,7 @@ static TOUCH(gekk_jump_touch) (gentity_t *self, gentity_t *other, const trace_t 
 		return;
 	}
 
-	if (self->style == 1 && other->takedamage) {
+	if (self->style == 1 && other && other->takedamage) {
 		if (self->velocity.length() > 200) {
 			vec3_t point;
 			vec3_t normal;
@@ -886,6 +898,9 @@ static TOUCH(gekk_jump_touch) (gentity_t *self, gentity_t *other, const trace_t 
 void gekk_jump_takeoff(gentity_t *self) {
 	vec3_t forward;
 
+	if (!gekk_has_live_enemy(self))
+		return;
+
 	gi.sound(self, CHAN_VOICE, sound_sight, 1, ATTN_NORM, 0);
 	AngleVectors(self->s.angles, forward, nullptr, nullptr);
 	self->s.origin[2] += 1;
@@ -908,6 +923,9 @@ void gekk_jump_takeoff(gentity_t *self) {
 
 void gekk_jump_takeoff2(gentity_t *self) {
 	vec3_t forward;
+
+	if (!gekk_has_live_enemy(self))
+		return;
 
 	gi.sound(self, CHAN_VOICE, sound_sight, 1, ATTN_NORM, 0);
 	AngleVectors(self->s.angles, forward, nullptr, nullptr);
@@ -962,10 +980,13 @@ void gekk_check_landing(gentity_t *self) {
 }
 
 MONSTERINFO_ATTACK(gekk_attack) (gentity_t *self) -> void {
+	if (!gekk_has_live_enemy(self))
+		return;
+
 	float r = range_to(self, self->enemy);
 
 	if (self->flags & FL_SWIM) {
-		if (self->enemy && self->enemy->waterlevel >= WATER_WAIST && r <= RANGE_NEAR)
+		if (self->enemy->waterlevel >= WATER_WAIST && r <= RANGE_NEAR)
 			return;
 
 		self->flags &= ~FL_SWIM;
@@ -1360,7 +1381,7 @@ mframe_t gekk_frames_jump_down[] = {
 MMOVE_T(gekk_move_jump_down) = { FRAME_leapatk_04, FRAME_leapatk_11, gekk_frames_jump_down, gekk_run };
 
 static void gekk_jump_updown(gentity_t *self, blocked_jump_result_t result) {
-	if (!self->enemy)
+	if (!gekk_has_live_enemy(self))
 		return;
 
 	if (result == blocked_jump_result_t::JUMP_JUMP_UP)

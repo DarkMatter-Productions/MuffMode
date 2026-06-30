@@ -46,15 +46,15 @@ The most useful player-facing commands are documented in the [Player Guide](play
 | Team selection | `team auto`, `team red`, `team blue`, `team free`, `team spectator` |
 | Voting | `callvote`, `cv`, `vote yes`, `vote no` |
 | Server info | `maplist`, `mapinfo`, `motd`, `players`, `stats` |
-| Spectating | `follow`, `followkiller`, `followleader`, `followpowerup` |
+| Spectating | `follow`, `follownext`, `followprev`, `followview`, `followkiller`, `followleader`, `followpowerup` |
 | Hook | `hook`, `unhook` |
 | Queueing | `mymap` |
 | Reconnect recovery | `ghost <code>` |
 | Captains | `captain`, `captain <player>` |
 
-MuffMode stores server-side player preference files in `baseq2/pcfg/sid-<encoded-social-id>.cfg`, using a safe hex encoding of the engine-provided social ID. Missing or unusually long social IDs keep session-only preferences instead of using fallback filenames. These files are loaded through a restricted player-config parser, not through the general server command buffer. Supported entries are `id`, `timer`, `fm`, `announcer`, `kb`, `followkiller`, `followleader`, `followpowerup`, `eskin`, and `tskin`.
+MuffMode stores server-side player preference files in `baseq2/pcfg/sid-<encoded-social-id>.cfg`, using a safe hex encoding of the engine-provided social ID. Missing or unusually long social IDs keep session-only preferences instead of using fallback filenames. These files are loaded through a restricted player-config parser, not through the general server command buffer. Supported entries are `id`, `timer`, `fm`, `announcer`, `kb`, `followview`, `followkiller`, `followleader`, `followpowerup`, `eskin`, and `tskin`.
 
-The in-game **Player Settings** menu exposes the same saved preferences for normal play: display toggles, kill beep selection, spectator auto-follow toggles, and quick skin override presets. Free-form skin paths are still entered with `eskin <model/skin>` and `tskin <model/skin>`.
+The in-game **Player Settings** menu exposes the same saved preferences for normal play: display toggles, kill beep selection, follow view, spectator auto-follow toggles, and quick skin override presets. Free-form skin paths are still entered with `eskin <model/skin>` and `tskin <model/skin>`.
 
 ## Vote Commands
 
@@ -307,7 +307,6 @@ Deathmatch respawns use a WORR-style danger score instead of raw farthest-only m
 | --- | --- | --- |
 | `bot_name_prefix` | `B|` | Prefix for bot names. Blank removes the prefix. |
 | `g_dm_crosshair_id` | `1` | Enables crosshair player identification by default. |
-| `g_eyecam` | `1` | Enables EyeCam spectator behavior. |
 | `g_frag_messages` | `1` | Enables frag message drawing. |
 | `g_frames_per_frame` | `1` | Game frames run per server frame. Useful for performance tuning. |
 | `g_huntercam` | `1` | Enables huntercam spectator behavior. |

@@ -158,9 +158,22 @@ MONSTERINFO_RUN(parasite_start_run) (gentity_t *self) -> void {
 
 static void proboscis_retract(gentity_t *self);
 
+static gentity_t *parasite_live_proboscis(gentity_t *self) {
+	if (!self || !self->proboscus)
+		return nullptr;
+
+	if (!self->proboscus->inuse || self->proboscus->owner != self) {
+		self->proboscus = nullptr;
+		return nullptr;
+	}
+
+	return self->proboscus;
+}
+
 void parasite_run(gentity_t *self) {
-	if (self->proboscus && self->proboscus->style != 2)
-		proboscis_retract(self->proboscus);
+	gentity_t *proboscis = parasite_live_proboscis(self);
+	if (proboscis && proboscis->style != 2)
+		proboscis_retract(proboscis);
 
 	if (self->monsterinfo.aiflags & AI_STAND_GROUND)
 		M_SetAnimation(self, &parasite_move_stand);
@@ -193,11 +206,34 @@ void parasite_walk(gentity_t *self) {
 	M_SetAnimation(self, &parasite_move_walk);
 }
 
+static bool proboscis_has_live_owner(const gentity_t *self) {
+	return self && self->owner && self->owner->inuse;
+}
+
+static void proboscis_clear_owner_link(gentity_t *self) {
+	if (proboscis_has_live_owner(self) && self->owner->proboscus == self)
+		self->owner->proboscus = nullptr;
+}
+
+static void proboscis_free_segment(gentity_t *self) {
+	if (self && self->proboscus && self->proboscus->inuse && self->proboscus->owner == self)
+		G_FreeEntity(self->proboscus);
+	if (self)
+		self->proboscus = nullptr;
+}
+
+static void proboscis_discard(gentity_t *self) {
+	if (!self)
+		return;
+
+	proboscis_clear_owner_link(self);
+	proboscis_free_segment(self);
+	G_FreeEntity(self);
+}
+
 // hard reset on proboscis; like we never existed
 static THINK(proboscis_reset) (gentity_t *self) -> void {
-	self->owner->proboscus = nullptr;
-	G_FreeEntity(self->proboscus);
-	G_FreeEntity(self);
+	proboscis_discard(self);
 }
 
 static DIE(proboscis_die) (gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int damage, const vec3_t &point, const mod_t &mod) -> void {
@@ -209,7 +245,8 @@ extern const mmove_t parasite_move_fire_proboscis;
 
 static void parasite_break_wait(gentity_t *self) {
 	// prob exploded?
-	if (self->proboscus && self->proboscus->style != 3)
+	gentity_t *proboscis = parasite_live_proboscis(self);
+	if (proboscis && proboscis->style != 3)
 		self->monsterinfo.nextframe = FRAME_break19;
 	else if (brandom()) {
 		// don't get hurt
@@ -219,6 +256,11 @@ static void parasite_break_wait(gentity_t *self) {
 }
 
 static void proboscis_retract(gentity_t *self) {
+	if (!proboscis_has_live_owner(self)) {
+		proboscis_discard(self);
+		return;
+	}
+
 	// start retract animation
 	if (self->owner->monsterinfo.active_move == &parasite_move_fire_proboscis)
 		self->owner->monsterinfo.nextframe = FRAME_drain12;
@@ -234,8 +276,9 @@ static void proboscis_retract(gentity_t *self) {
 }
 
 static void parasite_break_retract(gentity_t *self) {
-	if (self->proboscus)
-		proboscis_retract(self->proboscus);
+	gentity_t *proboscis = parasite_live_proboscis(self);
+	if (proboscis)
+		proboscis_retract(proboscis);
 }
 
 static void parasite_break_sound(gentity_t *self) {
@@ -255,8 +298,9 @@ static void parasite_charge_proboscis(gentity_t *self, float dist) {
 	else
 		ai_charge(self, dist);
 
-	if (self->proboscus)
-		proboscis_segment_draw(self->proboscus->proboscus);
+	gentity_t *proboscis = parasite_live_proboscis(self);
+	if (proboscis && proboscis->proboscus)
+		proboscis_segment_draw(proboscis->proboscus);
 }
 
 static void parasite_break_noise(gentity_t *self) {
@@ -300,20 +344,31 @@ constexpr mframe_t parasite_frames_break[] = {
 MMOVE_T(parasite_move_break) = { FRAME_break01, FRAME_break32, parasite_frames_break, parasite_start_run };
 
 static TOUCH(proboscis_touch) (gentity_t *self, gentity_t *other, const trace_t &tr, bool other_touching_self) -> void {
+	if (!proboscis_has_live_owner(self)) {
+		proboscis_discard(self);
+		return;
+	}
+	if (!other) {
+		proboscis_retract(self);
+		return;
+	}
+
+	gentity_t *owner = self->owner;
+
 	// owner isn't trying to probe any more, don't touch anything
-	if (self->owner->monsterinfo.active_move != &parasite_move_fire_proboscis)
+	if (owner->monsterinfo.active_move != &parasite_move_fire_proboscis)
 		return;
 
 	vec3_t p;
 
 	// hit what we want to succ
-	if ((other->svflags & SVF_PLAYER) || other == self->owner->enemy) {
+	if ((other->svflags & SVF_PLAYER) || other == owner->enemy) {
 		if (tr.startsolid)
 			p = tr.endpos;
 		else
 			p = tr.endpos - ((self->s.origin - tr.endpos).normalized() * 12);
 
-		self->owner->monsterinfo.nextframe = FRAME_drain06;
+		owner->monsterinfo.nextframe = FRAME_drain06;
 		self->movetype = MOVETYPE_NONE;
 		self->solid = SOLID_NOT;
 		self->style = 1;
@@ -330,18 +385,18 @@ static TOUCH(proboscis_touch) (gentity_t *self, gentity_t *other, const trace_t 
 			proboscis_retract(self);
 		else {
 			// hit wall; stick to it and do break animation
-			self->owner->monsterinfo.active_move = &parasite_move_break;
+			owner->monsterinfo.active_move = &parasite_move_break;
 			self->movetype = MOVETYPE_NONE;
 			self->solid = SOLID_NOT;
 			self->style = 1;
-			self->owner->s.angles[YAW] = self->s.angles[YAW];
+			owner->s.angles[YAW] = self->s.angles[YAW];
 		}
 	}
 
 	if (other->takedamage)
-		T_Damage(other, self, self->owner, tr.plane.normal, tr.endpos, tr.plane.normal, 5, 0, DAMAGE_NONE, MOD_UNKNOWN);
+		T_Damage(other, self, owner, tr.plane.normal, tr.endpos, tr.plane.normal, 5, 0, DAMAGE_NONE, MOD_UNKNOWN);
 
-	gi.positioned_sound(tr.endpos, self->owner, CHAN_AUTO, sound_impact, 1, ATTN_NORM, 0);
+	gi.positioned_sound(tr.endpos, owner, CHAN_AUTO, sound_impact, 1, ATTN_NORM, 0);
 
 	self->s.origin = p;
 	self->nextthink = level.time + FRAME_TIME_S; // start doing stuff on next frame
@@ -404,11 +459,17 @@ static vec3_t parasite_get_proboscis_start(gentity_t *self) {
 }
 
 static THINK(proboscis_think) (gentity_t *self) -> void {
+	if (!proboscis_has_live_owner(self)) {
+		proboscis_discard(self);
+		return;
+	}
+
+	gentity_t *owner = self->owner;
 	self->nextthink = level.time + FRAME_TIME_S; // start doing stuff on next frame
 
 	// retracting; keep pulling until we hit the parasite
 	if (self->style == 2) {
-		vec3_t start = parasite_get_proboscis_start(self->owner);
+		vec3_t start = parasite_get_proboscis_start(owner);
 		vec3_t dir = (self->s.origin - start);
 		float dist = dir.normalize();
 
@@ -437,7 +498,7 @@ static THINK(proboscis_think) (gentity_t *self) -> void {
 			// update our position
 			self->s.origin = self->enemy->s.origin + self->move_origin;
 
-			vec3_t start = parasite_get_proboscis_start(self->owner);
+			vec3_t start = parasite_get_proboscis_start(owner);
 
 			self->s.angles = vectoangles((self->s.origin - start).normalized());
 
@@ -451,9 +512,10 @@ static THINK(proboscis_think) (gentity_t *self) -> void {
 			} else {
 				// succ & drain
 				if (self->timestamp <= level.time) {
-					T_Damage(self->enemy, self, self->owner, tr.plane.normal, tr.endpos, tr.plane.normal, 2, 0, DAMAGE_NONE, MOD_UNKNOWN);
-					self->owner->health = min(self->owner->max_health, self->owner->health + 2);
-					self->owner->monsterinfo.setskin(self->owner);
+					T_Damage(self->enemy, self, owner, tr.plane.normal, tr.endpos, tr.plane.normal, 2, 0, DAMAGE_NONE, MOD_UNKNOWN);
+					owner->health = min(owner->max_health, owner->health + 2);
+					if (owner->monsterinfo.setskin)
+						owner->monsterinfo.setskin(owner);
 					self->timestamp = level.time + 10_hz;
 				}
 			}
@@ -464,18 +526,18 @@ static THINK(proboscis_think) (gentity_t *self) -> void {
 	// flying
 	else if (self->style == 0) {
 		// owner gone away?
-		if (!self->owner->enemy || !self->owner->enemy->inuse || self->owner->enemy->health <= 0) {
+		if (!owner->enemy || !owner->enemy->inuse || owner->enemy->health <= 0) {
 			proboscis_retract(self);
 			return;
 		}
 
 		// if we're well behind our target and missed by 2x velocity,
 		// be smart enough to pull in automatically
-		vec3_t to_target = (self->s.origin - self->owner->enemy->s.origin);
+		vec3_t to_target = (self->s.origin - owner->enemy->s.origin);
 		float dist_to_target = to_target.normalize();
 
 		if (dist_to_target > (self->speed * 2) / 15.f) {
-			vec3_t from_owner = (self->s.origin - self->owner->s.origin).normalized();
+			vec3_t from_owner = (self->s.origin - owner->s.origin).normalized();
 			float dot = to_target.dot(from_owner);
 
 			if (dot > 0.f) {
@@ -487,10 +549,22 @@ static THINK(proboscis_think) (gentity_t *self) -> void {
 }
 
 PRETHINK(proboscis_segment_draw) (gentity_t *self) -> void {
-	vec3_t start = parasite_get_proboscis_start(self->owner->owner);
+	if (!self->owner || !self->owner->inuse || !proboscis_has_live_owner(self->owner)) {
+		G_FreeEntity(self);
+		return;
+	}
+
+	gentity_t *tip = self->owner;
+	gentity_t *owner = tip->owner;
+	if (owner->proboscus != tip) {
+		G_FreeEntity(self);
+		return;
+	}
+
+	vec3_t start = parasite_get_proboscis_start(owner);
 
 	self->s.origin = start;
-	self->s.old_origin = self->owner->s.origin - ((self->owner->s.origin - start).normalized() * 8.f);
+	self->s.old_origin = tip->s.origin - ((tip->s.origin - start).normalized() * 8.f);
 	gi.linkentity(self);
 }
 
@@ -538,8 +612,12 @@ static void fire_proboscis(gentity_t *self, vec3_t start, vec3_t dir, float spee
 }
 
 static void parasite_fire_proboscis(gentity_t *self) {
-	if (self->proboscus && self->proboscus->style != 2)
-		proboscis_reset(self->proboscus);
+	if (!self->enemy || !self->enemy->inuse)
+		return;
+
+	gentity_t *proboscis = parasite_live_proboscis(self);
+	if (proboscis && proboscis->style != 2)
+		proboscis_reset(proboscis);
 
 	vec3_t start = parasite_get_proboscis_start(self);
 
@@ -558,8 +636,10 @@ static void parasite_proboscis_wait(gentity_t *self) {
 }
 
 static void parasite_proboscis_pull_wait(gentity_t *self) {
+	gentity_t *proboscis = parasite_live_proboscis(self);
+
 	// prob exploded?
-	if (!self->proboscus || self->proboscus->style == 3) {
+	if (!proboscis || proboscis->style == 3) {
 		self->monsterinfo.nextframe = FRAME_drain14;
 		return;
 	}
@@ -570,8 +650,8 @@ static void parasite_proboscis_pull_wait(gentity_t *self) {
 	else
 		self->monsterinfo.nextframe = FRAME_drain12;
 
-	if (self->proboscus->style != 2)
-		proboscis_retract(self->proboscus);
+	if (proboscis->style != 2)
+		proboscis_retract(proboscis);
 }
 
 mframe_t parasite_frames_fire_proboscis[] = {
@@ -597,11 +677,15 @@ mframe_t parasite_frames_fire_proboscis[] = {
 MMOVE_T(parasite_move_fire_proboscis) = { FRAME_drain01, FRAME_drain18, parasite_frames_fire_proboscis, parasite_start_run };
 
 MONSTERINFO_ATTACK(parasite_attack) (gentity_t *self) -> void {
+	if (!self->enemy || !self->enemy->inuse)
+		return;
+
 	if (!M_CheckClearShot(self, parasite_drain_offsets[0]))
 		return;
 
-	if (self->proboscus && self->proboscus->style != 2)
-		proboscis_retract(self->proboscus);
+	gentity_t *proboscis = parasite_live_proboscis(self);
+	if (proboscis && proboscis->style != 2)
+		proboscis_retract(proboscis);
 
 	M_SetAnimation(self, &parasite_move_fire_proboscis);
 }
@@ -714,8 +798,9 @@ mframe_t parasite_frames_death[] = {
 MMOVE_T(parasite_move_death) = { FRAME_death101, FRAME_death107, parasite_frames_death, parasite_dead };
 
 static DIE(parasite_die) (gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int damage, const vec3_t &point, const mod_t &mod) -> void {
-	if (self->proboscus && self->proboscus->style != 2)
-		proboscis_reset(self->proboscus);
+	gentity_t *proboscis = parasite_live_proboscis(self);
+	if (proboscis && proboscis->style != 2)
+		proboscis_reset(proboscis);
 
 	// check for gib
 	if (M_CheckGib(self, mod)) {
@@ -771,8 +856,9 @@ static PAIN(parasite_pain) (gentity_t *self, gentity_t *other, float kick, int d
 	if (level.time < self->pain_debounce_time)
 		return;
 
-	if (self->proboscus && self->proboscus->style != 2)
-		proboscis_retract(self->proboscus);
+	gentity_t *proboscis = parasite_live_proboscis(self);
+	if (proboscis && proboscis->style != 2)
+		proboscis_retract(proboscis);
 
 	self->pain_debounce_time = level.time + 3_sec;
 

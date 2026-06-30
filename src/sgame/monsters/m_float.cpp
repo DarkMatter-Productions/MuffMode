@@ -20,6 +20,10 @@ static cached_soundindex sound_pain1;
 static cached_soundindex sound_pain2;
 static cached_soundindex sound_sight;
 
+static bool floater_has_live_enemy(const gentity_t *self) {
+	return self && self->enemy && self->enemy->inuse;
+}
+
 MONSTERINFO_SIGHT(floater_sight) (gentity_t *self, gentity_t *other) -> void {
 	gi.sound(self, CHAN_VOICE, sound_sight, 1, ATTN_NORM, 0);
 }
@@ -39,7 +43,7 @@ static void floater_fire_blaster(gentity_t *self) {
 	vec3_t	  end;
 	vec3_t	  dir;
 
-	if (!self->enemy || !self->enemy->inuse)
+	if (!floater_has_live_enemy(self))
 		return;
 
 	AngleVectors(self->s.angles, forward, right, nullptr);
@@ -464,6 +468,10 @@ MONSTERINFO_WALK(floater_walk) (gentity_t *self) -> void {
 
 void floater_wham(gentity_t *self) {
 	constexpr vec3_t aim = { MELEE_DISTANCE, 0, 0 };
+
+	if (!floater_has_live_enemy(self))
+		return;
+
 	gi.sound(self, CHAN_WEAPON, sound_attack3, 1, ATTN_NORM, 0);
 
 	if (!fire_hit(self, aim, irandom(5, 11), -50))
@@ -475,6 +483,9 @@ void floater_zap(gentity_t *self) {
 	vec3_t origin;
 	vec3_t dir;
 	vec3_t offset;
+
+	if (!floater_has_live_enemy(self))
+		return;
 
 	dir = self->enemy->s.origin - self->s.origin;
 
@@ -500,6 +511,9 @@ void floater_zap(gentity_t *self) {
 MONSTERINFO_ATTACK(floater_attack) (gentity_t *self) -> void {
 	float chance = 0.5f;
 
+	if (!floater_has_live_enemy(self))
+		return;
+
 	if (frandom() > chance) {
 		self->monsterinfo.attack_state = AS_STRAIGHT;
 		M_SetAnimation(self, &floater_move_attack1);
@@ -513,6 +527,9 @@ MONSTERINFO_ATTACK(floater_attack) (gentity_t *self) -> void {
 }
 
 MONSTERINFO_MELEE(floater_melee) (gentity_t *self) -> void {
+	if (!floater_has_live_enemy(self))
+		return;
+
 	if (frandom() < 0.5f)
 		M_SetAnimation(self, &floater_move_attack3);
 	else

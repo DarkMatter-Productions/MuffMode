@@ -205,6 +205,7 @@
     <ClInclude Include="..\..\src\sgame\muffmode\mm_statusbar.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_strike.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_team.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_time_format.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_util.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_vote.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_vote_menu.h" />
@@ -223,7 +224,7 @@
     <ClCompile Include="..\..\src\cgame\screen.cpp" />
     <ClCompile Include="..\..\src\sgame\core\ai.cpp" />
     <ClCompile Include="..\..\src\sgame\core\ai_navigation.cpp" />
-    <ClCompile Include="..\..\src\sgame\core\chase_camera.cpp" />
+    <ClCompile Include="..\..\src\sgame\core\following_camera.cpp" />
     <ClCompile Include="..\..\src\sgame\core\combat.cpp" />
     <ClCompile Include="..\..\src\sgame\core\commands.cpp" />
     <ClCompile Include="..\..\src\sgame\entities\brush_misc.cpp" />

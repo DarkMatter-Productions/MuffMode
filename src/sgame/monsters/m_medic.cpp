@@ -9,6 +9,7 @@ MEDIC
 */
 
 #include "../g_local.h"
+#include "muffmode/mm_parse.h"
 #include "m_medic.h"
 #include "m_flash.h"
 
@@ -56,7 +57,7 @@ static cached_soundindex commander_sound_spawn;
 constexpr const char *default_reinforcements = "monster_soldier_light 1;monster_soldier 2;monster_soldier_ss 2;monster_infantry 3;monster_gunner 4;monster_medic 5;monster_gladiator 6";
 constexpr int32_t default_monster_slots_base = 3;
 
-static const float inverse_log_slots = pow(2, MAX_REINFORCEMENTS);
+constexpr float reinforcement_roll_range = static_cast<float>(1u << MAX_REINFORCEMENTS);
 
 constexpr std::array<vec3_t, MAX_REINFORCEMENTS> reinforcement_position = {
 	vec3_t { 80, 0, 0 },
@@ -66,12 +67,21 @@ constexpr std::array<vec3_t, MAX_REINFORCEMENTS> reinforcement_position = {
 	vec3_t { 0, -80, 0 }
 };
 
+static bool medic_classname_starts_with(const gentity_t *ent, const char *prefix, size_t length) {
+	return ent && ent->inuse && ent->classname && !strncmp(ent->classname, prefix, length);
+}
+
+static bool medic_has_active_medic_healer(const gentity_t *ent) {
+	return ent && ent->inuse && ent->health > 0 && (ent->svflags & SVF_MONSTER) && (ent->monsterinfo.aiflags & AI_MEDIC);
+}
+
 // filter out the reinforcement indices we can pick given the space we have left
 static void M_PickValidReinforcements(gentity_t *self, int32_t space, std::vector<uint8_t> &output) {
 	output.clear();
 
 	for (size_t i = 0; i < self->monsterinfo.reinforcements.num_reinforcements; i++)
-		if (self->monsterinfo.reinforcements.reinforcements[i].strength <= space)
+		if (self->monsterinfo.reinforcements.reinforcements[i].strength > 0 &&
+			self->monsterinfo.reinforcements.reinforcements[i].strength <= space)
 			output.push_back(i);
 }
 
@@ -84,21 +94,21 @@ std::array<uint8_t, MAX_REINFORCEMENTS> M_PickReinforcements(gentity_t *self, in
 	// decide how many things we want to spawn;
 	// this is on a logarithmic scale
 	// so we don't spawn too much too often.
-	int32_t num_slots = max(1, (int32_t)log2(frandom(inverse_log_slots)));
+	int32_t num_slots = max(1, static_cast<int32_t>(log2(max(1.f, frandom(reinforcement_roll_range)))));
 
 	// we only have this many slots left to use
 	int32_t remaining = self->monsterinfo.monster_slots - self->monsterinfo.monster_used;
 
 	for (num_chosen = 0; num_chosen < num_slots; num_chosen++) {
 		// ran out of slots!
-		if ((max_slots && num_chosen == max_slots) || !remaining)
+		if ((max_slots && num_chosen == max_slots) || remaining <= 0)
 			break;
 
 		// get everything we could choose
 		M_PickValidReinforcements(self, remaining, available);
 
 		// can't pick any
-		if (!available.size())
+		if (available.empty())
 			break;
 
 		// select monster, TODO fairly
@@ -110,55 +120,72 @@ std::array<uint8_t, MAX_REINFORCEMENTS> M_PickReinforcements(gentity_t *self, in
 	return chosen;
 }
 
+static bool M_LoadReinforcementBounds(const char *classname, vec3_t &mins, vec3_t &maxs) {
+	if (!classname || !*classname)
+		return false;
+
+	gentity_t *new_ent = G_Spawn();
+	new_ent->classname = classname;
+	new_ent->monsterinfo.aiflags |= AI_DO_NOT_COUNT;
+
+	ED_CallSpawn(new_ent);
+	if (!new_ent->inuse)
+		return false;
+	if (!(new_ent->svflags & SVF_MONSTER)) {
+		G_FreeEntity(new_ent);
+		return false;
+	}
+
+	mins = new_ent->mins;
+	maxs = new_ent->maxs;
+	G_FreeEntity(new_ent);
+	return true;
+}
+
 void M_SetupReinforcements(const char *reinforcements, reinforcement_list_t &list) {
-	// count up the semicolons
+	list.reinforcements = nullptr;
 	list.num_reinforcements = 0;
 
-	if (!*reinforcements)
+	if (!reinforcements || !*reinforcements)
 		return;
 
-	list.num_reinforcements++;
-
-	for (size_t i = 0; i < strlen(reinforcements); i++)
-		if (reinforcements[i] == ';')
-			list.num_reinforcements++;
-
-	// allocate
-	list.reinforcements = (reinforcement_t *)gi.TagMalloc(sizeof(reinforcement_t) * list.num_reinforcements, TAG_LEVEL);
-
-	// parse
+	std::vector<reinforcement_t> parsed;
 	const char *p = reinforcements;
-	reinforcement_t *r = list.reinforcements;
 
 	st = {};
 
 	while (true) {
-		const char *token = COM_ParseEx(&p, "; ");
+		const char *classname = COM_ParseEx(&p, "; ");
 
-		if (!*token || r == list.reinforcements + list.num_reinforcements)
+		if (!*classname)
 			break;
 
-		r->classname = G_CopyString(token, TAG_LEVEL);
+		const char *strength_token = COM_ParseEx(&p, "; ");
+		const auto strength = MM_ParseNonNegativeIntArg(strength_token);
+		if (!strength || *strength <= 0) {
+			gi.Com_PrintFmt("{}: skipping reinforcement '{}' with invalid strength '{}'\n", __FUNCTION__, classname, strength_token ? strength_token : "");
+			continue;
+		}
 
-		token = COM_ParseEx(&p, "; ");
+		reinforcement_t reinforcement{};
+		if (!M_LoadReinforcementBounds(classname, reinforcement.mins, reinforcement.maxs)) {
+			gi.Com_PrintFmt("{}: skipping reinforcement '{}' with no monster spawn\n", __FUNCTION__, classname);
+			continue;
+		}
 
-		r->strength = strtoul(token, nullptr, 10);
-
-		gentity_t *newEnt = G_Spawn();
-
-		newEnt->classname = r->classname;
-
-		newEnt->monsterinfo.aiflags |= AI_DO_NOT_COUNT;
-
-		ED_CallSpawn(newEnt);
-
-		r->mins = newEnt->mins;
-		r->maxs = newEnt->maxs;
-
-		G_FreeEntity(newEnt);
-
-		r++;
+		reinforcement.classname = G_CopyString(classname, TAG_LEVEL);
+		reinforcement.strength = *strength;
+		parsed.push_back(reinforcement);
 	}
+
+	if (parsed.empty())
+		return;
+
+	list.num_reinforcements = static_cast<uint32_t>(parsed.size());
+	list.reinforcements = (reinforcement_t *)gi.TagMalloc(sizeof(reinforcement_t) * list.num_reinforcements, TAG_LEVEL);
+
+	for (uint32_t i = 0; i < list.num_reinforcements; i++)
+		list.reinforcements[i] = parsed[i];
 }
 
 static void cleanupHeal(gentity_t *self, bool change_frame) {
@@ -194,7 +221,7 @@ void abortHeal(gentity_t *self, bool change_frame, bool gib, bool mark) {
 		// gib em!
 		if (mark) {
 			// if the first badMedic slot is filled by a medic, skip it and use the second one
-			if ((self->enemy->monsterinfo.badMedic1) && (self->enemy->monsterinfo.badMedic1->inuse) && (!strncmp(self->enemy->monsterinfo.badMedic1->classname, "monster_medic", 13))) {
+			if (medic_classname_starts_with(self->enemy->monsterinfo.badMedic1, "monster_medic", 13)) {
 				self->enemy->monsterinfo.badMedic2 = self;
 			} else {
 				self->enemy->monsterinfo.badMedic1 = self;
@@ -260,8 +287,7 @@ static gentity_t *medic_FindDeadMonster(gentity_t *self) {
 			// FIXME - this is correcting a bug that is somewhere else
 			// if the healer is a monster, and it's in medic mode .. continue .. otherwise
 			//   we will override the healer, if it passes all the other tests
-			if ((ent->monsterinfo.healer->inuse) && (ent->monsterinfo.healer->health > 0) &&
-				(ent->monsterinfo.healer->svflags & SVF_MONSTER) && (ent->monsterinfo.healer->monsterinfo.aiflags & AI_MEDIC))
+			if (medic_has_active_medic_healer(ent->monsterinfo.healer))
 				continue;
 		if (ent->health > 0)
 			continue;
@@ -269,7 +295,7 @@ static gentity_t *medic_FindDeadMonster(gentity_t *self) {
 			continue;
 		if (!visible(self, ent))
 			continue;
-		if (!strncmp(ent->classname, "player", 6)) // stop it from trying to heal player_noise entities
+		if (medic_classname_starts_with(ent, "player", 6)) // stop it from trying to heal player_noise entities
 			continue;
 		// FIXME - there's got to be a better way ..
 		// make sure we don't spawn people right on top of us
@@ -605,7 +631,7 @@ static void medic_fire_blaster(gentity_t *self) {
 	dir = end - start;
 	dir.normalize();
 
-	if (!strcmp(self->enemy->classname, "tesla_mine"))
+	if (self->enemy->classname && !strcmp(self->enemy->classname, "tesla_mine"))
 		damage = 3;
 
 	// medic commander shoots blaster2
@@ -814,7 +840,13 @@ static void medic_cable_attack(gentity_t *self) {
 	}
 
 	AngleVectors(self->s.angles, f, r, nullptr);
-	offset = medic_cable_offsets[self->s.frame - FRAME_attack42];
+	const int32_t frame_index = self->s.frame - FRAME_attack42;
+	if (frame_index < 0 || frame_index >= static_cast<int32_t>(q_countof(medic_cable_offsets))) {
+		abortHeal(self, false, false, false);
+		return;
+	}
+
+	offset = medic_cable_offsets[frame_index];
 	start = M_ProjectFlashSource(self, offset, f, r);
 
 	// check for max distance
@@ -1241,6 +1273,11 @@ MMOVE_T(medic_move_callReinforcements) = { FRAME_attack33, FRAME_attack55, medic
 MONSTERINFO_ATTACK(medic_attack) (gentity_t *self) -> void {
 	monster_done_dodge(self);
 
+	if (!self->enemy || !self->enemy->inuse) {
+		self->monsterinfo.aiflags &= ~AI_MEDIC;
+		return;
+	}
+
 	float enemy_range = range_to(self, self->enemy);
 
 	// signal from checkattack to spawn
@@ -1290,6 +1327,9 @@ MONSTERINFO_CHECKATTACK(medic_checkattack) (gentity_t *self) -> bool {
 			return false;
 		}
 	}
+
+	if (!self->enemy || !self->enemy->inuse)
+		return false;
 
 	if (self->enemy->client && !visible(self, self->enemy) && M_SlotsLeft(self)) {
 		self->monsterinfo.attack_state = AS_BLIND;
@@ -1384,7 +1424,7 @@ void SP_monster_medic(gentity_t *self) {
 	self->mins = { -24, -24, -24 };
 	self->maxs = { 24, 24, 32 };
 
-	if (strcmp(self->classname, "monster_medic_commander") == 0) {
+	if (self->classname && strcmp(self->classname, "monster_medic_commander") == 0) {
 		self->health = 600 * st.health_multiplier;
 		self->gib_health = -130;
 		self->mass = 600;

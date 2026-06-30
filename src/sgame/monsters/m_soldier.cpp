@@ -550,6 +550,10 @@ static void soldier_fire_vanilla(gentity_t *self, int flash_number, bool angle_l
 
 static PRETHINK(soldierh_laser_update) (gentity_t *laser) -> void {
 	gentity_t *self = laser->owner;
+	if (!self || !self->inuse) {
+		G_FreeEntity(laser);
+		return;
+	}
 
 	vec3_t forward, right, up;
 	vec3_t start;
@@ -557,12 +561,14 @@ static PRETHINK(soldierh_laser_update) (gentity_t *laser) -> void {
 
 	AngleVectors(self->s.angles, forward, right, up);
 	start = self->s.origin;
-	tempvec = monster_flash_offset[self->splash_damage];
-	start += (forward * tempvec[0]);
-	start += (right * tempvec[1]);
-	start += (up * (tempvec[2] + 6));
+	if (self->splash_damage >= 0 && static_cast<size_t>(self->splash_damage) < q_countof(monster_flash_offset)) {
+		tempvec = monster_flash_offset[self->splash_damage];
+		start += (forward * tempvec[0]);
+		start += (right * tempvec[1]);
+		start += (up * (tempvec[2] + 6));
+	}
 
-	if (!self->deadflag)
+	if (!self->deadflag && self->enemy && self->enemy->inuse)
 		PredictAim(self, self->enemy, start, 0, false, frandom(0.1f, 0.2f), &forward, nullptr);
 
 	laser->s.origin = start;
@@ -693,7 +699,7 @@ static void soldier_attack1_refire1(gentity_t *self) {
 		return;
 	}
 
-	if (!self->enemy)
+	if (!self->enemy || !self->enemy->inuse)
 		return;
 
 	if (self->count > 1)
@@ -709,7 +715,7 @@ static void soldier_attack1_refire1(gentity_t *self) {
 }
 
 static void soldier_attack1_refire2(gentity_t *self) {
-	if (!self->enemy)
+	if (!self->enemy || !self->enemy->inuse)
 		return;
 
 	if (self->count < 2)
@@ -757,7 +763,7 @@ MMOVE_T(soldier_move_attack1) = { FRAME_attak101, FRAME_attak112, soldier_frames
 
 // ATTACK1 (blaster/shotgun)
 static void soldierh_hyper_refire1(gentity_t *self) {
-	if (!self->enemy)
+	if (!self->enemy || !self->enemy->inuse)
 		return;
 
 	if (self->count >= 2 && self->count < 4) {
@@ -797,7 +803,7 @@ static void soldier_attack2_refire1(gentity_t *self) {
 	if (self->count <= 0)
 		self->monsterinfo.nextframe = FRAME_attak216;
 
-	if (!self->enemy)
+	if (!self->enemy || !self->enemy->inuse)
 		return;
 
 	if (self->count > 1)
@@ -811,7 +817,7 @@ static void soldier_attack2_refire1(gentity_t *self) {
 }
 
 static void soldier_attack2_refire2(gentity_t *self) {
-	if (!self->enemy)
+	if (!self->enemy || !self->enemy->inuse)
 		return;
 
 	if (self->count < 2)
@@ -857,7 +863,7 @@ mframe_t soldier_frames_attack2[] = {
 MMOVE_T(soldier_move_attack2) = { FRAME_attak201, FRAME_attak218, soldier_frames_attack2, soldier_run };
 
 static void soldierh_hyper_refire2(gentity_t *self) {
-	if (!self->enemy)
+	if (!self->enemy || !self->enemy->inuse)
 		return;
 
 	if (self->count < 2)
@@ -952,7 +958,7 @@ static void soldier_attack6_refire1(gentity_t *self) {
 	monster_done_dodge(self);
 	soldier_stop_charge(self);
 
-	if (!self->enemy)
+	if (!self->enemy || !self->enemy->inuse)
 		return;
 
 	if (self->count > 1)
@@ -977,7 +983,7 @@ static void soldier_attack6_refire2(gentity_t *self) {
 	monster_done_dodge(self);
 	soldier_stop_charge(self);
 
-	if (!self->enemy || self->count <= 0)
+	if (!self->enemy || !self->enemy->inuse || self->count <= 0)
 		return;
 
 	if (self->enemy->health <= 0 ||
@@ -1064,6 +1070,9 @@ MONSTERINFO_ATTACK(soldier_attack) (gentity_t *self) -> void {
 		return;
 	}
 
+	if (!self->enemy || !self->enemy->inuse)
+		return;
+
 	// PMM - added this so the soldiers now run toward you and shoot instead of just stopping and shooting
 	r = frandom();
 
@@ -1114,7 +1123,7 @@ MONSTERINFO_SIGHT(soldier_sight) (gentity_t *self, gentity_t *other) -> void {
 	else
 		gi.sound(self, CHAN_VOICE, sound_sight2, 1, ATTN_NORM, 0);
 
-	if (self->enemy && (range_to(self, self->enemy) >= RANGE_NEAR) &&
+	if (self->enemy && self->enemy->inuse && (range_to(self, self->enemy) >= RANGE_NEAR) &&
 		visible(self, self->enemy) // Paril: don't run-shoot if we can't see them
 		) {
 		if (self->style == 1 || frandom() > 0.75f) {

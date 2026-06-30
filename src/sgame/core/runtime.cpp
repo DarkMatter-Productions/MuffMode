@@ -193,7 +193,6 @@ cvar_t *g_drop_cmds;
 cvar_t *g_entity_override_dir;
 cvar_t *g_entity_override_load;
 cvar_t *g_entity_override_save;
-cvar_t *g_eyecam;
 cvar_t *g_fast_doors;
 cvar_t *g_frag_messages;
 cvar_t *g_frenzy;
@@ -698,7 +697,6 @@ static void InitGame() {
 	g_entity_override_dir = gi.cvar("g_entity_override_dir", "maps", CVAR_NOFLAGS);
 	g_entity_override_load = gi.cvar("g_entity_override_load", "1", CVAR_NOFLAGS);
 	g_entity_override_save = gi.cvar("g_entity_override_save", "0", CVAR_NOFLAGS);
-	g_eyecam = gi.cvar("g_eyecam", "1", CVAR_NOFLAGS);
 	g_fast_doors = gi.cvar("g_fast_doors", "1", CVAR_NOFLAGS);
 	g_frames_per_frame = gi.cvar("g_frames_per_frame", "1", CVAR_NOFLAGS);
 	g_friendly_fire = gi.cvar("g_friendly_fire", "0", CVAR_NOFLAGS);
@@ -1946,9 +1944,9 @@ void BeginIntermission(gentity_t *targ) {
 	
 	// Clean up any dangling entity references before map transition
 	for (auto ec : active_clients()) {
-		// Clear follow_target if entity is not in use OR if client pointer is invalid
+		// Clear follow target if entity is not in use OR if client pointer is invalid
 		if (ec->client->follow_target && (!ec->client->follow_target->inuse || !ec->client->follow_target->client)) {
-			ec->client->follow_target = nullptr;
+			SetFollowTarget(ec, nullptr);
 		}
 		// Clear any bot-specific entity references
 		if (ec->svflags & SVF_BOT) {

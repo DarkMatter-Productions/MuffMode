@@ -30,14 +30,21 @@ extern const mmove_t turret_move_fire_blind;
 
 static cached_soundindex sound_moved, sound_moving;
 
+static bool turret_has_live_enemy(const gentity_t *self) {
+	return self && self->enemy && self->enemy->inuse && self->enemy != world;
+}
+
 void TurretAim(gentity_t *self) {
 	vec3_t end, dir;
 	vec3_t ang;
 	float  move, idealPitch, idealYaw, current, speed;
 	int	   orientation;
 
-	if (!self->enemy || self->enemy == world) {
+	if (!turret_has_live_enemy(self)) {
 		if (!FindTarget(self))
+			return;
+
+		if (!turret_has_live_enemy(self))
 			return;
 	}
 
@@ -343,7 +350,7 @@ static void TurretFire(gentity_t *self) {
 
 	TurretAim(self);
 
-	if (!self->enemy || !self->enemy->inuse)
+	if (!turret_has_live_enemy(self))
 		return;
 
 	if (self->monsterinfo.aiflags & AI_LOST_SIGHT)
@@ -428,7 +435,7 @@ static void TurretFireBlind(gentity_t *self) {
 
 	TurretAim(self);
 
-	if (!self->enemy || !self->enemy->inuse)
+	if (!turret_has_live_enemy(self))
 		return;
 
 	dir = self->monsterinfo.blind_fire_target - self->s.origin;
@@ -490,8 +497,14 @@ MONSTERINFO_ATTACK(turret_attack) (gentity_t *self) -> void {
 		turret_ready_gun(self);
 	// PMM
 	else if (self->monsterinfo.attack_state != AS_BLIND) {
+		if (!turret_has_live_enemy(self))
+			return;
+
 		M_SetAnimation(self, &turret_move_fire);
 	} else {
+		if (!turret_has_live_enemy(self))
+			return;
+
 		// setup shot probabilities
 		if (self->monsterinfo.blind_fire_delay < 1_sec)
 			chance = 1.0;
@@ -562,7 +575,7 @@ static DIE(turret_die) (gentity_t *self, gentity_t *inflictor, gentity_t *attack
 	}
 
 	if (self->target) {
-		if (self->enemy && self->enemy->inuse)
+		if (turret_has_live_enemy(self))
 			G_UseTargets(self, self->enemy);
 		else
 			G_UseTargets(self, self);
@@ -726,6 +739,9 @@ MONSTERINFO_CHECKATTACK(turret_checkattack) (gentity_t *self) -> bool {
 	float	chance;
 	trace_t tr;
 
+	if (!turret_has_live_enemy(self))
+		return false;
+
 	if (self->enemy->health > 0) {
 		// see if any entities are in the way of the shot
 		spot1 = self->s.origin;
@@ -736,12 +752,14 @@ MONSTERINFO_CHECKATTACK(turret_checkattack) (gentity_t *self) -> bool {
 		tr = gi.traceline(spot1, spot2, self, CONTENTS_SOLID | CONTENTS_PLAYER | CONTENTS_MONSTER | CONTENTS_SLIME | CONTENTS_LAVA | CONTENTS_WINDOW);
 
 		// do we have a clear shot?
-		if (tr.ent != self->enemy && !(tr.ent->svflags & SVF_PLAYER)) {
+		const bool direct_hit_player = tr.ent && (tr.ent->svflags & SVF_PLAYER);
+		if (tr.ent != self->enemy && !direct_hit_player) {
 			// we want them to go ahead and shoot at info_notnulls if they can.
 			if (self->enemy->solid != SOLID_NOT || tr.fraction < 1.0f) // PGM
 			{
 				// if we can't see our target, and we're not blocked by a monster, go into blind fire if available
-				if ((!(tr.ent->svflags & SVF_MONSTER)) && (!visible(self, self->enemy))) {
+				const bool blocked_by_monster = tr.ent && (tr.ent->svflags & SVF_MONSTER);
+				if (!blocked_by_monster && !visible(self, self->enemy)) {
 					if ((self->monsterinfo.blindfire) && (self->monsterinfo.blind_fire_delay <= 10_sec)) {
 						if (level.time < self->monsterinfo.attack_finished) {
 							return false;
@@ -752,7 +770,8 @@ MONSTERINFO_CHECKATTACK(turret_checkattack) (gentity_t *self) -> bool {
 						} else {
 							// make sure we're not going to shoot something we don't want to shoot
 							tr = gi.traceline(spot1, self->monsterinfo.blind_fire_target, self, CONTENTS_MONSTER | CONTENTS_PLAYER);
-							if (tr.allsolid || tr.startsolid || ((tr.fraction < 1.0f) && (tr.ent != self->enemy && !(tr.ent->svflags & SVF_PLAYER)))) {
+							const bool blind_hit_player = tr.ent && (tr.ent->svflags & SVF_PLAYER);
+							if (tr.allsolid || tr.startsolid || ((tr.fraction < 1.0f) && (tr.ent != self->enemy && !blind_hit_player))) {
 								return false;
 							}
 

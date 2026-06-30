@@ -161,7 +161,7 @@ void ApplyUserinfoChanged(gentity_t *ent, const char *userinfo)
 		gi.configstring(CS_PLAYERSKINS + playernum, G_Fmt("{}\\{}", ent->client->pers.netname, ent->client->pers.skin).data());
 	}
 
-	gi.configstring(CONFIG_CHASE_PLAYER_NAME + playernum, ent->client->pers.netname);
+	gi.configstring(CONFIG_FOLLOW_PLAYER_NAME + playernum, ent->client->pers.netname);
 
 	if (!(ent->svflags & SVF_BOT)) {
 		const auto encoded_name = EncodedPlayerName(ent);

@@ -121,7 +121,7 @@ void Open(gentity_t *ent);
 
 namespace muffmode::menu::info {
 void ReturnToMain(gentity_t *ent, menu_hnd_t *p);
-void OpenChaseCam(gentity_t *ent, menu_hnd_t *p);
+void OpenFollowCamera(gentity_t *ent, menu_hnd_t *p);
 void OpenHost(gentity_t *ent, menu_hnd_t *p);
 void OpenServer(gentity_t *ent, menu_hnd_t *p);
 }
@@ -544,6 +544,7 @@ void ToggleTimer(gentity_t *ent, menu_hnd_t *p);
 void ToggleFragMessages(gentity_t *ent, menu_hnd_t *p);
 void ToggleAnnouncer(gentity_t *ent, menu_hnd_t *p);
 void CycleKillBeep(gentity_t *ent, menu_hnd_t *p);
+void ToggleFollowView(gentity_t *ent, menu_hnd_t *p);
 void ToggleFollowKiller(gentity_t *ent, menu_hnd_t *p);
 void ToggleFollowLeader(gentity_t *ent, menu_hnd_t *p);
 void ToggleFollowPowerup(gentity_t *ent, menu_hnd_t *p);
@@ -568,6 +569,7 @@ const menu_t kPlayerSettingsMenuTemplate[] = {
 	{ "", MENU_ALIGN_LEFT, CycleKillBeep },
 	{ "", MENU_ALIGN_LEFT, nullptr },
 	{ "*Spectator", MENU_ALIGN_LEFT, nullptr },
+	{ "", MENU_ALIGN_LEFT, ToggleFollowView },
 	{ "", MENU_ALIGN_LEFT, ToggleFollowKiller },
 	{ "", MENU_ALIGN_LEFT, ToggleFollowLeader },
 	{ "", MENU_ALIGN_LEFT, ToggleFollowPowerup },
@@ -646,6 +648,11 @@ void CycleKillBeep(gentity_t *ent, menu_hnd_t *)
 		P_Menu_Update(ent);
 }
 
+void ToggleFollowView(gentity_t *ent, menu_hnd_t *p)
+{
+	ToggleBool(ent, p, mm_pconfig_bool_setting_t::follow_first_person);
+}
+
 void ToggleFollowKiller(gentity_t *ent, menu_hnd_t *p)
 {
 	ToggleBool(ent, p, mm_pconfig_bool_setting_t::follow_killer);
@@ -711,25 +718,29 @@ void Update(gentity_t *ent)
 	SetBoolRow(entries + 6, "Announcer", mm_pconfig_bool_setting_t::use_expanded, ToggleAnnouncer, ent);
 	P_Menu_UpdateEntry(entries + 7, G_Fmt("Kill beep: {}", MM_PConfigKillBeepName(ent->client->sess.pc.killbeep_num)).data(), MENU_ALIGN_LEFT, CycleKillBeep);
 
-	SetBoolRow(entries + 10, "Follow killer", mm_pconfig_bool_setting_t::follow_killer, ToggleFollowKiller, ent);
-	SetBoolRow(entries + 11, "Follow leader", mm_pconfig_bool_setting_t::follow_leader, ToggleFollowLeader, ent);
-	SetBoolRow(entries + 12, "Follow powerup", mm_pconfig_bool_setting_t::follow_powerup, ToggleFollowPowerup, ent);
+	P_Menu_UpdateEntry(entries + 10,
+		G_Fmt("Follow view: {}", MM_PConfigFollowViewName(ent->client->sess.pc.follow_first_person)).data(),
+		MENU_ALIGN_LEFT,
+		ToggleFollowView);
+	SetBoolRow(entries + 11, "Follow killer", mm_pconfig_bool_setting_t::follow_killer, ToggleFollowKiller, ent);
+	SetBoolRow(entries + 12, "Follow leader", mm_pconfig_bool_setting_t::follow_leader, ToggleFollowLeader, ent);
+	SetBoolRow(entries + 13, "Follow powerup", mm_pconfig_bool_setting_t::follow_powerup, ToggleFollowPowerup, ent);
 
 	if (!muffmode::CvarEnabled(g_allow_skin_overrides)) {
-		P_Menu_UpdateEntry(entries + 15, "Skin overrides: disabled", MENU_ALIGN_LEFT, nullptr);
-		P_Menu_UpdateEntry(entries + 16, "", MENU_ALIGN_LEFT, nullptr);
+		P_Menu_UpdateEntry(entries + 16, "Skin overrides: disabled", MENU_ALIGN_LEFT, nullptr);
+		P_Menu_UpdateEntry(entries + 17, "", MENU_ALIGN_LEFT, nullptr);
 		return;
 	}
 
-	P_Menu_UpdateEntry(entries + 15,
+	P_Menu_UpdateEntry(entries + 16,
 		G_Fmt("{} skin: {}", GT(GT_DUEL) ? "Opp" : "Enemy", SkinValueText(ent->client->sess.pc.enemy_skin)).data(),
 		MENU_ALIGN_LEFT,
 		CycleEnemySkin);
 
 	if (GT(GT_DUEL)) {
-		P_Menu_UpdateEntry(entries + 16, "Team skin: unavailable", MENU_ALIGN_LEFT, nullptr);
+		P_Menu_UpdateEntry(entries + 17, "Team skin: unavailable", MENU_ALIGN_LEFT, nullptr);
 	} else {
-		P_Menu_UpdateEntry(entries + 16,
+		P_Menu_UpdateEntry(entries + 17,
 			G_Fmt("Team skin: {}", SkinValueText(ent->client->sess.pc.team_skin)).data(),
 			MENU_ALIGN_LEFT,
 			CycleTeamSkin);
@@ -786,7 +797,7 @@ constexpr int kMatch = 3;
 
 constexpr int kTeamsJoinRed = 5;
 constexpr int kTeamsJoinBlue = 6;
-constexpr int kTeamsChase = 8;
+constexpr int kTeamsFollow = 8;
 constexpr int kTeamsReadyUp = 9;
 constexpr int kTeamsPlayerStats = 12;
 constexpr int kTeamsCallVote = 13;
@@ -794,7 +805,7 @@ constexpr int kTeamsPlayerSettings = 14;
 constexpr int kTeamsAdmin = 15;
 
 constexpr int kFreeJoin = 5;
-constexpr int kFreeChase = 8;
+constexpr int kFreeFollow = 8;
 constexpr int kFreeReadyUp = 9;
 constexpr int kFreePlayerStats = 12;
 constexpr int kFreeCallVote = 13;
@@ -813,7 +824,7 @@ const menu_t kTeamsMenuTemplate[] = {
 	{ "$g_pc_join_red_team", MENU_ALIGN_LEFT, JoinRed },
 	{ "$g_pc_join_blue_team", MENU_ALIGN_LEFT, JoinBlue },
 	{ "Spectate", MENU_ALIGN_LEFT, JoinSpectator },
-	{ "$g_pc_chase_camera", MENU_ALIGN_LEFT, menu::info::OpenChaseCam },
+	{ "Follow Player", MENU_ALIGN_LEFT, menu::info::OpenFollowCamera },
 	{ "", MENU_ALIGN_LEFT, nullptr },  // Ready Up (set dynamically)
 	{ "Host Info", MENU_ALIGN_LEFT, menu::info::OpenHost },
 	{ "Match Info", MENU_ALIGN_LEFT, menu::info::OpenServer },
@@ -834,7 +845,7 @@ const menu_t kFreeMenuTemplate[] = {
 	{ "Join Game", MENU_ALIGN_LEFT, JoinFree },
 	{ "", MENU_ALIGN_LEFT, nullptr },
 	{ "Spectate", MENU_ALIGN_LEFT, JoinSpectator },
-	{ "$g_pc_chase_camera", MENU_ALIGN_LEFT, menu::info::OpenChaseCam },
+	{ "Follow Player", MENU_ALIGN_LEFT, menu::info::OpenFollowCamera },
 	{ "", MENU_ALIGN_LEFT, nullptr },  // Ready Up (set dynamically)
 	{ "Host Info", MENU_ALIGN_LEFT, menu::info::OpenHost },
 	{ "Match Info", MENU_ALIGN_LEFT, menu::info::OpenServer },
@@ -850,12 +861,12 @@ const menu_t kFreeMenuTemplate[] = {
 
 namespace muffmode::menu::info {
 
-const menu_t kNoChaseMenuTemplate[] = {
+const menu_t kNoFollowMenuTemplate[] = {
 	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_CENTER, nullptr },
-	{ "$g_pc_no_chase", MENU_ALIGN_LEFT, nullptr },
+	{ "No players to follow", MENU_ALIGN_LEFT, nullptr },
 	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "$g_pc_return", MENU_ALIGN_LEFT, ReturnToMain }
 };
@@ -902,7 +913,7 @@ const menu_t kServerMenuTemplate[] = {
 	{ "$g_pc_return", MENU_ALIGN_LEFT, ReturnToMain }
 };
 
-void UpdateNoChase(gentity_t *ent)
+void UpdateNoFollow(gentity_t *ent)
 {
 	menu_t *entries = nullptr;
 	int num_entries = 0;
@@ -914,7 +925,7 @@ void UpdateNoChase(gentity_t *ent)
 	menu::SetLevelName(&entries[2]);
 }
 
-void OpenChaseCam(gentity_t *ent, menu_hnd_t *)
+void OpenFollowCamera(gentity_t *ent, menu_hnd_t *)
 {
 	if (!menu::HasClient(ent))
 		return;
@@ -930,7 +941,10 @@ void OpenChaseCam(gentity_t *ent, menu_hnd_t *)
 	GetFollowTarget(ent);
 
 	P_Menu_Close(ent);
-	P_Menu_Open(ent, kNoChaseMenuTemplate, -1, muffmode::CountAsInt(kNoChaseMenuTemplate), nullptr, UpdateNoChase);
+	if (ent->client->follow_target)
+		return;
+
+	P_Menu_Open(ent, kNoFollowMenuTemplate, -1, muffmode::CountAsInt(kNoFollowMenuTemplate), nullptr, UpdateNoFollow);
 }
 
 void ReturnToMain(gentity_t *ent, menu_hnd_t *)
@@ -1367,11 +1381,11 @@ void Update(gentity_t *ent)
 		}
 	}
 
-	int index = teams ? kTeamsChase : kFreeChase;
+	int index = teams ? kTeamsFollow : kFreeFollow;
 	if (ent->client->follow_target)
-		menu::SetText(entries[index], "$g_pc_leave_chase_camera");
+		menu::SetText(entries[index], "Stop Following");
 	else
-		menu::SetText(entries[index], "$g_pc_chase_camera");
+		menu::SetText(entries[index], "Follow Player");
 
 	index = teams ? kTeamsReadyUp : kFreeReadyUp;
 	if (muffmode::CvarEnabled(g_dm_do_readyup) && level.match_state == matchst_t::MATCH_WARMUP_READYUP) {

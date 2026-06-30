@@ -25,6 +25,10 @@ static cached_soundindex sound_search2;
 
 static cached_soundindex tread_sound;
 
+static bool supertank_has_live_enemy(const gentity_t *self) {
+	return self && self->enemy && self->enemy->inuse;
+}
+
 void TreadSound(gentity_t *self) {
 	gi.sound(self, CHAN_BODY, tread_sound, 1, ATTN_NORM, 0);
 }
@@ -217,7 +221,7 @@ static void supertankGrenade(gentity_t *self) {
 	vec3_t					 start;
 	monster_muzzleflash_id_t flash_number;
 
-	if (!self->enemy || !self->enemy->inuse)
+	if (!supertank_has_live_enemy(self))
 		return;
 
 	if (self->s.frame == FRAME_attak4_1)
@@ -338,7 +342,7 @@ mframe_t supertank_frames_end_attack1[] = {
 MMOVE_T(supertank_move_end_attack1) = { FRAME_attak1_7, FRAME_attak1_20, supertank_frames_end_attack1, supertank_run };
 
 void supertank_reattack1(gentity_t *self) {
-	if (visible(self, self->enemy)) {
+	if (supertank_has_live_enemy(self) && visible(self, self->enemy)) {
 		if (self->timestamp >= level.time || frandom() < 0.3f)
 			M_SetAnimation(self, &supertank_move_attack1);
 		else
@@ -396,7 +400,7 @@ void supertankRocket(gentity_t *self) {
 	vec3_t					 vec;
 	monster_muzzleflash_id_t flash_number;
 
-	if (!self->enemy || !self->enemy->inuse)
+	if (!supertank_has_live_enemy(self))
 		return;
 
 	if (self->s.frame == FRAME_attak2_8)
@@ -427,7 +431,7 @@ void supertankMachineGun(gentity_t *self) {
 	vec3_t					 forward, right;
 	monster_muzzleflash_id_t flash_number;
 
-	if (!self->enemy || !self->enemy->inuse)
+	if (!supertank_has_live_enemy(self))
 		return;
 
 	flash_number = static_cast<monster_muzzleflash_id_t>(MZ2_SUPERTANK_MACHINEGUN_1 + (self->s.frame - FRAME_attak1_1));
@@ -445,6 +449,9 @@ void supertankMachineGun(gentity_t *self) {
 MONSTERINFO_ATTACK(supertank_attack) (gentity_t *self) -> void {
 	vec3_t vec;
 	float  range;
+
+	if (!supertank_has_live_enemy(self))
+		return;
 
 	vec = self->enemy->s.origin - self->s.origin;
 	range = range_to(self, self->enemy);

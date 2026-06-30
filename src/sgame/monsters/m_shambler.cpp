@@ -22,6 +22,10 @@ static cached_soundindex sound_melee2;
 static cached_soundindex sound_smack;
 static cached_soundindex sound_boom;
 
+static bool shambler_has_live_enemy(const gentity_t *self) {
+	return self && self->enemy && self->enemy->inuse;
+}
+
 //
 // misc
 //
@@ -46,25 +50,39 @@ constexpr vec3_t lightning_right_hand[] = {
 	{ 27, -11, 83 }
 };
 
+static void shambler_free_lightning(gentity_t *self) {
+	if (!self)
+		return;
+
+	if (self->beam && self->beam->inuse && self->beam->owner == self)
+		G_FreeEntity(self->beam);
+	self->beam = nullptr;
+}
+
 static void shambler_lightning_update(gentity_t *self) {
 	gentity_t *lightning = self->beam;
-
-	if (self->s.frame >= FRAME_magic01 + q_countof(lightning_left_hand)) {
-		G_FreeEntity(lightning);
+	if (!lightning || !lightning->inuse || lightning->owner != self) {
 		self->beam = nullptr;
+		return;
+	}
+
+	const int32_t frame_index = self->s.frame - FRAME_magic01;
+	if (frame_index < 0 || frame_index >= static_cast<int32_t>(q_countof(lightning_left_hand))) {
+		shambler_free_lightning(self);
 		return;
 	}
 
 	vec3_t f, r;
 	AngleVectors(self->s.angles, f, r, nullptr);
-	lightning->s.origin = M_ProjectFlashSource(self, lightning_left_hand[self->s.frame - FRAME_magic01], f, r);
-	lightning->s.old_origin = M_ProjectFlashSource(self, lightning_right_hand[self->s.frame - FRAME_magic01], f, r);
+	lightning->s.origin = M_ProjectFlashSource(self, lightning_left_hand[frame_index], f, r);
+	lightning->s.old_origin = M_ProjectFlashSource(self, lightning_right_hand[frame_index], f, r);
 	gi.linkentity(lightning);
 }
 
 static void shambler_windup(gentity_t *self) {
 	gi.sound(self, CHAN_WEAPON, sound_windup, 1, ATTN_NORM, 0);
 
+	shambler_free_lightning(self);
 	gentity_t *lightning = self->beam = G_Spawn();
 	lightning->s.modelindex = gi.modelindex("models/proj/lightning/tris.md2");
 	lightning->s.renderfx |= RF_BEAM;
@@ -153,7 +171,7 @@ mframe_t shambler_frames_run[] = {
 MMOVE_T(shambler_move_run) = { FRAME_run01, FRAME_run06, shambler_frames_run, nullptr };
 
 MONSTERINFO_RUN(shambler_run) (gentity_t *self) -> void {
-	if (self->enemy && self->enemy->client)
+	if (shambler_has_live_enemy(self) && self->enemy->client)
 		self->monsterinfo.aiflags |= AI_BRUTAL;
 	else
 		self->monsterinfo.aiflags &= ~AI_BRUTAL;
@@ -227,6 +245,9 @@ MONSTERINFO_SETSKIN(shambler_setskin) (gentity_t *self) -> void {
 //
 
 static void ShamblerSaveLoc(gentity_t *self) {
+	if (!shambler_has_live_enemy(self))
+		return;
+
 	self->pos1 = self->enemy->s.origin; // save for aiming the shot
 	self->pos1[2] += self->enemy->viewheight;
 	self->monsterinfo.nextframe = FRAME_magic09;
@@ -251,7 +272,7 @@ static vec3_t FindShamblerOffset(gentity_t *self) {
 }
 
 static void ShamblerCastLightning(gentity_t *self) {
-	if (!self->enemy)
+	if (!shambler_has_live_enemy(self))
 		return;
 
 	vec3_t start;
@@ -316,7 +337,7 @@ void sham_swingl9(gentity_t *self);
 void sham_swingr9(gentity_t *self);
 
 static void sham_smash10(gentity_t *self) {
-	if (!self->enemy)
+	if (!shambler_has_live_enemy(self))
 		return;
 
 	ai_charge(self, 0);
@@ -335,7 +356,7 @@ static void sham_smash10(gentity_t *self) {
 };
 
 static void ShamClaw(gentity_t *self) {
-	if (!self->enemy)
+	if (!shambler_has_live_enemy(self))
 		return;
 
 	ai_charge(self, 10);
@@ -452,10 +473,7 @@ mframe_t shambler_frames_death[] = {
 MMOVE_T(shambler_move_death) = { FRAME_death01, FRAME_death11, shambler_frames_death, shambler_dead };
 
 static DIE(shambler_die) (gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int damage, const vec3_t &point, const mod_t &mod) -> void {
-	if (self->beam) {
-		G_FreeEntity(self->beam);
-		self->beam = nullptr;
-	}
+	shambler_free_lightning(self);
 
 	if (self->beam2) {
 		G_FreeEntity(self->beam2);

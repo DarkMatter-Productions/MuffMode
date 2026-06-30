@@ -348,7 +348,7 @@ void hintpath_stop(gentity_t *self) {
 			FoundTarget(self);
 			return;
 		}
-		// otherwise, keep chasing
+		// otherwise, keep pursuing
 		HuntTarget(self);
 		return;
 	}

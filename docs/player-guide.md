@@ -10,7 +10,7 @@ This guide is for anyone joining a MuffMode game. You do not need to learn every
 | --- | --- |
 | New or playing casually | Join through the menu, use `team auto`, read `motd`, and call votes from the voting menu. |
 | Playing a match or pickup | Use `readyup`, know `time-out`, check the active ruleset, and use team/captain commands when needed. |
-| Spectating or casting | Use `follow`, `followleader`, `followkiller`, and `followpowerup` to keep the action easy to watch. |
+| Spectating or casting | Use `follow`, `followview`, `followleader`, `followkiller`, and `followpowerup` to keep the action easy to watch. |
 
 ## Install
 
@@ -21,7 +21,7 @@ This guide is for anyone joining a MuffMode game. You do not need to learn every
 
 If you are joining someone else's server, they control most match settings. Your client-side commands still let you adjust your display preferences, ready state, team, votes, and spectator behavior.
 
-Display, skin override, kill beep, and spectator auto-follow preferences are saved per server by your social ID. Open **Player Settings** from the game menu for everyday changes, or use the commands below when you want binds, explicit values, or a custom skin path.
+Display, skin override, kill beep, follow view, and spectator auto-follow preferences are saved per server by your social ID. Open **Player Settings** from the game menu for everyday changes, or use the commands below when you want binds, explicit values, or a custom skin path.
 
 ## First Match
 
@@ -48,7 +48,7 @@ Display, skin override, kill beep, and spectator auto-follow preferences are sav
 
 ## Display Commands
 
-The **Player Settings** menu covers crosshair ID, match timer, frag messages, announcer, kill beep, spectator auto-follow toggles, and quick skin override presets. Custom `model/skin` override paths still use `eskin` and `tskin`; a command-entered custom skin appears as `custom` in the menu and can be cycled back to normal or a stock preset there.
+The **Player Settings** menu covers crosshair ID, match timer, frag messages, announcer, kill beep, follow view, spectator auto-follow toggles, and quick skin override presets. Custom `model/skin` override paths still use `eskin` and `tskin`; a command-entered custom skin appears as `custom` in the menu and can be cycled back to normal or a stock preset there.
 
 | Command | What it does |
 | --- | --- |
@@ -76,6 +76,9 @@ The **Player Settings** menu covers crosshair ID, match timer, frag messages, an
 | `time-out` | Call a timeout when the server allows timeouts. |
 | `time-in` | End an active timeout early. |
 | `follow <player>` | Spectate a specific player. |
+| `follow next`, `follow prev`, `follow stop` | Cycle targets or return to free spectator view. |
+| `follownext` / `followprev` | Move through follow targets directly; jump/crouch and inventory next/previous do the same while following. |
+| `followview [first|third]` or `follow view` | Toggle or set first-person versus third-person following. While following, press `+use` to toggle this quickly. |
 | `followkiller [on|off]` | Toggle auto-following killers while spectating. |
 | `followleader [on|off]` | Toggle auto-following the leading player while spectating. |
 | `followpowerup [on|off]` | Toggle auto-following players who pick up powerups. |

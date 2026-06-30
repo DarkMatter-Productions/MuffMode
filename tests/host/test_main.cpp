@@ -10,10 +10,13 @@
 #include "muffmode/mm_parse.h"
 #include "muffmode/mm_pconfig_rules.h"
 #include "muffmode/mm_red_rover_rules.h"
+#include "muffmode/mm_time_format.h"
 
+#include <cstdint>
 #include <cstdio>
 #include <exception>
 #include <functional>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -75,6 +78,7 @@ MM_TEST(parse_int_rejects_malformed_values) {
 	MM_CHECK_EQ(*MM_ParseIntArg("42"), 42);
 	MM_CHECK_EQ(*MM_ParseIntArg("-7"), -7);
 	MM_CHECK_FALSE(MM_ParseIntArg(""));
+	MM_CHECK_FALSE(MM_ParseIntArg("+7"));
 	MM_CHECK_FALSE(MM_ParseIntArg("12x"));
 	MM_CHECK_FALSE(MM_ParseIntArg("2147483648"));
 	MM_CHECK_FALSE(MM_ParseIntArg("-2147483649"));
@@ -86,6 +90,20 @@ MM_TEST(parse_non_negative_int_rejects_negative_and_malformed_values) {
 	MM_CHECK_FALSE(MM_ParseNonNegativeIntArg("-1"));
 	MM_CHECK_FALSE(MM_ParseNonNegativeIntArg("+1"));
 	MM_CHECK_FALSE(MM_ParseNonNegativeIntArg("1.0"));
+}
+
+MM_TEST(parse_uint32_rejects_signed_malformed_and_overflow_values) {
+	MM_CHECK_EQ(*MM_ParseUInt32Arg("0"), 0u);
+	MM_CHECK_EQ(*MM_ParseUInt32Arg("4294967295"), std::numeric_limits<uint32_t>::max());
+	MM_CHECK_FALSE(MM_ParseUInt32Arg(""));
+	MM_CHECK_FALSE(MM_ParseUInt32Arg("-1"));
+	MM_CHECK_FALSE(MM_ParseUInt32Arg("+1"));
+	MM_CHECK_FALSE(MM_ParseUInt32Arg(" 1"));
+	MM_CHECK_FALSE(MM_ParseUInt32Arg("1x"));
+	MM_CHECK_FALSE(MM_ParseUInt32Arg("4294967296"));
+
+	const char embedded_null[] = { '1', '\0', '2' };
+	MM_CHECK_FALSE(MM_ParseUInt32Text(std::string_view(embedded_null, sizeof(embedded_null))));
 }
 
 MM_TEST(parse_float_rejects_non_finite_and_trailing_values) {
@@ -146,6 +164,11 @@ MM_TEST(player_config_tokens_parse_deterministically) {
 	MM_CHECK_EQ(*ParseKillBeepToken("beep-boop"), 2);
 	MM_CHECK_EQ(*ParseKillBeepToken("tangtang"), 4);
 	MM_CHECK_FALSE(ParseKillBeepToken("5"));
+
+	MM_CHECK_EQ(*ParseFollowViewToken("first-person"), true);
+	MM_CHECK_EQ(*ParseFollowViewToken("third"), false);
+	MM_CHECK_EQ(*ParseFollowViewToken("on"), true);
+	MM_CHECK_FALSE(ParseFollowViewToken("sideways"));
 }
 
 MM_TEST(player_config_skin_paths_match_command_safety_rules) {
@@ -171,6 +194,26 @@ MM_TEST(player_config_skin_paths_match_command_safety_rules) {
 	MM_CHECK_FALSE(IsStorableSkinPath(too_long, max_qpath, max_netname_length, player_skin_configstring_size));
 	MM_CHECK_FALSE(IsStorableSkinPath("male/gr.unt", max_qpath, max_netname_length, player_skin_configstring_size));
 	MM_CHECK_FALSE(IsStorableSkinPath(longest_fit, longest_fit.size(), max_netname_length, player_skin_configstring_size));
+}
+
+MM_TEST(player_config_length_helpers_reject_overflowing_bounds) {
+	using namespace muffmode::pconfig;
+
+	MM_CHECK_FALSE(EncodeSocialIdConfigStem("a", 63, 0));
+	MM_CHECK_FALSE(EncodeSocialIdConfigStem("a", 63, 5));
+	MM_CHECK_FALSE(SkinFitsPlayerConfigString("male/grunt", std::numeric_limits<size_t>::max(), std::numeric_limits<size_t>::max()));
+	MM_CHECK_FALSE(SkinFitsPlayerConfigString("male/grunt", 95, 96));
+	MM_CHECK(SkinFitsPlayerConfigString("male/grunt", 31, 96));
+}
+
+MM_TEST(match_time_formatting_handles_negative_zero_and_extreme_values) {
+	MM_CHECK_EQ(MM_FormatMatchTime(0), std::string("00:00"));
+	MM_CHECK_EQ(MM_FormatMatchTime(500), std::string("00:00"));
+	MM_CHECK_EQ(MM_FormatMatchTime(-500), std::string("-00:00"));
+	MM_CHECK_EQ(MM_FormatMatchTime(3661000), std::string("1:01:01"));
+	MM_CHECK_EQ(MM_FormatMatchTimeMs(5), std::string("00:00.005"));
+	MM_CHECK_EQ(MM_FormatMatchTimeMs(-5), std::string("-00:00.005"));
+	MM_CHECK_EQ(MM_FormatMatchTimeMs(std::numeric_limits<int>::min()), std::string("-596:31:23.648"));
 }
 
 MM_TEST(command_argument_contracts_match_phase_one_fixes) {

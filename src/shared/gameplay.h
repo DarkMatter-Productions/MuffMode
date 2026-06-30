@@ -53,8 +53,8 @@ enum coop_respawn_t {
 enum {
 	CONFIG_MATCH_STATE = CS_GENERAL,
 	CONFIG_TEAMINFO,
-	CONFIG_CHASE_PLAYER_NAME,
-	CONFIG_CHASE_PLAYER_NAME_END = CONFIG_CHASE_PLAYER_NAME + MAX_CLIENTS,
+	CONFIG_FOLLOW_PLAYER_NAME,
+	CONFIG_FOLLOW_PLAYER_NAME_END = CONFIG_FOLLOW_PLAYER_NAME + MAX_CLIENTS,
 
 	// nb: offset by 1 since NONE is zero
 	CONFIG_COOP_RESPAWN_STRING,
@@ -70,6 +70,9 @@ enum {
 	CONFIG_RULESET_HUD,		// DM HUD: "Ruleset: …"
 	CONFIG_ROUND_PROGRESS,	// DM HUD: "Round x of y" / "Wave x of y"
 	CONFIG_WARMUP_NOTICE,	// DM HUD: warmup requisite detail (e.g. more players needed)
+	CONFIG_SPECTATOR_MODE_FREE,
+	CONFIG_SPECTATOR_MODE_FOLLOW_FIRST,
+	CONFIG_SPECTATOR_MODE_FOLLOW_THIRD,
 	CONFIG_POV_CENTER_POOL,	// per-client HUD lines: Strike OFFENSE/DEFENSE, CA/RR/LMS centre POV, ELIMINATED
 	CONFIG_COUNTDOWN_HEADER, // match/round countdown: "Round N\nBegins in..." (centerprint band)
 
@@ -206,7 +209,7 @@ enum player_stat_t {
 	STAT_LAYOUTS = 13,
 	STAT_SCORE = 14,
 	STAT_FLASHES = 15, // cleared each frame, 1 = health, 2 = armor
-	STAT_CHASE = 16,
+	STAT_FOLLOW = 16,
 	STAT_SPECTATOR = 17,
 
 	STAT_MINISCORE_FIRST_PIC = 18,

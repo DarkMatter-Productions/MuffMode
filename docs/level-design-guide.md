@@ -147,6 +147,8 @@ Example:
 | `target_kill` | Kills the activator. |
 | `target_cvar` | Sets a cvar using `cvar` and `cvarValue`. |
 | `target_position` | Alias for `info_notnull`. |
+| `func_bobbing` | Quake III Arena sine mover. Accepts `height`, `speed`, `phase`, and `dmg`; spawnflags `X_AXIS` and `Y_AXIS` change the bob axis from Z. Crushes through blockers like Q3. |
+| `func_pendulum` | Quake III Arena pendulum mover. Uses brush length plus gravity for swing timing and accepts `speed`, `phase`, and `dmg`. Crushes through blockers like Q3. |
 | `trigger_deathcount` | Fires targets after a minimum death count. Uses `count`, default `10`; `REPEAT` repeats every count. |
 | `trigger_no_monsters` | Fires when all monsters are dead or none are present. Removed in deathmatch except Horde. `ONCE` removes after firing. |
 | `trigger_monsters` | Fires when monsters are present. Removed in deathmatch except Horde. `ONCE` removes after firing. |

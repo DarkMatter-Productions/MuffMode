@@ -57,6 +57,7 @@ constexpr uint32_t k_config_field_follow_leader = bit_v<6>;
 constexpr uint32_t k_config_field_follow_powerup = bit_v<7>;
 constexpr uint32_t k_config_field_enemy_skin = bit_v<8>;
 constexpr uint32_t k_config_field_team_skin = bit_v<9>;
+constexpr uint32_t k_config_field_follow_first_person = bit_v<10>;
 constexpr uint32_t k_all_config_fields =
 	k_config_field_show_id |
 	k_config_field_show_timer |
@@ -67,7 +68,8 @@ constexpr uint32_t k_all_config_fields =
 	k_config_field_follow_leader |
 	k_config_field_follow_powerup |
 	k_config_field_enemy_skin |
-	k_config_field_team_skin;
+	k_config_field_team_skin |
+	k_config_field_follow_first_person;
 
 int ClientSlotNumber(const gentity_t *ent)
 {
@@ -264,6 +266,24 @@ config_line_result_t ApplyKillBeepLine(client_config_t &config, std::string_view
 	return config_line_result_t::applied;
 }
 
+config_line_result_t ApplyFollowViewLine(client_config_t &config, std::string_view args, const char *name, int line_number)
+{
+	std::string_view value;
+	if (!ReadSingleArg(args, value)) {
+		gi.Com_PrintFmt("{}:{}: expected one follow view value.\n", name, line_number);
+		return config_line_result_t::invalid;
+	}
+
+	const auto parsed = ParseFollowViewToken(value);
+	if (!parsed) {
+		gi.Com_PrintFmt("{}:{}: invalid follow view value \"{}\"; use first or third.\n", name, line_number, std::string(value));
+		return config_line_result_t::invalid;
+	}
+
+	config.follow_first_person = *parsed;
+	return config_line_result_t::applied;
+}
+
 config_line_result_t ApplySkinLine(char (&store)[MAX_QPATH], std::string_view args, const char *name, int line_number)
 {
 	std::string_view value;
@@ -320,6 +340,8 @@ config_line_result_t ApplyConfigLine(client_config_t &config, std::string_view r
 		return apply_known(k_config_field_follow_leader, ApplyBoolLine(config.follow_leader, args, name, line_number));
 	if (EqualsI(command, "followpowerup"))
 		return apply_known(k_config_field_follow_powerup, ApplyBoolLine(config.follow_powerup, args, name, line_number));
+	if (EqualsI(command, "followview") || EqualsI(command, "followcamera") || EqualsI(command, "followfirstperson"))
+		return apply_known(k_config_field_follow_first_person, ApplyFollowViewLine(config, args, name, line_number));
 	if (EqualsI(command, "kb") || EqualsI(command, "killbeep"))
 		return apply_known(k_config_field_killbeep, ApplyKillBeepLine(config, args, name, line_number));
 	if (EqualsI(command, "eskin") || EqualsI(command, "enemyskin"))
@@ -388,6 +410,7 @@ std::string RenderConfigText(gentity_t *ent)
 	fmt::format_to(std::back_inserter(text), FMT_STRING("followkiller {}\n"), BoolInt(config.follow_killer));
 	fmt::format_to(std::back_inserter(text), FMT_STRING("followleader {}\n"), BoolInt(config.follow_leader));
 	fmt::format_to(std::back_inserter(text), FMT_STRING("followpowerup {}\n"), BoolInt(config.follow_powerup));
+	fmt::format_to(std::back_inserter(text), FMT_STRING("followview {}\n"), config.follow_first_person ? "first" : "third");
 	fmt::format_to(std::back_inserter(text), FMT_STRING("eskin {}\n"), config.enemy_skin[0] ? config.enemy_skin : "off");
 	fmt::format_to(std::back_inserter(text), FMT_STRING("tskin {}\n"), config.team_skin[0] ? config.team_skin : "off");
 	return text;
@@ -531,6 +554,8 @@ bool *MM_PConfigBoolField(gentity_t *ent, mm_pconfig_bool_setting_t setting)
 		return &config.show_fragmessages;
 	case mm_pconfig_bool_setting_t::use_expanded:
 		return &config.use_expanded;
+	case mm_pconfig_bool_setting_t::follow_first_person:
+		return &config.follow_first_person;
 	case mm_pconfig_bool_setting_t::follow_killer:
 		return &config.follow_killer;
 	case mm_pconfig_bool_setting_t::follow_leader:
@@ -557,6 +582,12 @@ void MM_PConfigApplyBoolEffects(gentity_t *ent, mm_pconfig_bool_setting_t settin
 	if (!ent || !ent->client)
 		return;
 
+	if (setting == mm_pconfig_bool_setting_t::follow_first_person) {
+		if (ent->client->follow_target)
+			UpdateFollowCamera(ent);
+		return;
+	}
+
 	if (setting == mm_pconfig_bool_setting_t::follow_killer && !value) {
 		muffmode::pconfig::ClearQueuedFollowTarget(ent);
 		return;
@@ -575,10 +606,8 @@ void MM_PConfigApplyBoolEffects(gentity_t *ent, mm_pconfig_bool_setting_t settin
 		return;
 
 	if (!ClientIsPlaying(ent->client) && ent->client->follow_target != leader) {
-		ent->client->follow_target = leader;
-		ent->client->follow_update = true;
-		UpdateChaseCam(ent);
-		MM_RefreshSkinOverridesForViewer(ent);
+		SetFollowTarget(ent, leader);
+		UpdateFollowCamera(ent);
 	} else if (ent->client->eliminated && ent->client->follow_target != leader) {
 		ent->client->follow_queued_target = leader;
 		ent->client->follow_queued_time = level.time;
@@ -597,6 +626,7 @@ client_config_t MM_DefaultClientConfig()
 	config.follow_killer = false;
 	config.follow_leader = false;
 	config.follow_powerup = false;
+	config.follow_first_person = true;
 	config.use_expanded = false;
 	config.enemy_skin[0] = 0;
 	config.team_skin[0] = 0;
@@ -684,6 +714,11 @@ bool MM_PConfigToggleBool(gentity_t *ent, mm_pconfig_bool_setting_t setting)
 const char *MM_PConfigBoolText(bool value)
 {
 	return muffmode::pconfig::BoolText(value);
+}
+
+const char *MM_PConfigFollowViewName(bool first_person)
+{
+	return first_person ? "first-person" : "third-person";
 }
 
 const char *MM_PConfigKillBeepName(int value)
@@ -796,6 +831,33 @@ void MM_CmdKillBeep(gentity_t *ent)
 
 	MM_PConfigSetKillBeep(ent, num);
 	gi.LocClient_Print(ent, PRINT_HIGH, "Kill beep changed to: {}\n", MM_PConfigKillBeepName(num));
+}
+
+/*
+=================
+MM_CmdFollowView
+=================
+*/
+void MM_CmdFollowView(gentity_t *ent)
+{
+	if (!ent || !ent->client)
+		return;
+
+	if (!muffmode::pconfig::RequireCommandArgc(ent, 1, 2, G_Fmt("{} [first|third]", gi.argv(0)).data()))
+		return;
+
+	bool first_person = !ent->client->sess.pc.follow_first_person;
+	if (gi.argc() > 1) {
+		const auto parsed = muffmode::pconfig::ParseFollowViewToken(gi.argv(1));
+		if (!parsed) {
+			gi.LocClient_Print(ent, PRINT_HIGH, "Invalid follow view. Use first or third.\n");
+			return;
+		}
+		first_person = *parsed;
+	}
+
+	MM_PConfigSetBool(ent, mm_pconfig_bool_setting_t::follow_first_person, first_person);
+	gi.LocClient_Print(ent, PRINT_HIGH, "Follow view: {}\n", MM_PConfigFollowViewName(first_person));
 }
 
 /*

@@ -63,6 +63,14 @@ void carrier_prep_spawn(gentity_t *self);
 void CarrierMachineGunHold(gentity_t *self);
 void CarrierRocket(gentity_t *self);
 
+static bool CarrierHasLiveEnemy(const gentity_t *self) {
+	return self && self->enemy && self->enemy->inuse;
+}
+
+static bool CarrierHasClassname(const gentity_t *ent, const char *classname) {
+	return ent && ent->inuse && ent->classname && !strcmp(ent->classname, classname);
+}
+
 MONSTERINFO_SIGHT(carrier_sight) (gentity_t *self, gentity_t *other) -> void {
 	gi.sound(self, CHAN_VOICE, sound_sight, 1, ATTN_NORM, 0);
 }
@@ -127,7 +135,7 @@ static void CarrierGrenade(gentity_t *self) {
 
 	CarrierCoopCheck(self);
 
-	if (!self->enemy)
+	if (!CarrierHasLiveEnemy(self))
 		return;
 
 	if (frandom() < 0.5f)
@@ -178,6 +186,9 @@ static void CarrierPredictiveRocket(gentity_t *self) {
 	vec3_t start;
 	vec3_t dir;
 
+	if (!CarrierHasLiveEnemy(self))
+		return;
+
 	AngleVectors(self->s.angles, forward, right, nullptr);
 
 	// 1
@@ -207,13 +218,13 @@ void CarrierRocket(gentity_t *self) {
 	vec3_t dir;
 	vec3_t vec;
 
-	if (self->enemy) {
-		if (self->enemy->client && frandom() < 0.5f) {
-			CarrierPredictiveRocket(self);
-			return;
-		}
-	} else
+	if (!CarrierHasLiveEnemy(self))
 		return;
+
+	if (self->enemy->client && frandom() < 0.5f) {
+		CarrierPredictiveRocket(self);
+		return;
+	}
 
 	AngleVectors(self->s.angles, forward, right, nullptr);
 
@@ -290,9 +301,9 @@ static void carrier_firebullet_left(gentity_t *self) {
 
 static void CarrierMachineGun(gentity_t *self) {
 	CarrierCoopCheck(self);
-	if (self->enemy)
+	if (CarrierHasLiveEnemy(self))
 		carrier_firebullet_left(self);
-	if (self->enemy)
+	if (CarrierHasLiveEnemy(self))
 		carrier_firebullet_right(self);
 }
 
@@ -327,17 +338,17 @@ static void CarrierSpawn(gentity_t *self) {
 		ent->monsterinfo.monster_slots = reinforcement.strength;
 		self->monsterinfo.monster_used += reinforcement.strength;
 
-		if ((self->enemy->inuse) && (self->enemy->health > 0)) {
+		if (CarrierHasLiveEnemy(self) && self->enemy->health > 0) {
 			ent->enemy = self->enemy;
 			FoundTarget(ent);
 
-			if (!strcmp(ent->classname, "monster_kamikaze")) {
+			if (CarrierHasClassname(ent, "monster_kamikaze")) {
 				ent->monsterinfo.lefty = false;
 				ent->monsterinfo.attack_state = AS_STRAIGHT;
 				M_SetAnimation(ent, &flyer_move_kamikaze);
 				ent->monsterinfo.aiflags |= AI_CHARGING;
 				ent->owner = self;
-			} else if (!strcmp(ent->classname, "monster_flyer")) {
+			} else if (CarrierHasClassname(ent, "monster_flyer")) {
 				if (brandom()) {
 					ent->monsterinfo.lefty = false;
 					ent->monsterinfo.attack_state = AS_SLIDING;
@@ -414,7 +425,7 @@ void carrier_start_spawn(gentity_t *self) {
 	if (!orig_yaw_speed)
 		orig_yaw_speed = self->yaw_speed;
 
-	if (!self->enemy)
+	if (!CarrierHasLiveEnemy(self))
 		return;
 
 	mytime = (int)((level.time - self->timestamp) / 0.5).seconds();
@@ -556,6 +567,9 @@ static void CarrierRail(gentity_t *self) {
 	vec3_t forward, right;
 
 	CarrierCoopCheck(self);
+	if (!CarrierHasLiveEnemy(self) && !self->pos1)
+		return;
+
 	AngleVectors(self->s.angles, forward, right, nullptr);
 	start = M_ProjectFlashSource(self, monster_flash_offset[MZ2_CARRIER_RAILGUN], forward, right);
 
@@ -569,6 +583,9 @@ static void CarrierRail(gentity_t *self) {
 
 static void CarrierSaveLoc(gentity_t *self) {
 	CarrierCoopCheck(self);
+	if (!CarrierHasLiveEnemy(self))
+		return;
+
 	self->pos1 = self->enemy->s.origin; // save for aiming the shot
 	self->pos1[2] += self->enemy->viewheight;
 };
@@ -783,6 +800,13 @@ void carrier_reattack_mg(gentity_t *self) {
 	CarrierMachineGun(self);
 
 	CarrierCoopCheck(self);
+	if (!CarrierHasLiveEnemy(self)) {
+		M_SetAnimation(self, &carrier_move_attack_post_mg);
+		self->monsterinfo.weapon_sound = 0;
+		gi.sound(self, CHAN_BODY, sound_cg_down, 1, 0.5f, 0);
+		return;
+	}
+
 	if (visible(self, self->enemy) && infront(self, self->enemy)) {
 		if (frandom() < 0.6f) {
 			self->monsterinfo.melee_debounce_time += random_time(250_ms, 500_ms);
@@ -807,6 +831,11 @@ void carrier_attack_gren(gentity_t *self) {
 
 void carrier_reattack_gren(gentity_t *self) {
 	CarrierCoopCheck(self);
+	if (!CarrierHasLiveEnemy(self)) {
+		M_SetAnimation(self, &carrier_move_attack_post_gren);
+		return;
+	}
+
 	if (infront(self, self->enemy))
 		if (self->timestamp + 1.3_sec > level.time) // four grenades
 		{
@@ -902,6 +931,9 @@ static DIE(carrier_die) (gentity_t *self, gentity_t *inflictor, gentity_t *attac
 }
 
 MONSTERINFO_CHECKATTACK(Carrier_CheckAttack) (gentity_t *self) -> bool {
+	if (!CarrierHasLiveEnemy(self))
+		return false;
+
 	bool enemy_infront = infront(self, self->enemy);
 	bool enemy_inback = inback(self, self->enemy);
 	bool enemy_below = below(self, self->enemy);

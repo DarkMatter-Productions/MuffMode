@@ -22,7 +22,7 @@ This reference helps players and hosts choose what to play. Casual players can u
 - Match progression with warmups, ready states, countdowns, post-match delays, sudden death, overtime, and round handling.
 - Enhanced teamplay with auto-balancing, forced balance rules, improved team messaging, major item pickup notices, weapon drop points of interest, and friendly fire warnings.
 - Extensive controls for map item spawns and entity string overrides.
-- EyeCam spectating with smooth behavior and aim prediction.
+- First-person and third-person spectator following with smooth behavior and aim prediction.
 - MyMap queueing inspired by Tastyspleen.
 - Bug fixes, minor refinements, balance tweaks, and additional server settings.
 

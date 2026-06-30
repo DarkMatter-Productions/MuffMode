@@ -44,6 +44,8 @@ void SP_func_areaportal(gentity_t *ent);
 void SP_func_killbox(gentity_t *ent);
 void SP_func_eye(gentity_t *ent); // [Paril-KEX]
 void SP_func_spinning(gentity_t *ent); // [Paril-KEX]
+void SP_func_bobbing(gentity_t *ent);
+void SP_func_pendulum(gentity_t *ent);
 void SP_object_repair(gentity_t *self);
 
 void SP_trigger_always(gentity_t *ent);
@@ -262,6 +264,8 @@ static const std::initializer_list<spawn_t> spawns = {
 	{ "func_eye", SP_func_eye },
 	{ "func_animation", SP_func_animation },
 	{ "func_spinning", SP_func_spinning },
+	{ "func_bobbing", SP_func_bobbing },
+	{ "func_pendulum", SP_func_pendulum },
 	{ "func_object_repair", SP_object_repair },
 
 	{ "trigger_always", SP_trigger_always },

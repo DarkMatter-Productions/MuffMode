@@ -29,6 +29,10 @@ static cached_soundindex daed_sound_sight;
 static cached_soundindex daed_sound_search1;
 static cached_soundindex daed_sound_search2;
 
+static bool hover_has_live_enemy(const gentity_t *self) {
+	return self && self->enemy && self->enemy->inuse;
+}
+
 MONSTERINFO_SIGHT(hover_sight) (gentity_t *self, gentity_t *other) -> void {
 	// PMM - daedalus sounds
 	if (self->mass < 225)
@@ -326,7 +330,7 @@ mframe_t hover_frames_attack2[] = {
 MMOVE_T(hover_move_attack2) = { FRAME_attak104, FRAME_attak106, hover_frames_attack2, nullptr };
 
 void hover_reattack(gentity_t *self) {
-	if (self->enemy->health > 0)
+	if (hover_has_live_enemy(self) && self->enemy->health > 0)
 		if (visible(self, self->enemy))
 			if (frandom() <= 0.6f) {
 				if (self->monsterinfo.attack_state == AS_STRAIGHT) {
@@ -347,7 +351,7 @@ void hover_fire_blaster(gentity_t *self) {
 	vec3_t	  end;
 	vec3_t	  dir;
 
-	if (!self->enemy || !self->enemy->inuse)
+	if (!hover_has_live_enemy(self))
 		return;
 
 	AngleVectors(self->s.angles, forward, right, nullptr);
@@ -382,11 +386,17 @@ MONSTERINFO_WALK(hover_walk) (gentity_t *self) -> void {
 }
 
 MONSTERINFO_ATTACK(hover_start_attack) (gentity_t *self) -> void {
+	if (!hover_has_live_enemy(self))
+		return;
+
 	M_SetAnimation(self, &hover_move_start_attack);
 }
 
 void hover_attack(gentity_t *self) {
 	float chance = 0.5f;
+
+	if (!hover_has_live_enemy(self))
+		return;
 
 	if (self->mass > 150) // the daedalus strafes more
 		chance += 0.1f;
@@ -540,7 +550,7 @@ void SP_monster_hover(gentity_t *self) {
 	self->monsterinfo.search = hover_search;
 	self->monsterinfo.setskin = hover_setskin;
 
-	if (strcmp(self->classname, "monster_daedalus") == 0) {
+	if (self->classname && strcmp(self->classname, "monster_daedalus") == 0) {
 		self->health = 450 * st.health_multiplier;
 		self->mass = 225;
 		self->yaw_speed = 23;
@@ -579,7 +589,7 @@ void SP_monster_hover(gentity_t *self) {
 
 	flymonster_start(self);
 
-	if (strcmp(self->classname, "monster_daedalus") == 0)
+	if (self->classname && strcmp(self->classname, "monster_daedalus") == 0)
 		self->s.skinnum = 2;
 
 	self->monsterinfo.aiflags |= AI_ALTERNATE_FLY;

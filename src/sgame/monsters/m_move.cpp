@@ -8,6 +8,18 @@
 // is blocking us
 gentity_t *new_bad; // pmm
 
+static bool M_HasClassname(const gentity_t *ent, const char *classname) {
+	return ent && ent->inuse && ent->classname && !strcmp(ent->classname, classname);
+}
+
+static bool M_ClassnameStartsWith(const gentity_t *ent, const char *prefix, size_t length) {
+	return ent && ent->inuse && ent->classname && !strncmp(ent->classname, prefix, length);
+}
+
+static bool M_IsTeslaMine(const gentity_t *ent) {
+	return M_HasClassname(ent, "tesla_mine");
+}
+
 /*
 =============
 M_CheckBottom
@@ -420,7 +432,7 @@ static bool G_flystep(gentity_t *ent, vec3_t move, bool relink, gentity_t *curre
 	// from shooting his fliers, who spawn in below him
 	float minheight;
 
-	if (!strcmp(ent->classname, "monster_carrier"))
+	if (M_HasClassname(ent, "monster_carrier"))
 		minheight = 104;
 	else
 		minheight = 40;
@@ -450,7 +462,7 @@ static bool G_flystep(gentity_t *ent, vec3_t move, bool relink, gentity_t *curre
 						new_move[2] += dist;
 					}
 			} else {
-				if (strcmp(ent->classname, "monster_fixbot") == 0) {
+				if (M_HasClassname(ent, "monster_fixbot")) {
 					if (ent->s.frame >= 105 && ent->s.frame <= 120) {
 						if (dz > 12)
 							new_move[2]--;
@@ -547,7 +559,7 @@ static bool G_movestep(gentity_t *ent, vec3_t move, bool relink) {
 		if (current_bad) {
 			ent->bad_area = current_bad;
 
-			if (ent->enemy && !strcmp(ent->enemy->classname, "tesla_mine")) {
+			if (M_IsTeslaMine(ent->enemy)) {
 				// if the tesla is in front of us, back up...
 				if (IsBadAhead(ent, current_bad, move))
 					move *= -1;
@@ -690,21 +702,19 @@ static bool G_movestep(gentity_t *ent, vec3_t move, bool relink) {
 		// use AI_BLOCKED to tell the calling layer that we're now mad at a tesla
 		new_bad = CheckForBadArea(ent);
 		if (!current_bad && new_bad) {
-			if (new_bad->owner) {
-				if (!strcmp(new_bad->owner->classname, "tesla_mine")) {
-					if ((!(ent->enemy)) || (!(ent->enemy->inuse))) {
-						TargetTesla(ent, new_bad->owner);
-						ent->monsterinfo.aiflags |= AI_BLOCKED;
-					} else if (!strcmp(ent->enemy->classname, "tesla_mine")) {
-					} else if ((ent->enemy) && (ent->enemy->client)) {
-						if (!visible(ent, ent->enemy)) {
-							TargetTesla(ent, new_bad->owner);
-							ent->monsterinfo.aiflags |= AI_BLOCKED;
-						}
-					} else {
+			if (M_IsTeslaMine(new_bad->owner)) {
+				if ((!(ent->enemy)) || (!(ent->enemy->inuse))) {
+					TargetTesla(ent, new_bad->owner);
+					ent->monsterinfo.aiflags |= AI_BLOCKED;
+				} else if (M_IsTeslaMine(ent->enemy)) {
+				} else if ((ent->enemy) && (ent->enemy->client)) {
+					if (!visible(ent, ent->enemy)) {
 						TargetTesla(ent, new_bad->owner);
 						ent->monsterinfo.aiflags |= AI_BLOCKED;
 					}
+				} else {
+					TargetTesla(ent, new_bad->owner);
+					ent->monsterinfo.aiflags |= AI_BLOCKED;
 				}
 			}
 
@@ -874,7 +884,7 @@ static bool G_StepDirection(gentity_t *ent, float yaw, float dist, bool allow_no
 		if (!ent->inuse)
 			return true; // PGM g_touchtrigger free problem
 
-		if (strncmp(ent->classname, "monster_widow", 13)) {
+		if (!M_ClassnameStartsWith(ent, "monster_widow", 13)) {
 			if (!FacingIdeal(ent)) {
 				// not turned far enough, so don't take the step
 				// but still turn

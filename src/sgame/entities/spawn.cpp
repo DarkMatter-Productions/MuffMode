@@ -1,8 +1,9 @@
 // Copyright (c) ZeniMax Media Inc.
 // Licensed under the GNU General Public License 2.0.
 
-#include <cerrno>
+#include <charconv>
 #include <cmath>
+#include <cstdint>
 #include <limits>
 
 #include "g_local.h"
@@ -12,6 +13,7 @@
 #include "muffmode/mm_combat_heatmap.h"
 #include "muffmode/mm_gametype.h"
 #include "muffmode/mm_ghost.h"
+#include "muffmode/mm_parse.h"
 #include "muffmode/mm_horde.h"
 #include "muffmode/mm_spawn_filter.h"
 #include "muffmode/mm_statusbar.h"
@@ -160,33 +162,30 @@ struct member_object_container_type<T1 T2:: *> { using type = T2; };
 template<typename T>
 using member_object_container_type_t = typename member_object_container_type<std::remove_cv_t<T>>::type;
 
-static bool ED_ParseConsumesWholeToken(const char *s, const char *end) {
-	return s != nullptr && end != nullptr && end != s && *end == '\0';
-}
-
 static bool ED_TryLoadFloat(const char *s, float &out) {
-	char *end = nullptr;
-	errno = 0;
-	const float value = strtof(s, &end);
-	if (!ED_ParseConsumesWholeToken(s, end) || errno == ERANGE || !std::isfinite(value)) {
+	const auto value = MM_ParseFloatArg(s);
+	if (!value)
 		return false;
-	}
 
-	out = value;
+	out = *value;
 	return true;
 }
 
 template<typename T>
 static T ED_LoadInteger(const char *s) {
-	char *end = nullptr;
-	errno = 0;
-	const long long raw_value = strtoll(s, &end, 10);
-	if (!ED_ParseConsumesWholeToken(s, end)) {
+	if (!s || !*s)
+		return {};
+
+	int64_t raw_value = 0;
+	const char *begin = s;
+	const char *end = s + strlen(s);
+	const auto [ptr, ec] = std::from_chars(begin, end, raw_value);
+	if (ec != std::errc{} || ptr != end) {
 		return {};
 	}
 
-	const long long min_value = static_cast<long long>(std::numeric_limits<T>::min());
-	const long long max_value = static_cast<long long>(std::numeric_limits<T>::max());
+	const int64_t min_value = static_cast<int64_t>(std::numeric_limits<T>::min());
+	const int64_t max_value = static_cast<int64_t>(std::numeric_limits<T>::max());
 	return static_cast<T>(clamp(raw_value, min_value, max_value));
 }
 
@@ -432,6 +431,7 @@ static const std::initializer_list<temp_field_t> temp_fields = {
 	FIELD_AUTO(lip),
 	FIELD_AUTO(distance),
 	FIELD_AUTO(height),
+	FIELD_AUTO(phase),
 	FIELD_AUTO(noise),
 	FIELD_AUTO(pausetime),
 	FIELD_AUTO(item),
@@ -1619,6 +1619,9 @@ void SP_worldspawn(gentity_t *ent) {
 
 	// statusbar prog
 	MM_InitStatusbar();
+	gi.configstring(CONFIG_SPECTATOR_MODE_FREE, "SPECTATOR | FIRE/JUMP FOLLOW");
+	gi.configstring(CONFIG_SPECTATOR_MODE_FOLLOW_FIRST, "SPECTATOR | FIRST-PERSON");
+	gi.configstring(CONFIG_SPECTATOR_MODE_FOLLOW_THIRD, "SPECTATOR | THIRD-PERSON");
 
 	// [Paril-KEX] air accel handled by game DLL now, and allow
 	// it to be changed in sp/coop

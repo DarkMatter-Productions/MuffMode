@@ -24,6 +24,10 @@ static cached_soundindex sound_thud;
 static cached_soundindex sound_explod;
 static cached_soundindex sound_jump;
 
+static bool berserk_has_live_enemy(const gentity_t *self) {
+	return self && self->enemy && self->enemy->inuse;
+}
+
 MONSTERINFO_SIGHT(berserk_sight) (gentity_t *self, gentity_t *other) -> void {
 	gi.sound(self, CHAN_VOICE, sound_sight, 1, ATTN_NORM, 0);
 }
@@ -77,7 +81,7 @@ MMOVE_T(berserk_move_stand_fidget) = { FRAME_standb1, FRAME_standb20, berserk_fr
 void berserk_fidget(gentity_t *self) {
 	if (self->monsterinfo.aiflags & AI_STAND_GROUND)
 		return;
-	else if (self->enemy)
+	else if (berserk_has_live_enemy(self))
 		return;
 	if (frandom() > 0.15f)
 		return;
@@ -264,7 +268,7 @@ static void berserk_high_gravity(gentity_t *self) {
 static void berserk_jump_takeoff(gentity_t *self) {
 	vec3_t forward;
 
-	if (!self->enemy)
+	if (!berserk_has_live_enemy(self))
 		return;
 
 	// immediately turn to where we need to go
@@ -354,7 +358,7 @@ MONSTERINFO_MELEE(berserk_melee) (gentity_t *self) -> void {
 }
 
 static void berserk_run_attack_speed(gentity_t *self) {
-	if (self->enemy && range_to(self, self->enemy) < MELEE_DISTANCE) {
+	if (berserk_has_live_enemy(self) && range_to(self, self->enemy) < MELEE_DISTANCE) {
 		self->monsterinfo.nextframe = self->s.frame + 6;
 		monster_done_dodge(self);
 	}
@@ -393,16 +397,21 @@ mframe_t berserk_frames_run_attack1[] = {
 MMOVE_T(berserk_move_run_attack1) = { FRAME_r_att1, FRAME_r_att18, berserk_frames_run_attack1, berserk_run };
 
 MONSTERINFO_ATTACK(berserk_attack) (gentity_t *self) -> void {
-	if (self->monsterinfo.melee_debounce_time <= level.time && (range_to(self, self->enemy) < MELEE_DISTANCE))
+	if (!berserk_has_live_enemy(self))
+		return;
+
+	const float enemy_range = range_to(self, self->enemy);
+
+	if (self->monsterinfo.melee_debounce_time <= level.time && (enemy_range < MELEE_DISTANCE))
 		berserk_melee(self);
 	// only jump if they are far enough away for it to make sense (otherwise
 	// it gets annoying to have them keep hopping over and over again)
-	else if (!self->spawnflags.has(SPAWNFLAG_BERSERK_NOJUMPING) && (self->timestamp < level.time && brandom()) && range_to(self, self->enemy) > 150.f) {
+	else if (!self->spawnflags.has(SPAWNFLAG_BERSERK_NOJUMPING) && (self->timestamp < level.time && brandom()) && enemy_range > 150.f) {
 		M_SetAnimation(self, &berserk_move_attack_strike);
 		// don't do this for a while, otherwise we just keep doing it
 		gi.sound(self, CHAN_WEAPON, sound_jump, 1, ATTN_NORM, 0);
 		self->timestamp = level.time + 5_sec;
-	} else if (self->monsterinfo.active_move == &berserk_move_run1 && (range_to(self, self->enemy) <= RANGE_NEAR)) {
+	} else if (self->monsterinfo.active_move == &berserk_move_run1 && (enemy_range <= RANGE_NEAR)) {
 		M_SetAnimation(self, &berserk_move_run_attack1);
 		self->monsterinfo.nextframe = FRAME_r_att1 + (self->s.frame - FRAME_run1) + 1;
 	}
@@ -600,7 +609,7 @@ mframe_t berserk_frames_jump2[] = {
 MMOVE_T(berserk_move_jump2) = { FRAME_jump1, FRAME_jump9, berserk_frames_jump2, berserk_run };
 
 static void berserk_jump(gentity_t *self, blocked_jump_result_t result) {
-	if (!self->enemy)
+	if (!berserk_has_live_enemy(self))
 		return;
 
 	if (result == blocked_jump_result_t::JUMP_JUMP_UP)

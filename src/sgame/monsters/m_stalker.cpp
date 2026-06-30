@@ -479,6 +479,10 @@ MONSTERINFO_ATTACK(stalker_attack_ranged) (gentity_t *self) -> void {
 
 void stalker_swing_attack(gentity_t *self) {
 	vec3_t aim = { MELEE_DISTANCE, 0, 0 };
+
+	if (!has_valid_enemy(self))
+		return;
+
 	if (fire_hit(self, aim, irandom(5, 10), 50)) {
 		if (self->s.frame < FRAME_attack08)
 			gi.sound(self, CHAN_WEAPON, sound_punch_hit2, 1, ATTN_NORM, 0);
@@ -527,6 +531,9 @@ MONSTERINFO_MELEE(stalker_attack_melee) (gentity_t *self) -> void {
 // ====================
 // ====================
 static bool stalker_check_lz(gentity_t *self, gentity_t *target, const vec3_t &dest) {
+	if (!target || !target->inuse)
+		return false;
+
 	if ((gi.pointcontents(dest) & MASK_WATER) || (target->waterlevel))
 		return false;
 
@@ -537,24 +544,24 @@ static bool stalker_check_lz(gentity_t *self, gentity_t *target, const vec3_t &d
 
 	// check under the player's four corners
 	// if they're not solid, bail.
-	jumpLZ[0] = self->enemy->mins[0];
-	jumpLZ[1] = self->enemy->mins[1];
-	jumpLZ[2] = self->enemy->mins[2] - 0.25f;
+	jumpLZ[0] = dest[0] + target->mins[0];
+	jumpLZ[1] = dest[1] + target->mins[1];
+	jumpLZ[2] = dest[2] + target->mins[2] - 0.25f;
 	if (!(gi.pointcontents(jumpLZ) & MASK_SOLID))
 		return false;
 
-	jumpLZ[0] = self->enemy->maxs[0];
-	jumpLZ[1] = self->enemy->mins[1];
+	jumpLZ[0] = dest[0] + target->maxs[0];
+	jumpLZ[1] = dest[1] + target->mins[1];
 	if (!(gi.pointcontents(jumpLZ) & MASK_SOLID))
 		return false;
 
-	jumpLZ[0] = self->enemy->maxs[0];
-	jumpLZ[1] = self->enemy->maxs[1];
+	jumpLZ[0] = dest[0] + target->maxs[0];
+	jumpLZ[1] = dest[1] + target->maxs[1];
 	if (!(gi.pointcontents(jumpLZ) & MASK_SOLID))
 		return false;
 
-	jumpLZ[0] = self->enemy->mins[0];
-	jumpLZ[1] = self->enemy->maxs[1];
+	jumpLZ[0] = dest[0] + target->mins[0];
+	jumpLZ[1] = dest[1] + target->maxs[1];
 	if (!(gi.pointcontents(jumpLZ) & MASK_SOLID))
 		return false;
 
@@ -572,6 +579,9 @@ bool stalker_do_pounce(gentity_t *self, const vec3_t &dest) {
 
 	// don't pounce when we're on the ceiling
 	if (STALKER_ON_CEILING(self))
+		return false;
+
+	if (!has_valid_enemy(self))
 		return false;
 
 	if (!stalker_check_lz(self, self->enemy, dest))
@@ -666,7 +676,10 @@ MONSTERINFO_DODGE(stalker_dodge) (gentity_t *self, gentity_t *attacker, gtime_t 
 	if (!self->groundentity || self->health <= 0)
 		return;
 
-	if (!self->enemy) {
+	if (!has_valid_enemy(self)) {
+		if (!attacker || !attacker->inuse || attacker->health <= 0)
+			return;
+
 		self->enemy = attacker;
 		FoundTarget(self);
 		return;
@@ -760,7 +773,7 @@ MMOVE_T(stalker_move_jump_down) = { FRAME_jump01, FRAME_jump07, stalker_frames_j
 //		use stalker_dodge_jump
 //============
 static void stalker_jump(gentity_t *self, blocked_jump_result_t result) {
-	if (!self->enemy)
+	if (!has_valid_enemy(self))
 		return;
 
 	if (result == blocked_jump_result_t::JUMP_JUMP_UP)

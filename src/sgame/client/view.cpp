@@ -6,6 +6,7 @@
 #include "bots/bot_includes.h"
 // [MuffMode] AutoDoc regen lives in muffmode/mm_items_rules
 #include "muffmode/mm_items_rules.h"
+#include "muffmode/mm_parse.h"
 
 static gentity_t *current_player;
 static gclient_t *current_client;
@@ -207,7 +208,7 @@ void P_DamageFeedback(gentity_t *player) {
 	//
 	// calculate view angle kicks
 	//
-	kick = (float)abs(client->damage_knockback);
+	kick = std::abs(static_cast<float>(client->damage_knockback));
 	if (kick && player->health > 0) // kick of 0 means no view adjust at all
 	{
 		kick = kick * 100 / player->health;
@@ -229,13 +230,15 @@ void P_DamageFeedback(gentity_t *player) {
 		client->v_dmg_time = level.time + DAMAGE_TIME();
 	}
 
-	// [Paril-KEX] send view indicators
-	if (client->num_damage_indicators) {
-		gi.WriteByte(svc_damage);
-		gi.WriteByte(client->num_damage_indicators);
+	const auto send_damage_indicators = [](gentity_t *recipient, gentity_t *pov, gclient_t *source_client) {
+		if (!recipient || !recipient->client || !pov || !source_client || !source_client->num_damage_indicators)
+			return;
 
-		for (size_t i = 0; i < client->num_damage_indicators; i++) {
-			auto &indicator = client->damage_indicators[i];
+		gi.WriteByte(svc_damage);
+		gi.WriteByte(source_client->num_damage_indicators);
+
+		for (size_t i = 0; i < source_client->num_damage_indicators; i++) {
+			auto &indicator = source_client->damage_indicators[i];
 
 			// encode total damage into 5 bits
 			uint8_t encoded = std::clamp((indicator.health + indicator.power + indicator.armor) / 3, 1, 0x1F);
@@ -249,10 +252,20 @@ void P_DamageFeedback(gentity_t *player) {
 				encoded |= 0x80;
 
 			gi.WriteByte(encoded);
-			gi.WriteDir((player->s.origin - indicator.from).normalized());
+			gi.WriteDir((pov->s.origin - indicator.from).normalized());
 		}
 
-		gi.unicast(player, false);
+		gi.unicast(recipient, false);
+	};
+
+	// [Paril-KEX] send view indicators
+	if (client->num_damage_indicators) {
+		send_damage_indicators(player, player, client);
+
+		for (auto viewer : active_clients()) {
+			if (viewer != player && viewer->client && viewer->client->follow_target == player)
+				send_damage_indicators(viewer, player, client);
+		}
 	}
 
 	//
@@ -1510,16 +1523,22 @@ void ClientEndServerFrame(gentity_t *ent) {
 	}
 
 	float bobtime, bobtime_run;
-	gentity_t *e = ent;	// g_eyecam->integer &&ent->client->follow_target ? ent->client->follow_target : ent;
+	gentity_t *e = ent;
 
 	current_player = e;
 	current_client = e->client;
 
 	if (deathmatch->integer) {
-		int limit = level.match_state >= MATCH_IN_PROGRESS ? GT_ScoreLimit() : 0;
+		const int raw_limit = level.match_state >= MATCH_IN_PROGRESS ? GT_ScoreLimit() : 0;
+		const int limit = raw_limit > 0 ? raw_limit : 0;
 		ent->client->ps.stats[STAT_SCORELIMIT] = limit;
-		if (limit != (int)strtoul(gi.get_configstring(CONFIG_STORY_SCORELIMIT), nullptr, 10)) {
-			gi.configstring(CONFIG_STORY_SCORELIMIT, limit ? G_Fmt("{}", limit).data() : "");
+		const char *scorelimit_text = gi.get_configstring(CONFIG_STORY_SCORELIMIT);
+		const auto configured_limit = MM_ParseUInt32Arg(scorelimit_text);
+		const bool matches_configstring = limit > 0
+			? (configured_limit && *configured_limit == static_cast<uint32_t>(limit))
+			: (!scorelimit_text || !*scorelimit_text);
+		if (!matches_configstring) {
+			gi.configstring(CONFIG_STORY_SCORELIMIT, limit > 0 ? G_Fmt("{}", limit).data() : "");
 		}
 	}
 
@@ -1656,21 +1675,13 @@ void ClientEndServerFrame(gentity_t *ent) {
 	// accurately determined
 	G_CalcBlend(e);
 
-	// chase cam stuff
+	// follow camera stuff
 	if (!ClientIsPlaying(ent->client) || ent->client->eliminated) {
 		G_SetSpectatorStats(ent);
-
-		if (ent->client->follow_target && ent->client->follow_target->client) {
-			ent->client->ps.screen_blend = ent->client->follow_target->client->ps.screen_blend;
-			ent->client->ps.damage_blend = ent->client->follow_target->client->ps.damage_blend;
-
-			ent->s.effects = ent->client->follow_target->s.effects;
-			ent->s.renderfx = ent->client->follow_target->s.renderfx;
-		}
 	} else
 		G_SetStats(ent);
 
-	G_CheckChaseStats(ent);
+	G_CheckFollowStats(ent);
 
 	G_SetCoopStats(ent);
 
@@ -1679,6 +1690,9 @@ void ClientEndServerFrame(gentity_t *ent) {
 	G_SetClientEffects(e);
 
 	G_SetClientSound(e);
+
+	if (ent->client->follow_target && ent->client->follow_target->client)
+		SyncFollowPresentation(ent);
 
 	G_SetClientFrame(ent);
 	
