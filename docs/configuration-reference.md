@@ -444,7 +444,7 @@ Defaults to `1` (enabled); set to `0` to restore legacy horde monster targeting 
 
 | Cvar | Default | Purpose |
 | --- | --- | --- |
-| `g_horde_enhanced_ai` | `1` | Target spread, spawn tactics, adaptive pacing, per-spawn roles, retarget-on-kill, extended aggro, and attack stagger. |
+| `g_horde_enhanced_ai` | `1` | Target spread, spawn tactics, adaptive pacing, per-spawn roles, retarget-on-kill, extended aggro, attack stagger, and medic corpse-resurrect priority. |
 
 ## Debug-Only Weapon Balance Cvars
 

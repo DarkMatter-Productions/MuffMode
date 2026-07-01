@@ -12,6 +12,8 @@ MEDIC
 #include "m_medic.h"
 #include "m_flash.h"
 
+extern cvar_t *g_horde_enhanced_ai;
+
 constexpr float MEDIC_MIN_DISTANCE = 32;
 constexpr float MEDIC_MAX_HEAL_DISTANCE = 400;
 constexpr gtime_t MEDIC_TRY_TIME = 10_sec;
@@ -234,17 +236,18 @@ static bool canReach(gentity_t *self, gentity_t *other) {
 }
 
 static gentity_t *medic_FindDeadMonster(gentity_t *self) {
-	float	 radius;
-	gentity_t *ent = nullptr;
-	gentity_t *best = nullptr;
+	const bool  horde_priority = GT(GT_HORDE) && g_horde_enhanced_ai->integer;
+	float       radius;
+	gentity_t  *ent = nullptr;
+	gentity_t  *best = nullptr;
 
-	if (self->monsterinfo.react_to_damage_time > level.time)
+	if (!horde_priority && self->monsterinfo.react_to_damage_time > level.time)
 		return nullptr;
 
 	if (self->monsterinfo.aiflags & AI_STAND_GROUND)
 		radius = MEDIC_MAX_HEAL_DISTANCE;
 	else
-		radius = 1024;
+		radius = horde_priority ? 1536.f : 1024.f;
 
 	while ((ent = findradius(ent, self->s.origin, radius)) != nullptr) {
 		if (ent == self)
@@ -267,8 +270,10 @@ static gentity_t *medic_FindDeadMonster(gentity_t *self) {
 			continue;
 		if ((ent->nextthink) && (ent->think != monster_dead_think))
 			continue;
-		if (!visible(self, ent))
-			continue;
+		if (!horde_priority || realrange(self, ent) > MEDIC_MAX_HEAL_DISTANCE) {
+			if (!visible(self, ent))
+				continue;
+		}
 		if (!strncmp(ent->classname, "player", 6)) // stop it from trying to heal player_noise entities
 			continue;
 		// FIXME - there's got to be a better way ..
@@ -290,46 +295,40 @@ static gentity_t *medic_FindDeadMonster(gentity_t *self) {
 	return best;
 }
 
-MONSTERINFO_IDLE(medic_idle) (gentity_t *self) -> void {
-	gentity_t *ent;
+static bool medic_TryBeginHeal(gentity_t *self) {
+	gentity_t *ent = medic_FindDeadMonster(self);
 
+	if (!ent)
+		return false;
+
+	self->oldenemy = self->enemy;
+	self->enemy = ent;
+	self->enemy->monsterinfo.healer = self;
+	self->monsterinfo.aiflags |= AI_MEDIC;
+	FoundTarget(self);
+	return true;
+}
+
+MONSTERINFO_IDLE(medic_idle) (gentity_t *self) -> void {
 	// PMM - commander sounds
 	if (self->mass == 400)
 		gi.sound(self, CHAN_VOICE, sound_idle1, 1, ATTN_IDLE, 0);
 	else
 		gi.sound(self, CHAN_VOICE, commander_sound_idle1, 1, ATTN_IDLE, 0);
 
-	if (!self->oldenemy) {
-		ent = medic_FindDeadMonster(self);
-		if (ent) {
-			self->oldenemy = self->enemy;
-			self->enemy = ent;
-			self->enemy->monsterinfo.healer = self;
-			self->monsterinfo.aiflags |= AI_MEDIC;
-			FoundTarget(self);
-		}
-	}
+	if (!self->oldenemy)
+		medic_TryBeginHeal(self);
 }
 
 MONSTERINFO_SEARCH(medic_search) (gentity_t *self) -> void {
-	gentity_t *ent;
-
 	// PMM - commander sounds
 	if (self->mass == 400)
 		gi.sound(self, CHAN_VOICE, sound_search, 1, ATTN_IDLE, 0);
 	else
 		gi.sound(self, CHAN_VOICE, commander_sound_search, 1, ATTN_IDLE, 0);
 
-	if (!self->oldenemy) {
-		ent = medic_FindDeadMonster(self);
-		if (ent) {
-			self->oldenemy = self->enemy;
-			self->enemy = ent;
-			self->enemy->monsterinfo.healer = self;
-			self->monsterinfo.aiflags |= AI_MEDIC;
-			FoundTarget(self);
-		}
-	}
+	if (!self->oldenemy)
+		medic_TryBeginHeal(self);
 }
 
 MONSTERINFO_SIGHT(medic_sight) (gentity_t *self, gentity_t *other) -> void {
@@ -472,17 +471,8 @@ MONSTERINFO_RUN(medic_run) (gentity_t *self) -> void {
 	monster_done_dodge(self);
 
 	if (!(self->monsterinfo.aiflags & AI_MEDIC)) {
-		gentity_t *ent;
-
-		ent = medic_FindDeadMonster(self);
-		if (ent) {
-			self->oldenemy = self->enemy;
-			self->enemy = ent;
-			self->enemy->monsterinfo.healer = self;
-			self->monsterinfo.aiflags |= AI_MEDIC;
-			FoundTarget(self);
+		if (medic_TryBeginHeal(self))
 			return;
-		}
 	}
 
 	if (self->monsterinfo.aiflags & AI_STAND_GROUND)
@@ -1290,6 +1280,9 @@ MONSTERINFO_CHECKATTACK(medic_checkattack) (gentity_t *self) -> bool {
 			return false;
 		}
 	}
+
+	if (GT(GT_HORDE) && g_horde_enhanced_ai->integer && medic_TryBeginHeal(self))
+		return true;
 
 	if (self->enemy->client && !visible(self, self->enemy) && M_SlotsLeft(self)) {
 		self->monsterinfo.attack_state = AS_BLIND;
