@@ -15,7 +15,7 @@
 //
 // STAT_GAMETYPE_HUD       — warmup (through ready-up): "Gametype: …"; in-progress: frag/capture/round/wave label
 // STAT_RULESET_HUD        — warmup (through ready-up): ruleset; Strike in-progress: capturelimit
-// STAT_CTF_FLAG_PIC       — CTF: carried flag blink; RR: current-team badge (top-right row 3)
+// STAT_CTF_FLAG_PIC       — CTF/Strike: carried flag blink; RR: current-team badge (top-right row 4)
 // STAT_CENTER_LINE        — duel header pic; LMS: CONFIG_POV_CENTER_POOL + client POV text
 // STAT_WARMUP_NOTICE      — layout slot reserved; warmup guidance uses centerprint (menu-bind band)
 // STAT_ROUND_NUMBER       — CONFIG_ROUND_PROGRESS (generic round modes); CA/RR no longer show alive "N vs M"

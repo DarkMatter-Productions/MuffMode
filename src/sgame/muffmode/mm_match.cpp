@@ -769,7 +769,8 @@ static void CountLivingRoundPlayers(int &count_living_red, int &count_living_blu
 	count_living_blue = 0;
 
 	for (auto ec : active_clients()) {
-		if (!ec->client || !ClientIsPlaying(ec->client) || ec->client->eliminated || ec->health <= 0)
+		if (!ec->client || !ClientIsPlaying(ec->client) || ec->client->eliminated ||
+				ec->deadflag || ec->health <= 0)
 			continue;
 
 		if (ec->client->sess.team == TEAM_RED)
@@ -852,7 +853,7 @@ void TickRoundState() {
 
 		auto is_living_round_player = [](gentity_t *ent) {
 			return ent->client && ClientIsPlaying(ent->client) &&
-				!ent->client->eliminated && ent->health > 0;
+				!ent->client->eliminated && !ent->deadflag && ent->health > 0;
 		};
 
 		switch (MM_CurrentGametype()) {
@@ -896,8 +897,7 @@ void TickRoundState() {
 				return;
 			}
 			if (!count_living_red && !count_living_blue) {
-				if (level.num_playing_clients >= 2)
-					MM_Strike_EndMutualElimination();
+				MM_Strike_EndMutualElimination();
 				return;
 			}
 			break;
@@ -1409,6 +1409,12 @@ countdown:
 
 			if (g_warmup_countdown->integer > 0) {
 				level.match_state_timer = level.time + gtime_t::from_sec(g_warmup_countdown->integer);
+
+				// Drop stale menu-bind / ready-up centerprints before the countdown header.
+				for (auto ec : active_clients()) {
+					if (ec && ec->client)
+						gi.LocClient_Print(ec, PRINT_CENTER, "");
+				}
 
 				// announce it
 				gclient_t *first = SortedConnectedClient(0);

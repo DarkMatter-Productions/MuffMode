@@ -919,6 +919,7 @@ static void G_SetGametypeStats(gentity_t *ent) {
 		const int ci = (int)(ent - g_entities - 1);
 
 		if (GTF(GTF_ELIMINATION) && GTF(GTF_TEAMS) && GTF(GTF_CTF) && GT(GT_STRIKE)
+			&& level.round_state != roundst_t::ROUND_COUNTDOWN
 			&& ClientIsPlaying(ent->client)) {
 			if (ci >= 0 && (size_t)ci < CONFIG_POV_CENTER_POOL_SLOTS) {
 				const bool attacking = ent->client->sess.team == (level.strike_red_attacks ? TEAM_RED : TEAM_BLUE);

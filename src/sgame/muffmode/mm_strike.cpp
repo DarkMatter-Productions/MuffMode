@@ -65,9 +65,6 @@ void MM_Strike_AwardTurnWin(bool captured)
 
 	const team_t attacker = MM_Strike_AttackingTeam();
 	G_AdjustTeamScore(attacker, STRIKE_WIN_POINTS);
-	MM_Strike_CheckMatchEnd();
-	if (level.match_state != matchst_t::MATCH_IN_PROGRESS)
-		return;
 
 	if (captured) {
 		gi.LocBroadcast_Print(PRINT_CENTER, "Flag captured!\n{} scores {} points!\n",
@@ -79,6 +76,7 @@ void MM_Strike_AwardTurnWin(bool captured)
 
 	AnnouncerSound(world, attacker == TEAM_RED ? "red_wins_round" : "blue_wins_round", "ctf/flagcap.wav", attacker == TEAM_BLUE);
 	Round_End();
+	MM_Strike_CheckMatchEnd();
 }
 
 void MM_Strike_EndDefenseTurn(bool timeout)

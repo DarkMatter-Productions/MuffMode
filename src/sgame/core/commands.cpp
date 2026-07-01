@@ -831,6 +831,19 @@ static void Cmd_Drop_f(gentity_t *ent) {
 	ValidateSelectedItem(ent);
 }
 
+static bool ShouldShowMenuBindHint(const gentity_t *ent)
+{
+	if (!ent || !ent->client)
+		return false;
+	if (level.match_state >= matchst_t::MATCH_COUNTDOWN)
+		return false;
+	if (level.round_state == roundst_t::ROUND_COUNTDOWN)
+		return false;
+	if (level.match_state == matchst_t::MATCH_WARMUP_READYUP && ent->client->resp.ready)
+		return false;
+	return true;
+}
+
 /*
 =================
 Cmd_Inven_f
@@ -854,7 +867,8 @@ static void Cmd_Inven_f(gentity_t *ent) {
 		P_Menu_Close(ent);
 		ent->client->follow_update = true;
 		if (!ent->client->initial_menu_closure) {
-			gi.LocClient_Print(ent, PRINT_CENTER, "%bind:inven:Open menu%{}", " ");
+			if (ShouldShowMenuBindHint(ent))
+				gi.LocClient_Print(ent, PRINT_CENTER, "%bind:inven:Open menu%{}", " ");
 			ent->client->initial_menu_closure = true;
 		}
 		return;

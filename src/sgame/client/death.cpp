@@ -590,6 +590,23 @@ bool ClientArenaEliminationCorpse(const gclient_t *client) {
 	return client && client->eliminated && GTF(GTF_ARENA) && GTF(GTF_ELIMINATION);
 }
 
+static void ClientFinalizeArenaEliminationCorpse(gentity_t *self) {
+	if (!ClientArenaEliminationCorpse(self->client) || !self->s.modelindex)
+		return;
+
+	// Snapshot after death pose is chosen (see early CopyToBodyQue in player_die history).
+	if (self->client->anim_priority == ANIM_DEATH && self->client->anim_end > 0)
+		self->s.frame = self->client->anim_end;
+
+	if (self->client->anim_end > 0)
+		CopyToBodyQue(self);
+
+	self->svflags |= SVF_NOCLIENT;
+	self->s.modelindex = 0;
+	self->s.modelindex2 = 0;
+	self->s.modelindex3 = 0;
+}
+
 /*
 ==================
 player_die
@@ -684,13 +701,6 @@ DIE(player_die) (gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 			!self->client->eliminated) {
 		ClientSetEliminated(self);
 		CalculateRanks();
-		// [MuffMode] Snapshot corpse at kill site before chase cam moves our origin.
-		CopyToBodyQue(self);
-		self->svflags |= SVF_NOCLIENT;
-		self->s.modelindex = 0;
-		self->s.modelindex2 = 0;
-		self->s.modelindex3 = 0;
-		gi.linkentity(self);
 	}
 
 	if (!self->deadflag) {
@@ -873,6 +883,8 @@ DIE(player_die) (gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 
 	if (ClientArenaEliminationCorpse(self->client))
 		self->takedamage = false;
+
+	ClientFinalizeArenaEliminationCorpse(self);
 
 	// holster view weapon (Think_Weapon skips eliminated players before it can)
 	self->client->newweapon = nullptr;
