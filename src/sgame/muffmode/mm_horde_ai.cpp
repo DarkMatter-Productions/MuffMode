@@ -336,9 +336,9 @@ select_spawn_result_t SelectSpawnPoint(vec3_t avoid_point)
 	const float max_dist = candidates.back().dist;
 	const float dist_span = max(1.0f, max_dist - min_dist);
 
-	const uint32_t theme = ActiveThemeCategory();
-	const bool     prefer_close = !!(theme & (HCAT_MELEE | HCAT_INFEST));
-	const bool     prefer_aerial = !!(theme & HCAT_AERIAL);
+	const HordeCategory theme = ActiveThemeCategory();
+	const bool          prefer_close = (theme & (HCAT_MELEE | HCAT_INFEST)) != HordeCategory::None;
+	const bool          prefer_aerial = (theme & HCAT_AERIAL) != HordeCategory::None;
 
 	const float ideal_t = prefer_close ? 0.25f : (prefer_aerial ? 0.75f : 0.55f);
 	const float ideal_dist = min_dist + dist_span * ideal_t;

@@ -20,20 +20,34 @@
 #include "muffmode/mm_vote.h"
 #include "muffmode/mm_vote_menu.h"
 #include "monsters/m_player.h"
-enum cmd_flags_t : uint32_t {
-	CF_NONE				= 0,
-	CF_ALLOW_DEAD		= bit_v<0>,
-	CF_ALLOW_INT		= bit_v<1>,
-	CF_ALLOW_SPEC		= bit_v<2>,
-	CF_MATCH_ONLY		= bit_v<3>,
-	CF_ADMIN_ONLY		= bit_v<4>,
-	CF_CHEAT_PROTECT	= bit_v<5>,
+enum class cmd_flags_t : uint32_t {
+	none			= 0,
+	allow_dead		= bit_v<0>,
+	allow_int		= bit_v<1>,
+	allow_spec		= bit_v<2>,
+	match_only		= bit_v<3>,
+	admin_only		= bit_v<4>,
+	cheat_protect	= bit_v<5>,
 };
+MAKE_ENUM_BITFLAGS(cmd_flags_t);
+
+constexpr cmd_flags_t CF_NONE = cmd_flags_t::none;
+constexpr cmd_flags_t CF_ALLOW_DEAD = cmd_flags_t::allow_dead;
+constexpr cmd_flags_t CF_ALLOW_INT = cmd_flags_t::allow_int;
+constexpr cmd_flags_t CF_ALLOW_SPEC = cmd_flags_t::allow_spec;
+constexpr cmd_flags_t CF_MATCH_ONLY = cmd_flags_t::match_only;
+constexpr cmd_flags_t CF_ADMIN_ONLY = cmd_flags_t::admin_only;
+constexpr cmd_flags_t CF_CHEAT_PROTECT = cmd_flags_t::cheat_protect;
+
+constexpr bool HasCmdFlag(cmd_flags_t flags, cmd_flags_t flag)
+{
+	return (flags & flag) != cmd_flags_t::none;
+}
 
 struct cmds_t {
 	const		char *name;
 	void		(*func)(gentity_t *ent);
-	uint32_t	flags;
+	cmd_flags_t	flags;
 };
 
 static void Cmd_Print_State(gentity_t *ent, bool on_state) {
@@ -2454,26 +2468,26 @@ void ClientCommand(gentity_t *ent) {
 		return;
 	}
 
-	if (cc->flags & CF_ADMIN_ONLY)
+	if (HasCmdFlag(cc->flags, CF_ADMIN_ONLY))
 		if (!AdminOk(ent))
 			return;
 
-	if (cc->flags & CF_CHEAT_PROTECT)
+	if (HasCmdFlag(cc->flags, CF_CHEAT_PROTECT))
 		if (!CheatsOk(ent))
 			return;
 
-	if (!(cc->flags & CF_ALLOW_DEAD))
+	if (!HasCmdFlag(cc->flags, CF_ALLOW_DEAD))
 		if (!AliveOk(ent))
 			return;
 
-	if (!(cc->flags & CF_ALLOW_SPEC))
+	if (!HasCmdFlag(cc->flags, CF_ALLOW_SPEC))
 		if (!SpectatorOk(ent))
 			return;
 
-	if (cc->flags & CF_MATCH_ONLY)
+	if (HasCmdFlag(cc->flags, CF_MATCH_ONLY))
 		return;
 
-	if (!(cc->flags & CF_ALLOW_INT))
+	if (!HasCmdFlag(cc->flags, CF_ALLOW_INT))
 		if (level.intermission_time)
 			return;
 
