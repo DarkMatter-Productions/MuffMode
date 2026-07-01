@@ -4,6 +4,7 @@
 #include "g_local.h"
 #include "muffmode/mm_horde.h"
 #include "muffmode/mm_horde_ai.h"
+#include "muffmode/mm_horde_ai_rules.h"
 #include "muffmode/mm_horde_tables.h"
 
 #include <algorithm>
@@ -13,6 +14,10 @@
 // Late-wave tuning cvars are referenced by helpers defined before the main extern block below.
 extern cvar_t *g_horde_content_peak_wave;
 extern cvar_t *g_horde_late_wave_factor;
+extern cvar_t *g_horde_late_escalation;
+extern cvar_t *g_horde_late_budget_factor;
+extern cvar_t *g_horde_late_max_alive_per_wave;
+extern cvar_t *g_horde_late_max_alive_cap;
 extern cvar_t *g_horde_theme_min_monsters;
 extern cvar_t *g_horde_enhanced_ai;
 
@@ -329,6 +334,25 @@ int MM_Horde_CountFighters()
 	return clamp(max(fighters, 1), 1, max_fighters);
 }
 
+namespace {
+
+float EffectiveLateWaveFactor()
+{
+	const bool escalation = g_horde_late_escalation->integer != 0;
+	return MM_Horde_EffectiveLateWaveFactor(escalation, g_horde_late_wave_factor->value,
+		g_horde_late_budget_factor->value);
+}
+
+int MaxAliveCap()
+{
+	const bool escalation = g_horde_late_escalation->integer != 0;
+	return MM_Horde_LateMaxAlive(g_horde_max_alive->integer, level.round_number,
+		g_horde_content_peak_wave->integer, g_horde_late_max_alive_per_wave->integer,
+		g_horde_late_max_alive_cap->integer, escalation);
+}
+
+} // namespace
+
 int MM_Horde_WavePointBudget()
 {
 	const int   fighters = MM_Horde_CountFighters();
@@ -341,14 +365,15 @@ int MM_Horde_WavePointBudget()
 	const int   peak     = g_horde_content_peak_wave->integer;
 
 	// Linear up to the tuned content peak (wave 12). Beyond it - reached via endless (roundlimit 0)
-	// or a high finite roundlimit - growth tapers by g_horde_late_wave_factor so late waves stay
-	// playable instead of piling up 190+ points of commanders. Continuous at the peak.
+	// or a high finite roundlimit - growth tapers by the effective late factor (escalation on:
+	// g_horde_late_budget_factor; off: g_horde_late_wave_factor) so late waves stay playable
+	// instead of piling up 190+ points of commanders. Continuous at the peak.
 	int budget;
 	if (level.round_number <= peak)
 		budget = base + level.round_number * per_wave;
 	else
 		budget = base + peak * per_wave +
-			static_cast<int>((level.round_number - peak) * per_wave * g_horde_late_wave_factor->value);
+			static_cast<int>((level.round_number - peak) * per_wave * EffectiveLateWaveFactor());
 
 	if (min_pts > 0)
 		budget = max(budget, min_pts);
@@ -853,7 +878,7 @@ void MM_Horde_RunSpawning()
 	// single player and overflow that client's network message buffer (SZ_GetSpace).
 	// Spawning pauses while at the cap and resumes as monsters die, so the wave still
 	// spawns its full budget over time - only peak concurrency is bounded. 0 disables.
-	const int alive_cap = g_horde_max_alive->integer;
+	const int alive_cap = MaxAliveCap();
 	int effective_cap = alive_cap;
 	if (!warmup && alive_cap > 0 && g_horde_enhanced_ai->integer)
 		effective_cap = max(1, static_cast<int>(alive_cap * min(adaptive_mult, 1.f)));

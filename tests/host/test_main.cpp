@@ -253,6 +253,24 @@ MM_TEST(horde_adaptive_spawn_mult_bounds_and_direction) {
 	MM_CHECK_EQ(MM_Horde_ComputeAdaptiveBudgetMult(1.f), 1.f);
 }
 
+MM_TEST(horde_late_escalation_budget_factor) {
+	MM_CHECK_EQ(MM_Horde_EffectiveLateWaveFactor(false, 0.35f, 0.6f), 0.35f);
+	MM_CHECK_EQ(MM_Horde_EffectiveLateWaveFactor(true, 0.35f, 0.6f), 0.6f);
+}
+
+MM_TEST(horde_late_escalation_max_alive_cap) {
+	const int base = 60;
+	const int peak = 12;
+
+	MM_CHECK_EQ(MM_Horde_LateMaxAlive(base, 12, peak, 2, 70, false), 60);
+	MM_CHECK_EQ(MM_Horde_LateMaxAlive(base, 50, peak, 2, 70, false), 60);
+	MM_CHECK_EQ(MM_Horde_LateMaxAlive(base, 12, peak, 2, 70, true), 60);
+	MM_CHECK_EQ(MM_Horde_LateMaxAlive(base, 15, peak, 2, 70, true), 66);
+	MM_CHECK_EQ(MM_Horde_LateMaxAlive(base, 17, peak, 2, 70, true), 70);
+	MM_CHECK_EQ(MM_Horde_LateMaxAlive(base, 18, peak, 2, 70, true), 70);
+	MM_CHECK_EQ(MM_Horde_LateMaxAlive(base, 19, peak, 2, 72, true), 72);
+}
+
 MM_TEST(loc_line_parser_extracts_position_and_multiword_label) {
 	float xyz[3] = { 0.f, 0.f, 0.f };
 	std::string label;
