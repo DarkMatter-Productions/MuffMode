@@ -1,6 +1,8 @@
 // Copyright (c) ZeniMax Media Inc.
 // Licensed under the GNU General Public License 2.0.
 // Specialty brush entities: force walls, killboxes, eyes, lights and repair targets.
+#include <cmath>
+
 #include "g_local.h"
 
 namespace {
@@ -14,6 +16,14 @@ constexpr spawnflags_t SPAWNFLAG_FUNC_EYE_FIRED_TARGETS = 17_spawnflag_bit; // i
 
 constexpr spawnflags_t SPAWNFLAG_ROTATING_LIGHT_START_OFF = 1_spawnflag;
 constexpr spawnflags_t SPAWNFLAG_ROTATING_LIGHT_ALARM = 2_spawnflag;
+
+constexpr spawnflags_t SPAWNFLAG_BOBBING_X_AXIS = 1_spawnflag;
+constexpr spawnflags_t SPAWNFLAG_BOBBING_Y_AXIS = 2_spawnflag;
+
+constexpr float DEFAULT_BOBBING_CYCLE_SECONDS = 4.0f;
+constexpr float DEFAULT_BOBBING_HEIGHT = 32.0f;
+constexpr float DEFAULT_PENDULUM_SWING_DEGREES = 30.0f;
+constexpr float MIN_PENDULUM_LENGTH = 8.0f;
 
 void EmitWeldingSparks(gentity_t *ent, int32_t count) {
 	gi.WriteByte(svc_temp_entity);
@@ -46,6 +56,55 @@ void SetupForceWallLine(gentity_t *ent) {
 		ent->pos1[1] = ent->absmin[1];
 		ent->pos2[1] = ent->absmax[1];
 	}
+}
+
+float SineMoverCycleSeconds(const gentity_t *ent) {
+	return max(ent->wait, gi.frame_time_s);
+}
+
+float SineMoverPhaseAt(const gentity_t *ent, const gtime_t at_time) {
+	const float cycle_seconds = SineMoverCycleSeconds(ent);
+	const float elapsed = (at_time - ent->timestamp).seconds();
+	return sinf((fmodf(elapsed, cycle_seconds) / cycle_seconds) * (PIf * 2.0f));
+}
+
+vec3_t SineMoverOriginAt(const gentity_t *ent, const gtime_t at_time) {
+	return ent->pos1 + (ent->pos2 * SineMoverPhaseAt(ent, at_time));
+}
+
+vec3_t SineMoverAnglesAt(const gentity_t *ent, const gtime_t at_time) {
+	return ent->move_angles + (ent->movedir * SineMoverPhaseAt(ent, at_time));
+}
+
+void PrimeSineMoverFrame(gentity_t *ent) {
+	const gtime_t target_time = level.time + FRAME_TIME_MS;
+	ent->velocity = (SineMoverOriginAt(ent, target_time) - ent->s.origin) * (1.0f / gi.frame_time_s);
+	ent->avelocity = (SineMoverAnglesAt(ent, target_time) - ent->s.angles) * (1.0f / gi.frame_time_s);
+}
+
+PRETHINK(sine_mover_prethink) (gentity_t *self) -> void {
+	if (self->flags & FL_TEAMSLAVE) {
+		PrimeSineMoverFrame(self);
+		return;
+	}
+
+	for (gentity_t *part = self; part; part = part->teamchain)
+		PrimeSineMoverFrame(part);
+}
+
+void SetupSineMover(gentity_t *ent, const float cycle_seconds, const float phase) {
+	ent->solid = SOLID_BSP;
+	ent->movetype = MOVETYPE_PUSH;
+	ent->flags |= FL_Q3_SINE_MOVER;
+	ent->wait = max(cycle_seconds, gi.frame_time_s);
+	ent->timestamp = level.time + gtime_t::from_sec(ent->wait * phase);
+	ent->prethink = sine_mover_prethink;
+
+	ent->s.origin = SineMoverOriginAt(ent, level.time);
+	ent->s.angles = SineMoverAnglesAt(ent, level.time);
+	PrimeSineMoverFrame(ent);
+
+	gi.linkentity(ent);
 }
 
 } // namespace
@@ -402,7 +461,6 @@ void SP_object_repair(gentity_t *ent) {
 		ent->delay = 1.0;
 }
 
-#if 0
 /*
 ===============================================================================
 
@@ -423,34 +481,28 @@ Normally bobs on the Z axis
 "light"		constantLight radius
 */
 void SP_func_bobbing(gentity_t *ent) {
+	const float cycle_seconds = ent->speed > 0.0f ? ent->speed : DEFAULT_BOBBING_CYCLE_SECONDS;
+	const float height = st.height != 0.0f ? st.height : DEFAULT_BOBBING_HEIGHT;
+	const float phase = st.phase;
 
-	if (!ent->speed)
-		ent->speed = 4;
-	if (!ent->height)
-		ent->height = 32;
 	if (!ent->dmg)
 		ent->dmg = 2;
-	if (!ent->phase)
-		ent->phase = 0;
+	ent->speed = cycle_seconds;
 
-	ent->solid = SOLID_BSP;
+	ent->pos1 = ent->s.origin;
+	ent->pos2 = {};
+	ent->move_angles = ent->s.angles;
+	ent->movedir = {};
+
+	if (ent->spawnflags.has(SPAWNFLAG_BOBBING_X_AXIS))
+		ent->pos2[0] = height;
+	else if (ent->spawnflags.has(SPAWNFLAG_BOBBING_Y_AXIS))
+		ent->pos2[1] = height;
+	else
+		ent->pos2[2] = height;
+
 	gi.setmodel(ent, ent->model);
-	
-	VectorCopy(ent->s.origin, ent->s.pos.trBase);
-	VectorCopy(ent->s.origin, ent->r.currentOrigin);
-
-	ent->s.pos.trDuration = ent->speed * 1000;
-	ent->s.pos.trTime = ent->s.pos.trDuration * ent->phase;
-	ent->s.pos.trType = TR_SINE;
-
-	// set the axis of bobbing
-	if (ent->spawnflags.has(1_spawnflag)) {
-		ent->s.pos.trDelta[0] = ent->height;
-	} else if (ent->spawnflags.has(2_spawnflag)) {
-		ent->s.pos.trDelta[1] = ent->height;
-	} else {
-		ent->s.pos.trDelta[2] = ent->height;
-	}
+	SetupSineMover(ent, cycle_seconds, phase);
 }
 
 /*
@@ -474,41 +526,26 @@ Pendulum frequency is a physical constant based on the length of the beam and gr
 "light"		constantLight radius
 */
 void SP_func_pendulum(gentity_t *ent) {
-	float freq, length;
+	const float swing_degrees = ent->speed != 0.0f ? ent->speed : DEFAULT_PENDULUM_SWING_DEGREES;
 
-	if (!ent->speed)
-		ent->speed = 30;
 	if (!ent->dmg)
 		ent->dmg = 2;
-	if (!ent->phase)
-		ent->phase = 0;
+	ent->speed = swing_degrees;
 
-	ent->solid = SOLID_BSP;
 	gi.setmodel(ent, ent->model);
 
-	// find pendulum length
-	length = fabs(ent->mins[2]);
+	float length = fabsf(ent->mins[2]);
 	if (length < 8)
-		length = 8;
+		length = MIN_PENDULUM_LENGTH;
 
-	freq = 1 / (PI * 2) * sqrt(g_gravity->value / (3 * length));
+	const float gravity = max(g_gravity->value, 1.0f);
+	const float freq = (1.0f / (PIf * 2.0f)) * sqrtf(gravity / (3.0f * length));
+	const float cycle_seconds = 1.0f / freq;
 
-	ent->s.pos.trDuration = (1000 / freq);
+	ent->pos1 = ent->s.origin;
+	ent->pos2 = {};
+	ent->move_angles = ent->s.angles;
+	ent->movedir = { 0.0f, 0.0f, swing_degrees };
 
-	//ent->moveinfo.
-	InitMover(ent);
-
-	VectorCopy(ent->s.origin, ent->s.pos.trBase);
-	VectorCopy(ent->s.origin, ent->r.currentOrigin);
-
-	VectorCopy(ent->s.angles, ent->s.apos.trBase);
-
-	ent->s.apos.trDuration = 1000 / freq;
-	ent->s.apos.trTime = ent->s.apos.trDuration * phase;
-	ent->s.apos.trType = TR_SINE;
-	ent->s.apos.trDelta[2] = speed;
-
-	//Move_Calc(ent, ent->moveinfo.end_origin, 
-
+	SetupSineMover(ent, cycle_seconds, st.phase);
 }
-#endif

@@ -181,6 +181,12 @@
     <ClInclude Include="..\..\src\sgame\muffmode\mm_gametype.h">
       <Filter>sgame\muffmode</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_freezetag.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_freezetag_rules.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\src\sgame\muffmode\mm_captain.h">
       <Filter>sgame\muffmode</Filter>
     </ClInclude>
@@ -235,6 +241,9 @@
     <ClInclude Include="..\..\src\sgame\muffmode\mm_pconfig.h">
       <Filter>sgame\muffmode</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_pconfig_rules.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\src\sgame\muffmode\mm_skin.h">
       <Filter>sgame\muffmode</Filter>
     </ClInclude>
@@ -242,6 +251,9 @@
       <Filter>sgame\muffmode</Filter>
     </ClInclude>
     <ClInclude Include="..\..\src\sgame\muffmode\mm_parse.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_time_format.h">
       <Filter>sgame\muffmode</Filter>
     </ClInclude>
     <ClInclude Include="..\..\src\sgame\muffmode\mm_profile.h">
@@ -288,7 +300,7 @@
     <ClCompile Include="..\..\src\sgame\core\ai.cpp">
       <Filter>sgame\core</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\src\sgame\core\chase_camera.cpp">
+    <ClCompile Include="..\..\src\sgame\core\following_camera.cpp">
       <Filter>sgame\core</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\sgame\core\commands.cpp">
@@ -604,6 +616,9 @@
       <Filter>sgame\muffmode</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\sgame\muffmode\mm_gametype.cpp">
+      <Filter>sgame\muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_freezetag.cpp">
       <Filter>sgame\muffmode</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\sgame\muffmode\mm_horde_ai.cpp">

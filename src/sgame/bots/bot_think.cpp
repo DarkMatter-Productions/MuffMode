@@ -3,6 +3,7 @@
 
 #include "../g_local.h"
 #include "bot_think.h"
+#include "muffmode/mm_freezetag.h"
 
 /*
 ================
@@ -10,7 +11,7 @@ Bot_BeginFrame
 ================
 */
 void Bot_BeginFrame( gentity_t * bot ) {
-
+	MM_FreezeTag_BotBeginFrame(bot);
 }
 
 /*

@@ -43,6 +43,14 @@ extern const mmove_t fixbot_move_turn;
 
 void roam_goal(gentity_t *self);
 
+static bool fixbot_has_classname(const gentity_t *ent, const char *classname) {
+	return ent && ent->inuse && ent->classname && !strcmp(ent->classname, classname);
+}
+
+static bool fixbot_has_active_medic_healer(const gentity_t *ent) {
+	return ent && ent->inuse && ent->health > 0 && (ent->svflags & SVF_MONSTER) && (ent->monsterinfo.aiflags & AI_MEDIC);
+}
+
 // [Paril-KEX] clean up bot goals if we get interrupted
 static THINK(bot_goal_check) (gentity_t *self) -> void {
 	if (!self->owner || !self->owner->inuse || self->owner->goalentity != self) {
@@ -73,8 +81,7 @@ static gentity_t *fixbot_FindDeadMonster(gentity_t *self) {
 			// FIXME - this is correcting a bug that is somewhere else
 			// if the healer is a monster, and it's in medic mode .. continue .. otherwise
 			//   we will override the healer, if it passes all the other tests
-			if ((ent->monsterinfo.healer->inuse) && (ent->monsterinfo.healer->health > 0) &&
-				(ent->monsterinfo.healer->svflags & SVF_MONSTER) && (ent->monsterinfo.healer->monsterinfo.aiflags & AI_MEDIC))
+			if (fixbot_has_active_medic_healer(ent->monsterinfo.healer))
 				continue;
 		if (ent->health > 0)
 			continue;
@@ -278,10 +285,10 @@ void use_scanner(gentity_t *self) {
 
 	while ((ent = findradius(ent, self->s.origin, radius)) != nullptr) {
 		if (ent->health >= 100) {
-			if (strcmp(ent->classname, "object_repair") == 0) {
+			if (fixbot_has_classname(ent, "object_repair")) {
 				if (visible(self, ent)) {
 					// remove the old one
-					if (strcmp(self->goalentity->classname, "bot_goal") == 0) {
+					if (fixbot_has_classname(self->goalentity, "bot_goal")) {
 						self->goalentity->nextthink = level.time + 100_ms;
 						self->goalentity->think = G_FreeEntity;
 					}
@@ -303,8 +310,9 @@ void use_scanner(gentity_t *self) {
 		}
 	}
 
-	if (!self->goalentity) {
+	if (!self->goalentity || !self->goalentity->inuse) {
 		M_SetAnimation(self, &fixbot_move_stand);
+		self->goalentity = self->enemy = nullptr;
 		return;
 	}
 
@@ -312,7 +320,7 @@ void use_scanner(gentity_t *self) {
 	len = vec.length();
 
 	if (len < 32) {
-		if (strcmp(self->goalentity->classname, "object_repair") == 0) {
+		if (fixbot_has_classname(self->goalentity, "object_repair")) {
 			M_SetAnimation(self, &fixbot_move_weld_start);
 		} else {
 			self->goalentity->nextthink = level.time + 100_ms;
@@ -330,7 +338,7 @@ void use_scanner(gentity_t *self) {
 	  bot is stuck get new goalentity
 	*/
 	if (len == 0) {
-		if (strcmp(self->goalentity->classname, "object_repair") == 0) {
+		if (fixbot_has_classname(self->goalentity, "object_repair")) {
 			M_SetAnimation(self, &fixbot_move_stand);
 		} else {
 			self->goalentity->nextthink = level.time + 100_ms;
@@ -390,7 +398,7 @@ static void blastoff(gentity_t *self, const vec3_t &start, const vec3_t &aimdir,
 
 			if (start != tr.endpos) {
 				if (tr.contents & CONTENTS_WATER) {
-					if (strcmp(tr.surface->name, "*brwater") == 0)
+					if (tr.surface && tr.surface->name && strcmp(tr.surface->name, "*brwater") == 0)
 						color = SPLASH_BROWN_WATER;
 					else
 						color = SPLASH_BLUE_WATER;
@@ -430,19 +438,17 @@ static void blastoff(gentity_t *self, const vec3_t &start, const vec3_t &aimdir,
 	// send gun puff / flash
 	if (!((tr.surface) && (tr.surface->flags & SURF_SKY))) {
 		if (tr.fraction < 1.0f) {
-			if (tr.ent->takedamage) {
+			if (tr.ent && tr.ent->takedamage) {
 				T_Damage(tr.ent, self, self, aimdir, tr.endpos, tr.plane.normal, damage, kick, DAMAGE_BULLET, MOD_BLASTOFF);
-			} else {
-				if (!(tr.surface->flags & SURF_SKY)) {
-					gi.WriteByte(svc_temp_entity);
-					gi.WriteByte(te_impact);
-					gi.WritePosition(tr.endpos);
-					gi.WriteDir(tr.plane.normal);
-					gi.multicast(tr.endpos, MULTICAST_PVS, false);
+			} else if (!tr.surface || !(tr.surface->flags & SURF_SKY)) {
+				gi.WriteByte(svc_temp_entity);
+				gi.WriteByte(te_impact);
+				gi.WritePosition(tr.endpos);
+				gi.WriteDir(tr.plane.normal);
+				gi.multicast(tr.endpos, MULTICAST_PVS, false);
 
-					if (self->client)
-						PlayerNoise(self, tr.endpos, PNOISE_IMPACT);
-				}
+				if (self->client)
+					PlayerNoise(self, tr.endpos, PNOISE_IMPACT);
 			}
 		}
 	}
@@ -477,6 +483,12 @@ void fly_vertical(gentity_t *self) {
 	vec3_t start;
 	vec3_t tempvec;
 
+	if (!self->goalentity || !self->goalentity->inuse) {
+		self->goalentity = self->enemy = nullptr;
+		M_SetAnimation(self, &fixbot_move_stand);
+		return;
+	}
+
 	v = self->goalentity->s.origin - self->s.origin;
 	self->ideal_yaw = vectoyaw(v);
 	M_ChangeYaw(self);
@@ -504,6 +516,12 @@ void fly_vertical(gentity_t *self) {
 static void fly_vertical2(gentity_t *self) {
 	vec3_t v;
 	float  len;
+
+	if (!self->goalentity || !self->goalentity->inuse) {
+		self->goalentity = self->enemy = nullptr;
+		M_SetAnimation(self, &fixbot_move_stand);
+		return;
+	}
 
 	v = self->goalentity->s.origin - self->s.origin;
 	len = v.length();
@@ -648,7 +666,8 @@ mframe_t fixbot_frames_roamgoal[] = {
 MMOVE_T(fixbot_move_roamgoal) = { FRAME_freeze_01, FRAME_freeze_01, fixbot_frames_roamgoal, nullptr };
 
 static void ai_facing(gentity_t *self, float dist) {
-	if (!self->goalentity) {
+	if (!self->goalentity || !self->goalentity->inuse) {
+		self->goalentity = self->enemy = nullptr;
 		fixbot_stand(self);
 		return;
 	}
@@ -770,12 +789,16 @@ void abortHeal(gentity_t *self, bool change_frame, bool gib, bool mark);
 
 PRETHINK(fixbot_laser_update) (gentity_t *laser) -> void {
 	gentity_t *self = laser->owner;
+	if (!self || !self->inuse) {
+		G_FreeEntity(laser);
+		return;
+	}
 
 	vec3_t start, dir;
 	AngleVectors(self->s.angles, dir, nullptr, nullptr);
 	start = self->s.origin + (dir * 16);
 
-	if (self->enemy && self->health > 0) {
+	if (self->enemy && self->enemy->inuse && self->health > 0) {
 		vec3_t point;
 		point = (self->enemy->absmin + self->enemy->absmax) * 0.5f;
 		if (self->monsterinfo.aiflags & AI_MEDIC)
@@ -952,9 +975,9 @@ MMOVE_T(fixbot_move_attack2) = { FRAME_charging_01, FRAME_charging_31, fixbot_fr
 static void weldstate(gentity_t *self) {
 	if (self->s.frame == FRAME_weldstart_10)
 		M_SetAnimation(self, &fixbot_move_weld);
-	else if (self->goalentity && self->s.frame == FRAME_weldmiddle_07) {
+	else if (self->goalentity && self->goalentity->inuse && self->s.frame == FRAME_weldmiddle_07) {
 		if (self->goalentity->health <= 0) {
-			self->enemy->owner = nullptr;
+			self->goalentity->owner = nullptr;
 			M_SetAnimation(self, &fixbot_move_weld_end);
 		} else
 			self->goalentity->health -= 10;
@@ -965,7 +988,7 @@ static void weldstate(gentity_t *self) {
 }
 
 static void ai_move2(gentity_t *self, float dist) {
-	if (!self->goalentity) {
+	if (!self->goalentity || !self->goalentity->inuse) {
 		fixbot_stand(self);
 		return;
 	}
@@ -1023,7 +1046,7 @@ void fixbot_fire_welder(gentity_t *self) {
 	vec3_t vec;
 	float  r;
 
-	if (!self->enemy)
+	if (!self->enemy || !self->enemy->inuse)
 		return;
 
 	vec[0] = 24.0;
@@ -1063,8 +1086,14 @@ void fixbot_fire_blaster(gentity_t *self) {
 	vec3_t end;
 	vec3_t dir;
 
+	if (!self->enemy || !self->enemy->inuse) {
+		M_SetAnimation(self, &fixbot_move_run);
+		return;
+	}
+
 	if (!visible(self, self->enemy)) {
 		M_SetAnimation(self, &fixbot_move_run);
+		return;
 	}
 
 	AngleVectors(self->s.angles, forward, right, up);
@@ -1093,7 +1122,7 @@ MONSTERINFO_WALK(fixbot_walk) (gentity_t *self) -> void {
 	vec3_t vec;
 	float  len;
 
-	if (self->goalentity && strcmp(self->goalentity->classname, "object_repair") == 0) {
+	if (fixbot_has_classname(self->goalentity, "object_repair")) {
 		vec = self->s.origin - self->goalentity->s.origin;
 		len = vec.length();
 		if (len < 32) {
@@ -1113,6 +1142,11 @@ MONSTERINFO_ATTACK(fixbot_attack) (gentity_t *self) -> void {
 	float  len;
 
 	if (self->monsterinfo.aiflags & AI_MEDIC) {
+		if (!self->enemy || !self->enemy->inuse) {
+			self->monsterinfo.aiflags &= ~AI_MEDIC;
+			M_SetAnimation(self, &fixbot_move_stand);
+			return;
+		}
 		if (!visible(self, self->enemy))
 			return;
 		vec = self->s.origin - self->enemy->s.origin;

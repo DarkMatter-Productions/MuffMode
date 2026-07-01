@@ -10,7 +10,7 @@ This reference helps players and hosts choose what to play. Casual players can u
 | --- | --- |
 | A quick public game | Deathmatch, Instagib, NadeFest, or Horde Mode. |
 | A competitive head-to-head match | Duel with a [known ruleset](rulesets.md) and a focused map list. |
-| Organized team play | Team Deathmatch, Capture the Flag, Clan Arena, or Capture Strike. |
+| Organized team play | Team Deathmatch, Capture the Flag, Clan Arena, Freeze Tag, or Capture Strike. |
 | A different pace for a community night | Red Rover, Capture Strike, Horde, Vampiric Damage, Weapons Frenzy, Quad Hog, or custom [ruleset](rulesets.md)/map combinations. |
 
 ## Feature Overview
@@ -22,7 +22,7 @@ This reference helps players and hosts choose what to play. Casual players can u
 - Match progression with warmups, ready states, countdowns, post-match delays, sudden death, overtime, and round handling.
 - Enhanced teamplay with auto-balancing, forced balance rules, improved team messaging, major item pickup notices, weapon drop points of interest, and friendly fire warnings.
 - Extensive controls for map item spawns and entity string overrides.
-- EyeCam spectating with smooth behavior and aim prediction.
+- First-person and third-person spectator following with smooth behavior and aim prediction.
 - MyMap queueing inspired by Tastyspleen.
 - Bug fixes, minor refinements, balance tweaks, and additional server settings.
 
@@ -65,13 +65,16 @@ Muff Mode maintains a curated set of final `mm-*` remasters and ports, plus a se
 | `tdm` | Team Deathmatch | Competitive or casual team frag competition. |
 | `ctf` | Capture the Flag | Team flag capture play with stronger coordination and map control. |
 | `ca` | Clan Arena | Round-based team elimination with no item spawns, no self-damage, and a full arsenal. Good for fast team matches. |
-| `strike` | Capture Strike | Threewave-inspired attack/defend mode: teams alternate offense and defense on CTF maps with a single life per turn and a full arena loadout (100 health / 100 armor). Offense earns 1 team point for the first enemy-flag touch and 2 more for a capture or defender wipe; defense earns no team points. Match ends immediately when a team reaches `capturelimit` (default 15). |
+| `ft` | Freeze Tag | Team round mode where deaths freeze players in place instead of respawning them. Live teammates thaw frozen players by standing nearby, with additional teammates accelerating the thaw and earning assist credit when they meaningfully help a successful rescue; freezing every active opponent wins the round. Frozen players cannot move, fire, use items, or pick up items, but they remain on the field with a white shell, a standing pose, and a third-person look-around camera; frozen bodies can be nudged by knockback or pulled with the grapple. Frozen players can call for help with a throttled teammate marker and location-aware chat line, and the HUD shows frozen/thawing state plus a clean top-right round display. Thawed players normally respawn at player spawn points with white-shell gibs thrown at the thaw spot, with a server option to restore them at the safe thaw location instead, and spawned/thawed players use normal map/item-control loadouts unless the server enables the optional Freeze Tag arena kit. |
+| `strike` | Capture Strike | Threewave-inspired attack/defend mode: teams alternate offense and defense on CTF maps with a single life per turn and a full arena loadout (100 health / 100 armor). Offense earns 1 team point for the first enemy-flag touch and 2 more for a capture or defender wipe; defense earns no team points. Match ends at `capturelimit` (default 15) after both teams have attacked in the current round-pair. |
 | `rr` | Red Rover | Two teams with the Clan Arena loadout; on death you defect to the opposing team and respawn instantly. An arena mode like CA: each round ends on a team wipe (everyone forced onto one team) or `roundtimelimit`, announces that round's top fragger, and reshuffles for the next one. The match ends on `roundlimit` (primary) or `timelimit` (backstop) and the player with the most frags wins. Scored by individual frags; `fraglimit` is disabled, as in CA. |
 | `horde` | Horde Mode | Fight monster waves and stay on top of the scoreboard through a finite or endless run. Good for casual groups; packaged presets use limited lives and slower non-weapon item respawns. |
 | `instagib` | Instagib | Rail-focused instant-kill combat. |
 | `nadefest` | NadeFest | Grenade-only combat. |
 
-`ft`, `lms`, and `ball` are reserved or removed in the current build and are not exposed as supported play choices.
+`ball` is reserved or removed in the current build and is not exposed as a supported play choice.
+
+Freeze Tag's original Quake II concept and lineage are credited to [Darrell "Doolittle" Bircsak](https://darrellbircsak.com/2016/03/25/freeze-tag-reminisced/). Muff Mode's implementation was informed by his [Quake II Rerelease Freeze Tag port](https://github.com/dbircsak/freeze-tag-quake2-rerelease) and adapts the mode to Muff Mode's match, HUD, bot, and server-control systems.
 
 ## Game Modifications
 

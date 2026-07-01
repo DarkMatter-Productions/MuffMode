@@ -29,6 +29,10 @@ static cached_soundindex sound_step_left;
 static cached_soundindex sound_step_right;
 static cached_soundindex sound_death_hit;
 
+static bool jorg_has_live_enemy(const gentity_t *self) {
+	return self && self->enemy && self->enemy->inuse;
+}
+
 void MakronToss(gentity_t *self);
 
 static void jorg_attack1_end_sound(gentity_t *self) {
@@ -340,7 +344,7 @@ mframe_t jorg_frames_end_attack1[] = {
 MMOVE_T(jorg_move_end_attack1) = { FRAME_attak115, FRAME_attak118, jorg_frames_end_attack1, jorg_run };
 
 void jorg_reattack1(gentity_t *self) {
-	if (visible(self, self->enemy)) {
+	if (jorg_has_live_enemy(self) && visible(self, self->enemy)) {
 		if (frandom() < 0.9f)
 			M_SetAnimation(self, &jorg_move_attack1);
 		else {
@@ -426,6 +430,9 @@ void jorgBFG(gentity_t *self) {
 	vec3_t dir;
 	vec3_t vec;
 
+	if (!jorg_has_live_enemy(self))
+		return;
+
 	AngleVectors(self->s.angles, forward, right, nullptr);
 	start = M_ProjectFlashSource(self, monster_flash_offset[MZ2_JORG_BFG_1], forward, right);
 
@@ -439,6 +446,10 @@ void jorgBFG(gentity_t *self) {
 
 static void jorg_firebullet_right(gentity_t *self) {
 	vec3_t forward, right, start;
+
+	if (!jorg_has_live_enemy(self))
+		return;
+
 	AngleVectors(self->s.angles, forward, right, nullptr);
 	start = M_ProjectFlashSource(self, monster_flash_offset[MZ2_JORG_MACHINEGUN_R1], forward, right);
 	PredictAim(self, self->enemy, start, 0, false, -0.2f, &forward, nullptr);
@@ -447,6 +458,10 @@ static void jorg_firebullet_right(gentity_t *self) {
 
 static void jorg_firebullet_left(gentity_t *self) {
 	vec3_t forward, right, start;
+
+	if (!jorg_has_live_enemy(self))
+		return;
+
 	AngleVectors(self->s.angles, forward, right, nullptr);
 	start = M_ProjectFlashSource(self, monster_flash_offset[MZ2_JORG_MACHINEGUN_L1], forward, right);
 	PredictAim(self, self->enemy, start, 0, false, 0.2f, &forward, nullptr);
@@ -459,6 +474,9 @@ void jorg_firebullet(gentity_t *self) {
 };
 
 MONSTERINFO_ATTACK(jorg_attack) (gentity_t *self) -> void {
+	if (!jorg_has_live_enemy(self))
+		return;
+
 	if (frandom() <= 0.75f) {
 		gi.sound(self, CHAN_WEAPON, sound_attack1, 1, ATTN_NORM, 0);
 		self->monsterinfo.weapon_sound = gi.soundindex("boss3/w_loop.wav");

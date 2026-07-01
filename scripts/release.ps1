@@ -1832,6 +1832,78 @@ function Get-HtmlHrefValues {
     })
 }
 
+function Normalize-HtmlReadmeComparisonText {
+    param([AllowNull()][string]$Text)
+
+    if ($null -eq $Text) {
+        return ""
+    }
+
+    $decoded = [System.Net.WebUtility]::HtmlDecode($Text)
+    return ([regex]::Replace($decoded, '\s+', ' ')).Trim()
+}
+
+function Get-HtmlVisibleTextBlocks {
+    param([string]$Html)
+
+    $textHtml = $Html
+    $textHtml = [regex]::Replace(
+        $textHtml,
+        '(?is)<nav\b[^>]*class\s*=\s*["''][^"'']*\blanguage-switcher\b[^"'']*["''][^>]*>.*?</nav>',
+        ' '
+    )
+
+    foreach ($tag in @("script", "style", "code", "kbd", "samp", "pre")) {
+        $pattern = '(?is)<{0}\b[^>]*>.*?</{0}>' -f [regex]::Escape($tag)
+        $textHtml = [regex]::Replace($textHtml, $pattern, ' ')
+    }
+
+    $textHtml = [regex]::Replace($textHtml, '(?is)<!--.*?-->', ' ')
+    $visibleText = [regex]::Replace($textHtml, '(?is)<[^>]+>', "`n")
+
+    $blocks = New-Object System.Collections.Generic.List[string]
+    foreach ($line in ($visibleText -split "`r?`n")) {
+        $normalized = Normalize-HtmlReadmeComparisonText $line
+        if ($normalized.Length -ge 20 -and $normalized -match '\p{L}') {
+            $blocks.Add($normalized)
+        }
+    }
+
+    return $blocks.ToArray()
+}
+
+function Assert-HtmlReadmeHasTranslatedProse {
+    param(
+        [string]$SourceHtml,
+        [string]$TranslatedHtml,
+        [object]$Language
+    )
+
+    $sourceBlocks = @(Get-HtmlVisibleTextBlocks $SourceHtml)
+    $translatedBlocks = @(Get-HtmlVisibleTextBlocks $TranslatedHtml)
+
+    if ($translatedBlocks.Count -eq 0) {
+        throw "$($Language.EnglishName) README has no visible translated prose to validate."
+    }
+
+    $sourceBlockSet = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::Ordinal)
+    foreach ($block in $sourceBlocks) {
+        [void]$sourceBlockSet.Add($block)
+    }
+
+    $unchangedCount = 0
+    foreach ($block in $translatedBlocks) {
+        if ($sourceBlockSet.Contains($block)) {
+            $unchangedCount++
+        }
+    }
+
+    $unchangedRatio = [double]$unchangedCount / [double]$translatedBlocks.Count
+    if ($sourceBlocks.Count -gt 0 -and $unchangedRatio -ge 0.80) {
+        throw "$($Language.EnglishName) README still looks mostly untranslated: $unchangedCount of $($translatedBlocks.Count) visible prose blocks exactly match the English source."
+    }
+}
+
 function Assert-MatchingStringSequence {
     param(
         [string[]]$Expected,
@@ -1904,36 +1976,11 @@ function Assert-TranslatedHtmlReadme {
             throw "$($Language.EnglishName) README changed or removed protected term '$term'."
         }
     }
-}
 
-function New-EnglishFallbackHtmlReadmes {
-    param(
-        [string]$SourcePath,
-        [string]$TargetVersion,
-        [string]$OutputRoot
-    )
-
-    $outputRootAbs = Resolve-RepoPath $OutputRoot
-    $sourceHtml = Get-Content -Raw -LiteralPath $SourcePath
-    $results = New-Object System.Collections.Generic.List[object]
-
-    foreach ($language in @(Get-ReadmeTranslationLanguages)) {
-        $outputPath = Join-Path $outputRootAbs ("README-{0}.{1}.html" -f $TargetVersion, $language.Code)
-        Write-Step "Using English README copy for $($language.EnglishName)"
-        $localizedHtml = Add-HtmlReadmeLanguageSwitcher -Html $sourceHtml -CurrentLanguageCode $language.Code
-        Set-Content -LiteralPath $outputPath -Value $localizedHtml -Encoding utf8
-        Assert-TranslatedHtmlReadme -SourcePath $SourcePath -TranslatedPath $outputPath -Language $language
-        $results.Add([pscustomobject]@{
-            Code = $language.Code
-            HtmlLang = $language.HtmlLang
-            EnglishName = $language.EnglishName
-            NativeName = $language.NativeName
-            PackageFileName = $language.PackageFileName
-            Path = $outputPath
-        })
-    }
-
-    return $results.ToArray()
+    Assert-HtmlReadmeHasTranslatedProse `
+        -SourceHtml $sourceHtml `
+        -TranslatedHtml $translatedHtml `
+        -Language $Language
 }
 
 function New-TranslatedHtmlReadmes {
@@ -1955,15 +2002,7 @@ function New-TranslatedHtmlReadmes {
     }
 
     if (-not (Test-ReleaseCopilotUserToken)) {
-        if ($RequireCopilot) {
-            throw "COPILOT_GITHUB_TOKEN is required for localized README translation. Set a fine-grained user PAT with the Copilot Requests permission, or disable require_copilot to use English README copies."
-        }
-
-        Write-Warning "COPILOT_GITHUB_TOKEN is not set. Using English README copies for localized guide files."
-        return New-EnglishFallbackHtmlReadmes `
-            -SourcePath $SourcePath `
-            -TargetVersion $TargetVersion `
-            -OutputRoot $OutputRoot
+        throw "COPILOT_GITHUB_TOKEN is required for localized README translation. Localized README files must be real translations, not English copies."
     }
 
     Assert-GitHubCopilot

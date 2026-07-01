@@ -16,6 +16,10 @@ static cached_soundindex sound_pain;
 static cached_soundindex sound_death;
 static cached_soundindex sound_sight;
 
+static bool arachnid_has_live_enemy(const gentity_t *self) {
+	return self && self->enemy && self->enemy->inuse;
+}
+
 MONSTERINFO_SIGHT(arachnid_sight) (gentity_t *self, gentity_t *other) -> void {
 	gi.sound(self, CHAN_VOICE, sound_sight, 1, ATTN_NORM, 0);
 }
@@ -144,7 +148,7 @@ static PAIN(arachnid_pain) (gentity_t *self, gentity_t *other, float kick, int d
 static cached_soundindex sound_charge;
 
 void arachnid_charge_rail(gentity_t *self) {
-	if (!self->enemy || !self->enemy->inuse)
+	if (!arachnid_has_live_enemy(self))
 		return;
 
 	gi.sound(self, CHAN_WEAPON, sound_charge, 1.f, ATTN_NORM, 0.f);
@@ -157,6 +161,9 @@ static void arachnid_rail(gentity_t *self) {
 	vec3_t dir;
 	vec3_t forward, right;
 	monster_muzzleflash_id_t id;
+
+	if (!self->pos1)
+		return;
 
 	switch (self->s.frame) {
 	case FRAME_rails4:
@@ -226,6 +233,9 @@ static void arachnid_melee_charge(gentity_t *self) {
 }
 
 static void arachnid_melee_hit(gentity_t *self) {
+	if (!arachnid_has_live_enemy(self))
+		return;
+
 	if (!fire_hit(self, { MELEE_DISTANCE, 0, 0 }, 15, 50))
 		self->monsterinfo.melee_debounce_time = level.time + 1000_ms;
 }
@@ -247,7 +257,7 @@ mframe_t arachnid_frames_melee[] = {
 MMOVE_T(arachnid_melee) = { FRAME_melee_atk1, FRAME_melee_atk12, arachnid_frames_melee, arachnid_run };
 
 MONSTERINFO_ATTACK(arachnid_attack) (gentity_t *self) -> void {
-	if (!self->enemy || !self->enemy->inuse)
+	if (!arachnid_has_live_enemy(self))
 		return;
 
 	if (self->monsterinfo.melee_debounce_time < level.time && range_to(self, self->enemy) < MELEE_DISTANCE)

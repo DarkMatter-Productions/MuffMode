@@ -235,17 +235,17 @@ void EmitTopRightMatchInfo(statusbar_t &sb)
 		sb.ifstat(STAT_ARENA_ROLE).xr(kRightHudTextXr).yt(kRoundProgressYt).loc_stat_rstring(STAT_ARENA_ROLE).endifstat();
 	} else {
 		sb.ifstat(STAT_RULESET_HUD).xr(kRightHudTextXr).yt(kRulesetYt).loc_stat_rstring(STAT_RULESET_HUD).endifstat();
-		if (!GT(GT_HORDE) && !GT(GT_CA) && !GT(GT_RR))
+		if (!GT(GT_HORDE) && !GT(GT_CA) && !GT(GT_RR) && !GT(GT_FREEZE))
 			sb.ifstat(STAT_ROUND_NUMBER).xr(kRightHudTextXr).yt(kRoundProgressYt).loc_stat_rstring(STAT_ROUND_NUMBER).endifstat();
 	}
 
 	EmitRedRoverTeamBadge(sb);
 }
 
-// VANILLA_BASE — centre eliminated label (CA/RR team modes, not Strike).
+// VANILLA_BASE — centre eliminated/frozen label (CA/RR/Freeze team modes, not Strike).
 void EmitCenterArenaRole(statusbar_t &sb, int32_t yt)
 {
-	if (!MM_GametypeHasFlag(GTF_ELIMINATION))
+	if (!MM_GametypeHasFlag(GTF_ELIMINATION) && !GT(GT_FREEZE))
 		return;
 
 	sb.ifstat(STAT_ARENA_ROLE).xv(0).yt(yt).loc_stat_rstring(STAT_ARENA_ROLE).endifstat();
@@ -297,7 +297,7 @@ void MM_InitStatusbar()
 
 	sb.yb(-24);
 
-	sb.ifstat(STAT_SHOW_STATUSBAR).xv(minhud ? 100 : 0).hnum().xv(minhud ? 150 : 50).pic(STAT_HEALTH_ICON).endifstat();
+	sb.ifstat(STAT_SHOW_STATUSBAR).ifstat(STAT_HEALTH_ICON).xv(minhud ? 100 : 0).hnum().xv(minhud ? 150 : 50).pic(STAT_HEALTH_ICON).endifstat().endifstat();
 	if (!minhud) {
 		sb.ifstat(STAT_SHOW_STATUSBAR).ifstat(STAT_AMMO_ICON).xv(100).anum().xv(150).pic(STAT_AMMO_ICON).endifstat().endifstat();
 		sb.ifstat(STAT_SHOW_STATUSBAR).ifstat(STAT_ARMOR_ICON).xv(200).rnum().xv(250).pic(STAT_ARMOR_ICON).endifstat().endifstat();
@@ -370,8 +370,9 @@ void MM_InitStatusbar()
 		if (GT(GT_LMS))
 			sb.ifstat(STAT_CENTER_LINE).xv(0).yt(26).stat_string(STAT_CENTER_LINE).endifstat();
 		sb.ifstat(STAT_WARMUP_NOTICE).xv(0).yb(-90).stat_string(STAT_WARMUP_NOTICE).endifstat();
-		sb.ifstat(STAT_CHASE).xv(0).yb(-68).string("FOLLOWING").xv(80).stat_string(STAT_CHASE).endifstat();
-		sb.ifstat(STAT_SPECTATOR).xv(0).yb(-58).string2("SPECTATOR MODE").endifstat();
+		sb.ifstat(STAT_FOLLOW).xv(0).yb(-68).string("FOLLOWING").xv(80).stat_string(STAT_FOLLOW).endifstat();
+		sb.ifstat(STAT_SPECTATOR).xv(0).yb(-58).stat_string(STAT_SPECTATOR).endifstat();
+		sb.ifstat(STAT_FOLLOW).xv(0).yb(-48).string2("USE VIEW JUMP/CROUCH TARGET FIRE STOP").endifstat();
 
 		sb.ifstat(STAT_CROSSHAIR_ID_VIEW).xv(122).yb(-128).stat_pname(STAT_CROSSHAIR_ID_VIEW).endifstat();
 		sb.ifstat(STAT_CROSSHAIR_ID_VIEW_COLOR).xv(156).yb(-118).pic(STAT_CROSSHAIR_ID_VIEW_COLOR).endifstat();
@@ -389,6 +390,9 @@ void MM_InitStatusbar()
 
 	if (MM_StatusbarLayoutContainsBannedToken(layout))
 		gi.Com_Error("CS_STATUSBAR layout contains banned token (ifbit)");
+
+	if (!MM_StatusbarLayoutUsesOnlyVanillaTokens(layout))
+		gi.Com_Error("CS_STATUSBAR layout contains non-vanilla token");
 
 	muffmode::statusbar::g_last_layout = layout;
 
@@ -435,7 +439,7 @@ bool MM_DumpStatusbar(std::string *out_path)
 	MM_HUD_STAT(STAT_MINISCORE_SECOND_PIC) MM_HUD_STAT(STAT_MINISCORE_SECOND_SCORE)
 	MM_HUD_STAT(STAT_MINISCORE_SECOND_POS)
 	MM_HUD_STAT(STAT_COUNTDOWN) MM_HUD_STAT(STAT_MATCH_STATE) MM_HUD_STAT(STAT_CENTER_LINE) MM_HUD_STAT(STAT_WARMUP_NOTICE)
-	MM_HUD_STAT(STAT_CHASE) MM_HUD_STAT(STAT_SPECTATOR)
+	MM_HUD_STAT(STAT_FOLLOW) MM_HUD_STAT(STAT_SPECTATOR)
 	MM_HUD_STAT(STAT_CROSSHAIR_ID_VIEW) MM_HUD_STAT(STAT_CROSSHAIR_ID_VIEW_COLOR)
 #undef MM_HUD_STAT
 	// trailing dummy key keeps the JSON valid despite the trailing commas above

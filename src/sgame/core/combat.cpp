@@ -4,6 +4,7 @@
 
 #include "g_local.h"
 #include "muffmode/mm_combat_heatmap.h"
+#include "muffmode/mm_freezetag.h"
 
 /*
 ============
@@ -586,6 +587,9 @@ void T_Damage(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, const 
 			((targ->flags & FL_ALIVE_KNOCKBACK_ONLY) && (!targ->deadflag || targ->dead_time != level.time)))
 			knockback = 0;
 
+	if (MM_FreezeTag_IsFrozen(targ))
+		knockback = static_cast<int>(ceilf(knockback * max(0.0f, g_freezetag_frozen_knockback_scale->value)));
+
 	// figure momentum add
 	if (!(dflags & DAMAGE_NO_KNOCKBACK)) {
 		if ((knockback) && (targ->movetype != MOVETYPE_NONE) && (targ->movetype != MOVETYPE_BOUNCE) &&
@@ -618,6 +622,13 @@ void T_Damage(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, const 
 
 			targ->velocity += kvel;
 		}
+	}
+
+	if (MM_FreezeTag_IsFrozen(targ)) {
+		if (damage > 0 && !(targ->flags & FL_NO_DAMAGE_EFFECTS))
+			SpawnDamage(te_sparks, point, normal, damage);
+		MM_FreezeTag_OnFrozenDamage(targ, attacker);
+		return;
 	}
 
 	if (RS(RS_Q3A) && targ == attacker && damage > 0)

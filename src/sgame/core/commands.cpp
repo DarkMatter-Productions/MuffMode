@@ -6,6 +6,7 @@
 #include "muffmode/mm_captain.h"
 #include "muffmode/mm_command_contracts.h"
 #include "muffmode/mm_duel.h"
+#include "muffmode/mm_freezetag.h"
 #include "muffmode/mm_ghost.h"
 #include "muffmode/mm_loc.h"
 #include "muffmode/mm_maps.h"
@@ -20,20 +21,34 @@
 #include "muffmode/mm_vote.h"
 #include "muffmode/mm_vote_menu.h"
 #include "monsters/m_player.h"
-enum cmd_flags_t : uint32_t {
-	CF_NONE				= 0,
-	CF_ALLOW_DEAD		= bit_v<0>,
-	CF_ALLOW_INT		= bit_v<1>,
-	CF_ALLOW_SPEC		= bit_v<2>,
-	CF_MATCH_ONLY		= bit_v<3>,
-	CF_ADMIN_ONLY		= bit_v<4>,
-	CF_CHEAT_PROTECT	= bit_v<5>,
+enum class cmd_flags_t : uint32_t {
+	none			= 0,
+	allow_dead		= bit_v<0>,
+	allow_int		= bit_v<1>,
+	allow_spec		= bit_v<2>,
+	match_only		= bit_v<3>,
+	admin_only		= bit_v<4>,
+	cheat_protect	= bit_v<5>,
 };
+MAKE_ENUM_BITFLAGS(cmd_flags_t);
+
+constexpr cmd_flags_t CF_NONE = cmd_flags_t::none;
+constexpr cmd_flags_t CF_ALLOW_DEAD = cmd_flags_t::allow_dead;
+constexpr cmd_flags_t CF_ALLOW_INT = cmd_flags_t::allow_int;
+constexpr cmd_flags_t CF_ALLOW_SPEC = cmd_flags_t::allow_spec;
+constexpr cmd_flags_t CF_MATCH_ONLY = cmd_flags_t::match_only;
+constexpr cmd_flags_t CF_ADMIN_ONLY = cmd_flags_t::admin_only;
+constexpr cmd_flags_t CF_CHEAT_PROTECT = cmd_flags_t::cheat_protect;
+
+constexpr bool HasCmdFlag(cmd_flags_t flags, cmd_flags_t flag)
+{
+	return (flags & flag) != cmd_flags_t::none;
+}
 
 struct cmds_t {
 	const		char *name;
 	void		(*func)(gentity_t *ent);
-	uint32_t	flags;
+	cmd_flags_t	flags;
 };
 
 static void Cmd_Print_State(gentity_t *ent, bool on_state) {
@@ -57,6 +72,11 @@ static inline bool CheatsOk(gentity_t *ent) {
 static inline bool AliveOk(gentity_t *ent) {
 	if (ent->health <= 0 || ent->deadflag) {
 		//gi.LocClient_Print(ent, PRINT_HIGH, "You must be alive to use this command.\n");
+		return false;
+	}
+
+	if (MM_FreezeTag_IsFrozen(ent)) {
+		MM_FreezeTag_BlockFrozenCommand(ent);
 		return false;
 	}
 
@@ -91,17 +111,6 @@ static size_t CmdClientEntityCount() {
 
 static bool CmdClientIndexIsValid(int client_index) {
 	return client_index >= 0 && static_cast<size_t>(client_index) < game.maxclients;
-}
-
-static gentity_t *CmdEntityForClientIndex(int client_index) {
-	if (!CmdClientIndexIsValid(client_index))
-		return nullptr;
-
-	const size_t entity_index = static_cast<size_t>(client_index) + 1;
-	if (entity_index >= CmdClientEntityCount())
-		return nullptr;
-
-	return &g_entities[entity_index];
 }
 
 //=================================================================================
@@ -2040,33 +2049,65 @@ Cmd_Follow_f
 =================
 */
 static void Cmd_Follow_f(gentity_t *ent) {
-	if (ClientIsPlaying(ent->client)) {
+	if (ClientIsPlaying(ent->client) && !ent->client->eliminated) {
 		gi.Client_Print(ent, PRINT_HIGH, "You must spectate before you can follow.\n");
 		return;
 	}
 	if (gi.argc() < 2) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "Usage: {} [client name/num]\nFollows the specified player.", gi.argv(0));
+		gi.LocClient_Print(ent, PRINT_HIGH, "Usage: {} <client name/num|next|prev|stop|view>\n", gi.argv(0));
 		return;
 	}
 
-	gentity_t *follow_ent = ClientEntFromString(gi.argv(1));
+	const char *arg = gi.argv(1);
+
+	if (!Q_strcasecmp(arg, "next")) {
+		if (ent->client->follow_target)
+			FollowNext(ent);
+		else
+			GetFollowTarget(ent);
+		return;
+	}
+
+	if (!Q_strcasecmp(arg, "prev") || !Q_strcasecmp(arg, "previous")) {
+		if (ent->client->follow_target)
+			FollowPrev(ent);
+		else
+			FollowCycle(ent, -1);
+		return;
+	}
+
+	if (!Q_strcasecmp(arg, "stop") || !Q_strcasecmp(arg, "off") || !Q_strcasecmp(arg, "free")) {
+		if (ent->client->follow_target)
+			FreeFollower(ent);
+		else
+			gi.Client_Print(ent, PRINT_HIGH, "You are not following anyone.\n");
+		return;
+	}
+
+	if (!Q_strcasecmp(arg, "view")) {
+		ToggleFollowViewMode(ent);
+		return;
+	}
+
+	gentity_t *follow_ent = ClientEntFromString(arg);
 
 	if (!follow_ent || !follow_ent->inuse || !follow_ent->client) {
 		gi.Client_Print(ent, PRINT_HIGH, "Invalid client specified.\n");
 		return;
 	}
 
-	if (!ClientIsPlaying(follow_ent->client)) {
+	if (!ClientIsPlaying(follow_ent->client) || follow_ent->client->eliminated) {
 		gi.Client_Print(ent, PRINT_HIGH, "Specified client is not playing.\n");
 		return;
 	}
 
-	ent->client->follow_target = follow_ent;
-	ent->client->follow_update = true;
-	UpdateChaseCam(ent);
+	if (!FollowTargetAllowed(ent, follow_ent)) {
+		gi.Client_Print(ent, PRINT_HIGH, "You can only follow teammates while eliminated.\n");
+		return;
+	}
 
-	// [MuffMode] Follow target changed; re-evaluate this viewer's skin overrides.
-	MM_RefreshSkinOverridesForViewer(ent);
+	SetFollowTarget(ent, follow_ent);
+	UpdateFollowCamera(ent);
 }
 
 /*
@@ -2075,8 +2116,7 @@ Cmd_FollowKiller_f
 =================
 */
 static void Cmd_FollowKiller_f(gentity_t *ent) {
-	ent->client->sess.pc.follow_killer ^= true;
-	gi.LocClient_Print(ent, PRINT_HIGH, "Auto-follow killer: {}\n", ent->client->sess.pc.follow_killer ? "ON" : "OFF");
+	MM_CmdFollowKiller(ent);
 }
 
 /*
@@ -2085,30 +2125,7 @@ Cmd_FollowLeader_f
 =================
 */
 static void Cmd_FollowLeader_f(gentity_t *ent) {
-	ent->client->sess.pc.follow_leader ^= true;
-
-	gentity_t *leader = nullptr;
-
-	if (ent->client->sess.pc.follow_leader) {
-		leader = CmdEntityForClientIndex(level.sorted_clients[0]);
-		if (!level.num_playing_clients || !leader || !leader->inuse || !leader->client || !ClientIsPlaying(leader->client)) {
-			ent->client->sess.pc.follow_leader = false;
-			gi.Client_Print(ent, PRINT_HIGH, "No leader available to follow.\n");
-			gi.LocClient_Print(ent, PRINT_HIGH, "Auto-follow leader: OFF\n");
-			return;
-		}
-	}
-
-	gi.LocClient_Print(ent, PRINT_HIGH, "Auto-follow leader: {}\n", ent->client->sess.pc.follow_leader ? "ON" : "OFF");
-
-	if (!ClientIsPlaying(ent->client) && ent->client->sess.pc.follow_leader && ent->client->follow_target != leader) {
-		ent->client->follow_target = leader;
-		ent->client->follow_update = true;
-		UpdateChaseCam(ent);
-
-		// [MuffMode] Follow target changed; re-evaluate this viewer's skin overrides.
-		MM_RefreshSkinOverridesForViewer(ent);
-	}
+	MM_CmdFollowLeader(ent);
 }
 
 /*
@@ -2117,8 +2134,36 @@ Cmd_FollowPowerup_f
 =================
 */
 static void Cmd_FollowPowerup_f(gentity_t *ent) {
-	ent->client->sess.pc.follow_powerup ^= true;
-	gi.LocClient_Print(ent, PRINT_HIGH, "Auto-follow powerup pick-ups: {}\n", ent->client->sess.pc.follow_powerup ? "ON" : "OFF");
+	MM_CmdFollowPowerup(ent);
+}
+
+/*
+=================
+Cmd_FollowView_f
+=================
+*/
+static void Cmd_FollowView_f(gentity_t *ent) {
+	MM_CmdFollowView(ent);
+}
+
+static void Cmd_FollowNext_f(gentity_t *ent) {
+	if (!ent || !ent->client)
+		return;
+
+	if (ent->client->follow_target)
+		FollowNext(ent);
+	else
+		GetFollowTarget(ent);
+}
+
+static void Cmd_FollowPrev_f(gentity_t *ent) {
+	if (!ent || !ent->client)
+		return;
+
+	if (ent->client->follow_target)
+		FollowPrev(ent);
+	else
+		FollowCycle(ent, -1);
 }
 
 /*----------------------------------------------------------------*/
@@ -2299,7 +2344,10 @@ cmds_t client_cmds[] = {
 	{"follow",			Cmd_Follow_f,			CF_ALLOW_SPEC | CF_ALLOW_DEAD},
 	{"followkiller",	Cmd_FollowKiller_f,		CF_ALLOW_SPEC | CF_ALLOW_DEAD},
 	{"followleader",	Cmd_FollowLeader_f,		CF_ALLOW_SPEC | CF_ALLOW_DEAD},
+	{"follownext",		Cmd_FollowNext_f,		CF_ALLOW_SPEC | CF_ALLOW_DEAD},
+	{"followprev",		Cmd_FollowPrev_f,		CF_ALLOW_SPEC | CF_ALLOW_DEAD},
 	{"followpowerup",	Cmd_FollowPowerup_f,	CF_ALLOW_SPEC | CF_ALLOW_DEAD},
+	{"followview",		Cmd_FollowView_f,		CF_ALLOW_SPEC | CF_ALLOW_DEAD},
 	{"forcevote",		Cmd_ForceVote_f,		CF_ADMIN_ONLY | CF_ALLOW_INT | CF_ALLOW_SPEC},
 	{"forfeit",			Cmd_Forfeit_f,			CF_ALLOW_DEAD},
 	{"gametype",		Cmd_Gametype_f,			CF_ALLOW_DEAD | CF_ALLOW_INT | CF_ALLOW_SPEC},	// listing is open to all; changing is gated to admins inside the handler
@@ -2445,26 +2493,26 @@ void ClientCommand(gentity_t *ent) {
 		return;
 	}
 
-	if (cc->flags & CF_ADMIN_ONLY)
+	if (HasCmdFlag(cc->flags, CF_ADMIN_ONLY))
 		if (!AdminOk(ent))
 			return;
 
-	if (cc->flags & CF_CHEAT_PROTECT)
+	if (HasCmdFlag(cc->flags, CF_CHEAT_PROTECT))
 		if (!CheatsOk(ent))
 			return;
 
-	if (!(cc->flags & CF_ALLOW_DEAD))
+	if (!HasCmdFlag(cc->flags, CF_ALLOW_DEAD))
 		if (!AliveOk(ent))
 			return;
 
-	if (!(cc->flags & CF_ALLOW_SPEC))
+	if (!HasCmdFlag(cc->flags, CF_ALLOW_SPEC))
 		if (!SpectatorOk(ent))
 			return;
 
-	if (cc->flags & CF_MATCH_ONLY)
+	if (HasCmdFlag(cc->flags, CF_MATCH_ONLY))
 		return;
 
-	if (!(cc->flags & CF_ALLOW_INT))
+	if (!HasCmdFlag(cc->flags, CF_ALLOW_INT))
 		if (level.intermission_time)
 			return;
 

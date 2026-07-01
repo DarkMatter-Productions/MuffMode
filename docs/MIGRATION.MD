@@ -361,8 +361,8 @@ This document tracks migration progress from a monolithic fork style toward thin
 Validated against vanilla Q2RE source (`q2re-src/`): every Phase 7 target is MuffMode-only code with zero overlap in vanilla files. Vanilla itself keeps its menu framework and ghost system inside the `ctf/` mod folder, mirroring the `muffmode/` boundary.
 
 1. **R1 — Join/admin/info menus extracted (complete)**
-   - Moved `g_menu.cpp` wholesale (via `git mv`, history preserved) to `mm_menu.cpp` with new `mm_menu.h`; `g_menu.cpp` deleted. Vanilla Q2RE has no `g_menu.cpp` — the file was 100% MuffMode UI (admin settings, join/team, readyup entry, player stats, host/match info, chasecam menus).
-   - Public surface: `G_Menu_Join_Open()` (callers: `g_chase.cpp`, `g_cmds.cpp`, `p_client.cpp`) and `G_Menu_ReturnToMain()` (used by `mm_vote_menu`); declarations moved from `g_local.h` to `mm_menu.h`. `mm_vote_menu.cpp` now includes `mm_menu.h` instead of a forward declaration.
+   - Moved `g_menu.cpp` wholesale (via `git mv`, history preserved) to `mm_menu.cpp` with new `mm_menu.h`; `g_menu.cpp` deleted. Vanilla Q2RE has no `g_menu.cpp` — the file was 100% MuffMode UI (admin settings, join/team, readyup entry, player stats, host/match info, follow-camera menus).
+   - Public surface: `G_Menu_Join_Open()` (callers: following camera, command, and client lifecycle code) and `G_Menu_ReturnToMain()` (used by `mm_vote_menu`); declarations moved from `g_local.h` to `mm_menu.h`. `mm_vote_menu.cpp` now includes `mm_menu.h` instead of a forward declaration.
    - `p_menu.cpp` (pmenu framework) intentionally stays at `src/` root: quasi-vanilla shared infrastructure (vanilla keeps the equivalent in `ctf/p_ctf_menu.cpp`), used by both vanilla files and MuffMode modules.
 
 2. **R2 — Duel scoreboard and forfeit extracted (complete)**
@@ -383,7 +383,7 @@ Validated against vanilla Q2RE source (`q2re-src/`): every Phase 7 target is Muf
    - Added `mm_team.h` / `mm_team.cpp` (~600 lines from `g_cmds.cpp`): `PickTeam`, `BroadcastTeamChange`, `AllowTeamSwitch` (file-local), `AllowClientTeamSwitch`, `TeamBalance`, `TeamShuffle`, `SetTeam`, and `PlayerSortByJoinTime` (shared comparator, also used by `Cmd_PlayersJoinTime_f`).
    - Vanilla adapter names retained (`SetTeam` has callers across 9 files); declarations moved from `g_local.h` to `mm_team.h`.
    - Command bodies became `MM_CmdTeam()`, `MM_CmdSetTeam()`, `MM_CmdShuffle()`, `MM_CmdBalanceTeams()`; wrappers stay in the command table.
-   - `StopFollowing` intentionally stays in `g_cmds.cpp` (chase/spectator glue, not team logic).
+   - `StopFollowing` intentionally stays in `g_cmds.cpp` (following/spectator glue, not team logic).
 
 6. **R6 — Match/round state machine extracted (complete)**
    - Added `mm_match.h` / `mm_match.cpp` (~1,100 lines from `g_main.cpp` and `g_cmds.cpp`): `Match_Start`, `Match_Reset`, `Round_End` (vanilla adapter names) plus module-local `Round_StartNew`, `SetMatchID`, `CheckReady`, `CheckDMWarmupState`, `CheckDMRoundState`, `CheckDMCountdown`, `CheckDMMatchEndWarning`, and the world-reset helpers `Entities_Reset`, `Entities_ItemTeams_Reset`, `Monsters_KillAll` (their only callers were inside the moved block).
@@ -399,7 +399,7 @@ Validated against vanilla Q2RE source (`q2re-src/`): every Phase 7 target is Muf
 
 8. **R8 — Closure: header audit, marker pass, doc corrections (complete)**
    - `g_local.h` audit: no orphaned declarations for moved functions remain; the intentional surface is documented under "Permanent vanilla surface" below.
-   - Bounded `[MuffMode]` marker pass at hook boundaries: module include blocks (`g_spawn.cpp`, `p_weapon.cpp`, `g_monster.cpp`, `g_chase.cpp`, `p_view.cpp`, `g_utils.cpp`), the `InitGame` horde cvar group, and the `g_cmds.cpp` command table header. Per the marker policy, one-line gates are exempt.
+   - Bounded `[MuffMode]` marker pass at hook boundaries: module include blocks (`g_spawn.cpp`, `p_weapon.cpp`, `g_monster.cpp`, the following camera module, `p_view.cpp`, `g_utils.cpp`), the `InitGame` horde cvar group, and the `g_cmds.cpp` command table header. Per the marker policy, one-line gates are exempt.
    - Rewrote the completion claim, adapter table, and permanent-surface list to match post-Phase-7 reality.
 
 ## MuffMode module map
@@ -416,7 +416,7 @@ Validated against vanilla Q2RE source (`q2re-src/`): every Phase 7 target is Muf
 | `mm_items_rules` | Item pickup, respawn, inhibit, autoswitch rules |
 | `mm_maps` | Map list, queue, shuffle, MyMap |
 | `mm_match` | Match/round state machine, warmup/countdown, entity resets, timeouts |
-| `mm_menu` | Join/team, admin, readyup, player stats, host/match info, chasecam menus |
+| `mm_menu` | Join/team, admin, readyup, player stats, host/match info, follow-camera menus |
 | `mm_motd` | Message-of-the-day load and commands |
 | `mm_pconfig` | Player config persistence and preference commands |
 | `mm_ruleset` | Health/armor caps, Q3A over-max decay, and clamp helpers |
@@ -496,7 +496,7 @@ Cohesive MuffMode feature bodies live in `src/sgame/muffmode/` (22 modules). Rem
 These are MuffMode-owned or MuffMode-modified pieces that deliberately stay in vanilla files; everything here was re-evaluated against vanilla Q2RE source during Phase 7.
 
 - **`g_main.cpp`** — intermission/exit orchestration (`Match_End`, `QueueIntermission`, `CheckDMExitRules`, `CheckDMIntermissionExit`, `BeginIntermission`, `CalculateRanks`): MuffMode rewrites of vanilla `CheckDMRules`/`EndDMLevel`, retained as the highest-fan-in orchestration hub, delegating specifics via `MM_*` hooks. Plus `InitGame` cvar registration (marked).
-- **`g_cmds.cpp`** — command dispatch table (marked) with thin `Cmd_*_f` wrappers; spectator follow system (`Cmd_Follow*`, `StopFollowing` — chase-cam glue); player listing/info commands.
+- **`g_cmds.cpp`** — command dispatch table (marked) with thin `Cmd_*_f` wrappers; spectator follow system (`Cmd_Follow*`, `StopFollowing` — follow-camera glue); player listing/info commands.
 - **`g_local.h`** — `gametype_t`/`ruleset_t` enums and `GT`/`RS`/`GTF` macros, name/index tables, embedded state (`VoteStateData`, `ghost_t`/`level.ghosts[]`, `level.captain[]`/`level.locked[]`, map queue/MOTD/horde/duel fields), cvar externs, and pre-existing vanilla-named adapter declarations (`TransitionVoteState`, `ClearVote`, `GT_*`).
 - **`p_client.cpp`** — connect/spawn/die glue (`InitPlayerTeam`, `MoveClientToFreeCam`, elimination predicates, rampage messages): extracting would obscure control flow.
 - **`p_hud.cpp`** — teams/FFA scoreboard layouts and line-level stat gates (a future `mm_hud` is justified if HUD work is planned; `SetCrosshairIDView` and `TeamsScoreboardMessage` would go there).
@@ -587,4 +587,4 @@ Configs that used the old min/max clamps can set `g_horde_points_min 20` and `g_
 
 - This is a staged refactor, not a rewrite.
 - Focus remains on reducing merge/debug risk while preserving gameplay behavior.
-- **Gametype availability** (`mm_gametype.cpp`): enabled modes are selectable (incl. Strike, RR, and LMS); removed modes (Freeze, Ball) have gameplay stripped. `g_gametype` enum indices are unchanged.
+- **Gametype availability** (`mm_gametype.cpp`): enabled modes are selectable (incl. Freeze Tag, Strike, RR, and LMS); removed modes (Ball) have gameplay stripped. `g_gametype` enum indices are unchanged.

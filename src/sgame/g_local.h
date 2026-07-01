@@ -761,6 +761,11 @@ struct lag_compensation_restore_t {
 	vec3_t maxs;
 	int32_t viewheight = 0;
 	int32_t pmove_viewheight = 0;
+	vec3_t rewound_origin;
+	vec3_t rewound_mins;
+	vec3_t rewound_maxs;
+	int32_t rewound_viewheight = 0;
+	int32_t rewound_pmove_viewheight = 0;
 };
 
 #define SERVER_TICK_RATE gi.tick_rate // in hz
@@ -1108,6 +1113,7 @@ enum ent_flags_t : uint64_t {
 
 	FL_NO_BOTS				= bit_v<35>,  // not to be used by bots
 	FL_NO_HUMANS			= bit_v<36>,  // not to be used by humans
+	FL_Q3_SINE_MOVER		= bit_v<37>,  // Quake III func_bobbing / func_pendulum crush-through pusher
 };
 MAKE_ENUM_BITFLAGS(ent_flags_t);
 
@@ -1757,7 +1763,8 @@ struct spawn_temp_t {
 
 	int32_t		lip;
 	int32_t		distance;
-	int32_t		height;
+	float		height;
+	float		phase;
 	const char *noise;
 	float		pausetime;
 	const char *item;
@@ -2466,9 +2473,18 @@ extern cvar_t *g_drop_cmds;
 extern cvar_t *g_entity_override_dir;
 extern cvar_t *g_entity_override_load;
 extern cvar_t *g_entity_override_save;
-extern cvar_t *g_eyecam;
 extern cvar_t *g_fast_doors;
 extern cvar_t *g_frag_messages;
+extern cvar_t *g_freezetag_arena_loadout;
+extern cvar_t *g_freezetag_auto_thaw_time;
+extern cvar_t *g_freezetag_bot_rescue;
+extern cvar_t *g_freezetag_frozen_knockback_scale;
+extern cvar_t *g_freezetag_multi_thaw_scale;
+extern cvar_t *g_freezetag_round_reset_alive_inventory;
+extern cvar_t *g_freezetag_round_respawn_all;
+extern cvar_t *g_freezetag_thaw_radius;
+extern cvar_t *g_freezetag_thaw_respawn_at_location;
+extern cvar_t *g_freezetag_thaw_time;
 extern cvar_t *g_frenzy;
 extern cvar_t *g_friendly_fire;
 extern cvar_t *g_grapple_damage;
@@ -3117,7 +3133,7 @@ void G_SetCoopStats(gentity_t *ent);
 int HudRoundDisplayNumber();
 const char *HudCountdownProgressLabel();
 void G_SetSpectatorStats(gentity_t *ent);
-void G_CheckChaseStats(gentity_t *ent);
+void G_CheckFollowStats(gentity_t *ent);
 void ValidateSelectedItem(gentity_t *ent);
 void DeathmatchScoreboardMessage(gentity_t *ent, gentity_t *killer);
 void TeamsScoreboardMessage(gentity_t *ent, gentity_t *killer);
@@ -3205,13 +3221,20 @@ void GT_Changes();
 void SpawnEntities(const char *mapname, const char *entities, const char *spawnpoint);
 
 //
-// sgame/core/chase_camera.cpp
+// sgame/core/following_camera.cpp
 //
+bool FollowTargetAllowed(gentity_t *viewer, gentity_t *target);
+bool FollowFirstPersonEnabled(const gentity_t *ent);
+const char *FollowViewModeName(const gentity_t *ent);
+void ToggleFollowViewMode(gentity_t *ent);
+void SyncFollowPresentation(gentity_t *ent);
+void SetFollowTarget(gentity_t *ent, gentity_t *target);
 void FreeFollower(gentity_t *ent);
 void FreeClientFollowers(gentity_t *ent);
-void UpdateChaseCam(gentity_t *ent);
+void UpdateFollowCamera(gentity_t *ent);
 void FollowNext(gentity_t *ent);
 void FollowPrev(gentity_t *ent);
+void FollowCycle(gentity_t *ent, int dir);
 void GetFollowTarget(gentity_t *ent);
 
 //====================
@@ -3470,6 +3493,7 @@ struct client_config_t {
 	bool			follow_killer;
 	bool			follow_leader;
 	bool			follow_powerup;
+	bool			follow_first_person;
 
 	bool			use_expanded;
 
@@ -3487,7 +3511,7 @@ struct client_session_t {
 
 	team_t			team;
 	spectator_state_t	spectator_state;
-	int8_t			spectator_client;	// for chasecam and follow mode
+	int8_t			spectator_client;	// for follow mode
 
 	// client flags
 	bool			admin;
@@ -3719,7 +3743,7 @@ struct gclient_t {
 	gtime_t landmark_noise_time;
 
 	gtime_t invisibility_fade_time; // [Paril-KEX] at this time, the player will be mostly fully cloaked
-	gtime_t chase_msg_time; // to prevent CTF message spamming
+	gtime_t follow_msg_time; // to prevent follow message spamming
 	gtime_t last_warmup_nudge_time; // ready-up centerprint nudge; 0 = none sent yet this phase
 	int32_t menu_sign; // menu sign
 	vec3_t last_ladder_pos; // for ladder step sounds

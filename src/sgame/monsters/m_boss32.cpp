@@ -35,6 +35,10 @@ static cached_soundindex sound_taunt2;
 static cached_soundindex sound_taunt3;
 static cached_soundindex sound_hit;
 
+static bool makron_has_live_enemy(const gentity_t *self) {
+	return self && self->enemy && self->enemy->inuse;
+}
+
 static void makron_taunt(gentity_t *self) {
 	float r;
 
@@ -395,6 +399,9 @@ void makronBFG(gentity_t *self) {
 	vec3_t dir;
 	vec3_t vec;
 
+	if (!makron_has_live_enemy(self))
+		return;
+
 	AngleVectors(self->s.angles, forward, right, nullptr);
 	start = M_ProjectFlashSource(self, monster_flash_offset[MZ2_MAKRON_BFG], forward, right);
 
@@ -469,6 +476,9 @@ mframe_t makron_frames_attack5[] = {
 MMOVE_T(makron_move_attack5) = { FRAME_attak501, FRAME_attak516, makron_frames_attack5, makron_run };
 
 void MakronSaveloc(gentity_t *self) {
+	if (!makron_has_live_enemy(self))
+		return;
+
 	self->pos1 = self->enemy->s.origin; // save for aiming the shot
 	self->pos1[2] += self->enemy->viewheight;
 };
@@ -477,6 +487,9 @@ void MakronRailgun(gentity_t *self) {
 	vec3_t start;
 	vec3_t dir;
 	vec3_t forward, right;
+
+	if (!self->pos1)
+		return;
 
 	AngleVectors(self->s.angles, forward, right, nullptr);
 	start = M_ProjectFlashSource(self, monster_flash_offset[MZ2_MAKRON_RAILGUN_1], forward, right);
@@ -496,18 +509,17 @@ void MakronHyperblaster(gentity_t *self) {
 
 	monster_muzzleflash_id_t flash_number = (monster_muzzleflash_id_t)(MZ2_MAKRON_BLASTER_1 + (self->s.frame - FRAME_attak405));
 
+	if (!makron_has_live_enemy(self))
+		return;
+
 	AngleVectors(self->s.angles, forward, right, nullptr);
 	start = M_ProjectFlashSource(self, monster_flash_offset[flash_number], forward, right);
 
-	if (self->enemy) {
-		vec = self->enemy->s.origin;
-		vec[2] += self->enemy->viewheight;
-		vec -= start;
-		vec = vectoangles(vec);
-		dir[0] = vec[0];
-	} else {
-		dir[0] = 0;
-	}
+	vec = self->enemy->s.origin;
+	vec[2] += self->enemy->viewheight;
+	vec -= start;
+	vec = vectoangles(vec);
+	dir[0] = vec[0];
 	if (self->s.frame <= FRAME_attak413)
 		dir[1] = self->s.angles[YAW] - 10 * (self->s.frame - FRAME_attak413);
 	else
@@ -577,6 +589,9 @@ MONSTERINFO_SIGHT(makron_sight) (gentity_t *self, gentity_t *other) -> void {
 
 MONSTERINFO_ATTACK(makron_attack) (gentity_t *self) -> void {
 	float r;
+
+	if (!makron_has_live_enemy(self))
+		return;
 
 	r = frandom();
 

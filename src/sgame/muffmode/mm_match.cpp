@@ -5,6 +5,7 @@
 #include "muffmode/mm_captain.h"
 #include "muffmode/mm_command_contracts.h"
 #include "muffmode/mm_duel.h"
+#include "muffmode/mm_freezetag.h"
 #include "muffmode/mm_gametype.h"
 #include "muffmode/mm_ghost.h"
 #include "muffmode/mm_horde.h"
@@ -343,8 +344,17 @@ bool StartNewRound()
 	level.round_state_timer = level.time + gtime_t::from_sec(g_round_countdown->integer);
 	level.countdown_check = 0_sec;
 
-	if (!MM_Horde_ShouldSkipEntitiesReset())
-		ResetEntities(true, false, false);
+	if (!MM_Horde_ShouldSkipEntitiesReset()) {
+		if (GT(GT_FREEZE)) {
+			ResetEntities(false, false, false);
+			MM_FreezeTag_ResetRoundPlayers();
+		} else {
+			ResetEntities(true, false, false);
+		}
+	}
+
+	if (GT(GT_FREEZE))
+		MM_FreezeTag_OnRoundReset();
 
 	// LMS: re-arm each player's per-round lives after the reset respawned them.
 	if (GT(GT_LMS))
@@ -711,7 +721,7 @@ CheckLastManStanding
 namespace muffmode::match {
 
 static void CheckLastManStanding() {
-	if (notGT(GT_CA) && notGT(GT_STRIKE) && notGT(GT_RR) && notGT(GT_HORDE) && notGT(GT_LMS))
+	if (notGT(GT_CA) && notGT(GT_FREEZE) && notGT(GT_STRIKE) && notGT(GT_RR) && notGT(GT_HORDE) && notGT(GT_LMS))
 		return;
 
 	auto announce_survivor = [](gentity_t *survivor) {
@@ -749,8 +759,9 @@ static void CheckLastManStanding() {
 			if (ec->client->sess.team != team || !ClientIsPlaying(ec->client))
 				continue;
 			// Red Rover keeps everyone currently on the team (death there defects rather
-			// than eliminates); CA/Strike count only living, non-eliminated round players.
-			if (GT(GT_RR) || (!ec->client->eliminated && ec->health > 0)) {
+			// than eliminates); Freeze Tag counts only unfrozen fighters; CA/Strike count
+			// living, non-eliminated round players.
+			if (GT(GT_RR) || (GT(GT_FREEZE) ? MM_FreezeTag_ClientIsActiveFighter(ec) : (!ec->client->eliminated && ec->health > 0))) {
 				count++;
 				survivor = ec;
 			}
@@ -905,6 +916,11 @@ void TickRoundState() {
 		case GT_HORDE:
 			if (MM_Horde_UpdateRoundInProgress())
 				Round_End();
+			return;
+
+		case GT_FREEZE:
+			if (MM_FreezeTag_UpdateRound())
+				return;
 			return;
 
 		case GT_LMS:

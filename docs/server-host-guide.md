@@ -54,7 +54,7 @@ g_map_list_shuffle 1
 g_allow_voting 1
 g_allow_vote_midgame 0
 g_allow_spec_vote 0
-g_votable_gametypes "ffa duel tdm ctf ca strike rr horde instagib nadefest"
+g_votable_gametypes "ffa duel tdm ctf ca ft strike rr horde instagib nadefest"
 g_votable_rulesets "q2re mm q2reb"
 
 g_dm_do_warmup 1
@@ -78,7 +78,7 @@ g_allow_voting 1
 g_allow_vote_midgame 0
 g_allow_spec_vote 0
 g_vote_limit 2
-g_votable_gametypes "duel tdm ca ctf"
+g_votable_gametypes "duel tdm ca ctf ft"
 g_votable_rulesets "q2re mm q2reb"
 ```
 
@@ -95,13 +95,14 @@ Set `g_gametype` by index, or use the admin command `gametype <shortname>`.
 | `3` | `tdm` | Team Deathmatch |
 | `4` | `ctf` | Capture the Flag |
 | `5` | `ca` | Clan Arena |
+| `6` | `ft` | Freeze Tag |
 | `7` | `strike` | Capture Strike |
 | `8` | `rr` | Red Rover |
 | `10` | `horde` | Horde Mode |
 | `12` | `instagib` | Instagib |
 | `13` | `nadefest` | NadeFest |
 
-Values `6` (`ft`), `9` (`lms`), and `11` (`ball`) are reserved/removed in the current build. See [Gametypes](gameplay-reference.md#gametypes) for descriptions and work-in-progress notes.
+Value `11` (`ball`) is reserved/removed in the current build. See [Gametypes](gameplay-reference.md#gametypes) for descriptions and work-in-progress notes.
 
 ## Rulesets
 
@@ -151,6 +152,29 @@ Good match flow matters for both audiences: casual players should not get stuck 
 
 Team captains can lock or unlock their own team and can ready their team. Admins can transfer players, shuffle teams, balance teams, and force ready state.
 
+## Freeze Tag Controls
+
+| Cvar | Default | Purpose |
+| --- | --- | --- |
+| `g_freezetag_arena_loadout` | `0` | Preserves map/item-control loadouts by default; set `1` to give spawned and thawed players the arena-style Freeze Tag kit. |
+| `g_freezetag_thaw_time` | `3` | Seconds a live teammate must stay near a frozen player to thaw them. |
+| `g_freezetag_multi_thaw_scale` | `0.5` | Extra thaw speed per additional live teammate near the same frozen player; total thaw rate is capped. |
+| `g_freezetag_thaw_radius` | `96` | Thaw proximity radius in units. |
+| `g_freezetag_auto_thaw_time` | `0` | Optional forced thaw timer in seconds; `0` disables. |
+| `g_freezetag_bot_rescue` | `1` | Lets bots route to frozen teammates and hold position for thawing. |
+| `g_freezetag_frozen_knockback_scale` | `1.0` | Knockback multiplier for frozen players. |
+| `g_freezetag_thaw_respawn_at_location` | `0` | Respawns thawed players at normal player spawn points by default; set `1` to restore them at the safe thaw location. |
+| `g_freezetag_round_respawn_all` | `1` | Respawns every round participant for the next round; set `0` to respawn only frozen, dead, or waiting players. |
+| `g_freezetag_round_reset_alive_inventory` | `1` | Resets live survivor inventory/loadout when full round respawns are enabled; set `0` to preserve survivor inventory. |
+
+Frozen-player help calls use the regular `g_loc` / `g_loc_items` location system for teammate markers and location text when map `.loc` data or item landmarks are available.
+
+Thaw assist credit is automatic: the finishing rescuer scores for the thaw, and teammates who spend meaningful time helping the same successful thaw score assist credit. The assist threshold scales with `g_freezetag_thaw_time`.
+
+The in-match top-right HUD shows only the Freeze Tag round display, such as `Round 1 of 8`, so hosts should tune `roundlimit` as the visible match target for the mode. When `g_freezetag_arena_loadout` is enabled, freezes do not drop the player's starter weapon; timed powerups still follow the normal death-drop cvars.
+
+Players who join a Freeze Tag team during a live round are held as round spectators until the next round begins, preserving the active/frozen balance of the current round.
+
 ## Voting
 
 Voting is menu-driven and console-driven. For casual servers, keep enough voting open that players can self-serve maps and modes. For competitive servers, restrict voting to the decisions players should actually make during a match session.
@@ -180,6 +204,7 @@ Examples:
 | Team Deathmatch | `gt-TDM.cfg` |
 | Capture the Flag | `gt-CTF.cfg` |
 | Clan Arena | `gt-CA.cfg` |
+| Freeze Tag | `gt-FT.cfg` |
 | Capture Strike | `gt-STRIKE.cfg` |
 | Red Rover | `gt-REDROVER.cfg` |
 | Horde | `gt-HORDE.cfg` |

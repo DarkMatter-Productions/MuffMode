@@ -2,10 +2,9 @@
 // Licensed under the GNU General Public License 2.0.
 // Player-affecting target entities: inventory, teleport, score and cvar helpers.
 #include <array>
-#include <cerrno>
-#include <limits>
 
 #include "g_local.h"
+#include "muffmode/mm_parse.h"
 
 namespace {
 
@@ -47,25 +46,12 @@ void ClampTargetPowerupAmmoInventory(gclient_t *client) {
 	}
 }
 
-bool TargetPlayerConsumesWholeToken(const char *token, const char *end) {
-	return token != nullptr && token[0] != '\0' && end != nullptr && end != token && *end == '\0';
-}
-
 bool TargetPlayerParseInt32(const char *token, int32_t &out) {
-	if (token == nullptr || token[0] == '\0') {
+	const auto value = MM_ParseIntArg(token);
+	if (!value)
 		return false;
-	}
 
-	char *end = nullptr;
-	errno = 0;
-	const long value = strtol(token, &end, 10);
-	if (!TargetPlayerConsumesWholeToken(token, end) || errno == ERANGE ||
-		value < static_cast<long>(std::numeric_limits<int32_t>::min()) ||
-		value > static_cast<long>(std::numeric_limits<int32_t>::max())) {
-		return false;
-	}
-
-	out = static_cast<int32_t>(value);
+	out = *value;
 	return true;
 }
 
@@ -73,7 +59,7 @@ bool TargetPlayerParseInt32(const char *token, int32_t &out) {
 Takes away all the activator's powerups, techs, held items, keys and CTF flags.
 */
 static USE(target_remove_powerups_use) (gentity_t *ent, gentity_t *other, gentity_t *activator) -> void {
-	if (!activator->client)
+	if (!activator || !activator->client)
 		return;
 
 	activator->client->pu_time_quad = 0_sec;
@@ -92,7 +78,7 @@ static USE(target_remove_powerups_use) (gentity_t *ent, gentity_t *other, gentit
 		if (!activator->client->pers.inventory[i])
 			continue;
 		
-		if (itemlist[i].flags & IF_KEY | IF_POWERUP | IF_TIMED | IF_SPHERE | IF_TECH) {
+		if (itemlist[i].flags & (IF_KEY | IF_POWERUP | IF_TIMED | IF_SPHERE | IF_TECH)) {
 			if (itemlist[i].id == IT_POWERUP_QUAD && g_quadhog->integer) {
 				// spawn quad
 				
@@ -119,18 +105,22 @@ Takes away all the activator's weapons and ammo (except blaster).
 BLASTER : also remove blaster
 */
 static USE(target_remove_weapons_use) (gentity_t *ent, gentity_t *other, gentity_t *activator) -> void {
-	if (!activator->client)
+	if (!activator || !activator->client)
 		return;
+
+	const bool remove_blaster = ent->spawnflags.has(1_spawnflag);
 	
 	for (size_t i = 0; i < IT_TOTAL; i++) {
 		if (!activator->client->pers.inventory[i])
 			continue;
 
-		if (itemlist[i].flags & IF_WEAPON | IF_AMMO && itemlist[i].id != IT_WEAPON_BLASTER)
+		const bool is_weapon_or_ammo = !!(itemlist[i].flags & (IF_WEAPON | IF_AMMO));
+		if (is_weapon_or_ammo && (remove_blaster || itemlist[i].id != IT_WEAPON_BLASTER))
 			activator->client->pers.inventory[i] = 0;
 	}
 
-	NoAmmoWeaponChange(ent, false);
+	activator->client->newweapon = nullptr;
+	NoAmmoWeaponChange(activator, false);
 
 	activator->client->pers.weapon = activator->client->newweapon;
 	if (activator->client->newweapon)
@@ -143,10 +133,10 @@ static USE(target_remove_weapons_use) (gentity_t *ent, gentity_t *other, gentity
 Gives the activator the targetted item.
 */
 static USE(target_give_use) (gentity_t *ent, gentity_t *other, gentity_t *activator) -> void {
-	if (!activator->client)
+	if (!activator || !activator->client || !ent->item || !ent->item->pickup)
 		return;
 
-	ent->item->pickup(ent, other);
+	ent->item->pickup(ent, activator);
 }
 
 /*QUAKED target_delay (1 0 0) (-8 -8 -8) (8 8 8) x x x x x x x x NOT_EASY NOT_MEDIUM NOT_HARD NOT_DM NOT_COOP
@@ -222,7 +212,10 @@ static USE(target_cvar_use) (gentity_t *self, gentity_t *other, gentity_t *activ
 	if (!activator || !activator->client)
 		return;
 
-	gi.cvar_set(st.cvar, st.cvarvalue);
+	if (!self->message || !self->map)
+		return;
+
+	gi.cvar_set(self->message, self->map);
 }
 
 /*QUAKED target_setskill (1 0 0) (-8 -8 -8) (8 8 8) x x x x x x x x NOT_EASY NOT_MEDIUM NOT_HARD NOT_DM NOT_COOP
@@ -294,7 +287,7 @@ void SP_target_delay(gentity_t *ent) {
 }
 
 void SP_target_print(gentity_t *ent) {
-	if (!ent->message[0]) {
+	if (!ent->message || !ent->message[0]) {
 		gi.Com_PrintFmt("{}: No message, removing.\n", *ent);
 		G_FreeEntity(ent);
 		return;
@@ -322,11 +315,13 @@ void SP_target_kill(gentity_t *self) {
 }
 
 void SP_target_cvar(gentity_t *ent) {
-	if (!st.cvar[0] || !st.cvarvalue[0]) {
+	if (!st.cvar || !st.cvar[0] || !st.cvarvalue || !st.cvarvalue[0]) {
 		G_FreeEntity(ent);
 		return;
 	}
 
+	ent->message = st.cvar;
+	ent->map = st.cvarvalue;
 	ent->use = target_cvar_use;
 }
 

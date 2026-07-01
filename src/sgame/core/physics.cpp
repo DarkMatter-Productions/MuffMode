@@ -243,6 +243,17 @@ static uint32_t G_PhysicsEntityLimit() {
 	return min(globals.num_entities, game.maxentities);
 }
 
+static bool G_CrushWithQ3SineMover(gentity_t *pusher, gentity_t *check) {
+	if (!(pusher->flags & FL_Q3_SINE_MOVER))
+		return false;
+
+	T_Damage(check, pusher, pusher, vec3_origin, check->s.origin, vec3_origin, 100000, 1, DAMAGE_NONE, MOD_CRUSH);
+	if (check->inuse && check->solid && !check->client && !(check->svflags & SVF_MONSTER))
+		BecomeExplosion1(check);
+
+	return true;
+}
+
 /*
 ============
 G_Push
@@ -357,6 +368,12 @@ static bool G_Push(gentity_t *pusher, vec3_t &move, vec3_t &amove) {
 			check->s.origin = old_position;
 			block = G_TestEntityPosition(check);
 			if (!block) {
+				pushed_p--;
+				continue;
+			}
+
+			// [MuffMode] Quake III sine movers crush through blockers instead of rolling back.
+			if (G_CrushWithQ3SineMover(pusher, check)) {
 				pushed_p--;
 				continue;
 			}

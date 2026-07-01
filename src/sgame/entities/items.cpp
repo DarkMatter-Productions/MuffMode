@@ -4,6 +4,7 @@
 #include "bots/bot_includes.h"
 #include "monsters/m_player.h"	//doppelganger
 #include "muffmode/mm_captain.h"
+#include "muffmode/mm_freezetag.h"
 #include "muffmode/mm_items_rules.h"
 #include "muffmode/mm_ruleset.h"
 #include "muffmode/mm_ruleset_weapons.h"
@@ -1166,12 +1167,8 @@ bool Pickup_Powerup(gentity_t *ent, gentity_t *other) {
 
 	for (auto ec : active_clients()) {
 		if (!ClientIsPlaying(ec->client) && ec->client->sess.pc.follow_powerup) {
-			ec->client->follow_target = other;
-			ec->client->follow_update = true;
-			UpdateChaseCam(ec);
-
-			// [MuffMode] Auto-switched follow target; re-evaluate this viewer's skin overrides.
-			MM_RefreshSkinOverridesForViewer(ec);
+			SetFollowTarget(ec, other);
+			UpdateFollowCamera(ec);
 		}
 	}
 	/*
@@ -1625,12 +1622,19 @@ bool Pickup_Pack(gentity_t *ent, gentity_t *other) {
 //======================================================================
 
 static void Use_Powerup_BroadcastMsg(gentity_t *ent, gitem_t *item, const char *sound_name, const char *announcer_name) {
+	if (deathmatch->integer && g_quadhog->integer && item->id == IT_POWERUP_QUAD) {
+		gi.LocBroadcast_Print(PRINT_CENTER, "{} is the Quad Hog!\n", ent->client->resp.netname);
+	//} else {
+	//	gi.LocBroadcast_Print(PRINT_HIGH, "{} got the {}!\n", ent->client->resp.netname, item->pickup_name);
+	}
+
+	// [MuffMode] Q2RE keeps stock local powerup use sounds.
+	if (RS(RS_Q2RE)) {
+		gi.sound(ent, CHAN_ITEM, gi.soundindex(sound_name), 1, ATTN_NORM, 0);
+		return;
+	}
+
 	if (deathmatch->integer) {
-		if (g_quadhog->integer && item->id == IT_POWERUP_QUAD) {
-			gi.LocBroadcast_Print(PRINT_CENTER, "{} is the Quad Hog!\n", ent->client->resp.netname);
-		//} else {
-		//	gi.LocBroadcast_Print(PRINT_HIGH, "{} got the {}!\n", ent->client->resp.netname, item->pickup_name);
-		}
 		if (MM_ShouldAnnouncePowerupUse()) {
 			gi.sound(ent, CHAN_RELIABLE | CHAN_NO_PHS_ADD | CHAN_AUX, gi.soundindex(sound_name), 1, ATTN_NONE, 0);
 			AnnouncerSound(world, announcer_name, nullptr, false);
@@ -2105,8 +2109,11 @@ bool Entity_IsVisibleToPlayer(gentity_t *ent, gentity_t *player) {
 		return false;
 	}
 
-	// Q2Eaks make eyecam chase target invisible, but keep other client visible
-	if (g_eyecam->integer && player->client->follow_target && ent == player->client->follow_target)
+	if (MM_FreezeTag_IsFrozenViewProxy(ent))
+		return MM_FreezeTag_IsFrozenViewProxyVisibleTo(ent, player);
+
+	// First-person following hides only the followed player from that viewer.
+	if (FollowFirstPersonEnabled(player) && player->client->follow_target && ent == player->client->follow_target)
 		return false;
 	else if (ent->client)
 		return true;
@@ -2131,6 +2138,8 @@ TOUCH(Touch_Item) (gentity_t *ent, gentity_t *other, const trace_t &tr, bool oth
 		return;
 	if (other->health < 1)
 		return; // dead people can't pickup
+	if (MM_FreezeTag_IsFrozen(other))
+		return;
 	if (!ent->item)
 		return;
 	if (!ent->item->pickup)
@@ -2555,7 +2564,7 @@ bool CheckItemEnabled(gitem_t *item) {
 		if (g_no_armor->integer && item->flags & (IF_ARMOR | IF_POWER_ARMOR))
 			return false;
 
-		if (g_no_powerups->integer && item->flags & IF_POWERUP || ((InCoopStyle() || !deathmatch->integer) && skill->integer > 3))
+		if ((g_no_powerups->integer && (item->flags & IF_POWERUP)) || ((InCoopStyle() || !deathmatch->integer) && skill->integer > 3))
 			return false;
 
 		if (g_no_items->integer) {

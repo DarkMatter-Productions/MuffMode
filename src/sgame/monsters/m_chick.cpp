@@ -34,6 +34,10 @@ static cached_soundindex sound_pain3;
 static cached_soundindex sound_sight;
 static cached_soundindex sound_search;
 
+static bool chick_has_live_enemy(const gentity_t *self) {
+	return self && self->enemy && self->enemy->inuse;
+}
+
 static void ChickMoan(gentity_t *self) {
 	if (frandom() < 0.5f)
 		gi.sound(self, CHAN_VOICE, sound_idle1, 1, ATTN_IDLE, 0);
@@ -382,6 +386,9 @@ mframe_t chick_frames_duck[] = {
 MMOVE_T(chick_move_duck) = { FRAME_duck01, FRAME_duck07, chick_frames_duck, chick_run };
 
 static void ChickSlash(gentity_t *self) {
+	if (!chick_has_live_enemy(self))
+		return;
+
 	vec3_t aim = { MELEE_DISTANCE, self->mins[0], 10 };
 	gi.sound(self, CHAN_WEAPON, sound_melee_swing, 1, ATTN_NORM, 0);
 	fire_hit(self, aim, irandom(10, 16), 100);
@@ -402,7 +409,7 @@ static void ChickRocket(gentity_t *self) {
 	else
 		blindfire = false;
 
-	if (!self->enemy || !self->enemy->inuse)
+	if (!chick_has_live_enemy(self))
 		return;
 
 	AngleVectors(self->s.angles, forward, right, nullptr);
@@ -554,6 +561,11 @@ void chick_rerocket(gentity_t *self) {
 		return;
 	}
 
+	if (!chick_has_live_enemy(self)) {
+		M_SetAnimation(self, &chick_move_end_attack1);
+		return;
+	}
+
 	if (!M_CheckClearShot(self, monster_flash_offset[MZ2_CHICK_ROCKET_1])) {
 		M_SetAnimation(self, &chick_move_end_attack1);
 		return;
@@ -596,7 +608,7 @@ mframe_t chick_frames_end_slash[] = {
 MMOVE_T(chick_move_end_slash) = { FRAME_attak213, FRAME_attak216, chick_frames_end_slash, chick_run };
 
 void chick_reslash(gentity_t *self) {
-	if (self->enemy->health > 0) {
+	if (chick_has_live_enemy(self) && self->enemy->health > 0) {
 		if (range_to(self, self->enemy) <= RANGE_MELEE) {
 			if (frandom() <= 0.9f) {
 				M_SetAnimation(self, &chick_move_slash);
@@ -626,6 +638,9 @@ MONSTERINFO_MELEE(chick_melee) (gentity_t *self) -> void {
 }
 
 MONSTERINFO_ATTACK(chick_attack) (gentity_t *self) -> void {
+	if (!chick_has_live_enemy(self))
+		return;
+
 	if (!M_CheckClearShot(self, monster_flash_offset[MZ2_CHICK_ROCKET_1]))
 		return;
 

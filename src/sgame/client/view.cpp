@@ -5,7 +5,9 @@
 #include "monsters/m_player.h"
 #include "bots/bot_includes.h"
 // [MuffMode] AutoDoc regen lives in muffmode/mm_items_rules
+#include "muffmode/mm_freezetag.h"
 #include "muffmode/mm_items_rules.h"
+#include "muffmode/mm_parse.h"
 
 static gentity_t *current_player;
 static gclient_t *current_client;
@@ -207,7 +209,7 @@ void P_DamageFeedback(gentity_t *player) {
 	//
 	// calculate view angle kicks
 	//
-	kick = (float)abs(client->damage_knockback);
+	kick = std::abs(static_cast<float>(client->damage_knockback));
 	if (kick && player->health > 0) // kick of 0 means no view adjust at all
 	{
 		kick = kick * 100 / player->health;
@@ -229,13 +231,15 @@ void P_DamageFeedback(gentity_t *player) {
 		client->v_dmg_time = level.time + DAMAGE_TIME();
 	}
 
-	// [Paril-KEX] send view indicators
-	if (client->num_damage_indicators) {
-		gi.WriteByte(svc_damage);
-		gi.WriteByte(client->num_damage_indicators);
+	const auto send_damage_indicators = [](gentity_t *recipient, gentity_t *pov, gclient_t *source_client) {
+		if (!recipient || !recipient->client || !pov || !source_client || !source_client->num_damage_indicators)
+			return;
 
-		for (size_t i = 0; i < client->num_damage_indicators; i++) {
-			auto &indicator = client->damage_indicators[i];
+		gi.WriteByte(svc_damage);
+		gi.WriteByte(source_client->num_damage_indicators);
+
+		for (size_t i = 0; i < source_client->num_damage_indicators; i++) {
+			auto &indicator = source_client->damage_indicators[i];
 
 			// encode total damage into 5 bits
 			uint8_t encoded = std::clamp((indicator.health + indicator.power + indicator.armor) / 3, 1, 0x1F);
@@ -249,10 +253,20 @@ void P_DamageFeedback(gentity_t *player) {
 				encoded |= 0x80;
 
 			gi.WriteByte(encoded);
-			gi.WriteDir((player->s.origin - indicator.from).normalized());
+			gi.WriteDir((pov->s.origin - indicator.from).normalized());
 		}
 
-		gi.unicast(player, false);
+		gi.unicast(recipient, false);
+	};
+
+	// [Paril-KEX] send view indicators
+	if (client->num_damage_indicators) {
+		send_damage_indicators(player, player, client);
+
+		for (auto viewer : active_clients()) {
+			if (viewer != player && viewer->client && viewer->client->follow_target == player)
+				send_damage_indicators(viewer, player, client);
+		}
 	}
 
 	//
@@ -832,6 +846,10 @@ static void G_SetClientEffects(gentity_t *ent) {
 			ent->s.alpha = std::clamp(x, 0.05f, 0.2f);
 		}
 	}
+
+	// [MuffMode] G_SetClientEffects rebuilds player effects every frame; reapply
+	// Freeze Tag's frozen shell after the vanilla/powerup effect pass.
+	MM_FreezeTag_ApplyClientEffects(ent);
 }
 
 /*
@@ -1092,7 +1110,7 @@ static int32_t G_LagCompensationSampleCount(gentity_t *ent) {
 	return min<int32_t>(ent->client->num_lag_origins, game.max_lag_origins);
 }
 
-static bool G_IsEnhancedLagTarget(gentity_t *ent) {
+static bool G_IsLagCompensationTarget(gentity_t *ent) {
 	return ent && ent->inuse && ent->client && ent->client->pers.connected &&
 		ClientIsPlaying(ent->client) && !ent->client->eliminated &&
 		ent->health > 0 && !ent->deadflag &&
@@ -1100,7 +1118,7 @@ static bool G_IsEnhancedLagTarget(gentity_t *ent) {
 }
 
 static bool G_IsLagCompensationShooter(gentity_t *ent) {
-	return G_IsEnhancedLagTarget(ent) && !(ent->svflags & SVF_BOT);
+	return G_IsLagCompensationTarget(ent) && !(ent->svflags & SVF_BOT);
 }
 
 static bool G_LagCompensationFrameDelta(gentity_t *from_player, uint32_t current_frame, int32_t &frames_back) {
@@ -1161,10 +1179,11 @@ static lag_compensation_sample_t G_InterpolateLagSamples(
 	return result;
 }
 
+constexpr uint32_t MAX_LAG_COMPENSATION_INTERPOLATION_SPAN = 2;
+
 static bool G_LagSampleAtFrame(
 	gentity_t *ent,
 	uint32_t target_frame,
-	int32_t frames_back,
 	lag_compensation_sample_t &sample) {
 	int32_t sample_count = G_LagCompensationSampleCount(ent);
 	if (sample_count <= 0)
@@ -1174,7 +1193,10 @@ static bool G_LagSampleAtFrame(
 	if (!G_LagSampleByOffset(ent, 0, latest))
 		return false;
 
-	if (target_frame >= latest.server_frame) {
+	if (target_frame > latest.server_frame)
+		return false;
+
+	if (target_frame == latest.server_frame) {
 		sample = latest;
 		return true;
 	}
@@ -1193,14 +1215,27 @@ static bool G_LagSampleAtFrame(
 			return false;
 
 		if (target_frame <= newer.server_frame && target_frame >= older.server_frame) {
+			if (target_frame == newer.server_frame) {
+				sample = newer;
+				return true;
+			}
+
+			if (target_frame == older.server_frame) {
+				sample = older;
+				return true;
+			}
+
 			uint32_t span = newer.server_frame - older.server_frame;
+			if (span == 0 || span > MAX_LAG_COMPENSATION_INTERPOLATION_SPAN)
+				return false;
+
 			float frac = span ? static_cast<float>(target_frame - older.server_frame) / static_cast<float>(span) : 1.f;
 			sample = G_InterpolateLagSamples(older, newer, target_frame, frac);
 			return true;
 		}
 	}
 
-	return G_LagSampleByOffset(ent, frames_back, sample);
+	return false;
 }
 
 static void G_ApplyLagCompensation(gentity_t *player, const lag_compensation_sample_t &sample, bool restore_bounds) {
@@ -1213,6 +1248,8 @@ static void G_ApplyLagCompensation(gentity_t *player, const lag_compensation_sam
 		player->client->lag_restore.pmove_viewheight = player->client->ps.pmove.viewheight;
 	}
 
+	player->client->lag_restore.rewound_origin = sample.origin;
+
 	player->s.origin = sample.origin;
 
 	if (restore_bounds) {
@@ -1221,6 +1258,11 @@ static void G_ApplyLagCompensation(gentity_t *player, const lag_compensation_sam
 		player->viewheight = sample.viewheight;
 		player->client->ps.pmove.viewheight = sample.pmove_viewheight;
 	}
+
+	player->client->lag_restore.rewound_mins = player->mins;
+	player->client->lag_restore.rewound_maxs = player->maxs;
+	player->client->lag_restore.rewound_viewheight = player->viewheight;
+	player->client->lag_restore.rewound_pmove_viewheight = player->client->ps.pmove.viewheight;
 
 	gi.linkentity(player);
 }
@@ -1246,6 +1288,9 @@ static bool G_LagCompensateLegacy(gentity_t *from_player, const vec3_t &start, c
 	for (auto player : active_clients()) {
 		// we aren't gonna hit ourselves
 		if (player == from_player)
+			continue;
+
+		if (!G_IsLagCompensationTarget(player))
 			continue;
 
 		// not enough data, spare them
@@ -1293,11 +1338,11 @@ bool G_LagCompensate(gentity_t *from_player, const vec3_t &start, const vec3_t &
 		if (player == from_player)
 			continue;
 
-		if (!G_IsEnhancedLagTarget(player))
+		if (!G_IsLagCompensationTarget(player))
 			continue;
 
 		lag_compensation_sample_t sample;
-		if (!G_LagSampleAtFrame(player, target_frame, frames_back, sample))
+		if (!G_LagSampleAtFrame(player, target_frame, sample))
 			continue;
 
 		// no way they'd be hit if they aren't in the PVS
@@ -1313,18 +1358,22 @@ bool G_LagCompensate(gentity_t *from_player, const vec3_t &start, const vec3_t &
 
 static void G_RestoreLagCompensatedPlayer(gentity_t *player) {
 	lag_compensation_restore_t restore = player->client->lag_restore;
-	bool restore_bounds = G_IsEnhancedLagTarget(player);
 
 	player->client->is_lag_compensated = false;
-	player->s.origin = restore.origin;
+	if (player->s.origin == restore.rewound_origin)
+		player->s.origin = restore.origin;
+	else
+		player->s.origin = restore.origin + (player->s.origin - restore.rewound_origin);
 
-	// Preserve death/spectator shape changes made while the player was rewound.
-	if (restore_bounds) {
+	// Preserve damage/death/spectator changes made while the player was rewound.
+	if (player->mins == restore.rewound_mins)
 		player->mins = restore.mins;
+	if (player->maxs == restore.rewound_maxs)
 		player->maxs = restore.maxs;
+	if (player->viewheight == restore.rewound_viewheight)
 		player->viewheight = restore.viewheight;
+	if (player->client->ps.pmove.viewheight == restore.rewound_pmove_viewheight)
 		player->client->ps.pmove.viewheight = restore.pmove_viewheight;
-	}
 
 	player->client->lag_restore = {};
 	gi.linkentity(player);
@@ -1351,7 +1400,7 @@ void G_ClearLagCompensationHistory(gentity_t *ent) {
 }
 
 static bool G_LagCompensationPositionDiscontinuity(gentity_t *ent) {
-	if (!g_lag_compensation_enhanced->integer || G_LagCompensationSampleCount(ent) <= 0)
+	if (G_LagCompensationSampleCount(ent) <= 0)
 		return false;
 
 	lag_compensation_sample_t latest;
@@ -1362,9 +1411,25 @@ static bool G_LagCompensationPositionDiscontinuity(gentity_t *ent) {
 	return (ent->s.origin - latest.origin).lengthSquared() > (max_delta * max_delta);
 }
 
+static bool G_LagCompensationFrameDiscontinuity(gentity_t *ent, uint32_t current_frame, bool &overwrite_latest) {
+	overwrite_latest = false;
+
+	lag_compensation_sample_t latest;
+	if (!G_LagSampleByOffset(ent, 0, latest))
+		return false;
+
+	const uint32_t frame_delta = current_frame - latest.server_frame;
+	if (frame_delta == 0) {
+		overwrite_latest = true;
+		return false;
+	}
+
+	return frame_delta > 1;
+}
+
 // [Paril-KEX] save the current lag compensation value
 static void G_SaveLagCompensation(gentity_t *ent) {
-	if (g_lag_compensation_enhanced->integer && !G_IsEnhancedLagTarget(ent)) {
+	if (!G_IsLagCompensationTarget(ent)) {
 		G_ClearLagCompensationHistory(ent);
 		return;
 	}
@@ -1373,14 +1438,26 @@ static void G_SaveLagCompensation(gentity_t *ent) {
 	if (!samples)
 		return;
 
-	if (G_LagCompensationPositionDiscontinuity(ent))
+	const uint32_t current_frame = gi.ServerFrame();
+	bool overwrite_latest = false;
+	if (G_LagCompensationPositionDiscontinuity(ent) ||
+		G_LagCompensationFrameDiscontinuity(ent, current_frame, overwrite_latest)) {
 		G_ClearLagCompensationHistory(ent);
+		overwrite_latest = false;
+	}
 
 	int32_t next_lag_origin = static_cast<int32_t>(ent->client->next_lag_origin) % game.max_lag_origins;
+	int32_t write_lag_origin = next_lag_origin;
+	if (overwrite_latest) {
+		write_lag_origin--;
+		if (write_lag_origin < 0)
+			write_lag_origin += game.max_lag_origins;
+	}
+
 	ent->client->next_lag_origin = static_cast<uint16_t>(next_lag_origin);
 
-	lag_compensation_sample_t &sample = samples[next_lag_origin];
-	sample.server_frame = gi.ServerFrame();
+	lag_compensation_sample_t &sample = samples[write_lag_origin];
+	sample.server_frame = current_frame;
 	sample.time = level.time;
 	sample.origin = ent->s.origin;
 	sample.mins = ent->mins;
@@ -1388,8 +1465,10 @@ static void G_SaveLagCompensation(gentity_t *ent) {
 	sample.viewheight = ent->viewheight;
 	sample.pmove_viewheight = ent->client->ps.pmove.viewheight;
 
-	ent->client->next_lag_origin = static_cast<uint16_t>((next_lag_origin + 1) % game.max_lag_origins);
+	if (overwrite_latest)
+		return;
 
+	ent->client->next_lag_origin = static_cast<uint16_t>((write_lag_origin + 1) % game.max_lag_origins);
 	if (ent->client->num_lag_origins < game.max_lag_origins)
 		ent->client->num_lag_origins++;
 }
@@ -1510,16 +1589,22 @@ void ClientEndServerFrame(gentity_t *ent) {
 	}
 
 	float bobtime, bobtime_run;
-	gentity_t *e = ent;	// g_eyecam->integer &&ent->client->follow_target ? ent->client->follow_target : ent;
+	gentity_t *e = ent;
 
 	current_player = e;
 	current_client = e->client;
 
 	if (deathmatch->integer) {
-		int limit = level.match_state >= MATCH_IN_PROGRESS ? GT_ScoreLimit() : 0;
+		const int raw_limit = level.match_state >= MATCH_IN_PROGRESS ? GT_ScoreLimit() : 0;
+		const int limit = raw_limit > 0 ? raw_limit : 0;
 		ent->client->ps.stats[STAT_SCORELIMIT] = limit;
-		if (limit != (int)strtoul(gi.get_configstring(CONFIG_STORY_SCORELIMIT), nullptr, 10)) {
-			gi.configstring(CONFIG_STORY_SCORELIMIT, limit ? G_Fmt("{}", limit).data() : "");
+		const char *scorelimit_text = gi.get_configstring(CONFIG_STORY_SCORELIMIT);
+		const auto configured_limit = MM_ParseUInt32Arg(scorelimit_text);
+		const bool matches_configstring = limit > 0
+			? (configured_limit && *configured_limit == static_cast<uint32_t>(limit))
+			: (!scorelimit_text || !*scorelimit_text);
+		if (!matches_configstring) {
+			gi.configstring(CONFIG_STORY_SCORELIMIT, limit > 0 ? G_Fmt("{}", limit).data() : "");
 		}
 	}
 
@@ -1656,21 +1741,13 @@ void ClientEndServerFrame(gentity_t *ent) {
 	// accurately determined
 	G_CalcBlend(e);
 
-	// chase cam stuff
+	// follow camera stuff
 	if (!ClientIsPlaying(ent->client) || ent->client->eliminated) {
 		G_SetSpectatorStats(ent);
-
-		if (ent->client->follow_target && ent->client->follow_target->client) {
-			ent->client->ps.screen_blend = ent->client->follow_target->client->ps.screen_blend;
-			ent->client->ps.damage_blend = ent->client->follow_target->client->ps.damage_blend;
-
-			ent->s.effects = ent->client->follow_target->s.effects;
-			ent->s.renderfx = ent->client->follow_target->s.renderfx;
-		}
 	} else
 		G_SetStats(ent);
 
-	G_CheckChaseStats(ent);
+	G_CheckFollowStats(ent);
 
 	G_SetCoopStats(ent);
 
@@ -1680,7 +1757,11 @@ void ClientEndServerFrame(gentity_t *ent) {
 
 	G_SetClientSound(e);
 
+	if (ent->client->follow_target && ent->client->follow_target->client)
+		SyncFollowPresentation(ent);
+
 	G_SetClientFrame(ent);
+	MM_FreezeTag_ApplyFrozenPresentation(ent);
 	
 	ent->client->oldvelocity = ent->velocity;
 	ent->client->oldviewangles = ent->client->ps.viewangles;

@@ -193,9 +193,18 @@ cvar_t *g_drop_cmds;
 cvar_t *g_entity_override_dir;
 cvar_t *g_entity_override_load;
 cvar_t *g_entity_override_save;
-cvar_t *g_eyecam;
 cvar_t *g_fast_doors;
 cvar_t *g_frag_messages;
+cvar_t *g_freezetag_arena_loadout;
+cvar_t *g_freezetag_auto_thaw_time;
+cvar_t *g_freezetag_bot_rescue;
+cvar_t *g_freezetag_frozen_knockback_scale;
+cvar_t *g_freezetag_multi_thaw_scale;
+cvar_t *g_freezetag_round_reset_alive_inventory;
+cvar_t *g_freezetag_round_respawn_all;
+cvar_t *g_freezetag_thaw_radius;
+cvar_t *g_freezetag_thaw_respawn_at_location;
+cvar_t *g_freezetag_thaw_time;
 cvar_t *g_frenzy;
 cvar_t *g_friendly_fire;
 cvar_t *g_grapple_damage;
@@ -384,7 +393,7 @@ int _gt[] = {
 	/* GT_TDM */ GTF_TEAMS | GTF_FRAGS,
 	/* GT_CTF */ GTF_TEAMS | GTF_CTF,
 	/* GT_CA */ GTF_TEAMS | GTF_ARENA | GTF_ROUNDS | GTF_ELIMINATION,
-	/* GT_FREEZE */ 0, // removed
+	/* GT_FREEZE */ GTF_TEAMS | GTF_ROUNDS,
 	/* GT_STRIKE */ GTF_TEAMS | GTF_ARENA | GTF_ROUNDS | GTF_CTF | GTF_ELIMINATION,
 	/* GT_RR */ GTF_TEAMS | GTF_ARENA | GTF_ROUNDS | GTF_FRAGS,
 	/* GT_LMS */ GTF_ARENA | GTF_ROUNDS | GTF_ELIMINATION,
@@ -706,9 +715,18 @@ static void InitGame() {
 	g_entity_override_dir = gi.cvar("g_entity_override_dir", "maps", CVAR_NOFLAGS);
 	g_entity_override_load = gi.cvar("g_entity_override_load", "1", CVAR_NOFLAGS);
 	g_entity_override_save = gi.cvar("g_entity_override_save", "0", CVAR_NOFLAGS);
-	g_eyecam = gi.cvar("g_eyecam", "1", CVAR_NOFLAGS);
 	g_fast_doors = gi.cvar("g_fast_doors", "1", CVAR_NOFLAGS);
 	g_frames_per_frame = gi.cvar("g_frames_per_frame", "1", CVAR_NOFLAGS);
+	g_freezetag_arena_loadout = gi.cvar("g_freezetag_arena_loadout", "0", CVAR_NOFLAGS);
+	g_freezetag_auto_thaw_time = gi.cvar("g_freezetag_auto_thaw_time", "0", CVAR_NOFLAGS);
+	g_freezetag_bot_rescue = gi.cvar("g_freezetag_bot_rescue", "1", CVAR_NOFLAGS);
+	g_freezetag_frozen_knockback_scale = gi.cvar("g_freezetag_frozen_knockback_scale", "1.0", CVAR_NOFLAGS);
+	g_freezetag_multi_thaw_scale = gi.cvar("g_freezetag_multi_thaw_scale", "0.5", CVAR_NOFLAGS);
+	g_freezetag_round_reset_alive_inventory = gi.cvar("g_freezetag_round_reset_alive_inventory", "1", CVAR_NOFLAGS);
+	g_freezetag_round_respawn_all = gi.cvar("g_freezetag_round_respawn_all", "1", CVAR_NOFLAGS);
+	g_freezetag_thaw_radius = gi.cvar("g_freezetag_thaw_radius", "96", CVAR_NOFLAGS);
+	g_freezetag_thaw_respawn_at_location = gi.cvar("g_freezetag_thaw_respawn_at_location", "0", CVAR_NOFLAGS);
+	g_freezetag_thaw_time = gi.cvar("g_freezetag_thaw_time", "3", CVAR_NOFLAGS);
 	g_friendly_fire = gi.cvar("g_friendly_fire", "0", CVAR_NOFLAGS);
 	g_inactivity = gi.cvar("g_inactivity", "120", CVAR_NOFLAGS);
 	g_infinite_ammo = gi.cvar("g_infinite_ammo", "0", CVAR_LATCH);
@@ -1946,9 +1964,9 @@ void BeginIntermission(gentity_t *targ) {
 	
 	// Clean up any dangling entity references before map transition
 	for (auto ec : active_clients()) {
-		// Clear follow_target if entity is not in use OR if client pointer is invalid
+		// Clear follow target if entity is not in use OR if client pointer is invalid
 		if (ec->client->follow_target && (!ec->client->follow_target->inuse || !ec->client->follow_target->client)) {
-			ec->client->follow_target = nullptr;
+			SetFollowTarget(ec, nullptr);
 		}
 		// Clear any bot-specific entity references
 		if (ec->svflags & SVF_BOT) {

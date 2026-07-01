@@ -417,7 +417,7 @@ static void CG_ExecuteLayoutString(const char *s, vrect_t hud_vrect, vrect_t hud
 					cgi.Com_Error("Pic outside image range");
 
 				//muff: client-side hacky hacks - don't show vitals if spectating
-				if ((ps->stats[STAT_SPECTATOR] && !ps->stats[STAT_CHASE]) && (stat == STAT_HEALTH_ICON || stat == STAT_AMMO_ICON || stat == STAT_ARMOR_ICON))
+				if ((ps->stats[STAT_SPECTATOR] && !ps->stats[STAT_FOLLOW]) && (stat == STAT_HEALTH_ICON || stat == STAT_AMMO_ICON || stat == STAT_ARMOR_ICON))
 					skip = true;
 
 				const char *const pic = cgi.get_configstring(CS_IMAGES + value);
@@ -593,7 +593,7 @@ static void CG_ExecuteLayoutString(const char *s, vrect_t hud_vrect, vrect_t hud
 		}
 
 		//muff: client-side hacky hacks - don't show vitals if spectating
-		if (!ps->stats[STAT_SPECTATOR] || ps->stats[STAT_CHASE]) {
+		if (!ps->stats[STAT_SPECTATOR] || ps->stats[STAT_FOLLOW]) {
 			if (!strcmp(token, "hnum")) {
 				// health number
 				if (!skip_depth) {

@@ -494,7 +494,7 @@ void SanitizeRestoredClient(gentity_t *ent, int ghost_index, bool keep_current_a
 	client->menudirty = false;
 	client->follow_queued_target = nullptr;
 	client->follow_queued_time = 0_ms;
-	client->follow_target = nullptr;
+	SetFollowTarget(ent, nullptr);
 	client->follow_update = false;
 	client->owned_sphere = nullptr;
 	client->grapple_ent = nullptr;

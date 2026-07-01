@@ -35,10 +35,17 @@ void boss2_reattack_mg(gentity_t *self);
 
 constexpr int32_t BOSS2_ROCKET_SPEED = 750;
 
+static bool Boss2HasLiveEnemy(const gentity_t *self) {
+	return self && self->enemy && self->enemy->inuse;
+}
+
 static void Boss2PredictiveRocket(gentity_t *self) {
 	vec3_t forward, right;
 	vec3_t start;
 	vec3_t dir;
+
+	if (!Boss2HasLiveEnemy(self))
+		return;
 
 	AngleVectors(self->s.angles, forward, right, nullptr);
 
@@ -69,11 +76,12 @@ static void Boss2Rocket(gentity_t *self) {
 	vec3_t dir;
 	vec3_t vec;
 
-	if (self->enemy) {
-		if (self->enemy->client && frandom() < 0.9f) {
-			Boss2PredictiveRocket(self);
-			return;
-		}
+	if (!Boss2HasLiveEnemy(self))
+		return;
+
+	if (self->enemy->client && frandom() < 0.9f) {
+		Boss2PredictiveRocket(self);
+		return;
 	}
 
 	AngleVectors(self->s.angles, forward, right, nullptr);
@@ -123,6 +131,9 @@ static void Boss2Rocket64(gentity_t *self) {
 	vec3_t dir;
 	vec3_t vec;
 	float  time, dist;
+
+	if (!Boss2HasLiveEnemy(self))
+		return;
 
 	AngleVectors(self->s.angles, forward, right, nullptr);
 	start = M_ProjectFlashSource(self, monster_flash_offset[MZ2_BOSS2_ROCKET_1], forward, right);
@@ -274,6 +285,9 @@ static void Boss2HyperBlaster(gentity_t *self) {
 	vec3_t forward, right, target;
 	vec3_t start;
 	monster_muzzleflash_id_t id = (self->s.frame & 1) ? MZ2_BOSS2_MACHINEGUN_L2 : MZ2_BOSS2_MACHINEGUN_R2;
+
+	if (!Boss2HasLiveEnemy(self))
+		return;
 
 	AngleVectors(self->s.angles, forward, right, nullptr);
 	start = M_ProjectFlashSource(self, monster_flash_offset[id], forward, right);
@@ -460,6 +474,9 @@ MONSTERINFO_ATTACK(boss2_attack) (gentity_t *self) -> void {
 	vec3_t vec;
 	float  range;
 
+	if (!Boss2HasLiveEnemy(self))
+		return;
+
 	vec = self->enemy->s.origin - self->s.origin;
 	range = vec.length();
 
@@ -474,7 +491,7 @@ void boss2_attack_mg(gentity_t *self) {
 }
 
 void boss2_reattack_mg(gentity_t *self) {
-	if (infront(self, self->enemy) && frandom() <= 0.7f)
+	if (Boss2HasLiveEnemy(self) && infront(self, self->enemy) && frandom() <= 0.7f)
 		boss2_attack_mg(self);
 	else
 		M_SetAnimation(self, &boss2_move_attack_post_mg);

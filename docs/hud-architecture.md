@@ -52,13 +52,13 @@ Use `ifstat` + configstrings instead (same pattern as `STAT_WARMUP_NOTICE` / `ST
 |------|--------|-----------------|-------|
 | `STAT_MATCH_STATE` | `hud.cpp` / match | `xv 0 yb -78 stat_string` | Match phase label (`WARMUP`, timer, etc.) |
 | `STAT_WARMUP_NOTICE` | unused | `xv 0 yb -90` | Reserved; warmup/ready guidance is centerprint (menu-bind band) |
-| `STAT_GAMETYPE_HUD` | `hud.cpp` | top-right `loc_stat_rstring` | Gametype / limit label |
+| `STAT_GAMETYPE_HUD` | `hud.cpp` | top-right `loc_stat_rstring` | Gametype / limit / round label |
 | `STAT_RULESET_HUD` | `hud.cpp` | top-right | Ruleset or capturelimit |
-| `STAT_ROUND_NUMBER` | `hud.cpp` | top-right | Round progress via `CONFIG_ROUND_PROGRESS` |
-| `STAT_CENTER_LINE` | `hud.cpp` | `xv 0 yt 26` | Duel pic; CA/RR/LMS POV text |
+| `STAT_ROUND_NUMBER` | `hud.cpp` | top-right / arena alive slot | Round progress via `CONFIG_ROUND_PROGRESS`; CA/RR use the secondary POV configstring lane for compact live counts |
+| `STAT_CENTER_LINE` | `hud.cpp` | `xv 0 yt 26` | Duel pic; LMS primary-lane POV text |
 | `STAT_COUNTDOWN` | match | `yb -256 num` | Layout position (same on all clients) |
 | `STAT_HORDE_REMAINING` | `hud.cpp` | Horde right stack `num` | Horde only |
-| `STAT_ARENA_ROLE` | `hud.cpp` | Strike top-right or CA centre yt 48 | Per-client via `CONFIG_POV_CENTER_POOL` |
+| `STAT_ARENA_ROLE` | `hud.cpp` | Strike top-right or CA/Freeze centre yt 48 | Per-client via the primary POV configstring lane |
 | `STAT_MINISCORE_*` | `hud.cpp` | bottom corners | Team / FFA miniscore |
 
 Full contract comments: `src/sgame/muffmode/mm_hud_stat_contracts.h`.

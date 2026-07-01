@@ -120,6 +120,9 @@
 #if FileExists(PackageRoot + "\rerelease\baseq2\gt-CA.cfg") == 0
   #error PackageRoot is missing rerelease\baseq2\gt-CA.cfg.
 #endif
+#if FileExists(PackageRoot + "\rerelease\baseq2\gt-FT.cfg") == 0
+  #error PackageRoot is missing rerelease\baseq2\gt-FT.cfg.
+#endif
 #if FileExists(PackageRoot + "\rerelease\baseq2\gt-REDROVER.cfg") == 0
   #error PackageRoot is missing rerelease\baseq2\gt-REDROVER.cfg.
 #endif
@@ -225,6 +228,7 @@
 #define PackageGtTdmHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\gt-TDM.cfg")
 #define PackageGtCtfHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\gt-CTF.cfg")
 #define PackageGtCaHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\gt-CA.cfg")
+#define PackageGtFtHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\gt-FT.cfg")
 #define PackageGtRedRoverHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\gt-REDROVER.cfg")
 #define PackageGtHordeHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\gt-HORDE.cfg")
 #define PackageGtInstagibHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\gt-INSTAGIB.cfg")
@@ -1481,6 +1485,8 @@ begin
   Result := VerifyInstalledFileHash(Baseq2Dir + 'gt-CTF.cfg', '{#PackageGtCtfHash}', 'CTF gametype config');
   if Result <> '' then Exit;
   Result := VerifyInstalledFileHash(Baseq2Dir + 'gt-CA.cfg', '{#PackageGtCaHash}', 'Clan Arena gametype config');
+  if Result <> '' then Exit;
+  Result := VerifyInstalledFileHash(Baseq2Dir + 'gt-FT.cfg', '{#PackageGtFtHash}', 'Freeze Tag gametype config');
   if Result <> '' then Exit;
   Result := VerifyInstalledFileHash(Baseq2Dir + 'gt-REDROVER.cfg', '{#PackageGtRedRoverHash}', 'Red Rover gametype config');
   if Result <> '' then Exit;

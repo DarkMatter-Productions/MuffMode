@@ -17,23 +17,7 @@ constexpr long k_max_motd_file_length = 0x40000;
 
 bool IsSafeFilename(const char *filename)
 {
-	if (!filename || !*filename)
-		return false;
-
-	if (CStringEquals(filename, ".") || CStringEquals(filename, ".."))
-		return false;
-
-	size_t length = 0;
-	for (const unsigned char *p = reinterpret_cast<const unsigned char *>(filename); *p; p++) {
-		length++;
-		if (length >= MAX_QPATH)
-			return false;
-
-		if (*p <= ' ' || *p == '/' || *p == '\\' || *p == ':' || *p == '"' || *p == ';')
-			return false;
-	}
-
-	return true;
+	return filename && IsSafeFilenameText(filename, MAX_QPATH);
 }
 
 void Clear()

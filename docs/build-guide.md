@@ -87,6 +87,14 @@ That job is experimental until the Visual Studio ClangCL build tools are install
 
 ## Test And Fuzz Commands
 
+Before pushing to GitHub, run the consolidated local push verifier:
+
+```powershell
+./scripts/ci/verify-github-push.ps1
+```
+
+Use `-RemoteBranch muffdev` when verifying a local branch that will be pushed to the active CI branch.
+
 Run the fast host-side smoke tests:
 
 ```powershell

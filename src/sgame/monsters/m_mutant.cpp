@@ -27,6 +27,10 @@ static cached_soundindex sound_step2;
 static cached_soundindex sound_step3;
 static cached_soundindex sound_thud;
 
+static bool mutant_has_live_enemy(const gentity_t *self) {
+	return self && self->enemy && self->enemy->inuse;
+}
+
 //
 // SOUNDS
 //
@@ -214,6 +218,9 @@ MONSTERINFO_RUN(mutant_run) (gentity_t *self) -> void {
 //
 
 static void mutant_hit_left(gentity_t *self) {
+	if (!mutant_has_live_enemy(self))
+		return;
+
 	vec3_t aim = { MELEE_DISTANCE, self->mins[0], 8 };
 	if (fire_hit(self, aim, irandom(5, 15), 100))
 		gi.sound(self, CHAN_WEAPON, sound_hit, 1, ATTN_NORM, 0);
@@ -224,6 +231,9 @@ static void mutant_hit_left(gentity_t *self) {
 }
 
 static void mutant_hit_right(gentity_t *self) {
+	if (!mutant_has_live_enemy(self))
+		return;
+
 	vec3_t aim = { MELEE_DISTANCE, self->maxs[0], 8 };
 	if (fire_hit(self, aim, irandom(5, 15), 100))
 		gi.sound(self, CHAN_WEAPON, sound_hit2, 1, ATTN_NORM, 0);
@@ -234,7 +244,7 @@ static void mutant_hit_right(gentity_t *self) {
 }
 
 static void mutant_check_refire(gentity_t *self) {
-	if (!self->enemy || !self->enemy->inuse || self->enemy->health <= 0)
+	if (!mutant_has_live_enemy(self) || self->enemy->health <= 0)
 		return;
 
 	if ((self->monsterinfo.melee_debounce_time <= level.time) && ((frandom() < 0.5f) || (range_to(self, self->enemy) <= RANGE_MELEE)))
@@ -266,7 +276,7 @@ static TOUCH(mutant_jump_touch) (gentity_t *self, gentity_t *other, const trace_
 		return;
 	}
 
-	if (self->style == 1 && other->takedamage) {
+	if (self->style == 1 && other && other->takedamage) {
 		// [Paril-KEX] only if we're actually moving fast enough to hurt
 		if (self->velocity.length() > 30) {
 			vec3_t point;
@@ -318,7 +328,7 @@ static void mutant_check_landing(gentity_t *self) {
 		if (self->monsterinfo.unduck)
 			self->monsterinfo.unduck(self);
 
-		if (range_to(self, self->enemy) <= RANGE_MELEE * 2.f)
+		if (mutant_has_live_enemy(self) && range_to(self, self->enemy) <= RANGE_MELEE * 2.f)
 			self->monsterinfo.melee(self);
 
 		return;
@@ -351,12 +361,18 @@ MONSTERINFO_ATTACK(mutant_jump) (gentity_t *self) -> void {
 //
 
 static bool mutant_check_melee(gentity_t *self) {
+	if (!mutant_has_live_enemy(self))
+		return false;
+
 	return range_to(self, self->enemy) <= RANGE_MELEE && self->monsterinfo.melee_debounce_time <= level.time;
 }
 
 static bool mutant_check_jump(gentity_t *self) {
 	vec3_t v;
 	float  distance;
+
+	if (!mutant_has_live_enemy(self))
+		return false;
 
 	// Paril: no harm in letting them jump down if you're below them
 	// if (self->absmin[2] > (self->enemy->absmin[2] + 0.75 * self->enemy->size[2]))
@@ -382,7 +398,7 @@ static bool mutant_check_jump(gentity_t *self) {
 }
 
 MONSTERINFO_CHECKATTACK(mutant_checkattack) (gentity_t *self) -> bool {
-	if (!self->enemy || self->enemy->health <= 0)
+	if (!mutant_has_live_enemy(self) || self->enemy->health <= 0)
 		return false;
 
 	if (mutant_check_melee(self)) {
@@ -590,7 +606,7 @@ mframe_t mutant_frames_jump_down[] = {
 MMOVE_T(mutant_move_jump_down) = { FRAME_jump01, FRAME_jump05, mutant_frames_jump_down, mutant_run };
 
 static void mutant_jump_updown(gentity_t *self, blocked_jump_result_t result) {
-	if (!self->enemy)
+	if (!mutant_has_live_enemy(self))
 		return;
 
 	if (result == blocked_jump_result_t::JUMP_JUMP_UP)

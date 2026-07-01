@@ -6,10 +6,11 @@
 #include "debug_log.h"
 // [MuffMode] Team management lives in muffmode/mm_team
 #include "muffmode/mm_profile.h"
+#include "muffmode/mm_parse.h"
 #include "muffmode/mm_skin.h"
+#include "muffmode/mm_time_format.h"
 #include "muffmode/mm_team.h"
 #include "muffmode/mm_util.h"
-#include <cerrno>
 #include <ctime>
 
 static size_t G_EntitySearchLimit() {
@@ -157,14 +158,14 @@ void G_PrintActivationMessage(gentity_t *ent, gentity_t *activator, bool coop_gl
 	//
 	// print the message
 	//
-	if ((ent->message) && !(activator->svflags & SVF_MONSTER)) {
+	if ((ent->message) && (!activator || !(activator->svflags & SVF_MONSTER))) {
 		if (coop_global && coop->integer)
 			gi.LocBroadcast_Print(PRINT_CENTER, "{}", ent->message);
-		else
+		else if (activator)
 			gi.LocCenter_Print(activator, "{}", ent->message);
 
 		// [Paril-KEX] allow non-noisy centerprints
-		if (ent->noise_index >= 0) {
+		if (activator && ent->noise_index >= 0) {
 			if (ent->noise_index)
 				gi.sound(activator, CHAN_AUTO, ent->noise_index, 1, ATTN_NORM, 0);
 			else
@@ -952,21 +953,7 @@ const char *G_TimeString(const int msec, bool state) {
 			return "MATCH END";
 	}
 
-	int ms = abs(msec);
-	int hours, mins, seconds;
-
-	seconds = ms / 1000;
-	mins = seconds / 60;
-	seconds -= mins * 60;
-	hours = mins / 60;
-	mins -= hours * 60;
-
-	if (hours > 0) {
-		G_FmtTo(buffer, "{}{}:{:02}:{:02}", msec < 1000 ? "-" : "", hours, mins, seconds);
-	} else {
-		G_FmtTo(buffer, "{}{:02}:{:02}", msec < 1000 ? "-" : "", mins, seconds);
-	}
-
+	Q_strlcpy(buffer, MM_FormatMatchTime(msec).c_str(), sizeof(buffer));
 	return buffer;
 }
 /*
@@ -986,21 +973,7 @@ const char *G_TimeStringMs(const int msec, bool state) {
 			return "MATCH END";
 	}
 
-	int hours, mins, seconds, ms = msec;
-
-	seconds = ms / 1000;
-	ms -= seconds * 1000;
-	mins = seconds / 60;
-	seconds -= mins * 60;
-	hours = mins / 60;
-	mins -= hours * 60;
-
-	if (hours > 0) {
-		G_FmtTo(buffer, "{}:{:02}:{:02}.{}", hours, mins, seconds, ms);
-	} else {
-		G_FmtTo(buffer, "{:02}:{:02}.{}", mins, seconds, ms);
-	}
-
+	Q_strlcpy(buffer, MM_FormatMatchTimeMs(msec).c_str(), sizeof(buffer));
 	return buffer;
 }
 
@@ -1120,15 +1093,11 @@ gentity_t *ClientEntFromString(const char *in) {
 	if (*in == '-' || *in == '+')
 		return nullptr;
 
-	char *end = nullptr;
-	errno = 0;
-	const unsigned long num = strtoul(in, &end, 10);
-	if (errno == ERANGE || !end || end == in || *end != '\0')
-		return nullptr;
-	if (num >= static_cast<unsigned long>(game.maxclients))
+	const auto num = MM_ParseUInt32Arg(in);
+	if (!num || game.maxclients <= 0 || *num >= static_cast<uint32_t>(game.maxclients))
 		return nullptr;
 
-	return &g_entities[&game.clients[num] - game.clients + 1];
+	return &g_entities[static_cast<size_t>(*num) + 1];
 }
 
 /*

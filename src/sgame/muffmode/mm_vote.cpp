@@ -214,9 +214,7 @@ void MM_PrintAvailableMaps(gentity_t *ent)
 
 	std::sort(all_maps.begin(), all_maps.end(), muffmode::CStringLessI);
 
-	std::string display = join_strings(all_maps, " ");
-	if (display.length() > 256)
-		display = display.substr(0, 256) + "...";
+	const std::string display = muffmode::TruncateWithEllipsis(join_strings(all_maps, " "), 256);
 	gi.LocClient_Print(ent, PRINT_HIGH, "Valid maps are: {}\n", display.c_str());
 }
 

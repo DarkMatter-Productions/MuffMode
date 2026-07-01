@@ -33,7 +33,7 @@ constexpr gametype_avail_t k_gametype_availability[GT_NUM_GAMETYPES] = {
 	/* GT_TDM */ gametype_avail_t::Enabled,
 	/* GT_CTF */ gametype_avail_t::Enabled,
 	/* GT_CA */ gametype_avail_t::Enabled,
-	/* GT_FREEZE */ gametype_avail_t::Removed,
+	/* GT_FREEZE */ gametype_avail_t::Enabled,
 	/* GT_STRIKE */ gametype_avail_t::Enabled,
 	/* GT_RR */ gametype_avail_t::Enabled,
 	/* GT_LMS */ gametype_avail_t::Enabled,
@@ -400,8 +400,13 @@ void MM_ChangeGametype(gametype_t gt, bool force_cfg)
 	case gametype_t::GT_CTF:
 		if (!ctf->integer)
 			gi.cvar_forceset("ctf", "1");
+		if (teamplay->integer)
+			gi.cvar_forceset("teamplay", "0");
 		break;
 	case gametype_t::GT_TDM:
+	case gametype_t::GT_FREEZE:
+		if (ctf->integer)
+			gi.cvar_forceset("ctf", "0");
 		if (!teamplay->integer)
 			gi.cvar_forceset("teamplay", "1");
 		break;
@@ -524,12 +529,17 @@ void MM_GTChanges()
 			switch (gt)
 			{
 			case gametype_t::GT_TDM:
+			case gametype_t::GT_FREEZE:
+				if (ctf->integer)
+					gi.cvar_forceset("ctf", "0");
 				if (!teamplay->integer)
 					gi.cvar_forceset("teamplay", "1");
 				break;
 			case gametype_t::GT_CTF:
 				if (!ctf->integer)
 					gi.cvar_forceset("ctf", "1");
+				if (teamplay->integer)
+					gi.cvar_forceset("teamplay", "0");
 				break;
 			default:
 				if (teamplay->integer)

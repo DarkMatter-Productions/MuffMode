@@ -12,6 +12,7 @@ This folder contains the server config bundle shipped with Muff Mode. Use it as 
 | `gt-TDM.cfg` | Team Deathmatch preset. |
 | `gt-CTF.cfg` | Capture the Flag preset. |
 | `gt-CA.cfg` | Clan Arena preset. |
+| `gt-FT.cfg` | Freeze Tag preset. |
 | `gt-STRIKE.cfg` | Capture Strike preset. |
 | `gt-REDROVER.cfg` | Red Rover preset. |
 | `gt-HORDE.cfg` | Horde preset. Set `roundlimit 0` after loading for endless Horde (`g_horde_late_escalation` defaults to `1`). |

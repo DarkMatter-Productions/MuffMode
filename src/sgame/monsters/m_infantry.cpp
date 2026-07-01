@@ -30,6 +30,10 @@ static cached_soundindex sound_idle;
 // range at which we'll try to initiate a run-attack to close distance
 constexpr float RANGE_RUN_ATTACK = RANGE_NEAR * 0.75f;
 
+static bool infantry_has_live_enemy(const gentity_t *self) {
+	return self && self->enemy && self->enemy->inuse;
+}
+
 mframe_t infantry_frames_stand[] = {
 	{ ai_stand },
 	{ ai_stand },
@@ -114,7 +118,7 @@ mframe_t infantry_frames_fidget[] = {
 MMOVE_T(infantry_move_fidget) = { FRAME_stand01, FRAME_stand49, infantry_frames_fidget, infantry_stand };
 
 MONSTERINFO_IDLE(infantry_fidget) (gentity_t *self) -> void {
-	if (self->enemy)
+	if (infantry_has_live_enemy(self))
 		return;
 
 	M_SetAnimation(self, &infantry_move_fidget);
@@ -267,7 +271,7 @@ void InfantryMachineGun(gentity_t *self) {
 	vec3_t					 vec;
 	monster_muzzleflash_id_t flash_number;
 
-	if (!self->enemy || !self->enemy->inuse)
+	if (!infantry_has_live_enemy(self))
 		return;
 
 	bool is_run_attack = (self->s.frame >= FRAME_run201 && self->s.frame <= FRAME_run208);
@@ -282,11 +286,7 @@ void InfantryMachineGun(gentity_t *self) {
 		AngleVectors(self->s.angles, forward, right, nullptr);
 		start = M_ProjectFlashSource(self, monster_flash_offset[flash_number], forward, right);
 
-		if (self->enemy)
-			PredictAim(self, self->enemy, start, 0, true, -0.2f, &forward, nullptr);
-		else {
-			AngleVectors(self->s.angles, forward, right, nullptr);
-		}
+		PredictAim(self, self->enemy, start, 0, true, -0.2f, &forward, nullptr);
 	} else {
 		flash_number = static_cast<monster_muzzleflash_id_t>(MZ2_INFANTRY_MACHINEGUN_2 + (self->s.frame - FRAME_death211));
 
@@ -437,8 +437,9 @@ DIE(infantry_die) (gentity_t *self, gentity_t *inflictor, gentity_t *attacker, i
 		if (head) {
 			head->s.angles = self->s.angles;
 			head->s.origin = self->s.origin + vec3_t{ 0, 0, 32.f };
-			vec3_t headDir = (self->s.origin - inflictor->s.origin);
-			head->velocity = headDir / headDir.length() * 100.0f;
+			const vec3_t damage_origin = (inflictor && inflictor->inuse) ? inflictor->s.origin : point;
+			vec3_t		 headDir = (self->s.origin - damage_origin).normalized();
+			head->velocity = headDir * 100.0f;
 			head->velocity[2] = 200.0f;
 			head->avelocity *= 0.15f;
 			head->s.skinnum = 0;
@@ -463,7 +464,7 @@ extern const mmove_t infantry_move_attack4;
 void infantry_set_firetime(gentity_t *self) {
 	self->monsterinfo.fire_wait = level.time + random_time(0.7_sec, 2_sec);
 
-	if (!(self->monsterinfo.aiflags & AI_STAND_GROUND) && self->enemy && range_to(self, self->enemy) >= RANGE_RUN_ATTACK && ai_check_move(self, 8.0f))
+	if (!(self->monsterinfo.aiflags & AI_STAND_GROUND) && infantry_has_live_enemy(self) && range_to(self, self->enemy) >= RANGE_RUN_ATTACK && ai_check_move(self, 8.0f))
 		M_SetAnimation(self, &infantry_move_attack4, false);
 }
 
@@ -593,6 +594,9 @@ static void infantry_swing(gentity_t *self) {
 static void infantry_smack(gentity_t *self) {
 	vec3_t aim = { MELEE_DISTANCE, 0, 0 };
 
+	if (!infantry_has_live_enemy(self))
+		return;
+
 	if (fire_hit(self, aim, irandom(5, 10), 50))
 		gi.sound(self, CHAN_WEAPON, sound_punch_hit, 1, ATTN_NORM, 0);
 	else
@@ -620,7 +624,7 @@ static void infantry_attack4_refire(gentity_t *self) {
 		self->monsterinfo.nextframe = FRAME_attak114;
 	}
 	// we got too close, or we can't move forward, switch us back to regular attack
-	else if ((self->monsterinfo.aiflags & AI_STAND_GROUND) || (self->enemy && (range_to(self, self->enemy) < RANGE_RUN_ATTACK || !ai_check_move(self, 8.0f)))) {
+	else if ((self->monsterinfo.aiflags & AI_STAND_GROUND) || !infantry_has_live_enemy(self) || range_to(self, self->enemy) < RANGE_RUN_ATTACK || !ai_check_move(self, 8.0f)) {
 		M_SetAnimation(self, &infantry_move_attack1, false);
 		self->monsterinfo.nextframe = FRAME_attak103;
 		monster_done_dodge(self);
@@ -645,6 +649,9 @@ MMOVE_T(infantry_move_attack4) = { FRAME_run201, FRAME_run208, infantry_frames_a
 
 MONSTERINFO_ATTACK(infantry_attack) (gentity_t *self) -> void {
 	monster_done_dodge(self);
+
+	if (!infantry_has_live_enemy(self))
+		return;
 
 	float r = range_to(self, self->enemy);
 
@@ -715,7 +722,7 @@ mframe_t infantry_frames_jump2[] = {
 MMOVE_T(infantry_move_jump2) = { FRAME_jump01, FRAME_jump10, infantry_frames_jump2, infantry_run };
 
 static void infantry_jump(gentity_t *self, blocked_jump_result_t result) {
-	if (!self->enemy)
+	if (!infantry_has_live_enemy(self))
 		return;
 
 	monster_done_dodge(self);

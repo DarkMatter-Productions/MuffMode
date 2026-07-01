@@ -1,11 +1,11 @@
 // Copyright (c) ZeniMax Media Inc.
 // Licensed under the GNU General Public License 2.0.
 
-#include <cerrno>
 #include <limits>
 #include <sstream>
 
 #include "g_local.h"
+#include "muffmode/mm_parse.h"
 #include <float.h>
 #ifdef __clang__
 #pragma clang diagnostic push
@@ -835,7 +835,7 @@ FIELD_AUTO(pickup_msg_time),
 
 FIELD_AUTO(respawn_time),
 
-// chasecam not required to persist
+// follow camera not required to persist
 
 FIELD_AUTO(pu_time_double),
 FIELD_AUTO(ir_time),
@@ -2222,23 +2222,16 @@ static uint32_t ValidateSaveFormatVersion(const Json::Value &json, const char *s
 }
 
 static uint32_t ParseSavedEntityNumber(const char *id) {
-	if (!id || !*id || *id == '-' || *id == '+') {
+	const auto value = MM_ParseUInt32Arg(id);
+	if (!value) {
 		gi.Com_ErrorFmt("invalid entity id in level JSON: {}", id ? id : "");
 	}
 
-	char *end = nullptr;
-	errno = 0;
-	const unsigned long value = strtoul(id, &end, 10);
-	if (end == id || *end != '\0' || errno == ERANGE ||
-		value > static_cast<unsigned long>(std::numeric_limits<uint32_t>::max())) {
-		gi.Com_ErrorFmt("invalid entity id in level JSON: {}", id);
+	if (*value >= static_cast<uint32_t>(game.maxentities)) {
+		gi.Com_ErrorFmt("entity id {} exceeds maxentities {}", *value, game.maxentities);
 	}
 
-	if (value >= static_cast<unsigned long>(game.maxentities)) {
-		gi.Com_ErrorFmt("entity id {} exceeds maxentities {}", value, game.maxentities);
-	}
-
-	return static_cast<uint32_t>(value);
+	return *value;
 }
 
 static size_t SaveEntityCount() {

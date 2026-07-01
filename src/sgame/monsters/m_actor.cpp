@@ -17,6 +17,10 @@ constexpr const char *actor_names[] = {
 	"Bitterman"
 };
 
+static bool actor_has_live_enemy(const gentity_t *self) {
+	return self && self->enemy && self->enemy->inuse;
+}
+
 mframe_t actor_frames_stand[] = {
 	{ ai_stand },
 	{ ai_stand },
@@ -99,7 +103,7 @@ mframe_t actor_frames_run[] = {
 MMOVE_T(actor_move_run) = { FRAME_run02, FRAME_run07, actor_frames_run, nullptr };
 
 MONSTERINFO_RUN(actor_run) (gentity_t *self) -> void {
-	if ((level.time < self->pain_debounce_time) && (!self->enemy)) {
+	if ((level.time < self->pain_debounce_time) && !actor_has_live_enemy(self)) {
 		if (self->movetarget)
 			actor_walk(self);
 		else
@@ -191,7 +195,7 @@ static PAIN(actor_pain) (gentity_t *self, gentity_t *other, float kick, int dama
 	self->pain_debounce_time = level.time + 3_sec;
 	//	gi.sound (self, CHAN_VOICE, actor.sound_pain, 1, ATTN_NORM, 0);
 
-	if ((other->client) && (frandom() < 0.4f)) {
+	if (other && other->inuse && other->client && (frandom() < 0.4f)) {
 		vec3_t		v;
 		const char *name;
 
@@ -232,7 +236,7 @@ static void actorMachineGun(gentity_t *self) {
 
 	AngleVectors(self->s.angles, forward, right, nullptr);
 	start = G_ProjectSource(self->s.origin, monster_flash_offset[MZ2_ACTOR_MACHINEGUN_1], forward, right);
-	if (self->enemy) {
+	if (actor_has_live_enemy(self)) {
 		if (self->enemy->health > 0) {
 			target = self->enemy->s.origin + (self->enemy->velocity * -0.2f);
 			target[2] += self->enemy->viewheight;
@@ -330,6 +334,9 @@ mframe_t actor_frames_attack[] = {
 MMOVE_T(actor_move_attack) = { FRAME_attak01, FRAME_attak04, actor_frames_attack, actor_run };
 
 MONSTERINFO_ATTACK(actor_attack) (gentity_t *self) -> void {
+	if (!actor_has_live_enemy(self))
+		return;
+
 	M_SetAnimation(self, &actor_move_attack);
 	self->monsterinfo.fire_wait = level.time + random_time(1_sec, 2.6_sec);
 }
@@ -338,7 +345,7 @@ static USE(actor_use) (gentity_t *self, gentity_t *other, gentity_t *activator) 
 	vec3_t v;
 
 	self->goalentity = self->movetarget = G_PickTarget(self->target);
-	if ((!self->movetarget) || (strcmp(self->movetarget->classname, "target_actor") != 0)) {
+	if (!self->movetarget || !self->movetarget->inuse || !self->movetarget->classname || strcmp(self->movetarget->classname, "target_actor")) {
 		gi.Com_PrintFmt("{}: bad target {}\n", *self, self->target);
 		self->target = nullptr;
 		self->monsterinfo.pausetime = HOLD_FOREVER;
@@ -431,12 +438,16 @@ constexpr spawnflags_t SPAWNFLAG_TARGET_ACTOR_BRUTAL = 32_spawnflag;
 static TOUCH(target_actor_touch) (gentity_t *self, gentity_t *other, const trace_t &tr, bool other_touching_self) -> void {
 	vec3_t v;
 
+	if (!other || !other->inuse)
+		return;
+
 	if (other->movetarget != self)
 		return;
 
-	if (other->enemy)
+	if (actor_has_live_enemy(other))
 		return;
 
+	other->enemy = nullptr;
 	other->goalentity = other->movetarget = nullptr;
 
 	// [Paril-KEX] Defensive: validate message pointer and clients before printing

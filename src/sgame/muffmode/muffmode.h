@@ -9,6 +9,7 @@
 #include "mm_captain.h"
 #include "mm_combat_heatmap.h"
 #include "mm_debug.h"
+#include "mm_freezetag.h"
 #include "mm_gametype.h"
 #include "mm_ghost.h"
 #include "mm_horde.h"

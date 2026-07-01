@@ -3,12 +3,50 @@
 
 #pragma once
 
+#include <cstddef>
 #include <string>
+#include <string_view>
 #include <vector>
 
 struct gentity_t;
 
 namespace muffmode::maps {
+
+inline bool IsSafeMapTokenText(std::string_view mapname, size_t max_qpath) noexcept
+{
+	if (mapname.empty() || mapname.size() >= max_qpath)
+		return false;
+
+	auto is_separator = [](char c) {
+		return c == '/' || c == '\\';
+	};
+
+	auto is_safe_segment = [](std::string_view segment) {
+		return !segment.empty() && segment != "." && segment != "..";
+	};
+
+	size_t segment_start = 0;
+	for (size_t i = 0; i < mapname.size(); i++) {
+		const unsigned char c = static_cast<unsigned char>(mapname[i]);
+
+		if (c <= ' ' || c == 0x7F || c == '"' || c == '\'' || c == ';' || c == ':' ||
+			c == '*' || c == '?' || c == '<' || c == '>' || c == '|') {
+			return false;
+		}
+
+		if (mapname[i] == '.' && i + 1 < mapname.size() && mapname[i + 1] == '.')
+			return false;
+
+		if (!is_separator(mapname[i]))
+			continue;
+
+		if (!is_safe_segment(mapname.substr(segment_start, i - segment_start)))
+			return false;
+		segment_start = i + 1;
+	}
+
+	return is_safe_segment(mapname.substr(segment_start));
+}
 
 // Typed helpers for internal MuffMode systems that need the sanitized map pool/list.
 std::vector<std::string> CollectConfiguredMaps();

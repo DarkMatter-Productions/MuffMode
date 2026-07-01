@@ -5,6 +5,7 @@
 #include "monsters/m_player.h"
 #include "bots/bot_includes.h"
 #include "muffmode/mm_captain.h"
+#include "muffmode/mm_freezetag.h"
 #include "muffmode/mm_ghost.h"
 #include "muffmode/mm_horde.h"
 #include "muffmode/mm_lms.h"
@@ -749,15 +750,24 @@ void ClientSpawn(gentity_t *ent) {
 	client_respawn_t		resp;
 	client_session_t		sess;
 
-	if (GTF(GTF_ROUNDS) && GTF(GTF_ELIMINATION) && level.match_state == matchst_t::MATCH_IN_PROGRESS && notGT(GT_HORDE))
-		if (level.round_state == roundst_t::ROUND_IN_PROGRESS || level.round_state == roundst_t::ROUND_ENDED)
+	if (GTF(GTF_ROUNDS) && level.match_state == matchst_t::MATCH_IN_PROGRESS && notGT(GT_HORDE)) {
+		const bool round_locked = level.round_state == roundst_t::ROUND_IN_PROGRESS ||
+			level.round_state == roundst_t::ROUND_ENDED;
+		if (round_locked) {
+			const bool freeze_thaw_respawn = MM_FreezeTag_IsFrozen(ent);
+
 			// LMS uses the Horde-style lives model: a mid-round (re)spawn with lives left is a
 			// living respawn, not an elimination. Only auto-eliminate LMS spawners who are out
 			// of lives (latecomers/round-joiners get no lives, so they spectate until next round).
-			if (notGT(GT_LMS) || ent->client->pers.lives <= 0)
+			if (!freeze_thaw_respawn && GTF(GTF_ELIMINATION) && (notGT(GT_LMS) || ent->client->pers.lives <= 0))
 				ClientSetEliminated(ent);
+			else if (ClientIsPlaying(ent->client) && !freeze_thaw_respawn && MM_FreezeTag_ShouldHoldSpawnForRound())
+				ClientSetEliminated(ent);
+		}
+	}
 
 	G_ClearLagCompensationHistory(ent);
+	MM_FreezeTag_ClearClient(ent);
 
 	if (GT(GT_HORDE) && level.match_state == matchst_t::MATCH_IN_PROGRESS &&
 		level.round_state == roundst_t::ROUND_IN_PROGRESS && !ent->client->eliminated)
@@ -1057,7 +1067,7 @@ void ClientSpawn(gentity_t *ent) {
 	}
 	
 	// force the current weapon up
-	if (GTF(GTF_ARENA) && client->pers.inventory[IT_WEAPON_RLAUNCHER])
+	if (MM_UsesArenaSpawnLoadout() && client->pers.inventory[IT_WEAPON_RLAUNCHER])
 		client->newweapon = &itemlist[IT_WEAPON_RLAUNCHER];
 	else
 		client->newweapon = client->pers.weapon;
@@ -1505,15 +1515,8 @@ bool ClientConnect(gentity_t *ent, char *userinfo, const char *social_id, bool i
 			ent->client->sess.team = deathmatch->integer ? TEAM_SPECTATOR : TEAM_FREE;
 			P_PublishEngineTeam(ent);
 			//InitPlayerTeam(ent);
-			ent->client->sess.pc.show_id = true;
-			ent->client->sess.pc.show_timer = true;
+			ent->client->sess.pc = MM_DefaultClientConfig();
 			ent->client->sess.pc.show_match_info = true;
-			ent->client->sess.pc.show_fragmessages = true;
-			ent->client->sess.pc.killbeep_num = 1;
-			ent->client->sess.pc.follow_killer = false;
-			ent->client->sess.pc.follow_powerup = false;
-			ent->client->sess.pc.enemy_skin[0] = 0;
-			ent->client->sess.pc.team_skin[0] = 0;
 
 			InitClientResp(ent->client);
 		}
@@ -1990,7 +1993,7 @@ void ClientThink(gentity_t *ent, usercmd_t *ucmd) {
 	}
 
 	// [Paril-KEX] pass buttons through even if we are in intermission or
-	// chasing.
+	// following.
 	client->oldbuttons = client->buttons;
 	client->buttons = ucmd->buttons;
 	client->latched_buttons |= client->buttons & ~client->oldbuttons;
@@ -2013,14 +2016,9 @@ void ClientThink(gentity_t *ent, usercmd_t *ucmd) {
 	if (!ClientIsPlaying(client) || client->eliminated) {
 		if (client->follow_queued_target && level.time > client->follow_queued_time + 500_ms) {
 			// eliminated players in team elimination modes may only follow their own team
-			bool queued_allowed = true;
-			if (client->eliminated && Teams() && client->follow_queued_target->client)
-				queued_allowed = (client->follow_queued_target->client->sess.team == client->sess.team);
-
-			if (queued_allowed) {
-				client->follow_target = client->follow_queued_target;
-				client->follow_update = true;
-				UpdateChaseCam(ent);
+			if (FollowTargetAllowed(ent, client->follow_queued_target)) {
+				SetFollowTarget(ent, client->follow_queued_target);
+				UpdateFollowCamera(ent);
 			}
 			client->follow_queued_target = nullptr;
 			client->follow_queued_time = 0_sec;
@@ -2109,6 +2107,9 @@ void ClientThink(gentity_t *ent, usercmd_t *ucmd) {
 		ent->movetype = MOVETYPE_FREECAM;
 		return;
 	}
+
+	if (MM_FreezeTag_ClientThink(ent, ucmd))
+		return;
 
 	if (ent->client->follow_target) {
 		client->resp.cmd_angles = ucmd->angles;
@@ -2275,6 +2276,20 @@ void ClientThink(gentity_t *ent, usercmd_t *ucmd) {
 	}
 
 	// fire weapon from final position if needed
+	if ((client->latched_buttons & BUTTON_USE) && client->follow_target && (!ClientIsPlaying(client) || (client->eliminated && !client->sess.is_a_bot))) {
+		if (!client->menu) {
+			client->latched_buttons &= ~BUTTON_USE;
+			ToggleFollowViewMode(ent);
+		}
+	}
+
+	if ((client->latched_buttons & BUTTON_CROUCH) && client->follow_target && (!ClientIsPlaying(client) || (client->eliminated && !client->sess.is_a_bot))) {
+		if (!client->menu) {
+			client->latched_buttons &= ~BUTTON_CROUCH;
+			FollowPrev(ent);
+		}
+	}
+
 	if (client->latched_buttons & BUTTON_ATTACK) {
 		if (!ClientIsPlaying(client) || (client->eliminated && !client->sess.is_a_bot)) {
 			if (!client->menu) {
@@ -2314,10 +2329,10 @@ void ClientThink(gentity_t *ent, usercmd_t *ucmd) {
 		}
 	}
 
-	// update chase cam if being followed
+	// update follow camera if being followed
 	for (auto ec : active_clients())
 		if (ec->client->follow_target == ent)
-			UpdateChaseCam(ec);
+			UpdateFollowCamera(ec);
 
 	// perform once-a-second actions
 	ClientTimerActions(ent);
@@ -2507,11 +2522,11 @@ inline std::tuple<gentity_t *, vec3_t> G_FindSquadRespawnTarget() {
 	return { nullptr, {} };
 }
 
-enum respawn_state_t {
-	RESPAWN_NONE,     // invalid state
-	RESPAWN_SPECTATE, // move to spectator
-	RESPAWN_SQUAD,    // move to good squad point
-	RESPAWN_START     // move to start of map
+enum class respawn_state_t {
+	none,     // invalid state
+	spectate, // move to spectator
+	squad,    // move to good squad point
+	start     // move to start of map
 };
 
 // [Paril-KEX] return false to fall back to click-to-respawn behavior.
@@ -2527,18 +2542,18 @@ static bool G_CoopRespawn(gentity_t *ent) {
 	if (!g_coop_squad_respawn->integer && !g_coop_enable_lives->integer)
 		return false;
 
-	respawn_state_t state = RESPAWN_NONE;
+	respawn_state_t state = respawn_state_t::none;
 
 	// first pass: if we have no lives left, just move to spectator
 	if (g_coop_enable_lives->integer) {
 		if (ent->client->pers.lives == 0) {
-			state = RESPAWN_SPECTATE;
+			state = respawn_state_t::spectate;
 			ent->client->coop_respawn_state = COOP_RESPAWN_NO_LIVES;
 		}
 	}
 
 	// second pass: check for where to spawn
-	if (state == RESPAWN_NONE) {
+	if (state == respawn_state_t::none) {
 		// if squad respawn, don't respawn until we can find a good player to spawn on.
 		if (coop->integer && g_coop_squad_respawn->integer) {
 			bool allDead = true;
@@ -2553,12 +2568,12 @@ static bool G_CoopRespawn(gentity_t *ent) {
 			// all dead, so if we ever get here we have lives enabled;
 			// we should just respawn at the start of the level
 			if (allDead)
-				state = RESPAWN_START;
+				state = respawn_state_t::start;
 			else {
 				auto [good_player, good_spot] = G_FindSquadRespawnTarget();
 
 				if (good_player) {
-					state = RESPAWN_SQUAD;
+					state = respawn_state_t::squad;
 
 					squad_respawn_position = good_spot;
 					squad_respawn_angles = good_player->s.angles;
@@ -2566,14 +2581,14 @@ static bool G_CoopRespawn(gentity_t *ent) {
 
 					use_squad_respawn = true;
 				} else {
-					state = RESPAWN_SPECTATE;
+					state = respawn_state_t::spectate;
 				}
 			}
 		} else
-			state = RESPAWN_START;
+			state = respawn_state_t::start;
 	}
 
-	if (state == RESPAWN_SQUAD || state == RESPAWN_START) {
+	if (state == respawn_state_t::squad || state == respawn_state_t::start) {
 		// give us our max health back since it will reset
 		// to pers.health; in instanced items we'd lose the items
 		// we touched so we always want to respawn with our max.
@@ -2584,7 +2599,7 @@ static bool G_CoopRespawn(gentity_t *ent) {
 
 		ent->client->latched_buttons = BUTTON_NONE;
 		use_squad_respawn = false;
-	} else if (state == RESPAWN_SPECTATE) {
+	} else if (state == respawn_state_t::spectate) {
 		if (!ent->client->coop_respawn_state)
 			ent->client->coop_respawn_state = COOP_RESPAWN_WAITING;
 
@@ -2636,6 +2651,9 @@ void ClientBeginServerFrame(gentity_t *ent) {
 		return;
 	}
 
+	if (MM_FreezeTag_RunClientFrame(ent))
+		return;
+
 	if ((ent->svflags & SVF_BOT) != 0) {
 		Bot_BeginFrame(ent);
 	}
@@ -2647,6 +2665,12 @@ void ClientBeginServerFrame(gentity_t *ent) {
 		client->weapon_thunk = false;
 
 	if (ent->deadflag) {
+		if (deathmatch->integer && MM_FreezeTag_ShouldRespawnForRoundCountdown(ent) &&
+				level.time > client->respawn_time && !level.coop_level_restart_time) {
+			ClientRespawn(ent);
+			return;
+		}
+
 		if (deathmatch->integer && ClientArenaEliminationRound(client) &&
 				level.time > client->respawn_time && !level.coop_level_restart_time) {
 			ClientRespawn(ent);

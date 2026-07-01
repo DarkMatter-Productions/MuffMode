@@ -2,6 +2,7 @@
 // Licensed under the GNU General Public License 2.0.
 // Grapple and off-hand hook weapon behavior.
 #include "g_local.h"
+#include "muffmode/mm_freezetag.h"
 
 namespace {
 constexpr float GRAPPLE_NORMAL_VOLUME = 1.0f;
@@ -55,6 +56,16 @@ static TOUCH(Weapon_Grapple_Touch) (gentity_t *self, gentity_t *other, const tra
 	self->velocity = {};
 
 	PlayerNoise(self->owner, self->s.origin, PNOISE_IMPACT);
+
+	if (MM_FreezeTag_IsFrozen(other)) {
+		self->owner->client->grapple_state = GRAPPLE_STATE_PULL;
+		self->enemy = other;
+		self->solid = SOLID_NOT;
+
+		gi.sound(self, CHAN_WEAPON, gi.soundindex("weapons/grapple/grhit.wav"), GrappleSoundVolume(self->owner), ATTN_NORM, 0);
+		self->s.sound = gi.soundindex("weapons/grapple/grpull.wav");
+		return;
+	}
 
 	if (other->takedamage) {
 		if (self->dmg)
@@ -115,6 +126,10 @@ void Weapon_Grapple_Pull(gentity_t *self) {
 			Weapon_Grapple_Reset(self);
 			return;
 		}
+		if (self->enemy->client && !MM_FreezeTag_IsFrozen(self->enemy)) {
+			Weapon_Grapple_Reset(self);
+			return;
+		}
 		if (self->enemy->solid == SOLID_BBOX) {
 			v = self->enemy->size * 0.5f;
 			v += self->enemy->s.origin;
@@ -130,6 +145,27 @@ void Weapon_Grapple_Pull(gentity_t *self) {
 	}
 
 	Weapon_Grapple_DrawCable(self);
+
+	if (self->enemy && MM_FreezeTag_IsFrozen(self->enemy)) {
+		vec3_t target = self->owner->s.origin;
+		target[2] += self->owner->viewheight;
+		vec3_t body = self->enemy->s.origin;
+		body[2] += 16.0f;
+		hookdir = target - body;
+		vlen = hookdir.length();
+
+		if (vlen > 48.0f) {
+			hookdir.normalize();
+			self->enemy->velocity = hookdir * g_grapple_pull_speed->value;
+			G_AddGravity(self->enemy);
+			gi.linkentity(self->enemy);
+		} else {
+			self->enemy->velocity = {};
+		}
+
+		self->owner->flags &= ~FL_NO_KNOCKBACK;
+		return;
+	}
 
 	if (self->owner->client->grapple_state > GRAPPLE_STATE_FLY) {
 		// pull player toward grapple

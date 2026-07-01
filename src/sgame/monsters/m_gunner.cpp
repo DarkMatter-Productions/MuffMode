@@ -20,6 +20,10 @@ static cached_soundindex sound_open;
 static cached_soundindex sound_search;
 static cached_soundindex sound_sight;
 
+static bool gunner_has_live_enemy(const gentity_t *self) {
+	return self && self->enemy && self->enemy->inuse;
+}
+
 void gunner_idlesound(gentity_t *self) {
 	gi.sound(self, CHAN_VOICE, sound_idle, 1, ATTN_IDLE, 0);
 }
@@ -90,7 +94,7 @@ MMOVE_T(gunner_move_fidget) = { FRAME_stand31, FRAME_stand70, gunner_frames_fidg
 static void gunner_fidget(gentity_t *self) {
 	if (self->monsterinfo.aiflags & AI_STAND_GROUND)
 		return;
-	else if (self->enemy)
+	else if (gunner_has_live_enemy(self))
 		return;
 	if (frandom() <= 0.05f)
 		M_SetAnimation(self, &gunner_move_fidget);
@@ -364,7 +368,7 @@ void GunnerFire(gentity_t *self) {
 	vec3_t					 aim;
 	monster_muzzleflash_id_t flash_number;
 
-	if (!self->enemy || !self->enemy->inuse)
+	if (!gunner_has_live_enemy(self))
 		return;
 
 	flash_number = static_cast<monster_muzzleflash_id_t>(MZ2_GUNNER_MACHINEGUN_1 + (self->s.frame - FRAME_attak216));
@@ -378,7 +382,7 @@ void GunnerFire(gentity_t *self) {
 static bool gunner_grenade_check(gentity_t *self) {
 	vec3_t	dir;
 
-	if (!self->enemy)
+	if (!gunner_has_live_enemy(self))
 		return false;
 
 	vec3_t start;
@@ -416,7 +420,7 @@ void GunnerGrenade(gentity_t *self) {
 	vec3_t					target;
 	bool					blindfire = false;
 
-	if (!self->enemy || !self->enemy->inuse)
+	if (!gunner_has_live_enemy(self))
 		return;
 
 	if (self->monsterinfo.aiflags & AI_MANUAL_STEERING)
@@ -454,24 +458,22 @@ void GunnerGrenade(gentity_t *self) {
 	AngleVectors(self->s.angles, forward, right, up);
 	start = M_ProjectFlashSource(self, monster_flash_offset[flash_number], forward, right);
 
-	if (self->enemy) {
-		float dist;
+	float dist;
 
-		aim = target - self->s.origin;
-		dist = aim.length();
+	aim = target - self->s.origin;
+	dist = aim.length();
 
-		// aim up if they're on the same level as me and far away.
-		if ((dist > 512) && (aim[2] < 64) && (aim[2] > -64)) {
-			aim[2] += (dist - 512);
-		}
-
-		aim.normalize();
-		pitch = aim[2];
-		if (pitch > 0.4f)
-			pitch = 0.4f;
-		else if (pitch < -0.5f)
-			pitch = -0.5f;
+	// aim up if they're on the same level as me and far away.
+	if ((dist > 512) && (aim[2] < 64) && (aim[2] > -64)) {
+		aim[2] += (dist - 512);
 	}
+
+	aim.normalize();
+	pitch = aim[2];
+	if (pitch > 0.4f)
+		pitch = 0.4f;
+	else if (pitch < -0.5f)
+		pitch = -0.5f;
 
 	aim = forward + (right * spread);
 	aim += (up * pitch);
@@ -628,6 +630,9 @@ MONSTERINFO_ATTACK(gunner_attack) (gentity_t *self) -> void {
 	}
 
 	// PGM - gunner needs to use his chaingun if he's being attacked by a tesla.
+	if (!gunner_has_live_enemy(self))
+		return;
+
 	if (self->bad_area || self->timestamp > level.time ||
 		(range_to(self, self->enemy) <= RANGE_NEAR * 0.35f && M_CheckClearShot(self, monster_flash_offset[MZ2_GUNNER_MACHINEGUN_1]))) {
 		M_SetAnimation(self, &gunner_move_attack_chain);
@@ -645,7 +650,7 @@ void gunner_fire_chain(gentity_t *self) {
 }
 
 void gunner_refire_chain(gentity_t *self) {
-	if (self->enemy->health > 0)
+	if (gunner_has_live_enemy(self) && self->enemy->health > 0)
 		if (visible(self, self->enemy))
 			if (frandom() <= 0.5f) {
 				M_SetAnimation(self, &gunner_move_fire_chain, false);
@@ -709,7 +714,7 @@ mframe_t gunner_frames_jump2[] = {
 MMOVE_T(gunner_move_jump2) = { FRAME_jump01, FRAME_jump10, gunner_frames_jump2, gunner_run };
 
 static void gunner_jump(gentity_t *self, blocked_jump_result_t result) {
-	if (!self->enemy)
+	if (!gunner_has_live_enemy(self))
 		return;
 
 	monster_done_dodge(self);

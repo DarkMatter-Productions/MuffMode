@@ -28,6 +28,10 @@ static cached_soundindex sound_strike;
 constexpr spawnflags_t SPAWNFLAG_TANK_COMMANDER_GUARDIAN = 8_spawnflag;
 constexpr spawnflags_t SPAWNFLAG_TANK_COMMANDER_HEAT_SEEKING = 16_spawnflag;
 
+static bool tank_has_live_enemy(const gentity_t *self) {
+	return self && self->enemy && self->enemy->inuse;
+}
+
 //
 // misc
 //
@@ -159,7 +163,7 @@ mframe_t tank_frames_run[] = {
 MMOVE_T(tank_move_run) = { FRAME_walk05, FRAME_walk20, tank_frames_run, nullptr };
 
 MONSTERINFO_RUN(tank_run) (gentity_t *self) -> void {
-	if (self->enemy && self->enemy->client)
+	if (tank_has_live_enemy(self) && self->enemy->client)
 		self->monsterinfo.aiflags |= AI_BRUTAL;
 	else
 		self->monsterinfo.aiflags &= ~AI_BRUTAL;
@@ -309,7 +313,7 @@ static void TankBlaster(gentity_t *self) {
 	vec3_t					 dir;
 	monster_muzzleflash_id_t flash_number;
 
-	if (!self->enemy || !self->enemy->inuse)
+	if (!tank_has_live_enemy(self))
 		return;
 
 	bool   blindfire = self->monsterinfo.aiflags & AI_MANUAL_STEERING;
@@ -353,7 +357,7 @@ static void TankRocket(gentity_t *self) {
 	int						rocketSpeed;
 	vec3_t					target;	// pmm - blindfire support
 
-	if (!self->enemy || !self->enemy->inuse)
+	if (!tank_has_live_enemy(self))
 		return;
 
 	bool   blindfire = self->monsterinfo.aiflags & AI_MANUAL_STEERING;
@@ -434,7 +438,7 @@ static void TankMachineGun(gentity_t *self) {
 	vec3_t					 forward, right;
 	monster_muzzleflash_id_t flash_number;
 
-	if (!self->enemy || !self->enemy->inuse)
+	if (!tank_has_live_enemy(self))
 		return;
 
 	flash_number = static_cast<monster_muzzleflash_id_t>(MZ2_TANK_MACHINEGUN_1 + (self->s.frame - FRAME_attak406));
@@ -443,15 +447,11 @@ static void TankMachineGun(gentity_t *self) {
 
 	start = M_ProjectFlashSource(self, monster_flash_offset[flash_number], forward, right);
 
-	if (self->enemy) {
-		vec = self->enemy->s.origin;
-		vec[2] += self->enemy->viewheight;
-		vec -= start;
-		vec = vectoangles(vec);
-		dir[0] = vec[0];
-	} else {
-		dir[0] = 0;
-	}
+	vec = self->enemy->s.origin;
+	vec[2] += self->enemy->viewheight;
+	vec -= start;
+	vec = vectoangles(vec);
+	dir[0] = vec[0];
 	if (self->s.frame <= FRAME_attak415)
 		dir[1] = self->s.angles[YAW] - 8 * (self->s.frame - FRAME_attak411);
 	else
@@ -517,7 +517,7 @@ void tank_reattack_blaster(gentity_t *self) {
 		return;
 	}
 
-	if (visible(self, self->enemy))
+	if (tank_has_live_enemy(self) && visible(self, self->enemy))
 		if (self->enemy->health > 0)
 			if (frandom() <= 0.6f) {
 				M_SetAnimation(self, &tank_move_reattack_blast);
@@ -686,7 +686,7 @@ void tank_refire_rocket(gentity_t *self) {
 	}
 	// pmm
 
-	if (self->enemy->health > 0)
+	if (tank_has_live_enemy(self) && self->enemy->health > 0)
 		if (visible(self, self->enemy))
 			if (frandom() <= 0.4f) {
 				M_SetAnimation(self, &tank_move_attack_fire_rocket);
@@ -705,7 +705,7 @@ MONSTERINFO_ATTACK(tank_attack) (gentity_t *self) -> void {
 	float  r;
 	float chance;
 
-	if (!self->enemy || !self->enemy->inuse)
+	if (!tank_has_live_enemy(self))
 		return;
 
 	if (self->enemy->health <= 0) {
@@ -945,7 +945,7 @@ void SP_monster_tank(gentity_t *self) {
 	gi.soundindex("tank/tnkatk2e.wav");
 	gi.soundindex("tank/tnkatck3.wav");
 
-	if (strcmp(self->classname, "monster_tank_commander") == 0) {
+	if (self->classname && strcmp(self->classname, "monster_tank_commander") == 0) {
 		self->health = 1000 * st.health_multiplier;
 		self->gib_health = -225;
 		self->count = 1;
@@ -993,7 +993,7 @@ void SP_monster_tank(gentity_t *self) {
 	self->monsterinfo.aiflags |= AI_IGNORE_SHOTS;
 	self->monsterinfo.blindfire = true;
 
-	if (strcmp(self->classname, "monster_tank_commander") == 0)
+	if (self->classname && strcmp(self->classname, "monster_tank_commander") == 0)
 		self->s.skinnum = 2;
 }
 

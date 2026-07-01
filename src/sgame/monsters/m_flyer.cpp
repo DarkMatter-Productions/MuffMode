@@ -27,6 +27,15 @@ void flyer_kamikaze(gentity_t *self);
 void flyer_kamikaze_check(gentity_t *self);
 void flyer_die(gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int damage, const vec3_t &point, const mod_t &mod);
 
+static bool flyer_has_live_enemy(const gentity_t *self) {
+	return self && self->enemy && self->enemy->inuse;
+}
+
+static bool flyer_has_live_commander_classname(const gentity_t *self, const char *classname) {
+	const gentity_t *commander = self ? self->monsterinfo.commander : nullptr;
+	return commander && commander->inuse && commander->classname && !strcmp(commander->classname, classname);
+}
+
 MONSTERINFO_SIGHT(flyer_sight) (gentity_t *self, gentity_t *other) -> void {
 	gi.sound(self, CHAN_VOICE, sound_sight, 1, ATTN_NORM, 0);
 }
@@ -222,11 +231,10 @@ MONSTERINFO_STAND(flyer_stand) (gentity_t *self) -> void {
 static void flyer_kamikaze_explode(gentity_t *self) {
 	vec3_t dir;
 
-	if (self->monsterinfo.commander && self->monsterinfo.commander->inuse &&
-		!strcmp(self->monsterinfo.commander->classname, "monster_carrier"))
+	if (flyer_has_live_commander_classname(self, "monster_carrier"))
 		self->monsterinfo.commander->monsterinfo.monster_slots++;
 
-	if (self->enemy) {
+	if (flyer_has_live_enemy(self)) {
 		dir = self->enemy->s.origin - self->s.origin;
 		T_Damage(self->enemy, self, self, dir, self->s.origin, vec3_origin, (int)50, (int)50, DAMAGE_RADIUS, MOD_UNKNOWN);
 	}
@@ -247,7 +255,7 @@ void flyer_kamikaze_check(gentity_t *self) {
 	if (!self->inuse)
 		return;
 
-	if ((!self->enemy) || (!self->enemy->inuse)) {
+	if (!flyer_has_live_enemy(self)) {
 		flyer_kamikaze_explode(self);
 		return;
 	}
@@ -297,7 +305,7 @@ static void flyer_fire(gentity_t *self, monster_muzzleflash_id_t flash_number) {
 	vec3_t	  end;
 	vec3_t	  dir;
 
-	if (!self->enemy || !self->enemy->inuse)
+	if (!flyer_has_live_enemy(self))
 		return;
 
 	AngleVectors(self->s.angles, forward, right, nullptr);
@@ -363,6 +371,9 @@ mframe_t flyer_frames_attack3[] = {
 MMOVE_T(flyer_move_attack3) = { FRAME_attak201, FRAME_attak217, flyer_frames_attack3, flyer_run };
 
 static void flyer_slash_left(gentity_t *self) {
+	if (!flyer_has_live_enemy(self))
+		return;
+
 	vec3_t aim = { MELEE_DISTANCE, self->mins[0], 0 };
 	if (!fire_hit(self, aim, 5, 0))
 		self->monsterinfo.melee_debounce_time = level.time + 1.5_sec;
@@ -370,6 +381,9 @@ static void flyer_slash_left(gentity_t *self) {
 }
 
 static void flyer_slash_right(gentity_t *self) {
+	if (!flyer_has_live_enemy(self))
+		return;
+
 	vec3_t aim = { MELEE_DISTANCE, self->maxs[0], 0 };
 	if (!fire_hit(self, aim, 5, 0))
 		self->monsterinfo.melee_debounce_time = level.time + 1.5_sec;
@@ -439,9 +453,12 @@ MONSTERINFO_ATTACK(flyer_attack) (gentity_t *self) -> void {
 		return;
 	}
 
+	if (!flyer_has_live_enemy(self))
+		return;
+
 	float range = range_to(self, self->enemy);
 
-	if (self->enemy && visible(self, self->enemy) && range <= 225.f && frandom() > (range / 225.f) * 0.35f) {
+	if (visible(self, self->enemy) && range <= 225.f && frandom() > (range / 225.f) * 0.35f) {
 		// fly-by slicing!
 		self->monsterinfo.attack_state = AS_STRAIGHT;
 		M_SetAnimation(self, &flyer_move_start_melee);
@@ -453,7 +470,7 @@ MONSTERINFO_ATTACK(flyer_attack) (gentity_t *self) -> void {
 
 	// [Paril-KEX] for alternate fly mode, sometimes we'll pin us
 	// down, kind of like a pseudo-stand ground
-	if (!self->monsterinfo.fly_pinned && brandom() && self->enemy && visible(self, self->enemy)) {
+	if (!self->monsterinfo.fly_pinned && brandom() && flyer_has_live_enemy(self) && visible(self, self->enemy)) {
 		self->monsterinfo.fly_pinned = true;
 		self->monsterinfo.fly_position_time = max(self->monsterinfo.fly_position_time, self->monsterinfo.fly_position_time + 1.7_sec); // make sure there's enough time for attack2/3
 
@@ -476,6 +493,12 @@ MONSTERINFO_MELEE(flyer_melee) (gentity_t *self) -> void {
 }
 
 void flyer_check_melee(gentity_t *self) {
+	if (!flyer_has_live_enemy(self)) {
+		M_SetAnimation(self, &flyer_move_end_melee);
+		flyer_set_fly_parameters(self, false);
+		return;
+	}
+
 	if (range_to(self, self->enemy) <= RANGE_MELEE) {
 		if (self->monsterinfo.melee_debounce_time <= level.time) {
 			M_SetAnimation(self, &flyer_move_loop_melee);
@@ -571,6 +594,9 @@ static TOUCH(kamikaze_touch) (gentity_t *ent, gentity_t *other, const trace_t &t
 }
 
 static TOUCH(flyer_touch) (gentity_t *ent, gentity_t *other, const trace_t &tr, bool other_touching_self) -> void {
+	if (!other || !other->inuse)
+		return;
+
 	if ((other->monsterinfo.aiflags & AI_ALTERNATE_FLY) && (other->flags & FL_FLY) &&
 		(ent->monsterinfo.duck_wait_time < level.time)) {
 		ent->monsterinfo.duck_wait_time = level.time + 1_sec;

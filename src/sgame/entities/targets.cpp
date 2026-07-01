@@ -1,44 +1,25 @@
 // Copyright (c) ZeniMax Media Inc.
 // Licensed under the GNU General Public License 2.0.
-#include <cerrno>
 #include <limits>
 
 #include "g_local.h"
-
-static bool TargetParseConsumesWholeToken(const char *token, const char *end) {
-	return token != nullptr && token[0] != '\0' && end != nullptr && end != token && *end == '\0';
-}
+#include "muffmode/mm_parse.h"
 
 static bool TargetParseFiniteFloat(const char *token, float &out) {
-	if (token == nullptr || token[0] == '\0') {
+	const auto value = MM_ParseFloatArg(token);
+	if (!value)
 		return false;
-	}
 
-	char *end = nullptr;
-	errno = 0;
-	const float value = strtof(token, &end);
-	if (!TargetParseConsumesWholeToken(token, end) || errno == ERANGE || !std::isfinite(value)) {
-		return false;
-	}
-
-	out = value;
+	out = *value;
 	return true;
 }
 
 static bool TargetParseUInt32(const char *token, uint32_t &out) {
-	if (token == nullptr || token[0] == '\0' || token[0] == '-' || token[0] == '+') {
+	const auto value = MM_ParseUInt32Arg(token);
+	if (!value)
 		return false;
-	}
 
-	char *end = nullptr;
-	errno = 0;
-	const unsigned long value = strtoul(token, &end, 10);
-	if (!TargetParseConsumesWholeToken(token, end) || errno == ERANGE ||
-		value > static_cast<unsigned long>(std::numeric_limits<uint32_t>::max())) {
-		return false;
-	}
-
-	out = static_cast<uint32_t>(value);
+	out = *value;
 	return true;
 }
 

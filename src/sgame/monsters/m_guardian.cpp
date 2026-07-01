@@ -219,6 +219,9 @@ static void guardian_fire_blaster(gentity_t *self) {
 	vec3_t start;
 	monster_muzzleflash_id_t id = MZ2_GUARDIAN_BLASTER;
 
+	if (!self->enemy || !self->enemy->inuse)
+		return;
+
 	AngleVectors(self->s.angles, forward, right, nullptr);
 	start = M_ProjectFlashSource(self, monster_flash_offset[id], forward, right);
 	target = self->enemy->s.origin;
@@ -290,12 +293,24 @@ constexpr vec3_t laser_positions[] = {
 
 static PRETHINK(guardian_fire_update) (gentity_t *laser) -> void {
 	gentity_t *self = laser->owner;
+	if (!self || !self->inuse) {
+		G_FreeEntity(laser);
+		return;
+	}
 
 	vec3_t forward, right, target;
 	vec3_t start;
 
 	AngleVectors(self->s.angles, forward, right, nullptr);
 	start = M_ProjectFlashSource(self, laser_positions[1 - (self->s.frame & 1)], forward, right);
+	if (!self->enemy || !self->enemy->inuse) {
+		laser->s.origin = start;
+		laser->movedir = forward;
+		gi.linkentity(laser);
+		dabeam_update(laser, false);
+		return;
+	}
+
 	target = self->enemy->s.origin + self->enemy->mins;
 	for (int i = 0; i < 3; i++)
 		target[i] += frandom() * self->enemy->size[i];

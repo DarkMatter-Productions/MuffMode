@@ -82,8 +82,7 @@ jobs:
             Write-Host "Copilot auth: RELEASE_BOT_TOKEN repository secret (legacy fallback)."
           }
           else {
-            Write-Host "Copilot auth: none. Release will use deterministic English README and English copies for localized guide files."
-            Write-Host "Add COPILOT_GITHUB_TOKEN (fine-grained user PAT with Copilot Requests) for Copilot-generated guides and translations."
+            throw "Set COPILOT_GITHUB_TOKEN (fine-grained user PAT with Copilot Requests) so localized README files can be translated."
           }
 
           if ([string]::IsNullOrWhiteSpace($env:DISCORD_RELEASE_WEBHOOK)) {
@@ -209,8 +208,7 @@ jobs:
             Write-Host "Copilot auth: RELEASE_BOT_TOKEN repository secret (legacy fallback)."
           }
           else {
-            Write-Host "Copilot auth: none. Release will use deterministic English README and English copies for localized guide files."
-            Write-Host "Add COPILOT_GITHUB_TOKEN (fine-grained user PAT with Copilot Requests) for Copilot-generated guides and translations."
+            throw "Set COPILOT_GITHUB_TOKEN (fine-grained user PAT with Copilot Requests) so localized README files can be translated."
           }
 
       - name: Setup Node.js

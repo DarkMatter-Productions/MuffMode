@@ -75,9 +75,16 @@ extern const mmove_t widow_move_attack_post_blaster_r;
 extern const mmove_t widow_move_attack_post_blaster_l;
 extern const mmove_t widow_move_attack_blaster;
 
+static bool WidowHasLiveEnemy(const gentity_t *self) {
+	return self && self->enemy && self->enemy->inuse;
+}
+
 static float target_angle(gentity_t *self) {
 	vec3_t target;
 	float  enemy_yaw;
+
+	if (!WidowHasLiveEnemy(self))
+		return 0;
 
 	target = self->s.origin - self->enemy->s.origin;
 	enemy_yaw = self->s.angles[YAW] - vectoyaw(target);
@@ -154,7 +161,7 @@ static void WidowBlaster(gentity_t *self) {
 	monster_muzzleflash_id_t flashnum;
 	effects_t				 effect;
 
-	if (!self->enemy)
+	if (!WidowHasLiveEnemy(self))
 		return;
 
 	shotsfired++;
@@ -481,6 +488,9 @@ void WidowRail(gentity_t *self) {
 }
 
 static void WidowSaveLoc(gentity_t *self) {
+	if (!WidowHasLiveEnemy(self))
+		return;
+
 	self->pos1 = self->enemy->s.origin; // save for aiming the shot
 	self->pos1[2] += self->enemy->viewheight;
 };
@@ -542,6 +552,9 @@ MMOVE_T(widow_move_attack_rail_l) = { FRAME_firec01, FRAME_firec09, widow_frames
 
 void widow_attack_rail(gentity_t *self) {
 	float enemy_angle;
+
+	if (!WidowHasLiveEnemy(self))
+		return;
 
 	enemy_angle = target_angle(self);
 
@@ -695,6 +708,9 @@ MMOVE_T(widow_move_death) = { FRAME_death01, FRAME_death31, widow_frames_death, 
 
 static void widow_attack_kick(gentity_t *self) {
 	vec3_t aim = { 100, 0, 4 };
+	if (!WidowHasLiveEnemy(self))
+		return;
+
 	if (self->enemy->groundentity)
 		fire_hit(self, aim, irandom(50, 56), 500);
 	else // not as much kick if they're in the air .. makes it harder to land on her head
@@ -737,6 +753,9 @@ MONSTERINFO_ATTACK(widow_attack) (gentity_t *self) -> void {
 	bool  rail_frames = false, blaster_frames = false, blocked = false, anger = false;
 
 	self->movetarget = nullptr;
+
+	if (!WidowHasLiveEnemy(self))
+		return;
 
 	if (self->monsterinfo.aiflags & AI_BLOCKED) {
 		blocked = true;
@@ -830,6 +849,9 @@ MONSTERINFO_ATTACK(widow_attack) (gentity_t *self) -> void {
 }
 
 void widow_attack_blaster(gentity_t *self) {
+	if (!WidowHasLiveEnemy(self))
+		return;
+
 	self->monsterinfo.fire_wait = level.time + random_time(1_sec, 3_sec);
 	M_SetAnimation(self, &widow_move_attack_blaster);
 	self->monsterinfo.nextframe = WidowTorso(self);
@@ -997,7 +1019,7 @@ void WidowPowerups(gentity_t *self) {
 }
 
 MONSTERINFO_CHECKATTACK(Widow_CheckAttack) (gentity_t *self) -> bool {
-	if (!self->enemy)
+	if (!WidowHasLiveEnemy(self))
 		return false;
 
 	WidowPowerups(self);

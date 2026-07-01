@@ -272,6 +272,11 @@ static void WidowDisrupt(gentity_t *self) {
 	vec3_t forward, right;
 	float  len;
 
+	if (!self->enemy || !self->enemy->inuse) {
+		widow2_run(self);
+		return;
+	}
+
 	AngleVectors(self->s.angles, forward, right, nullptr);
 	start = G_ProjectSource(self->s.origin, monster_flash_offset[MZ2_WIDOW_DISRUPTOR], forward, right);
 
@@ -377,13 +382,29 @@ static bool widow2_tongue_attack_ok(const vec3_t &start, const vec3_t &end, floa
 	return true;
 }
 
+static bool widow2_tongue_start(gentity_t *self, vec3_t &start) {
+	const int32_t frame_index = self->s.frame - FRAME_tongs01;
+	if (frame_index < 0 || frame_index >= static_cast<int32_t>(q_countof(offsets)))
+		return false;
+
+	vec3_t f, r, u;
+	AngleVectors(self->s.angles, f, r, u);
+	start = G_ProjectSource2(self->s.origin, offsets[frame_index], f, r, u);
+	return true;
+}
+
 static void Widow2Tongue(gentity_t *self) {
-	vec3_t	f, r, u;
 	vec3_t	start, end, dir;
 	trace_t tr;
 
-	AngleVectors(self->s.angles, f, r, u);
-	start = G_ProjectSource2(self->s.origin, offsets[self->s.frame - FRAME_tongs01], f, r, u);
+	if (!self->enemy || !self->enemy->inuse) {
+		self->monsterinfo.run(self);
+		return;
+	}
+
+	if (!widow2_tongue_start(self, start))
+		return;
+
 	end = self->enemy->s.origin;
 	if (!widow2_tongue_attack_ok(start, end, 256)) {
 		end[2] = self->enemy->s.origin[2] + self->enemy->maxs[2] - 8;
@@ -414,7 +435,7 @@ static void Widow2Tongue(gentity_t *self) {
 
 static void Widow2TonguePull(gentity_t *self) {
 	vec3_t vec;
-	vec3_t f, r, u;
+	vec3_t forward;
 	vec3_t start, end;
 
 	if ((!self->enemy) || (!self->enemy->inuse)) {
@@ -422,8 +443,9 @@ static void Widow2TonguePull(gentity_t *self) {
 		return;
 	}
 
-	AngleVectors(self->s.angles, f, r, u);
-	start = G_ProjectSource2(self->s.origin, offsets[self->s.frame - FRAME_tongs01], f, r, u);
+	if (!widow2_tongue_start(self, start))
+		return;
+
 	end = self->enemy->s.origin;
 
 	if (!widow2_tongue_attack_ok(start, end, 256))
@@ -436,6 +458,7 @@ static void Widow2TonguePull(gentity_t *self) {
 	}
 
 	vec = self->s.origin - self->enemy->s.origin;
+	AngleVectors(self->s.angles, forward, nullptr, nullptr);
 
 	if (self->enemy->client) {
 		vec.normalize();
@@ -443,7 +466,7 @@ static void Widow2TonguePull(gentity_t *self) {
 	} else {
 		self->enemy->ideal_yaw = vectoyaw(vec);
 		M_ChangeYaw(self->enemy);
-		self->enemy->velocity = f * 1000;
+		self->enemy->velocity = forward * 1000;
 	}
 }
 
@@ -644,7 +667,7 @@ MONSTERINFO_ATTACK(widow2_attack) (gentity_t *self) -> void {
 		self->monsterinfo.aiflags &= ~AI_BLOCKED;
 	}
 
-	if (!self->enemy)
+	if (!self->enemy || !self->enemy->inuse)
 		return;
 
 	float real_enemy_range = realrange(self, self->enemy);
@@ -735,6 +758,11 @@ void widow2_attack_beam(gentity_t *self) {
 void widow2_reattack_beam(gentity_t *self) {
 	self->monsterinfo.aiflags &= ~AI_MANUAL_STEERING;
 
+	if (!self->enemy || !self->enemy->inuse) {
+		M_SetAnimation(self, &widow2_move_attack_post_beam);
+		return;
+	}
+
 	if (infront(self, self->enemy))
 		if (frandom() <= 0.5f)
 			if ((frandom() < 0.7f) || (M_SlotsLeft(self) < 2))
@@ -789,6 +817,7 @@ void widow2_dead(gentity_t *self) {}
 
 static void KillChildren(gentity_t *self) {
 	gentity_t *ent = nullptr;
+	const vec3_t damage_origin = (self->enemy && self->enemy->inuse) ? self->enemy->s.origin : self->s.origin;
 
 	while (1) {
 		ent = G_FindByString<&gentity_t::classname>(ent, "monster_stalker");
@@ -797,7 +826,7 @@ static void KillChildren(gentity_t *self) {
 
 		// FIXME - may need to stagger
 		if ((ent->inuse) && (ent->health > 0))
-			T_Damage(ent, self, self, vec3_origin, self->enemy->s.origin, vec3_origin, (ent->health + 1), 0, DAMAGE_NO_KNOCKBACK, MOD_UNKNOWN);
+			T_Damage(ent, self, self, vec3_origin, damage_origin, vec3_origin, (ent->health + 1), 0, DAMAGE_NO_KNOCKBACK, MOD_UNKNOWN);
 	}
 }
 
@@ -849,7 +878,7 @@ static DIE(widow2_die) (gentity_t *self, gentity_t *inflictor, gentity_t *attack
 }
 
 MONSTERINFO_CHECKATTACK(Widow2_CheckAttack) (gentity_t *self) -> bool {
-	if (!self->enemy)
+	if (!self->enemy || !self->enemy->inuse)
 		return false;
 
 	WidowPowerups(self);

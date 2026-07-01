@@ -25,6 +25,10 @@ static cached_soundindex sound_idle;
 static cached_soundindex sound_search;
 static cached_soundindex sound_sight;
 
+static bool GladiatorHasLiveEnemy(const gentity_t *self) {
+	return self && self->enemy && self->enemy->inuse;
+}
+
 MONSTERINFO_IDLE(gladiator_idle) (gentity_t *self) -> void {
 	gi.sound(self, CHAN_VOICE, sound_idle, 1, ATTN_IDLE, 0);
 }
@@ -134,6 +138,9 @@ static void GladiatorGun(gentity_t *self) {
 	vec3_t dir;
 	vec3_t forward, right;
 
+	if (!self->pos1)
+		return;
+
 	AngleVectors(self->s.angles, forward, right, nullptr);
 	start = M_ProjectFlashSource(self, monster_flash_offset[MZ2_GLADIATOR_RAILGUN_1], forward, right);
 
@@ -162,6 +169,9 @@ static void gladbGun(gentity_t *self) {
 	vec3_t dir;
 	vec3_t forward, right;
 
+	if (!self->pos1)
+		return;
+
 	AngleVectors(self->s.angles, forward, right, nullptr);
 	start = M_ProjectFlashSource(self, monster_flash_offset[MZ2_GLADIATOR_RAILGUN_1], forward, right);
 
@@ -180,6 +190,9 @@ static void gladbGun(gentity_t *self) {
 	fire_phalanx(self, start, dir, damage, 725, radius_damage, radius_damage);
 
 	// save for aiming the shot
+	if (!GladiatorHasLiveEnemy(self))
+		return;
+
 	self->pos1 = self->enemy->s.origin;
 	self->pos1[2] += self->enemy->viewheight;
 }
@@ -205,6 +218,9 @@ MMOVE_T(gladb_move_attack_gun) = { FRAME_attack1, FRAME_attack9, gladb_frames_at
 MONSTERINFO_ATTACK(gladiator_attack) (gentity_t *self) -> void {
 	float  range;
 	vec3_t v;
+
+	if (!GladiatorHasLiveEnemy(self))
+		return;
 
 	// a small safe zone
 	v = self->s.origin - self->enemy->s.origin;
@@ -382,7 +398,7 @@ void SP_monster_gladiator(gentity_t *self) {
 	gi.modelindex("models/monsters/gladiatr/gibs/rarm.md2");
 	gi.modelindex("models/monsters/gladiatr/gibs/thigh.md2");
 
-	if (strcmp(self->classname, "monster_gladb") == 0) {
+	if (self->classname && strcmp(self->classname, "monster_gladb") == 0) {
 		sound_gunb.assign("weapons/plasshot.wav");
 
 		self->health = 250 * st.health_multiplier;

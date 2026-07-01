@@ -3,6 +3,7 @@
 #include "g_local.h"
 #include "core/statusbar.h"
 #include "muffmode/mm_duel.h"
+#include "muffmode/mm_freezetag.h"
 #include "muffmode/mm_hud_stat_contracts.h"
 #include "muffmode/mm_horde.h"
 #include "muffmode/mm_lms.h"
@@ -61,6 +62,18 @@ const char *HudCountdownProgressLabel()
 	if (limit > 0)
 		return G_Fmt("Round {} of {}", n, limit).data();
 	return G_Fmt("Round {}", n).data();
+}
+
+static int PovHudConfigString(gentity_t *ent, mm_pov_configstring_lane_t lane)
+{
+	if (!ent || !ent->client)
+		return 0;
+
+	const int ci = (int)(ent - g_entities - 1);
+	if (ci < 0)
+		return 0;
+
+	return MM_PovConfigStringForClient(static_cast<size_t>(ci), static_cast<size_t>(game.maxclients), lane);
 }
 
 static void UpdateCountdownHud(gentity_t *ent)
@@ -371,7 +384,7 @@ void TeamsScoreboardMessage(gentity_t *ent, gentity_t *killer) {
 		sortedscores[team][j] = score;
 		totalscore[team] += score;
 		total[team]++;
-		if (!game.clients[i].eliminated)
+		if (GT(GT_FREEZE) ? MM_FreezeTag_ClientIsActiveFighter(cl_ent) : !game.clients[i].eliminated)
 			total_living[team]++;
 	}
 
@@ -451,7 +464,14 @@ void TeamsScoreboardMessage(gentity_t *ent, gentity_t *killer) {
 			if (level.match_state == MATCH_WARMUP_READYUP && (cl->resp.ready || cl->sess.is_a_bot))
 				fmt::format_to(std::back_inserter(string),
 					FMT_STRING("xv -56 yv {} picn {} "), ty - 2, "wheel/p_compass_selected");
-			else if (GTF(GTF_ROUNDS) && level.match_state == MATCH_IN_PROGRESS && !cl->eliminated)
+			else if (GTF(GTF_ROUNDS) && level.match_state == MATCH_IN_PROGRESS && GT(GT_FREEZE)) {
+				if (MM_FreezeTag_IsFrozen(cl_ent))
+					fmt::format_to(std::back_inserter(string),
+						FMT_STRING("xv -52 yv {} string2 \"F\" "), ty);
+				else if (MM_FreezeTag_ClientIsActiveFighter(cl_ent))
+					fmt::format_to(std::back_inserter(string),
+						FMT_STRING("xv -50 yv {} picn {} "), ty, "sbfctf1");
+			} else if (GTF(GTF_ROUNDS) && level.match_state == MATCH_IN_PROGRESS && !cl->eliminated)
 				fmt::format_to(std::back_inserter(string),
 					FMT_STRING("xv -50 yv {} picn {} "), ty, "sbfctf1");
 
@@ -481,7 +501,14 @@ void TeamsScoreboardMessage(gentity_t *ent, gentity_t *killer) {
 			if (level.match_state == MATCH_WARMUP_READYUP && (cl->resp.ready || cl->sess.is_a_bot))
 				fmt::format_to(std::back_inserter(string),
 					FMT_STRING("xv 182 yv {} picn {} "), ty - 2, "wheel/p_compass_selected");
-			else if (GTF(GTF_ROUNDS) && level.match_state == MATCH_IN_PROGRESS && !cl->eliminated)
+			else if (GTF(GTF_ROUNDS) && level.match_state == MATCH_IN_PROGRESS && GT(GT_FREEZE)) {
+				if (MM_FreezeTag_IsFrozen(cl_ent))
+					fmt::format_to(std::back_inserter(string),
+						FMT_STRING("xv 188 yv {} string2 \"F\" "), ty);
+				else if (MM_FreezeTag_ClientIsActiveFighter(cl_ent))
+					fmt::format_to(std::back_inserter(string),
+						FMT_STRING("xv 190 yv {} picn {} "), ty, "sbfctf2");
+			} else if (GTF(GTF_ROUNDS) && level.match_state == MATCH_IN_PROGRESS && !cl->eliminated)
 				fmt::format_to(std::back_inserter(string),
 					FMT_STRING("xv 190 yv {} picn {} "), ty, "sbfctf2");
 
@@ -877,9 +904,17 @@ static void G_SetGametypeStats(gentity_t *ent) {
 		}
 		ent->client->ps.stats[STAT_RULESET_HUD] = 0;
 	} else if (deathmatch->integer && level.match_state == MATCH_IN_PROGRESS && level.round_state != roundst_t::ROUND_COUNTDOWN
-		&& (GT(GT_CA) || GT(GT_RR) || GT(GT_STRIKE) || GT(GT_LMS))) {
+		&& (GT(GT_CA) || GT(GT_FREEZE) || GT(GT_RR) || GT(GT_STRIKE) || GT(GT_LMS))) {
 		const int display_round = HudRoundDisplayNumber();
-		if (display_round > 0) {
+		if (GT(GT_FREEZE)) {
+			std::string round_status;
+			if (MM_FreezeTag_BuildRoundHudStatus(display_round, round_status)) {
+				gi.configstring(CONFIG_GAMETYPE_HUD, round_status.c_str());
+				ent->client->ps.stats[STAT_GAMETYPE_HUD] = CONFIG_GAMETYPE_HUD;
+			} else {
+				ent->client->ps.stats[STAT_GAMETYPE_HUD] = 0;
+			}
+		} else if (display_round > 0) {
 			const int limit = roundlimit->integer;
 			if (limit > 0)
 				gi.configstring(CONFIG_GAMETYPE_HUD, G_Fmt("Round {} of {}", display_round, limit).data());
@@ -897,6 +932,8 @@ static void G_SetGametypeStats(gentity_t *ent) {
 			} else {
 				ent->client->ps.stats[STAT_RULESET_HUD] = 0;
 			}
+		} else if (GT(GT_FREEZE)) {
+			ent->client->ps.stats[STAT_RULESET_HUD] = 0;
 		} else if (!GT(GT_CA) && !GT(GT_RR)) {
 			ent->client->ps.stats[STAT_RULESET_HUD] = 0;
 		}
@@ -916,27 +953,35 @@ static void G_SetGametypeStats(gentity_t *ent) {
 
 		ent->client->ps.stats[STAT_ARENA_ROLE] = 0;
 
-		const int ci = (int)(ent - g_entities - 1);
-
-		if (GTF(GTF_ELIMINATION) && GTF(GTF_TEAMS) && GTF(GTF_CTF) && GT(GT_STRIKE)
+		if (GT(GT_FREEZE) && MM_FreezeTag_IsFrozen(ent)) {
+			const int cs = PovHudConfigString(ent, mm_pov_configstring_lane_t::Primary);
+			if (cs != 0) {
+				const int thaw_pct = MM_FreezeTag_ThawProgressPercent(ent);
+				if (thaw_pct > 0)
+					gi.configstring(cs, G_Fmt("THAWING {}%", thaw_pct).data());
+				else
+					gi.configstring(cs, "FROZEN");
+				ent->client->ps.stats[STAT_ARENA_ROLE] = cs;
+			}
+		} else if (GTF(GTF_ELIMINATION) && GTF(GTF_TEAMS) && GTF(GTF_CTF) && GT(GT_STRIKE)
 			&& level.round_state != roundst_t::ROUND_COUNTDOWN
-			&& ClientIsPlaying(ent->client)) {
-			if (ci >= 0 && (size_t)ci < CONFIG_POV_CENTER_POOL_SLOTS) {
+			&& ClientIsPlaying(ent->client) && !ent->client->eliminated) {
+			const int cs = PovHudConfigString(ent, mm_pov_configstring_lane_t::Primary);
+			if (cs != 0) {
 				const bool attacking = ent->client->sess.team == (level.strike_red_attacks ? TEAM_RED : TEAM_BLUE);
-				const int cs = (int)(CONFIG_POV_CENTER_POOL + (size_t)ci);
 				gi.configstring(cs, attacking ? "OFFENSE" : "DEFENSE");
 				ent->client->ps.stats[STAT_ARENA_ROLE] = cs;
 			}
 		} else if (GTF(GTF_ELIMINATION) && GTF(GTF_TEAMS) && !GTF(GTF_CTF)
 			&& ClientIsPlaying(ent->client) && ent->client->eliminated) {
-			if (ci >= 0 && (size_t)ci < CONFIG_POV_CENTER_POOL_SLOTS) {
-				const int cs = (int)(CONFIG_POV_CENTER_POOL + (size_t)ci);
+			const int cs = PovHudConfigString(ent, mm_pov_configstring_lane_t::Primary);
+			if (cs != 0) {
 				gi.configstring(cs, "ELIMINATED");
 				ent->client->ps.stats[STAT_ARENA_ROLE] = cs;
 			}
 		}
 
-		if (GTF(GTF_ROUNDS) && !GT(GT_CA) && !GT(GT_RR) && !GT(GT_STRIKE) && !GT(GT_HORDE) && !GT(GT_LMS)) {
+		if (GTF(GTF_ROUNDS) && !GT(GT_CA) && !GT(GT_FREEZE) && !GT(GT_RR) && !GT(GT_STRIKE) && !GT(GT_HORDE) && !GT(GT_LMS)) {
 			const int display_round = HudRoundDisplayNumber();
 			if (display_round > 0) {
 				const int limit = GT_ScoreLimit();
@@ -987,9 +1032,8 @@ static void G_SetGametypeStats(gentity_t *ent) {
 			? "1 enemy remaining"
 			: G_Fmt("{} enemies remaining", enemies).data();
 
-		const int ci = (int)(ent - g_entities - 1);
-		if (ci >= 0 && (size_t)ci < CONFIG_POV_CENTER_POOL_SLOTS) {
-			const int cs = (int)(CONFIG_POV_CENTER_POOL + (size_t)ci);
+		const int cs = PovHudConfigString(ent, mm_pov_configstring_lane_t::Primary);
+		if (cs != 0) {
 			gi.configstring(cs, line);
 			ent->client->ps.stats[STAT_CENTER_LINE] = cs;
 		}
@@ -1823,19 +1867,19 @@ void G_SetStats(gentity_t *ent) {
 	}
 	
 	if (ent->client->pers.medal_time + 3_sec > level.time) {
-		ent->client->ps.stats[STAT_CHASE] = 0;	// CONFIG_TEAMINFO;
+		ent->client->ps.stats[STAT_FOLLOW] = 0;	// CONFIG_TEAMINFO;
 	} else {
-		ent->client->ps.stats[STAT_CHASE] = 0;
+		ent->client->ps.stats[STAT_FOLLOW] = 0;
 	}
 
 }
 
 /*
 ===============
-G_CheckChaseStats
+G_CheckFollowStats
 ===============
 */
-void G_CheckChaseStats(gentity_t *ent) {
+void G_CheckFollowStats(gentity_t *ent) {
 	for (auto player : active_clients()) {
 		if (player->client->follow_target != ent)
 			continue;
@@ -1858,8 +1902,6 @@ void G_SetSpectatorStats(gentity_t *ent) {
 		// Still publish team identity even when following (in case we follow someone on a team).
 		P_PublishEngineTeam(ent);
 
-	cl->ps.stats[STAT_SPECTATOR] = 1;
-
 	// layouts are independant in spectator
 	cl->ps.stats[STAT_LAYOUTS] = 0;
 	if (cl->pers.health <= 0 || level.intermission_time || cl->showscores)
@@ -1868,9 +1910,13 @@ void G_SetSpectatorStats(gentity_t *ent) {
 		cl->ps.stats[STAT_LAYOUTS] |= LAYOUTS_INVENTORY;
 
 	if (cl->follow_target && cl->follow_target->inuse) {
-		cl->ps.stats[STAT_CHASE] = CONFIG_CHASE_PLAYER_NAME +
+		cl->ps.stats[STAT_SPECTATOR] = FollowFirstPersonEnabled(ent) ?
+			CONFIG_SPECTATOR_MODE_FOLLOW_FIRST :
+			CONFIG_SPECTATOR_MODE_FOLLOW_THIRD;
+		cl->ps.stats[STAT_FOLLOW] = CONFIG_FOLLOW_PLAYER_NAME +
 			(cl->follow_target - g_entities) - 1;
 	} else {
-		cl->ps.stats[STAT_CHASE] = 0;
+		cl->ps.stats[STAT_SPECTATOR] = CONFIG_SPECTATOR_MODE_FREE;
+		cl->ps.stats[STAT_FOLLOW] = 0;
 	}
 }

@@ -2,9 +2,10 @@
 // Licensed under the GNU General Public License 2.0.
 
 #include "g_local.h"
+#include "muffmode/mm_pconfig.h"
+#include "muffmode/mm_pconfig_rules.h"
 #include "muffmode/mm_skin.h"
 
-#include <cctype>
 #include <cstring>
 
 //=======================================================================
@@ -24,42 +25,6 @@ bool MM_IsClientEntity(gentity_t *ent) {
 	return ent && ent->inuse && ent->client && ent->client->pers.connected;
 }
 
-bool MM_IsDisableToken(const char *value) {
-	return !Q_strcasecmp(value, "off") ||
-		!Q_strcasecmp(value, "clear") ||
-		!Q_strcasecmp(value, "reset") ||
-		!Q_strcasecmp(value, "default");
-}
-
-bool MM_IsSafeSkinPath(const char *skin) {
-	if (!skin || !*skin)
-		return false;
-
-	bool saw_slash = false;
-	char previous = 0;
-
-	for (const char *c = skin; *c; ++c) {
-		const unsigned char ch = static_cast<unsigned char>(*c);
-
-		if (std::isalnum(ch) || ch == '_' || ch == '-') {
-			previous = *c;
-			continue;
-		}
-
-		if (ch == '/') {
-			if (c == skin || previous == '/' || c[1] == 0)
-				return false;
-			saw_slash = true;
-			previous = *c;
-			continue;
-		}
-
-		return false;
-	}
-
-	return saw_slash && !std::strstr(skin, "..");
-}
-
 size_t MM_PlayerSkinConfigStringLength(const char *netname, const char *skin) {
 	return std::strlen(netname) + 1 + std::strlen(skin) + 1 + std::strlen("default");
 }
@@ -68,14 +33,14 @@ bool MM_PlayerSkinConfigStringFits(const char *netname, const char *skin, int32_
 	return MM_PlayerSkinConfigStringLength(netname, skin) < CS_SIZE(CS_PLAYERSKINS + playernum);
 }
 
-bool MM_PlayerSkinFitsAnyNetname(const char *skin) {
-	return ((MAX_NETNAME - 1) + 1 + std::strlen(skin) + 1 + std::strlen("default")) < CS_SIZE(CS_PLAYERSKINS);
+bool MM_PlayerSkinCanBeStored(const char *skin) {
+	return skin && muffmode::pconfig::IsStorableSkinPath(skin, MAX_QPATH, MAX_NETNAME - 1, CS_SIZE(CS_PLAYERSKINS));
 }
 
 bool MM_BuildSkinOverrideConfigString(gentity_t *target, const char *skin, char (&buffer)[CS_MAX_STRING_LENGTH]) {
 	if (!MM_IsClientEntity(target) || !skin || !*skin)
 		return false;
-	if (!MM_IsSafeSkinPath(skin) || !MM_PlayerSkinFitsAnyNetname(skin))
+	if (!MM_PlayerSkinCanBeStored(skin))
 		return false;
 
 	const int32_t playernum = target - g_entities - 1;
@@ -231,14 +196,15 @@ void MM_CmdSkinOverride(gentity_t *ent, bool is_enemy, const char *label, const 
 
 	const char *skin = gi.argv(1);
 
-	if (MM_IsDisableToken(skin)) {
+	if (muffmode::pconfig::IsDisableToken(skin)) {
 		store[0] = 0;
+		MM_ClientSavePConfigOrWarn(ent);
 		MM_RefreshSkinOverridesForViewer(ent);
 		gi.LocClient_Print(ent, PRINT_HIGH, "{} skin override cleared. Only your view changes; {} now use their normal skins for you.\n", label, affected_players);
 		return;
 	}
 
-	if (!MM_IsSafeSkinPath(skin)) {
+	if (!muffmode::pconfig::IsSafeSkinPath(skin)) {
 		gi.LocClient_Print(ent, PRINT_HIGH,
 			"Usage: {} <model/skin> (example: {} male/grunt) or {} off. Only your view changes; {} are affected.\n"
 			"Skin paths may use letters, numbers, '_', '-', and '/'.\n",
@@ -246,12 +212,13 @@ void MM_CmdSkinOverride(gentity_t *ent, bool is_enemy, const char *label, const 
 		return;
 	}
 
-	if (!MM_PlayerSkinFitsAnyNetname(skin)) {
+	if (!MM_PlayerSkinCanBeStored(skin)) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "{} is too long for player skin configstrings.\n", skin);
 		return;
 	}
 
 	Q_strlcpy(store, skin, MAX_QPATH);
+	MM_ClientSavePConfigOrWarn(ent);
 	MM_RefreshSkinOverridesForViewer(ent);
 	gi.LocClient_Print(ent, PRINT_HIGH, "{} skin override set to '{}'. Only your view changes; {} will use that skin for you.\n", label, skin, affected_players);
 }
