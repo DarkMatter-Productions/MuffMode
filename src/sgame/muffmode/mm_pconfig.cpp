@@ -752,7 +752,10 @@ MM_CmdInfoHud
 */
 void MM_CmdInfoHud(gentity_t *ent)
 {
-	if (!muffmode::pconfig::RequireNoCommandArgs(ent))
+	if (!ent || !ent->client)
+		return;
+
+	if (!muffmode::pconfig::RequireCommandArgc(ent, 1, 1, gi.argv(0)))
 		return;
 
 	ent->client->sess.pc.show_match_info ^= true;
