@@ -4,9 +4,43 @@
 #pragma once
 
 #include "mm_parse.h"
+#include "mm_util.h"
 
+#include <algorithm>
+#include <cstring>
 #include <string>
 #include <string_view>
+#include <utility>
+
+inline constexpr size_t MM_MAX_LOC_LABEL_CHARS = 64;
+
+inline std::string MM_SanitizeLocLabel(std::string_view label)
+{
+	std::string out;
+	out.reserve(std::min(label.size(), MM_MAX_LOC_LABEL_CHARS));
+
+	bool last_was_space = false;
+	for (const unsigned char ch : label) {
+		if (out.size() >= MM_MAX_LOC_LABEL_CHARS)
+			break;
+
+		if (ch < ' ' || ch == 0x7F || MM_IsAsciiWhitespace(static_cast<char>(ch))) {
+			if (!out.empty() && !last_was_space) {
+				out += ' ';
+				last_was_space = true;
+			}
+			continue;
+		}
+
+		out += static_cast<char>(ch);
+		last_was_space = false;
+	}
+
+	while (!out.empty() && out.back() == ' ')
+		out.pop_back();
+
+	return out;
+}
 
 // Parse one line of a Quake .loc file of the form:
 //
@@ -17,7 +51,7 @@
 // with the world position and out_label with the whitespace-trimmed place name.
 inline bool MM_ParseLocLine(const char *line, float out_xyz[3], std::string &out_label)
 {
-	if (!line)
+	if (!line || !out_xyz)
 		return false;
 
 	const char *p = line;
@@ -51,10 +85,14 @@ inline bool MM_ParseLocLine(const char *line, float out_xyz[3], std::string &out
 	if (label_begin == label_end)
 		return false;
 
+	std::string label = MM_SanitizeLocLabel(std::string_view(label_begin, static_cast<size_t>(label_end - label_begin)));
+	if (label.empty())
+		return false;
+
 	out_xyz[0] = vals[0];
 	out_xyz[1] = vals[1];
 	out_xyz[2] = vals[2];
-	out_label.assign(label_begin, static_cast<size_t>(label_end - label_begin));
+	out_label = std::move(label);
 	return true;
 }
 
@@ -84,7 +122,8 @@ inline std::string MM_BuildLocBody(const char *args, const char *label)
 {
 	constexpr size_t MM_MAX_LOC_MSG = 150;
 	constexpr const char *MM_LOC_LOCATION_TOKENS[] = { "%l", "%L" };
-	const std::string repl = std::string("[") + (label ? label : "") + "]";
+	const std::string safe_label = MM_SanitizeLocLabel(label ? std::string_view(label) : std::string_view());
+	const std::string repl = std::string("[") + safe_label + "]";
 
 	std::string body(MM_TrimAsciiWhitespace((args && *args) ? std::string_view(args) : std::string_view()));
 
@@ -104,8 +143,5 @@ inline std::string MM_BuildLocBody(const char *args, const char *label)
 		}
 	}
 
-	if (body.size() > MM_MAX_LOC_MSG)
-		body.resize(MM_MAX_LOC_MSG);
-
-	return body;
+	return muffmode::TruncateWithEllipsis(body, MM_MAX_LOC_MSG);
 }

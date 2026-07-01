@@ -196,44 +196,10 @@ std::optional<std::string> ReadConfigText(FILE *file)
 	return buffer;
 }
 
-std::string_view StripConfigComment(std::string_view line)
-{
-	size_t comment = std::string_view::npos;
-	const auto mark_comment = [&comment](size_t pos) {
-		if (pos != std::string_view::npos)
-			comment = comment == std::string_view::npos ? pos : std::min(comment, pos);
-	};
-
-	mark_comment(line.find("//"));
-	mark_comment(line.find('#'));
-	mark_comment(line.find(';'));
-
-	if (comment != std::string_view::npos)
-		line = line.substr(0, comment);
-
-	return MM_TrimAsciiWhitespace(line);
-}
-
-bool ReadSingleArg(std::string_view args, std::string_view &value)
-{
-	args = MM_TrimAsciiWhitespace(args);
-	if (args.empty())
-		return false;
-
-	const size_t split = args.find_first_of(" \t\r\n\v\f");
-	if (split == std::string_view::npos) {
-		value = args;
-		return true;
-	}
-
-	value = args.substr(0, split);
-	return MM_TrimAsciiWhitespace(args.substr(split)).empty();
-}
-
 config_line_result_t ApplyBoolLine(bool &field, std::string_view args, const char *name, int line_number)
 {
 	std::string_view value;
-	if (!ReadSingleArg(args, value)) {
+	if (!ReadSingleConfigArg(args, value)) {
 		gi.Com_PrintFmt("{}:{}: expected one boolean value.\n", name, line_number);
 		return config_line_result_t::invalid;
 	}
@@ -251,7 +217,7 @@ config_line_result_t ApplyBoolLine(bool &field, std::string_view args, const cha
 config_line_result_t ApplyKillBeepLine(client_config_t &config, std::string_view args, const char *name, int line_number)
 {
 	std::string_view value;
-	if (!ReadSingleArg(args, value)) {
+	if (!ReadSingleConfigArg(args, value)) {
 		gi.Com_PrintFmt("{}:{}: expected one kill beep value.\n", name, line_number);
 		return config_line_result_t::invalid;
 	}
@@ -269,7 +235,7 @@ config_line_result_t ApplyKillBeepLine(client_config_t &config, std::string_view
 config_line_result_t ApplyFollowViewLine(client_config_t &config, std::string_view args, const char *name, int line_number)
 {
 	std::string_view value;
-	if (!ReadSingleArg(args, value)) {
+	if (!ReadSingleConfigArg(args, value)) {
 		gi.Com_PrintFmt("{}:{}: expected one follow view value.\n", name, line_number);
 		return config_line_result_t::invalid;
 	}
@@ -287,7 +253,7 @@ config_line_result_t ApplyFollowViewLine(client_config_t &config, std::string_vi
 config_line_result_t ApplySkinLine(char (&store)[MAX_QPATH], std::string_view args, const char *name, int line_number)
 {
 	std::string_view value;
-	if (!ReadSingleArg(args, value)) {
+	if (!ReadSingleConfigArg(args, value)) {
 		gi.Com_PrintFmt("{}:{}: expected one skin value.\n", name, line_number);
 		return config_line_result_t::invalid;
 	}

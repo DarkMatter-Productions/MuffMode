@@ -7,10 +7,13 @@
 #include "muffmode/mm_horde_ai_rules.h"
 #include "muffmode/mm_lms_rules.h"
 #include "muffmode/mm_loc_parse.h"
+#include "muffmode/mm_maps.h"
+#include "muffmode/mm_motd.h"
 #include "muffmode/mm_parse.h"
 #include "muffmode/mm_pconfig_rules.h"
 #include "muffmode/mm_red_rover_rules.h"
 #include "muffmode/mm_time_format.h"
+#include "muffmode/mm_util.h"
 
 #include <cstdint>
 #include <cstdio>
@@ -106,6 +109,28 @@ MM_TEST(parse_uint32_rejects_signed_malformed_and_overflow_values) {
 	MM_CHECK_FALSE(MM_ParseUInt32Text(std::string_view(embedded_null, sizeof(embedded_null))));
 }
 
+MM_TEST(parse_bool_accepts_common_tokens_without_guessing) {
+	MM_CHECK_EQ(*MM_ParseBoolArg("1"), true);
+	MM_CHECK_EQ(*MM_ParseBoolArg("ON"), true);
+	MM_CHECK_EQ(*MM_ParseBoolArg("enabled"), true);
+	MM_CHECK_EQ(*MM_ParseBoolArg("0"), false);
+	MM_CHECK_EQ(*MM_ParseBoolArg("off"), false);
+	MM_CHECK_EQ(*MM_ParseBoolArg("Disable"), false);
+	MM_CHECK_FALSE(MM_ParseBoolArg(nullptr));
+	MM_CHECK_FALSE(MM_ParseBoolArg(""));
+	MM_CHECK_FALSE(MM_ParseBoolArg("2"));
+	MM_CHECK_FALSE(MM_ParseBoolArg(" on"));
+}
+
+MM_TEST(parse_clamped_int_defaults_invalid_values_and_bounds_valid_numbers) {
+	MM_CHECK_EQ(MM_ParseClampedIntArgOrDefault("2", 7, 0, 3), 2);
+	MM_CHECK_EQ(MM_ParseClampedIntArgOrDefault("-4", 7, 0, 3), 0);
+	MM_CHECK_EQ(MM_ParseClampedIntArgOrDefault("99", 7, 0, 3), 3);
+	MM_CHECK_EQ(MM_ParseClampedIntArgOrDefault("bad", 7, 0, 3), 7);
+	MM_CHECK_EQ(MM_ParseClampedIntArgOrDefault(nullptr, 7, 0, 3), 7);
+	MM_CHECK_EQ(MM_ParseClampedIntArgOrDefault("2", 7, 3, 0), 7);
+}
+
 MM_TEST(parse_float_rejects_non_finite_and_trailing_values) {
 	MM_CHECK_EQ(*MM_ParseFloatArg("12.5"), 12.5f);
 	MM_CHECK_EQ(*MM_ParseFloatArg("-0.25"), -0.25f);
@@ -129,6 +154,56 @@ MM_TEST(parse_cfg_int_accepts_quoted_or_plain_values) {
 	MM_CHECK_FALSE(MM_ParseCfgIntArg("\"\""));
 	MM_CHECK_FALSE(MM_ParseCfgIntArg("4 extra"));
 	MM_CHECK_FALSE(MM_ParseCfgIntArg("\"4\" extra"));
+}
+
+MM_TEST(string_helpers_copy_overlap_and_truncate_display_text_safely) {
+	char buffer[8] = "abcdef";
+	muffmode::CopyString(buffer, std::string_view(buffer + 1, 4));
+	MM_CHECK_EQ(std::string(buffer), std::string("bcde"));
+
+	muffmode::CopyString(buffer, "123456789");
+	MM_CHECK_EQ(std::string(buffer), std::string("1234567"));
+
+	MM_CHECK_EQ(muffmode::TruncateWithEllipsis("abcdef", 8), std::string("abcdef"));
+	MM_CHECK_EQ(muffmode::TruncateWithEllipsis("abcdef", 6), std::string("abcdef"));
+	MM_CHECK_EQ(muffmode::TruncateWithEllipsis("abcdef", 5), std::string("ab..."));
+	MM_CHECK_EQ(muffmode::TruncateWithEllipsis("abcdef", 3), std::string("..."));
+	MM_CHECK_EQ(muffmode::TruncateWithEllipsis("abcdef", 2), std::string(".."));
+	MM_CHECK(muffmode::TruncateWithEllipsis("abcdef", 0).empty());
+}
+
+MM_TEST(map_tokens_reject_traversal_segments_and_unsafe_characters) {
+	using muffmode::maps::IsSafeMapTokenText;
+
+	MM_CHECK(IsSafeMapTokenText("base1", 64));
+	MM_CHECK(IsSafeMapTokenText("q64/outpost", 64));
+	MM_CHECK(IsSafeMapTokenText("glug!", 64));
+	MM_CHECK_FALSE(IsSafeMapTokenText("", 64));
+	MM_CHECK_FALSE(IsSafeMapTokenText(".", 64));
+	MM_CHECK_FALSE(IsSafeMapTokenText("..", 64));
+	MM_CHECK_FALSE(IsSafeMapTokenText("../base1", 64));
+	MM_CHECK_FALSE(IsSafeMapTokenText("q64/./outpost", 64));
+	MM_CHECK_FALSE(IsSafeMapTokenText("q64//outpost", 64));
+	MM_CHECK_FALSE(IsSafeMapTokenText("q64\\..\\base1", 64));
+	MM_CHECK_FALSE(IsSafeMapTokenText("bad;map", 64));
+	MM_CHECK_FALSE(IsSafeMapTokenText("bad|map", 64));
+	MM_CHECK_FALSE(IsSafeMapTokenText(std::string(64, 'a'), 64));
+}
+
+MM_TEST(motd_filenames_reject_paths_devices_and_shell_metacharacters) {
+	using muffmode::motd::IsSafeFilenameText;
+
+	MM_CHECK(IsSafeFilenameText("motd.txt", 64));
+	MM_CHECK(IsSafeFilenameText(".motd", 64));
+	MM_CHECK_FALSE(IsSafeFilenameText("", 64));
+	MM_CHECK_FALSE(IsSafeFilenameText(".", 64));
+	MM_CHECK_FALSE(IsSafeFilenameText("..", 64));
+	MM_CHECK_FALSE(IsSafeFilenameText("motd.", 64));
+	MM_CHECK_FALSE(IsSafeFilenameText("../motd.txt", 64));
+	MM_CHECK_FALSE(IsSafeFilenameText("motd?.txt", 64));
+	MM_CHECK_FALSE(IsSafeFilenameText("motd|old.txt", 64));
+	MM_CHECK_FALSE(IsSafeFilenameText(std::string("bad\x7fname.txt", 12), 64));
+	MM_CHECK_FALSE(IsSafeFilenameText(std::string(64, 'a'), 64));
 }
 
 MM_TEST(player_config_social_ids_encode_to_safe_unique_path_stems) {
@@ -169,6 +244,37 @@ MM_TEST(player_config_tokens_parse_deterministically) {
 	MM_CHECK_EQ(*ParseFollowViewToken("third"), false);
 	MM_CHECK_EQ(*ParseFollowViewToken("on"), true);
 	MM_CHECK_FALSE(ParseFollowViewToken("sideways"));
+}
+
+MM_TEST(player_config_comment_and_arg_helpers_are_quote_aware) {
+	using namespace muffmode::pconfig;
+
+	MM_CHECK_EQ(std::string(StripConfigComment("id 1 # show crosshair id")), std::string("id 1"));
+	MM_CHECK_EQ(std::string(StripConfigComment("timer on ; local note")), std::string("timer on"));
+	MM_CHECK_EQ(std::string(StripConfigComment("kb clang // preferred")), std::string("kb clang"));
+	MM_CHECK_EQ(std::string(StripConfigComment("eskin \"male/#hash\" # note")), std::string("eskin \"male/#hash\""));
+	MM_CHECK_EQ(std::string(StripConfigComment("eskin \"male//slash\" // note")), std::string("eskin \"male//slash\""));
+
+	std::string_view value;
+	MM_CHECK(ReadSingleConfigArg("on", value));
+	MM_CHECK_EQ(std::string(value), std::string("on"));
+	MM_CHECK(ReadSingleConfigArg(" \"third\" ", value));
+	MM_CHECK_EQ(std::string(value), std::string("third"));
+	MM_CHECK(ReadSingleConfigArg("\"male/grunt\"", value));
+	MM_CHECK_EQ(std::string(value), std::string("male/grunt"));
+	MM_CHECK_FALSE(ReadSingleConfigArg("\"unterminated", value));
+	MM_CHECK_FALSE(ReadSingleConfigArg("\"first\" extra", value));
+	MM_CHECK_FALSE(ReadSingleConfigArg("first extra", value));
+}
+
+MM_TEST(player_config_comment_sanitizer_respects_output_limit) {
+	using namespace muffmode::pconfig;
+
+	MM_CHECK(SanitizeConfigCommentText("", 0).empty());
+	MM_CHECK_EQ(SanitizeConfigCommentText("", 3), std::string("Pla"));
+	MM_CHECK_EQ(SanitizeConfigCommentText("\t\n", 4), std::string("Play"));
+	MM_CHECK_EQ(SanitizeConfigCommentText("A\nB\tC", 16), std::string("A B C"));
+	MM_CHECK_EQ(SanitizeConfigCommentText("abcdef", 3), std::string("abc"));
 }
 
 MM_TEST(player_config_skin_paths_match_command_safety_rules) {
@@ -374,6 +480,10 @@ MM_TEST(loc_line_parser_extracts_position_and_multiword_label) {
 	MM_CHECK_EQ(xyz[1], 3.f);
 	MM_CHECK_EQ(xyz[2], 4.f);
 	MM_CHECK_EQ(label, std::string("ARENA"));
+
+	label.clear();
+	MM_CHECK(MM_ParseLocLine("1 2 3  HIGH\tRL\tNOW  \r\n", xyz, label));
+	MM_CHECK_EQ(label, std::string("HIGH RL NOW"));
 }
 
 MM_TEST(loc_line_parser_rejects_malformed_lines) {
@@ -381,15 +491,24 @@ MM_TEST(loc_line_parser_rejects_malformed_lines) {
 	std::string label;
 
 	MM_CHECK_FALSE(MM_ParseLocLine(nullptr, xyz, label));
+	MM_CHECK_FALSE(MM_ParseLocLine("1 2 3 LABEL", nullptr, label));
 	MM_CHECK_FALSE(MM_ParseLocLine("", xyz, label));
 	MM_CHECK_FALSE(MM_ParseLocLine("   \r\n", xyz, label));
 	MM_CHECK_FALSE(MM_ParseLocLine("1 2", xyz, label));
 	MM_CHECK_FALSE(MM_ParseLocLine("1 2 3", xyz, label));
+	MM_CHECK_FALSE(MM_ParseLocLine("1 2 3 \t\v\r\n", xyz, label));
 	MM_CHECK_FALSE(MM_ParseLocLine("1 2 x LABEL", xyz, label));
 	MM_CHECK_FALSE(MM_ParseLocLine("1 2 3x LABEL", xyz, label));
 	MM_CHECK_FALSE(MM_ParseLocLine("1 2 nan LABEL", xyz, label));
 	MM_CHECK_FALSE(MM_ParseLocLine("1 2 inf LABEL", xyz, label));
 	MM_CHECK_FALSE(MM_ParseLocLine("1 2 1e1000 LABEL", xyz, label));
+}
+
+MM_TEST(loc_labels_are_sanitized_and_capped) {
+	MM_CHECK_EQ(MM_SanitizeLocLabel("  HIGH\tRL\nNOW  "), std::string("HIGH RL NOW"));
+	MM_CHECK_EQ(MM_SanitizeLocLabel("A\vB\fC"), std::string("A B C"));
+	MM_CHECK(MM_SanitizeLocLabel("\t\r\n").empty());
+	MM_CHECK_EQ(MM_SanitizeLocLabel(std::string(80, 'x')).size(), MM_MAX_LOC_LABEL_CHARS);
 }
 
 MM_TEST(loc_body_requires_macro_and_substitutes_location) {
@@ -403,6 +522,7 @@ MM_TEST(loc_body_requires_macro_and_substitutes_location) {
 	MM_CHECK_EQ(MM_BuildLocBody("\"hold %l\"", "BOX"), std::string("hold [BOX]"));
 	MM_CHECK_EQ(MM_BuildLocBody("  at %l  ", "ARENA"), std::string("at [ARENA]"));
 	MM_CHECK_EQ(MM_BuildLocBody(" \"hold %l\" ", "BOX"), std::string("hold [BOX]"));
+	MM_CHECK_EQ(MM_BuildLocBody("at %l", "HIGH\tRL\nNOW"), std::string("at [HIGH RL NOW]"));
 
 	MM_CHECK_FALSE(MM_BuildLocBody("%h %a", "WATER").empty());
 	MM_CHECK_EQ(MM_BuildLocBody("at %l %h", "MEGA"), std::string("at [MEGA] %h"));
@@ -412,7 +532,9 @@ MM_TEST(loc_body_requires_macro_and_substitutes_location) {
 
 MM_TEST(loc_body_caps_length) {
 	std::string long_text = "%l " + std::string(400, 'x');
-	MM_CHECK(MM_BuildLocBody(long_text.c_str(), "WATER").size() <= 150);
+	const std::string body = MM_BuildLocBody(long_text.c_str(), "WATER");
+	MM_CHECK_EQ(body.size(), 150u);
+	MM_CHECK_EQ(body.substr(body.size() - 3), std::string("..."));
 }
 
 MM_TEST(hud_statusbar_layout_rejects_banned_ifbit_token) {
@@ -432,6 +554,13 @@ MM_TEST(hud_statusbar_layout_vanilla_token_whitelist) {
 		"if 18 xl 0 yb -60 if 18 pic 18 endif endif";
 	MM_CHECK_FALSE(MM_StatusbarLayoutContainsBannedToken(sample));
 	MM_CHECK(MM_StatusbarLayoutUsesOnlyVanillaTokens(sample));
+
+	MM_CHECK(MM_StatusbarLayoutUsesOnlyVanillaTokens("if 1 string2 \"USE VIEW JUMP\" endif "));
+	MM_CHECK(MM_StatusbarLayoutUsesOnlyVanillaTokens("if 1 loc_rstring 0 Monsters endif "));
+	MM_CHECK_FALSE(MM_StatusbarLayoutUsesOnlyVanillaTokens("if 1 unknown_token 2 endif "));
+	MM_CHECK_FALSE(MM_StatusbarLayoutUsesOnlyVanillaTokens("if not_a_stat endif "));
+	MM_CHECK_FALSE(MM_StatusbarLayoutUsesOnlyVanillaTokens("string2 \"unterminated "));
+	MM_CHECK_FALSE(MM_StatusbarLayoutUsesOnlyVanillaTokens("xv string_operand "));
 }
 
 MM_TEST(hud_stat_count_within_max_stats) {

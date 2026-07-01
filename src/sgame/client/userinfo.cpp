@@ -5,6 +5,7 @@
 
 #include "muffmode/mm_parse.h"
 
+#include <algorithm>
 #include <array>
 #include <string>
 #include <string_view>
@@ -67,7 +68,18 @@ int32_t ParseUserinfoIntOrDefault(const char *value, int32_t default_value)
 
 int32_t ParseUserinfoClampedIntOrDefault(const char *value, int32_t default_value, int32_t min_value, int32_t max_value)
 {
-	return clamp(ParseUserinfoIntOrDefault(value, default_value), min_value, max_value);
+	return MM_ParseClampedIntArgOrDefault(value, default_value, min_value, max_value);
+}
+
+int32_t ParseUserinfoAutoShieldOrDefault(const char *value)
+{
+	return std::max(ParseUserinfoIntOrDefault(value, AUTO_SHIELD_MANUAL), AUTO_SHIELD_MANUAL);
+}
+
+bool ParseUserinfoBoolOrDefault(const char *value, bool default_value)
+{
+	const auto parsed = MM_ParseBoolArg(value);
+	return parsed ? *parsed : default_value;
 }
 
 std::string EncodedPlayerName(gentity_t *player)
@@ -80,7 +92,7 @@ void StripUnsafeNameChars(char *name)
 	char *write = name;
 	for (const char *read = name; *read; read++) {
 		const auto c = static_cast<unsigned char>(*read);
-		if (c < 0x20 || c == '"' || c == '{' || c == '}')
+		if (c < 0x20 || c == 0x7F || c == '"' || c == '{' || c == '}')
 			continue;
 		*write++ = static_cast<char>(c);
 	}
@@ -130,7 +142,8 @@ const char *SkinOverride(const char *skin)
 
 float ParseUserinfoFov(const char *value)
 {
-	const auto parsed = MM_ParseFloatArg(value);
+	const std::string_view text = MM_TrimAsciiWhitespace(value ? std::string_view(value) : std::string_view());
+	const auto parsed = MM_ParseFloatArg(text);
 	if (!parsed)
 		return kDefaultUserinfoFov;
 
@@ -145,6 +158,8 @@ void ApplyUserinfoChanged(gentity_t *ent, const char *userinfo)
 		Q_strlcpy(ent->client->pers.netname, "badinfo", sizeof(ent->client->pers.netname));
 
 	StripUnsafeNameChars(ent->client->pers.netname);
+	if (!ent->client->pers.netname[0])
+		Q_strlcpy(ent->client->pers.netname, "badinfo", sizeof(ent->client->pers.netname));
 	Q_strlcpy(ent->client->resp.netname, ent->client->pers.netname, sizeof(ent->client->resp.netname));
 
 	if (!gi.Info_ValueForKey(userinfo, "skin", val, sizeof(val)))
@@ -189,12 +204,12 @@ void ApplyUserinfoChanged(gentity_t *ent, const char *userinfo)
 	}
 
 	if (gi.Info_ValueForKey(userinfo, "autoshield", val, sizeof(val)))
-		ent->client->pers.autoshield = ParseUserinfoIntOrDefault(val, AUTO_SHIELD_MANUAL);
+		ent->client->pers.autoshield = ParseUserinfoAutoShieldOrDefault(val);
 	else
 		ent->client->pers.autoshield = AUTO_SHIELD_MANUAL;
 
 	if (gi.Info_ValueForKey(userinfo, "bobskip", val, sizeof(val)))
-		ent->client->pers.bob_skip = val[0] == '1';
+		ent->client->pers.bob_skip = ParseUserinfoBoolOrDefault(val, false);
 	else
 		ent->client->pers.bob_skip = false;
 

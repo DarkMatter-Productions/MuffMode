@@ -105,8 +105,24 @@ inline void CopyString(char (&dest)[N], std::string_view value)
 
 	const size_t count = std::min(value.size(), N - 1);
 	if (count > 0)
-		std::copy_n(value.data(), count, dest);
+		std::memmove(dest, value.data(), count);
 	dest[count] = '\0';
+}
+
+inline std::string TruncateWithEllipsis(std::string_view text, size_t max_chars)
+{
+	if (text.size() <= max_chars)
+		return std::string(text);
+
+	if (max_chars == 0)
+		return std::string();
+
+	if (max_chars <= 3)
+		return std::string(max_chars, '.');
+
+	std::string out(text.substr(0, max_chars - 3));
+	out += "...";
+	return out;
 }
 
 inline std::vector<std::string> SplitTokens(std::string_view text, char delimiter)
@@ -126,6 +142,37 @@ inline std::vector<std::string> SplitTokens(std::string_view text, char delimite
 			break;
 
 		start = end + 1;
+	}
+
+	return tokens;
+}
+
+inline std::vector<std::string> SplitAsciiWhitespace(std::string_view text)
+{
+	std::vector<std::string> tokens;
+	size_t start = 0;
+
+	while (start < text.size()) {
+		while (start < text.size()) {
+			const char c = text[start];
+			if (c != ' ' && c != '\t' && c != '\r' && c != '\n' && c != '\v' && c != '\f')
+				break;
+			start++;
+		}
+
+		if (start >= text.size())
+			break;
+
+		size_t end = start;
+		while (end < text.size()) {
+			const char c = text[end];
+			if (c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '\v' || c == '\f')
+				break;
+			end++;
+		}
+
+		tokens.emplace_back(text.substr(start, end - start));
+		start = end;
 	}
 
 	return tokens;

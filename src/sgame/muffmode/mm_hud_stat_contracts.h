@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "muffmode/mm_parse.h"
 #include "shared/gameplay.h"
 
 #include <cstddef>
@@ -70,7 +71,7 @@ inline constexpr std::string_view MM_STATUSBAR_BANNED_TOKENS[] = {
 inline constexpr std::string_view MM_STATUSBAR_VANILLA_TOKENS[] = {
 	"xl", "xr", "xv", "yt", "yb", "yv",
 	"pic", "picn", "num", "lives_num", "hnum", "anum", "rnum",
-	"stat_string", "cstring", "string", "cstring2", "string2",
+	"stat_string", "stat_string2", "cstring", "string", "cstring2", "string2",
 	"if", "ifgef", "endif",
 	"loc_stat_string", "loc_stat_rstring", "loc_stat_cstring", "loc_stat_cstring2",
 	"loc_cstring", "loc_string", "loc_cstring2", "loc_string2", "loc_rstring2",
@@ -88,42 +89,143 @@ inline bool MM_StatusbarLayoutContainsBannedToken(std::string_view layout)
 	return false;
 }
 
+inline bool MM_StatusbarReadToken(std::string_view layout, size_t &pos, std::string_view &token)
+{
+	while (pos < layout.size() && MM_IsAsciiWhitespace(layout[pos]))
+		pos++;
+	if (pos >= layout.size())
+		return false;
+
+	if (layout[pos] == '"') {
+		const size_t start = pos++;
+		while (pos < layout.size() && layout[pos] != '"')
+			pos++;
+		if (pos >= layout.size()) {
+			pos = start;
+			return false;
+		}
+		pos++;
+		token = layout.substr(start, pos - start);
+		return true;
+	}
+
+	const size_t start = pos;
+	while (pos < layout.size() && !MM_IsAsciiWhitespace(layout[pos]))
+		pos++;
+	token = layout.substr(start, pos - start);
+	return true;
+}
+
+inline bool MM_StatusbarTokenIsInteger(std::string_view token)
+{
+	if (token.empty())
+		return false;
+
+	size_t i = token[0] == '-' ? 1 : 0;
+	if (i == token.size())
+		return false;
+
+	for (; i < token.size(); i++) {
+		if (token[i] < '0' || token[i] > '9')
+			return false;
+	}
+
+	return true;
+}
+
+inline bool MM_StatusbarTokenIsTextOperand(std::string_view token)
+{
+	return !token.empty() &&
+		(token.front() == '"' ||
+		 token.front() == '$' ||
+		 (token.find_first_of(" \t\r\n\v\f") == std::string_view::npos &&
+		  !MM_StatusbarTokenIsInteger(token)));
+}
+
+inline bool MM_StatusbarIsCommand(std::string_view token)
+{
+	for (std::string_view vanilla : MM_STATUSBAR_VANILLA_TOKENS) {
+		if (token == vanilla)
+			return true;
+	}
+	return false;
+}
+
+inline int MM_StatusbarNumericOperands(std::string_view command)
+{
+	if (command == "xl" || command == "xr" || command == "xv" ||
+		command == "yt" || command == "yb" || command == "yv" ||
+		command == "if" || command == "pic" || command == "stat_string" ||
+		command == "stat_string2" || command == "lives_num" ||
+		command == "stat_pname" || command == "loc_stat_string" ||
+		command == "loc_stat_rstring" || command == "loc_stat_cstring" ||
+		command == "loc_stat_cstring2") {
+		return 1;
+	}
+
+	if (command == "ifgef" || command == "num")
+		return 2;
+
+	return 0;
+}
+
+inline int MM_StatusbarTextOperands(std::string_view command)
+{
+	if (command == "picn" || command == "cstring" || command == "string" ||
+		command == "cstring2" || command == "string2") {
+		return 1;
+	}
+
+	if (command == "loc_cstring" || command == "loc_string" ||
+		command == "loc_cstring2" || command == "loc_string2" ||
+		command == "loc_rstring2" || command == "loc_rstring") {
+		return 1;
+	}
+
+	return 0;
+}
+
+inline bool MM_StatusbarTokenOperandsValid(std::string_view layout, size_t &pos, std::string_view command)
+{
+	std::string_view token;
+	const int numeric_operands = MM_StatusbarNumericOperands(command);
+	for (int i = 0; i < numeric_operands; i++) {
+		if (!MM_StatusbarReadToken(layout, pos, token) || !MM_StatusbarTokenIsInteger(token))
+			return false;
+	}
+
+	if (command == "loc_cstring" || command == "loc_string" ||
+		command == "loc_cstring2" || command == "loc_string2" ||
+		command == "loc_rstring2" || command == "loc_rstring") {
+		if (!MM_StatusbarReadToken(layout, pos, token) || !MM_StatusbarTokenIsInteger(token))
+			return false;
+	}
+
+	const int text_operands = MM_StatusbarTextOperands(command);
+	for (int i = 0; i < text_operands; i++) {
+		if (!MM_StatusbarReadToken(layout, pos, token) || !MM_StatusbarTokenIsTextOperand(token))
+			return false;
+	}
+
+	return true;
+}
+
 inline bool MM_StatusbarLayoutUsesOnlyVanillaTokens(std::string_view layout)
 {
 	if (MM_StatusbarLayoutContainsBannedToken(layout))
 		return false;
 
 	size_t i = 0;
-	while (i < layout.size()) {
-		while (i < layout.size() && layout[i] == ' ')
-			i++;
-		if (i >= layout.size())
-			break;
-
-		const size_t start = i;
-		while (i < layout.size() && layout[i] != ' ')
-			i++;
-
-		const std::string_view token = layout.substr(start, i - start);
-		if (token.empty())
-			continue;
-
-		bool allowed = false;
-		for (std::string_view vanilla : MM_STATUSBAR_VANILLA_TOKENS) {
-			if (token == vanilla) {
-				allowed = true;
-				break;
-			}
-		}
-
-		// Quoted string literals, numeric stat indices, and loc keys / label operands.
-		if (!allowed && (token[0] == '"' || token[0] == '$' || (token[0] >= '0' && token[0] <= '9') || token[0] == '-'))
-			allowed = true;
-
-		// loc_rstring / string / picn operands (e.g. Monsters, FOLLOWING, map paths).
-		if (!allowed)
-			allowed = true;
+	std::string_view token;
+	while (MM_StatusbarReadToken(layout, i, token)) {
+		if (!MM_StatusbarIsCommand(token))
+			return false;
+		if (!MM_StatusbarTokenOperandsValid(layout, i, token))
+			return false;
 	}
+
+	while (i < layout.size() && MM_IsAsciiWhitespace(layout[i]))
+		i++;
 
 	return true;
 }

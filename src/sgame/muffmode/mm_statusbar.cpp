@@ -404,6 +404,9 @@ void MM_InitStatusbar()
 	if (MM_StatusbarLayoutContainsBannedToken(layout))
 		gi.Com_Error("CS_STATUSBAR layout contains banned token (ifbit)");
 
+	if (!MM_StatusbarLayoutUsesOnlyVanillaTokens(layout))
+		gi.Com_Error("CS_STATUSBAR layout contains non-vanilla token");
+
 	muffmode::statusbar::g_last_layout = layout;
 
 	gi.configstring(CS_STATUSBAR, layout.c_str());

@@ -3,6 +3,9 @@
 
 #pragma once
 
+#include "mm_parse.h"
+
+#include <algorithm>
 #include <charconv>
 #include <optional>
 #include <string>
@@ -28,29 +31,29 @@ inline bool IsAsciiAlphaNumeric(char c) noexcept
 
 inline char ToAsciiLower(char c) noexcept
 {
-	return (c >= 'A' && c <= 'Z') ? static_cast<char>(c + ('a' - 'A')) : c;
+	return MM_ToAsciiLower(c);
 }
 
 inline bool EqualsI(std::string_view lhs, std::string_view rhs) noexcept
 {
-	if (lhs.size() != rhs.size())
-		return false;
-
-	for (size_t i = 0; i < lhs.size(); i++) {
-		if (ToAsciiLower(lhs[i]) != ToAsciiLower(rhs[i]))
-			return false;
-	}
-
-	return true;
+	return MM_EqualsAsciiI(lhs, rhs);
 }
 
 inline std::string SanitizeConfigCommentText(std::string_view text, size_t max_length)
 {
+	if (max_length == 0)
+		return std::string();
+
+	const auto fallback = [max_length]() {
+		constexpr std::string_view player = "Player";
+		return std::string(player.substr(0, max_length));
+	};
+
 	if (text.empty())
-		return "Player";
+		return fallback();
 
 	std::string out;
-	out.reserve(max_length);
+	out.reserve(std::min(text.size(), max_length));
 
 	for (const unsigned char ch : text) {
 		if (out.size() >= max_length)
@@ -67,7 +70,7 @@ inline std::string SanitizeConfigCommentText(std::string_view text, size_t max_l
 	while (!out.empty() && out.back() == ' ')
 		out.pop_back();
 
-	return out.empty() ? "Player" : out;
+	return out.empty() ? fallback() : out;
 }
 
 inline char HexDigit(unsigned int value) noexcept
@@ -109,17 +112,7 @@ inline bool IsDisableToken(std::string_view value) noexcept
 
 inline std::optional<bool> ParseBoolToken(std::string_view value) noexcept
 {
-	if (EqualsI(value, "1") || EqualsI(value, "on") || EqualsI(value, "true") ||
-		EqualsI(value, "yes") || EqualsI(value, "enable") || EqualsI(value, "enabled")) {
-		return true;
-	}
-
-	if (EqualsI(value, "0") || EqualsI(value, "off") || EqualsI(value, "false") ||
-		EqualsI(value, "no") || EqualsI(value, "disable") || EqualsI(value, "disabled")) {
-		return false;
-	}
-
-	return std::nullopt;
+	return MM_ParseBoolText(value);
 }
 
 inline std::optional<int> ParseKillBeepToken(std::string_view value) noexcept
@@ -160,6 +153,64 @@ inline std::optional<bool> ParseFollowViewToken(std::string_view value) noexcept
 	}
 
 	return ParseBoolToken(value);
+}
+
+inline std::string_view StripConfigComment(std::string_view line)
+{
+	bool in_quotes = false;
+
+	for (size_t i = 0; i < line.size(); i++) {
+		const char ch = line[i];
+		if (ch == '"') {
+			in_quotes = !in_quotes;
+			continue;
+		}
+
+		if (in_quotes)
+			continue;
+
+		const bool starts_comment =
+			ch == '#' ||
+			ch == ';' ||
+			(ch == '/' && i + 1 < line.size() && line[i + 1] == '/');
+		if (!starts_comment)
+			continue;
+
+		line = line.substr(0, i);
+		break;
+	}
+
+	return MM_TrimAsciiWhitespace(line);
+}
+
+inline bool ReadSingleConfigArg(std::string_view args, std::string_view &value)
+{
+	args = MM_TrimAsciiWhitespace(args);
+	if (args.empty())
+		return false;
+
+	if (args.front() == '"') {
+		const std::string_view quoted = args.substr(1);
+		const size_t closing_quote = quoted.find('"');
+		if (closing_quote == std::string_view::npos)
+			return false;
+
+		const std::string_view tail = MM_TrimAsciiWhitespace(quoted.substr(closing_quote + 1));
+		if (!tail.empty())
+			return false;
+
+		value = quoted.substr(0, closing_quote);
+		return true;
+	}
+
+	const size_t split = args.find_first_of(" \t\r\n\v\f");
+	if (split == std::string_view::npos) {
+		value = args;
+		return true;
+	}
+
+	value = args.substr(0, split);
+	return MM_TrimAsciiWhitespace(args.substr(split)).empty();
 }
 
 inline bool IsSafeSkinPath(std::string_view skin) noexcept

@@ -761,6 +761,11 @@ struct lag_compensation_restore_t {
 	vec3_t maxs;
 	int32_t viewheight = 0;
 	int32_t pmove_viewheight = 0;
+	vec3_t rewound_origin;
+	vec3_t rewound_mins;
+	vec3_t rewound_maxs;
+	int32_t rewound_viewheight = 0;
+	int32_t rewound_pmove_viewheight = 0;
 };
 
 #define SERVER_TICK_RATE gi.tick_rate // in hz

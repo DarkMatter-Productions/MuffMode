@@ -17,35 +17,7 @@ int s_map_list_shuffle_modified = -1;
 
 bool IsSafeMapToken(std::string_view mapname)
 {
-	if (mapname.empty())
-		return false;
-
-	if (mapname == "." || mapname == "..")
-		return false;
-
-	if (mapname.size() >= MAX_QPATH)
-		return false;
-
-	auto is_separator = [](char c) {
-		return c == '/' || c == '\\';
-	};
-
-	if (is_separator(mapname.front()) || is_separator(mapname.back()))
-		return false;
-
-	for (size_t i = 0; i < mapname.size(); ++i) {
-		const unsigned char c = static_cast<unsigned char>(mapname[i]);
-
-		if (c <= ' ' || c == '"' || c == '\'' || c == ';' || c == ':')
-			return false;
-		if (mapname[i] == '.' && i + 1 < mapname.size() && mapname[i + 1] == '.')
-			return false;
-
-		if (is_separator(mapname[i]) && i + 1 < mapname.size() && is_separator(mapname[i + 1]))
-			return false;
-	}
-
-	return true;
+	return IsSafeMapTokenText(mapname, MAX_QPATH);
 }
 
 bool IsSafeMapToken(const char *mapname)
@@ -131,7 +103,7 @@ void MM_ShuffleMapList()
 	if (!*map_list)
 		return;
 
-	auto values = muffmode::SplitTokens(map_list, ' ');
+	auto values = muffmode::SplitAsciiWhitespace(map_list);
 	const size_t original_count = values.size();
 	values.erase(std::remove_if(values.begin(), values.end(),
 		[](const std::string &map) { return !MM_IsSafeMapToken(map.c_str()); }), values.end());
@@ -418,26 +390,20 @@ constexpr size_t MAX_MAP_LIST_DISPLAY = 512;
 
 void MM_PrintTruncatedMapList(gentity_t *ent)
 {
-	std::string map_list_display = muffmode::CvarString(g_map_list);
-	if (map_list_display.length() > MAX_MAP_LIST_DISPLAY)
-		map_list_display = map_list_display.substr(0, MAX_MAP_LIST_DISPLAY) + "...";
+	const std::string map_list_display = muffmode::TruncateWithEllipsis(muffmode::CvarString(g_map_list), MAX_MAP_LIST_DISPLAY);
 	gi.LocClient_Print(ent, PRINT_HIGH, "{}\n", map_list_display.c_str());
 }
 
 void MM_PrintTruncatedMapSource(gentity_t *ent)
 {
 	const char *maps = muffmode::CvarString(g_map_list)[0] ? muffmode::CvarString(g_map_list) : muffmode::CvarString(g_map_pool);
-	std::string display = maps ? maps : "";
-	if (display.length() > MAX_MAP_LIST_DISPLAY)
-		display = display.substr(0, MAX_MAP_LIST_DISPLAY) + "...";
+	const std::string display = muffmode::TruncateWithEllipsis(maps ? maps : "", MAX_MAP_LIST_DISPLAY);
 	gi.LocClient_Print(ent, PRINT_HIGH, "{}\n", display.c_str());
 }
 
 void MM_PrintTruncatedMapPool(gentity_t *ent)
 {
-	std::string display = muffmode::CvarString(g_map_pool);
-	if (display.length() > MAX_MAP_LIST_DISPLAY)
-		display = display.substr(0, MAX_MAP_LIST_DISPLAY) + "...";
+	const std::string display = muffmode::TruncateWithEllipsis(muffmode::CvarString(g_map_pool), MAX_MAP_LIST_DISPLAY);
 	gi.LocClient_Print(ent, PRINT_HIGH, "{}\n", display.c_str());
 }
 

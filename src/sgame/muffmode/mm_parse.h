@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cerrno>
 #include <charconv>
 #include <cmath>
@@ -14,6 +15,22 @@
 
 inline bool MM_IsAsciiWhitespace(char c) {
 	return c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '\v' || c == '\f';
+}
+
+inline char MM_ToAsciiLower(char c) noexcept {
+	return (c >= 'A' && c <= 'Z') ? static_cast<char>(c + ('a' - 'A')) : c;
+}
+
+inline bool MM_EqualsAsciiI(std::string_view lhs, std::string_view rhs) noexcept {
+	if (lhs.size() != rhs.size())
+		return false;
+
+	for (size_t i = 0; i < lhs.size(); i++) {
+		if (MM_ToAsciiLower(lhs[i]) != MM_ToAsciiLower(rhs[i]))
+			return false;
+	}
+
+	return true;
 }
 
 inline std::string_view MM_TrimAsciiWhitespace(std::string_view text) {
@@ -47,6 +64,17 @@ inline std::optional<int32_t> MM_ParseIntArg(const char *s) {
 	return MM_ParseIntText(s);
 }
 
+inline int32_t MM_ParseClampedIntArgOrDefault(const char *s, int32_t default_value, int32_t min_value, int32_t max_value) {
+	if (min_value > max_value)
+		return default_value;
+
+	const auto parsed = MM_ParseIntArg(s);
+	if (!parsed)
+		return default_value;
+
+	return std::clamp(*parsed, min_value, max_value);
+}
+
 inline std::optional<uint32_t> MM_ParseUInt32Text(std::string_view text) {
 	if (text.empty() || text.front() == '-' || text.front() == '+')
 		return std::nullopt;
@@ -66,6 +94,27 @@ inline std::optional<uint32_t> MM_ParseUInt32Arg(const char *s) {
 		return std::nullopt;
 
 	return MM_ParseUInt32Text(s);
+}
+
+inline std::optional<bool> MM_ParseBoolText(std::string_view text) {
+	if (MM_EqualsAsciiI(text, "1") || MM_EqualsAsciiI(text, "on") || MM_EqualsAsciiI(text, "true") ||
+		MM_EqualsAsciiI(text, "yes") || MM_EqualsAsciiI(text, "enable") || MM_EqualsAsciiI(text, "enabled")) {
+		return true;
+	}
+
+	if (MM_EqualsAsciiI(text, "0") || MM_EqualsAsciiI(text, "off") || MM_EqualsAsciiI(text, "false") ||
+		MM_EqualsAsciiI(text, "no") || MM_EqualsAsciiI(text, "disable") || MM_EqualsAsciiI(text, "disabled")) {
+		return false;
+	}
+
+	return std::nullopt;
+}
+
+inline std::optional<bool> MM_ParseBoolArg(const char *s) {
+	if (!s)
+		return std::nullopt;
+
+	return MM_ParseBoolText(s);
 }
 
 inline std::optional<int32_t> MM_ParseNonNegativeIntArg(const char *s) {
