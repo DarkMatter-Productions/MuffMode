@@ -68,7 +68,7 @@ Use `gametype` and `not_gametype` to include or exclude an entity for specific g
 | `team` | Team Deathmatch |
 | `ctf` | Capture the Flag |
 | `ca` | Clan Arena |
-| `freeze` | Reserved Freeze Tag token |
+| `freeze` | Freeze Tag |
 | `strike` | Capture Strike |
 | `rr` | Red Rover |
 | `lms` | Reserved Last Man Standing token |

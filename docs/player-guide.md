@@ -63,6 +63,8 @@ The **Player Settings** menu covers crosshair ID, match timer, frag messages, an
 
 ## Gameplay Commands
 
+In Freeze Tag, dying during a live round freezes you in place instead of sending you to a respawn screen. While frozen, your body stays on the field with a white shell and you view it from a third-person camera that can look around. Live teammates thaw you by standing nearby, and extra teammates near the same frozen player speed up the thaw. The primary rescuer scores for the thaw, while teammates who spend meaningful time helping a successful thaw receive assist credit. Press attack while frozen to send a throttled team help call with a teammate marker and location when location data is available. The HUD shows frozen/thawing state and a clean round display in the top-right. Frozen bodies can be nudged by damage and pulled with the grapple; thawed players normally respawn at player spawn points with white-shell gibs thrown at the thaw spot, though servers can opt into restoring them at the safe thaw location, and thawed players use normal map/item-control loadouts unless the server enables the optional arena kit. Players who join a team during a live round wait until the next round starts.
+
 | Command | What it does |
 | --- | --- |
 | `ready`, `notready`, `readyup` | Set or toggle ready status. |

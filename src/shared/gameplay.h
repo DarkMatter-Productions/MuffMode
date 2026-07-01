@@ -73,8 +73,8 @@ enum {
 	CONFIG_SPECTATOR_MODE_FREE,
 	CONFIG_SPECTATOR_MODE_FOLLOW_FIRST,
 	CONFIG_SPECTATOR_MODE_FOLLOW_THIRD,
-	CONFIG_POV_CENTER_POOL,	// per-client HUD lines: Strike OFFENSE/DEFENSE, CA/RR/LMS centre POV, ELIMINATED
 	CONFIG_COUNTDOWN_HEADER, // match/round countdown: "Round N\nBegins in..." (centerprint band)
+	CONFIG_POV_CENTER_POOL,	// per-client HUD lines; see mm_hud_stat_contracts.h lane helpers
 
 	CONFIG_LAST
 };

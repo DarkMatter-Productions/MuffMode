@@ -4,6 +4,7 @@
 
 #include "g_local.h"
 #include "monsters/m_player.h"
+#include "muffmode/mm_freezetag.h"
 // [MuffMode] Per-ruleset weapon tuning hooks (MM_Ruleset_*)
 #include "muffmode/mm_ruleset_weapons.h"
 
@@ -571,7 +572,7 @@ Called by ClientBeginServerFrame and ClientThink
 =================
 */
 void Think_Weapon(gentity_t *ent) {
-	if (!ClientIsPlaying(ent->client) || ent->client->eliminated)
+	if (!ClientIsPlaying(ent->client) || ent->client->eliminated || MM_FreezeTag_IsFrozen(ent))
 		return;
 
 	// if just died, put the weapon away

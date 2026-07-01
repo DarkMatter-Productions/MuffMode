@@ -234,17 +234,17 @@ void EmitTopRightMatchInfo(statusbar_t &sb)
 		sb.ifstat(STAT_ARENA_ROLE).xr(kRightHudTextXr).yt(kRoundProgressYt).loc_stat_rstring(STAT_ARENA_ROLE).endifstat();
 	} else {
 		sb.ifstat(STAT_RULESET_HUD).xr(kRightHudTextXr).yt(kRulesetYt).loc_stat_rstring(STAT_RULESET_HUD).endifstat();
-		if (!GT(GT_HORDE) && !GT(GT_CA) && !GT(GT_RR))
+		if (!GT(GT_HORDE) && !GT(GT_CA) && !GT(GT_RR) && !GT(GT_FREEZE))
 			sb.ifstat(STAT_ROUND_NUMBER).xr(kRightHudTextXr).yt(kRoundProgressYt).loc_stat_rstring(STAT_ROUND_NUMBER).endifstat();
 	}
 
 	EmitRedRoverTeamBadge(sb);
 }
 
-// VANILLA_BASE — centre eliminated label (CA/RR team modes, not Strike).
+// VANILLA_BASE — centre eliminated/frozen label (CA/RR/Freeze team modes, not Strike).
 void EmitCenterArenaRole(statusbar_t &sb, int32_t yt)
 {
-	if (!MM_GametypeHasFlag(GTF_ELIMINATION))
+	if (!MM_GametypeHasFlag(GTF_ELIMINATION) && !GT(GT_FREEZE))
 		return;
 
 	sb.ifstat(STAT_ARENA_ROLE).xv(0).yt(yt).loc_stat_rstring(STAT_ARENA_ROLE).endifstat();
@@ -307,7 +307,7 @@ void MM_InitStatusbar()
 
 	sb.yb(-24);
 
-	sb.ifstat(STAT_SHOW_STATUSBAR).xv(minhud ? 100 : 0).hnum().xv(minhud ? 150 : 50).pic(STAT_HEALTH_ICON).endifstat();
+	sb.ifstat(STAT_SHOW_STATUSBAR).ifstat(STAT_HEALTH_ICON).xv(minhud ? 100 : 0).hnum().xv(minhud ? 150 : 50).pic(STAT_HEALTH_ICON).endifstat().endifstat();
 	if (!minhud) {
 		sb.ifstat(STAT_SHOW_STATUSBAR).ifstat(STAT_AMMO_ICON).xv(100).anum().xv(150).pic(STAT_AMMO_ICON).endifstat().endifstat();
 		sb.ifstat(STAT_SHOW_STATUSBAR).ifstat(STAT_ARMOR_ICON).xv(200).rnum().xv(250).pic(STAT_ARMOR_ICON).endifstat().endifstat();

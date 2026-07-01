@@ -3,6 +3,7 @@
 #include "g_local.h"
 #include "core/statusbar.h"
 #include "muffmode/mm_duel.h"
+#include "muffmode/mm_freezetag.h"
 #include "muffmode/mm_hud_stat_contracts.h"
 #include "muffmode/mm_horde.h"
 #include "muffmode/mm_lms.h"
@@ -24,6 +25,18 @@ static int HudRoundDisplayNumber()
 		return level.round_number;
 
 	return level.round_number + 1;
+}
+
+static int PovHudConfigString(gentity_t *ent, mm_pov_configstring_lane_t lane)
+{
+	if (!ent || !ent->client)
+		return 0;
+
+	const int ci = (int)(ent - g_entities - 1);
+	if (ci < 0)
+		return 0;
+
+	return MM_PovConfigStringForClient(static_cast<size_t>(ci), static_cast<size_t>(game.maxclients), lane);
 }
 
 static void UpdateCountdownHud(gentity_t *ent)
@@ -334,7 +347,7 @@ void TeamsScoreboardMessage(gentity_t *ent, gentity_t *killer) {
 		sortedscores[team][j] = score;
 		totalscore[team] += score;
 		total[team]++;
-		if (!game.clients[i].eliminated)
+		if (GT(GT_FREEZE) ? MM_FreezeTag_ClientIsActiveFighter(cl_ent) : !game.clients[i].eliminated)
 			total_living[team]++;
 	}
 
@@ -414,7 +427,14 @@ void TeamsScoreboardMessage(gentity_t *ent, gentity_t *killer) {
 			if (level.match_state == MATCH_WARMUP_READYUP && (cl->resp.ready || cl->sess.is_a_bot))
 				fmt::format_to(std::back_inserter(string),
 					FMT_STRING("xv -56 yv {} picn {} "), ty - 2, "wheel/p_compass_selected");
-			else if (GTF(GTF_ROUNDS) && level.match_state == MATCH_IN_PROGRESS && !cl->eliminated)
+			else if (GTF(GTF_ROUNDS) && level.match_state == MATCH_IN_PROGRESS && GT(GT_FREEZE)) {
+				if (MM_FreezeTag_IsFrozen(cl_ent))
+					fmt::format_to(std::back_inserter(string),
+						FMT_STRING("xv -52 yv {} string2 \"F\" "), ty);
+				else if (MM_FreezeTag_ClientIsActiveFighter(cl_ent))
+					fmt::format_to(std::back_inserter(string),
+						FMT_STRING("xv -50 yv {} picn {} "), ty, "sbfctf1");
+			} else if (GTF(GTF_ROUNDS) && level.match_state == MATCH_IN_PROGRESS && !cl->eliminated)
 				fmt::format_to(std::back_inserter(string),
 					FMT_STRING("xv -50 yv {} picn {} "), ty, "sbfctf1");
 
@@ -444,7 +464,14 @@ void TeamsScoreboardMessage(gentity_t *ent, gentity_t *killer) {
 			if (level.match_state == MATCH_WARMUP_READYUP && (cl->resp.ready || cl->sess.is_a_bot))
 				fmt::format_to(std::back_inserter(string),
 					FMT_STRING("xv 182 yv {} picn {} "), ty - 2, "wheel/p_compass_selected");
-			else if (GTF(GTF_ROUNDS) && level.match_state == MATCH_IN_PROGRESS && !cl->eliminated)
+			else if (GTF(GTF_ROUNDS) && level.match_state == MATCH_IN_PROGRESS && GT(GT_FREEZE)) {
+				if (MM_FreezeTag_IsFrozen(cl_ent))
+					fmt::format_to(std::back_inserter(string),
+						FMT_STRING("xv 188 yv {} string2 \"F\" "), ty);
+				else if (MM_FreezeTag_ClientIsActiveFighter(cl_ent))
+					fmt::format_to(std::back_inserter(string),
+						FMT_STRING("xv 190 yv {} picn {} "), ty, "sbfctf2");
+			} else if (GTF(GTF_ROUNDS) && level.match_state == MATCH_IN_PROGRESS && !cl->eliminated)
 				fmt::format_to(std::back_inserter(string),
 					FMT_STRING("xv 190 yv {} picn {} "), ty, "sbfctf2");
 
@@ -823,9 +850,17 @@ static void G_SetGametypeStats(gentity_t *ent) {
 			ent->client->ps.stats[STAT_GAMETYPE_HUD] = 0;
 		}
 		ent->client->ps.stats[STAT_RULESET_HUD] = 0;
-	} else if (deathmatch->integer && level.match_state == MATCH_IN_PROGRESS && (GT(GT_CA) || GT(GT_RR) || GT(GT_STRIKE) || GT(GT_LMS))) {
+	} else if (deathmatch->integer && level.match_state == MATCH_IN_PROGRESS && (GT(GT_CA) || GT(GT_FREEZE) || GT(GT_RR) || GT(GT_STRIKE) || GT(GT_LMS))) {
 		const int display_round = HudRoundDisplayNumber();
-		if (display_round > 0) {
+		if (GT(GT_FREEZE)) {
+			std::string round_status;
+			if (MM_FreezeTag_BuildRoundHudStatus(display_round, round_status)) {
+				gi.configstring(CONFIG_GAMETYPE_HUD, round_status.c_str());
+				ent->client->ps.stats[STAT_GAMETYPE_HUD] = CONFIG_GAMETYPE_HUD;
+			} else {
+				ent->client->ps.stats[STAT_GAMETYPE_HUD] = 0;
+			}
+		} else if (display_round > 0) {
 			const int limit = roundlimit->integer;
 			if (limit > 0)
 				gi.configstring(CONFIG_GAMETYPE_HUD, G_Fmt("Round {} of {}", display_round, limit).data());
@@ -843,6 +878,8 @@ static void G_SetGametypeStats(gentity_t *ent) {
 			} else {
 				ent->client->ps.stats[STAT_RULESET_HUD] = 0;
 			}
+		} else if (GT(GT_FREEZE)) {
+			ent->client->ps.stats[STAT_RULESET_HUD] = 0;
 		} else if (!GT(GT_CA) && !GT(GT_RR)) {
 			ent->client->ps.stats[STAT_RULESET_HUD] = 0;
 		}
@@ -862,25 +899,34 @@ static void G_SetGametypeStats(gentity_t *ent) {
 
 		ent->client->ps.stats[STAT_ARENA_ROLE] = 0;
 
-		const int ci = (int)(ent - g_entities - 1);
-
-		if (GTF(GTF_ELIMINATION) && GTF(GTF_TEAMS) && GTF(GTF_CTF) && GT(GT_STRIKE)
+		if (GT(GT_FREEZE) && MM_FreezeTag_IsFrozen(ent)) {
+			const int cs = PovHudConfigString(ent, mm_pov_configstring_lane_t::Primary);
+			if (cs != 0) {
+				const int thaw_pct = MM_FreezeTag_ThawProgressPercent(ent);
+				if (thaw_pct > 0)
+					gi.configstring(cs, G_Fmt("THAWING {}%", thaw_pct).data());
+				else
+					gi.configstring(cs, "FROZEN");
+				ent->client->ps.stats[STAT_ARENA_ROLE] = cs;
+			}
+		} else if (GTF(GTF_ELIMINATION) && GTF(GTF_TEAMS) && GTF(GTF_CTF) && GT(GT_STRIKE)
 			&& ClientIsPlaying(ent->client) && !ent->client->eliminated) {
-			if (ci >= 0 && (size_t)ci < CONFIG_POV_CENTER_POOL_SLOTS) {
+			const int cs = PovHudConfigString(ent, mm_pov_configstring_lane_t::Primary);
+			if (cs != 0) {
 				const bool attacking = ent->client->sess.team == (level.strike_red_attacks ? TEAM_RED : TEAM_BLUE);
-				const int cs = (int)(CONFIG_POV_CENTER_POOL + (size_t)ci);
+				gi.configstring(cs, attacking ? "OFFENSE" : "DEFENSE");
 				ent->client->ps.stats[STAT_ARENA_ROLE] = cs;
 			}
 		} else if (GTF(GTF_ELIMINATION) && GTF(GTF_TEAMS) && !GTF(GTF_CTF)
 			&& ClientIsPlaying(ent->client) && ent->client->eliminated) {
-			if (ci >= 0 && (size_t)ci < CONFIG_POV_CENTER_POOL_SLOTS) {
-				const int cs = (int)(CONFIG_POV_CENTER_POOL + (size_t)ci);
+			const int cs = PovHudConfigString(ent, mm_pov_configstring_lane_t::Primary);
+			if (cs != 0) {
 				gi.configstring(cs, "ELIMINATED");
 				ent->client->ps.stats[STAT_ARENA_ROLE] = cs;
 			}
 		}
 
-		if (GTF(GTF_ROUNDS) && !GT(GT_CA) && !GT(GT_RR) && !GT(GT_STRIKE) && !GT(GT_HORDE) && !GT(GT_LMS)) {
+		if (GTF(GTF_ROUNDS) && !GT(GT_CA) && !GT(GT_FREEZE) && !GT(GT_RR) && !GT(GT_STRIKE) && !GT(GT_HORDE) && !GT(GT_LMS)) {
 			const int display_round = HudRoundDisplayNumber();
 			if (display_round > 0) {
 				const int limit = GT_ScoreLimit();
@@ -909,17 +955,16 @@ static void G_SetGametypeStats(gentity_t *ent) {
 
 	if ((GT(GT_CA) || GT(GT_RR)) && deathmatch->integer && level.match_state == MATCH_IN_PROGRESS
 		&& level.round_state == roundst_t::ROUND_IN_PROGRESS) {
-		int allies = level.num_living_red;
-		int enemies = level.num_living_blue;
+		const int cs = PovHudConfigString(ent, mm_pov_configstring_lane_t::Secondary);
+		if (cs != 0) {
+			int allies = level.num_living_red;
+			int enemies = level.num_living_blue;
 
-		if (ent->client->sess.team == TEAM_BLUE) {
-			allies = level.num_living_blue;
-			enemies = level.num_living_red;
-		}
+			if (ent->client->sess.team == TEAM_BLUE) {
+				allies = level.num_living_blue;
+				enemies = level.num_living_red;
+			}
 
-		const int ci = (int)(ent - g_entities - 1);
-		if (ci >= 0 && (size_t)ci < CONFIG_POV_CENTER_POOL_SLOTS) {
-			const int cs = (int)(CONFIG_POV_CENTER_POOL + (size_t)ci);
 			gi.configstring(cs, G_Fmt("{} vs {}", allies, enemies).data());
 			ent->client->ps.stats[STAT_ROUND_NUMBER] = cs;
 		} else {
@@ -951,9 +996,8 @@ static void G_SetGametypeStats(gentity_t *ent) {
 			? "1 enemy remaining"
 			: G_Fmt("{} enemies remaining", enemies).data();
 
-		const int ci = (int)(ent - g_entities - 1);
-		if (ci >= 0 && (size_t)ci < CONFIG_POV_CENTER_POOL_SLOTS) {
-			const int cs = (int)(CONFIG_POV_CENTER_POOL + (size_t)ci);
+		const int cs = PovHudConfigString(ent, mm_pov_configstring_lane_t::Primary);
+		if (cs != 0) {
 			gi.configstring(cs, line);
 			ent->client->ps.stats[STAT_CENTER_LINE] = cs;
 		}

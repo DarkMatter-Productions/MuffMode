@@ -301,6 +301,26 @@ void MM_ClearLocCache()
 	g_loc_mapname.clear();
 }
 
+bool MM_LocLabelForEntity(gentity_t *ent, std::string &out_label)
+{
+	out_label.clear();
+
+	if (!ent || !ent->client || !g_loc || !g_loc->integer)
+		return false;
+
+	if (g_loc_mapname != level.mapname) {
+		MM_LoadLocFile(level.mapname);
+		g_loc_mapname = level.mapname;
+	}
+
+	if (const loc_entry_t *loc = MM_NearestLoc(ent->s.origin)) {
+		out_label = loc->label;
+		return true;
+	}
+
+	return g_loc_items && g_loc_items->integer && MM_NearestItemLoc(ent, out_label);
+}
+
 void MM_CmdLoc(gentity_t *ent)
 {
 	if (!ent || !ent->client)
@@ -311,15 +331,8 @@ void MM_CmdLoc(gentity_t *ent)
 		return;
 	}
 
-	if (g_loc_mapname != level.mapname) {
-		MM_LoadLocFile(level.mapname);
-		g_loc_mapname = level.mapname;
-	}
-
 	std::string label;
-	if (const loc_entry_t *loc = MM_NearestLoc(ent->s.origin)) {
-		label = loc->label;
-	} else if (!g_loc_items || !g_loc_items->integer || !MM_NearestItemLoc(ent, label)) {
+	if (!MM_LocLabelForEntity(ent, label)) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "No location data is available for this map.\n");
 		return;
 	}

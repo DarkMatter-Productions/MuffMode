@@ -3,6 +3,7 @@
 
 #include "fake_game_import.h"
 #include "muffmode/mm_command_contracts.h"
+#include "muffmode/mm_freezetag_rules.h"
 #include "muffmode/mm_hud_stat_contracts.h"
 #include "muffmode/mm_horde_ai_rules.h"
 #include "muffmode/mm_lms_rules.h"
@@ -423,6 +424,129 @@ MM_TEST(lms_round_is_a_draw_only_on_mutual_elimination) {
 	MM_CHECK_FALSE(MM_LMSRoundIsDraw(0, 1));
 }
 
+MM_TEST(freezetag_round_resolves_wipes_draws_and_time_ties) {
+	const mm_freezetag_team_counts_t red_full { 3, 3, 260 };
+	const mm_freezetag_team_counts_t blue_full { 2, 2, 180 };
+	const mm_freezetag_team_counts_t red_frozen { 3, 0, 0 };
+	const mm_freezetag_team_counts_t blue_frozen { 2, 0, 0 };
+
+	MM_CHECK_EQ(MM_FreezeTagResolveRound(red_frozen, blue_full, false), mm_freezetag_round_result_t::BlueWinsByFreeze);
+	MM_CHECK_EQ(MM_FreezeTagResolveRound(red_full, blue_frozen, false), mm_freezetag_round_result_t::RedWinsByFreeze);
+	MM_CHECK_EQ(MM_FreezeTagResolveRound(red_frozen, blue_frozen, false), mm_freezetag_round_result_t::Draw);
+	MM_CHECK_EQ(MM_FreezeTagResolveRound({ 0, 0, 0 }, blue_full, false), mm_freezetag_round_result_t::Continue);
+	MM_CHECK_EQ(MM_FreezeTagResolveRound(red_full, blue_full, false), mm_freezetag_round_result_t::Continue);
+	MM_CHECK_EQ(MM_FreezeTagResolveRound({ 3, 2, 200 }, { 3, 1, 220 }, true), mm_freezetag_round_result_t::RedWinsByActiveCount);
+	MM_CHECK_EQ(MM_FreezeTagResolveRound({ 3, 1, 220 }, { 3, 2, 200 }, true), mm_freezetag_round_result_t::BlueWinsByActiveCount);
+	MM_CHECK_EQ(MM_FreezeTagResolveRound({ 3, 2, 160 }, { 3, 2, 140 }, true), mm_freezetag_round_result_t::RedWinsByHealth);
+	MM_CHECK_EQ(MM_FreezeTagResolveRound({ 3, 2, 140 }, { 3, 2, 160 }, true), mm_freezetag_round_result_t::BlueWinsByHealth);
+	MM_CHECK_EQ(MM_FreezeTagResolveRound({ 3, 2, 160 }, { 3, 2, 160 }, true), mm_freezetag_round_result_t::Draw);
+}
+
+MM_TEST(freezetag_late_spawns_wait_for_next_round) {
+	MM_CHECK(MM_FreezeTagSpawnShouldWaitForNextRound(true, true, true, false));
+	MM_CHECK(MM_FreezeTagSpawnShouldWaitForNextRound(true, true, false, true));
+	MM_CHECK_FALSE(MM_FreezeTagSpawnShouldWaitForNextRound(true, true, false, false));
+	MM_CHECK_FALSE(MM_FreezeTagSpawnShouldWaitForNextRound(true, false, true, false));
+	MM_CHECK_FALSE(MM_FreezeTagSpawnShouldWaitForNextRound(false, true, true, false));
+}
+
+MM_TEST(freezetag_round_countdown_respawns_round_players) {
+	MM_CHECK(MM_FreezeTagRoundCountdownShouldRespawn(true, true, true, true));
+	MM_CHECK_FALSE(MM_FreezeTagRoundCountdownShouldRespawn(false, true, true, true));
+	MM_CHECK_FALSE(MM_FreezeTagRoundCountdownShouldRespawn(true, false, true, true));
+	MM_CHECK_FALSE(MM_FreezeTagRoundCountdownShouldRespawn(true, true, false, true));
+	MM_CHECK_FALSE(MM_FreezeTagRoundCountdownShouldRespawn(true, true, true, false));
+}
+
+MM_TEST(freezetag_round_participants_exclude_waiting_late_joiners) {
+	MM_CHECK(MM_FreezeTagClientCountsForRound(true, true, false));
+	MM_CHECK_FALSE(MM_FreezeTagClientCountsForRound(true, true, true));
+	MM_CHECK_FALSE(MM_FreezeTagClientCountsForRound(true, false, false));
+	MM_CHECK_FALSE(MM_FreezeTagClientCountsForRound(false, true, false));
+}
+
+MM_TEST(freezetag_death_conversion_respects_match_state_and_same_team_deaths) {
+	MM_CHECK(MM_FreezeTagDeathShouldFreeze(true, true, true, true, false, false, true, false, false, false));
+	MM_CHECK(MM_FreezeTagDeathShouldFreeze(true, true, true, true, false, false, false, false, false, false));
+	MM_CHECK(MM_FreezeTagDeathShouldFreeze(true, true, true, true, false, false, true, true, true, false));
+	MM_CHECK_FALSE(MM_FreezeTagDeathShouldFreeze(false, true, true, true, false, false, true, false, false, false));
+	MM_CHECK_FALSE(MM_FreezeTagDeathShouldFreeze(true, false, true, true, false, false, true, false, false, false));
+	MM_CHECK_FALSE(MM_FreezeTagDeathShouldFreeze(true, true, false, true, false, false, true, false, false, false));
+	MM_CHECK_FALSE(MM_FreezeTagDeathShouldFreeze(true, true, true, false, false, false, true, false, false, false));
+	MM_CHECK_FALSE(MM_FreezeTagDeathShouldFreeze(true, true, true, true, true, false, true, false, false, false));
+	MM_CHECK_FALSE(MM_FreezeTagDeathShouldFreeze(true, true, true, true, false, true, true, false, false, false));
+	MM_CHECK_FALSE(MM_FreezeTagDeathShouldFreeze(true, true, true, true, false, false, true, false, true, false));
+	MM_CHECK(MM_FreezeTagDeathShouldFreeze(true, true, true, true, false, false, true, false, true, true));
+}
+
+MM_TEST(freezetag_arena_loadout_is_mode_policy_not_global_arena_flag) {
+	MM_CHECK(MM_FreezeTagUsesArenaLoadout(false, true, true));
+	MM_CHECK_FALSE(MM_FreezeTagUsesArenaLoadout(false, true, false));
+	MM_CHECK_FALSE(MM_FreezeTagUsesArenaLoadout(false, false, true));
+	MM_CHECK(MM_FreezeTagUsesArenaLoadout(true, false, false));
+	MM_CHECK_FALSE(MM_FreezeTagDropWeaponOnFreeze(true));
+	MM_CHECK(MM_FreezeTagDropWeaponOnFreeze(false));
+}
+
+MM_TEST(freezetag_arena_thaws_select_rocket_launcher_when_available) {
+	constexpr int fallback_weapon = 3;
+	constexpr int rocket_launcher = 7;
+
+	MM_CHECK_EQ(MM_FreezeTagThawWeaponId(true, true, fallback_weapon, rocket_launcher), rocket_launcher);
+	MM_CHECK_EQ(MM_FreezeTagThawWeaponId(true, false, fallback_weapon, rocket_launcher), fallback_weapon);
+	MM_CHECK_EQ(MM_FreezeTagThawWeaponId(false, true, fallback_weapon, rocket_launcher), fallback_weapon);
+}
+
+MM_TEST(freezetag_hud_status_formats_relative_and_spectator_counts) {
+	const mm_freezetag_team_counts_t red { 3, 2, 180 };
+	const mm_freezetag_team_counts_t blue { 4, 1, 90 };
+
+	MM_CHECK_EQ(MM_FreezeTagFormatHudStatus(red, blue, mm_freezetag_hud_team_t::Red), std::string("Alive A 2/3 E 1/4"));
+	MM_CHECK_EQ(MM_FreezeTagFormatHudStatus(red, blue, mm_freezetag_hud_team_t::Blue), std::string("Alive A 1/4 E 2/3"));
+	MM_CHECK_EQ(MM_FreezeTagFormatHudStatus(red, blue, mm_freezetag_hud_team_t::Neutral), std::string("Alive R 2/3 B 1/4"));
+	MM_CHECK_EQ(MM_FreezeTagFormatHudStatus({ -1, 5, 0 }, { 2, -3, 0 }, mm_freezetag_hud_team_t::Neutral), std::string("Alive R 0/0 B 0/2"));
+
+	MM_CHECK_EQ(MM_FreezeTagFormatCompactAliveStatus(red, blue, mm_freezetag_hud_team_t::Red), std::string("2 vs 1"));
+	MM_CHECK_EQ(MM_FreezeTagFormatCompactAliveStatus(red, blue, mm_freezetag_hud_team_t::Blue), std::string("1 vs 2"));
+	MM_CHECK_EQ(MM_FreezeTagFormatCompactAliveStatus(red, blue, mm_freezetag_hud_team_t::Neutral), std::string("2 vs 1"));
+}
+
+MM_TEST(freezetag_round_hud_status_formats_score_and_limit) {
+	MM_CHECK_EQ(MM_FreezeTagFormatRoundHudStatus(2, 8, 1, 0), std::string("Round 2 of 8"));
+	MM_CHECK_EQ(MM_FreezeTagFormatRoundHudStatus(2, 0, 1, 0), std::string("Round 2"));
+	MM_CHECK_EQ(MM_FreezeTagFormatRoundHudStatus(0, 8, -2, 3), std::string());
+}
+
+MM_TEST(freezetag_thaw_rate_rewards_teamwork_without_extremes) {
+	MM_CHECK_EQ(MM_FreezeTagThawRate(0, 0.5f), 0.0f);
+	MM_CHECK_EQ(MM_FreezeTagThawRate(1, 0.5f), 1.0f);
+	MM_CHECK_EQ(MM_FreezeTagThawRate(2, 0.5f), 1.5f);
+	MM_CHECK_EQ(MM_FreezeTagThawRate(3, 0.5f), 2.0f);
+	MM_CHECK_EQ(MM_FreezeTagThawRate(3, -1.0f), 1.0f);
+	MM_CHECK_EQ(MM_FreezeTagThawRate(32, 4.0f), 8.0f);
+}
+
+MM_TEST(freezetag_thaw_progress_is_clamped_for_hud) {
+	MM_CHECK_EQ(MM_FreezeTagThawProgressPercent(0.0f, 3.0f), 0);
+	MM_CHECK_EQ(MM_FreezeTagThawProgressPercent(1.5f, 3.0f), 50);
+	MM_CHECK_EQ(MM_FreezeTagThawProgressPercent(3.0f, 3.0f), 99);
+	MM_CHECK_EQ(MM_FreezeTagThawProgressPercent(30.0f, 3.0f), 99);
+	MM_CHECK_EQ(MM_FreezeTagThawProgressPercent(1.0f, 0.0f), 0);
+	MM_CHECK_EQ(MM_FreezeTagThawProgressPercent(-1.0f, 3.0f), 0);
+}
+
+MM_TEST(freezetag_thaw_assist_threshold_scales_with_server_timing) {
+	MM_CHECK_EQ(MM_FreezeTagThawAssistThreshold(3.0f), 0.75f);
+	MM_CHECK_FALSE(MM_FreezeTagThawAssistQualifies(0.70f, 3.0f));
+	MM_CHECK(MM_FreezeTagThawAssistQualifies(0.75f, 3.0f));
+	MM_CHECK_EQ(MM_FreezeTagThawAssistThreshold(30.0f), 1.0f);
+	MM_CHECK_FALSE(MM_FreezeTagThawAssistQualifies(0.99f, 30.0f));
+	MM_CHECK(MM_FreezeTagThawAssistQualifies(1.0f, 30.0f));
+	MM_CHECK_EQ(MM_FreezeTagThawAssistThreshold(0.1f), 0.1f);
+	MM_CHECK(MM_FreezeTagThawAssistQualifies(0.1f, 0.1f));
+	MM_CHECK_FALSE(MM_FreezeTagThawAssistQualifies(1.0f, 0.0f));
+}
+
 MM_TEST(scoreboard_footer_reserve_keeps_layout_room_available) {
 	MM_CHECK_EQ(MM_ScoreboardFooterReserve(false), 96u);
 	MM_CHECK_EQ(MM_ScoreboardFooterReserve(true), 320u);
@@ -566,6 +690,22 @@ MM_TEST(hud_statusbar_layout_vanilla_token_whitelist) {
 MM_TEST(hud_stat_count_within_max_stats) {
 	MM_CHECK((int)STAT_LAST <= (int)MAX_STATS);
 	MM_CHECK((int)STAT_ARENA_ROLE < (int)MAX_STATS);
+}
+
+MM_TEST(hud_pov_configstring_lanes_do_not_overlap_global_countdown_or_each_other) {
+	constexpr size_t kTypicalMaxClients = 32;
+	MM_CHECK(CONFIG_COUNTDOWN_HEADER < CONFIG_POV_CENTER_POOL);
+
+	const int primary = MM_PovConfigStringForClient(1, kTypicalMaxClients, mm_pov_configstring_lane_t::Primary);
+	const int secondary = MM_PovConfigStringForClient(1, kTypicalMaxClients, mm_pov_configstring_lane_t::Secondary);
+
+	MM_CHECK(primary != 0);
+	MM_CHECK(secondary != 0);
+	MM_CHECK(primary != secondary);
+	MM_CHECK(primary != CONFIG_COUNTDOWN_HEADER);
+	MM_CHECK(secondary != CONFIG_COUNTDOWN_HEADER);
+	MM_CHECK_EQ(MM_PovConfigStringForClient(CONFIG_POV_CENTER_POOL_SLOTS, kTypicalMaxClients, mm_pov_configstring_lane_t::Primary), 0);
+	MM_CHECK_EQ(MM_PovConfigStringForClient(0, CONFIG_POV_CENTER_POOL_SLOTS, mm_pov_configstring_lane_t::Secondary), 0);
 }
 
 MM_TEST(hud_stat_contract_miniscore_val_visibility) {

@@ -4,8 +4,11 @@
 #include "g_local.h"
 #include "monsters/m_player.h"
 #include "muffmode/mm_captain.h"
+#include "muffmode/mm_freezetag.h"
+#include "muffmode/mm_freezetag_rules.h"
 #include "muffmode/mm_horde.h"
 #include "muffmode/mm_lms.h"
+#include "muffmode/mm_spawn_loadout.h"
 
 static bool ShouldShowRampageMessages();
 
@@ -422,7 +425,7 @@ TossClientItems
 Toss the weapon, tech, CTF flag and powerups for the killed player
 =================
 */
-void TossClientItems(gentity_t *self) {
+static void TossClientItemsInternal(gentity_t *self, bool drop_weapon) {
 	if (!deathmatch->integer)
 		return;
 
@@ -437,7 +440,7 @@ void TossClientItems(gentity_t *self) {
 	bool	quad, doubled, haste, protection, invis, regen;
 
 	// drop weapon
-	wp = self->client->pers.weapon;
+	wp = drop_weapon ? self->client->pers.weapon : nullptr;
 	if (wp) {
 		if (g_instagib->integer || GT(GT_INSTAGIB))
 			wp = nullptr;
@@ -506,6 +509,10 @@ void TossClientItems(gentity_t *self) {
 	}
 
 	self->client->v_angle[YAW] = 0.0;
+}
+
+void TossClientItems(gentity_t *self) {
+	TossClientItemsInternal(self, true);
 }
 
 /*
@@ -674,6 +681,15 @@ DIE(player_die) (gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 		MS_Adjust(self->client, MSTAT_DEATHS_ENVIRO, 1);
 	else if (1_sec > (level.time - self->client->respawn_time))
 		MS_Adjust(self->client, MSTAT_DEATHS_SPAWN, 1);
+
+	if (MM_FreezeTag_ShouldFreezeDeath(self, attacker, mod)) {
+		LookAtKiller(self, inflictor, attacker);
+		ClientObituary(self, inflictor, attacker, mod);
+		TossClientItemsInternal(self, MM_FreezeTagDropWeaponOnFreeze(MM_UsesArenaSpawnLoadout()));
+		Weapon_Grapple_DoReset(self->client);
+		MM_FreezeTag_FreezePlayer(self, attacker, mod);
+		return;
+	}
 
 	self->svflags |= SVF_DEADMONSTER;
 

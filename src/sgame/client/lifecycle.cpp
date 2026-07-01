@@ -5,6 +5,7 @@
 #include "monsters/m_player.h"
 #include "bots/bot_includes.h"
 #include "muffmode/mm_captain.h"
+#include "muffmode/mm_freezetag.h"
 #include "muffmode/mm_ghost.h"
 #include "muffmode/mm_horde.h"
 #include "muffmode/mm_lms.h"
@@ -741,15 +742,24 @@ void ClientSpawn(gentity_t *ent) {
 	client_respawn_t		resp;
 	client_session_t		sess;
 
-	if (GTF(GTF_ROUNDS) && GTF(GTF_ELIMINATION) && level.match_state == matchst_t::MATCH_IN_PROGRESS && notGT(GT_HORDE))
-		if (level.round_state == roundst_t::ROUND_IN_PROGRESS || level.round_state == roundst_t::ROUND_ENDED)
+	if (GTF(GTF_ROUNDS) && level.match_state == matchst_t::MATCH_IN_PROGRESS && notGT(GT_HORDE)) {
+		const bool round_locked = level.round_state == roundst_t::ROUND_IN_PROGRESS ||
+			level.round_state == roundst_t::ROUND_ENDED;
+		if (round_locked) {
+			const bool freeze_thaw_respawn = MM_FreezeTag_IsFrozen(ent);
+
 			// LMS uses the Horde-style lives model: a mid-round (re)spawn with lives left is a
 			// living respawn, not an elimination. Only auto-eliminate LMS spawners who are out
 			// of lives (latecomers/round-joiners get no lives, so they spectate until next round).
-			if (notGT(GT_LMS) || ent->client->pers.lives <= 0)
+			if (!freeze_thaw_respawn && GTF(GTF_ELIMINATION) && (notGT(GT_LMS) || ent->client->pers.lives <= 0))
 				ClientSetEliminated(ent);
+			else if (ClientIsPlaying(ent->client) && !freeze_thaw_respawn && MM_FreezeTag_ShouldHoldSpawnForRound())
+				ClientSetEliminated(ent);
+		}
+	}
 
 	G_ClearLagCompensationHistory(ent);
+	MM_FreezeTag_ClearClient(ent);
 
 	if (GT(GT_HORDE) && level.match_state == matchst_t::MATCH_IN_PROGRESS &&
 		level.round_state == roundst_t::ROUND_IN_PROGRESS && !ent->client->eliminated)
@@ -1049,7 +1059,7 @@ void ClientSpawn(gentity_t *ent) {
 	}
 	
 	// force the current weapon up
-	if (GTF(GTF_ARENA) && client->pers.inventory[IT_WEAPON_RLAUNCHER])
+	if (MM_UsesArenaSpawnLoadout() && client->pers.inventory[IT_WEAPON_RLAUNCHER])
 		client->newweapon = &itemlist[IT_WEAPON_RLAUNCHER];
 	else
 		client->newweapon = client->pers.weapon;
@@ -2089,6 +2099,9 @@ void ClientThink(gentity_t *ent, usercmd_t *ucmd) {
 		return;
 	}
 
+	if (MM_FreezeTag_ClientThink(ent, ucmd))
+		return;
+
 	if (ent->client->follow_target) {
 		client->resp.cmd_angles = ucmd->angles;
 		ent->movetype = MOVETYPE_FREECAM;
@@ -2629,6 +2642,9 @@ void ClientBeginServerFrame(gentity_t *ent) {
 		return;
 	}
 
+	if (MM_FreezeTag_RunClientFrame(ent))
+		return;
+
 	if ((ent->svflags & SVF_BOT) != 0) {
 		Bot_BeginFrame(ent);
 	}
@@ -2640,6 +2656,12 @@ void ClientBeginServerFrame(gentity_t *ent) {
 		client->weapon_thunk = false;
 
 	if (ent->deadflag) {
+		if (deathmatch->integer && MM_FreezeTag_ShouldRespawnForRoundCountdown(ent) &&
+				level.time > client->respawn_time && !level.coop_level_restart_time) {
+			ClientRespawn(ent);
+			return;
+		}
+
 		if (deathmatch->integer && ClientArenaEliminationRound(client) &&
 				level.time > client->respawn_time && !level.coop_level_restart_time) {
 			ClientRespawn(ent);

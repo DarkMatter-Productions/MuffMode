@@ -181,6 +181,12 @@
     <ClInclude Include="..\..\src\sgame\muffmode\mm_gametype.h">
       <Filter>sgame\muffmode</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_freezetag.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_freezetag_rules.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\src\sgame\muffmode\mm_captain.h">
       <Filter>sgame\muffmode</Filter>
     </ClInclude>
@@ -610,6 +616,9 @@
       <Filter>sgame\muffmode</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\sgame\muffmode\mm_gametype.cpp">
+      <Filter>sgame\muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_freezetag.cpp">
       <Filter>sgame\muffmode</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\sgame\muffmode\mm_horde_ai.cpp">

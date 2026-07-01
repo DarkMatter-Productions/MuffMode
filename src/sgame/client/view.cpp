@@ -5,6 +5,7 @@
 #include "monsters/m_player.h"
 #include "bots/bot_includes.h"
 // [MuffMode] AutoDoc regen lives in muffmode/mm_items_rules
+#include "muffmode/mm_freezetag.h"
 #include "muffmode/mm_items_rules.h"
 #include "muffmode/mm_parse.h"
 
@@ -845,6 +846,10 @@ static void G_SetClientEffects(gentity_t *ent) {
 			ent->s.alpha = std::clamp(x, 0.05f, 0.2f);
 		}
 	}
+
+	// [MuffMode] G_SetClientEffects rebuilds player effects every frame; reapply
+	// Freeze Tag's frozen shell after the vanilla/powerup effect pass.
+	MM_FreezeTag_ApplyClientEffects(ent);
 }
 
 /*
@@ -1756,6 +1761,7 @@ void ClientEndServerFrame(gentity_t *ent) {
 		SyncFollowPresentation(ent);
 
 	G_SetClientFrame(ent);
+	MM_FreezeTag_ApplyFrozenPresentation(ent);
 	
 	ent->client->oldvelocity = ent->velocity;
 	ent->client->oldviewangles = ent->client->ps.viewangles;

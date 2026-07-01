@@ -114,13 +114,14 @@ Use `callvote <command> [arg]` or `cv <command> [arg]`.
 | `3` | `tdm` | Team Deathmatch |
 | `4` | `ctf` | Capture the Flag |
 | `5` | `ca` | Clan Arena |
+| `6` | `ft` | Freeze Tag |
 | `7` | `strike` | Capture Strike |
 | `8` | `rr` | Red Rover |
 | `10` | `horde` | Horde Mode |
 | `12` | `instagib` | Instagib |
 | `13` | `nadefest` | NadeFest |
 
-Values `6` (`ft`), `9` (`lms`), and `11` (`ball`) are reserved or removed in the current build.
+Value `11` (`ball`) is reserved or removed in the current build.
 
 ## Ruleset Values
 
@@ -235,8 +236,8 @@ Deathmatch respawns use a WORR-style danger score instead of raw farthest-only m
 | `g_map_pool` | empty | Additional voting map pool. |
 | `g_gametype_cfg` | `1` | Executes `gt-[GAMETYPE].cfg` on gametype changes. |
 | `g_dm_exec_level_cfg` | `0` | Executes level-specific configs when enabled. |
-| `g_loc` | `1` | Enables the `loc` teammate callout command. |
-| `g_loc_items` | `1` | Allows `loc` to derive a fallback location from visible weapons, powerups, or mega health when no map `.loc` file exists. |
+| `g_loc` | `1` | Enables location-backed teammate callouts, including the `loc` command and Freeze Tag frozen help markers. |
+| `g_loc_items` | `1` | Allows location callouts to derive a fallback location from visible weapons, powerups, or mega health when no map `.loc` file exists. |
 | `g_motd_filename` | `motd.txt` | Message of the day file. |
 | `g_entity_override_dir` | `maps` | Directory for entity override `.ent` files. |
 | `g_entity_override_load` | `1` | Loads entity override files on map load. |
@@ -246,8 +247,8 @@ Deathmatch respawns use a WORR-style danger score instead of raw farthest-only m
 
 | Cvar | Default | Purpose |
 | --- | --- | --- |
-| `g_arena_start_armor` | `200` | Starting armor in arena modes. |
-| `g_arena_start_health` | `200` | Starting health in arena modes. |
+| `g_arena_start_armor` | `200` | Starting armor in arena modes and Freeze Tag when `g_freezetag_arena_loadout` is enabled. |
+| `g_arena_start_health` | `200` | Starting health in arena modes and Freeze Tag when `g_freezetag_arena_loadout` is enabled. |
 | `g_arena_dmg_armor` | `0` | Allows armor damage in arena modes. |
 | `g_coop_health_scaling` | `0` | Scales co-op health by player count. |
 | `g_corpse_sink_time` | `15` | Seconds before corpses sink and disappear. |
@@ -266,6 +267,16 @@ Deathmatch respawns use a WORR-style danger score instead of raw farthest-only m
 | `g_dm_weapons_stay` | `0` | Controls weapons-stay behavior in deathmatch. |
 | `g_drop_cmds` | `7` | Bitflag for dropping flags, powerups, weapons, and ammo. |
 | `g_fast_doors` | `1` | Doubles standard and rotating door speed. |
+| `g_freezetag_arena_loadout` | `0` | Freeze Tag only: set `1` to give players the arena-style spawn/thaw kit using `g_arena_start_health`, `g_arena_start_armor`, full weapons, and stocked ammo. The default `0` preserves map/item-control loadouts. |
+| `g_freezetag_auto_thaw_time` | `0` | Freeze Tag only: seconds before a frozen player is thawed automatically; `0` disables auto-thaw. |
+| `g_freezetag_bot_rescue` | `1` | Freeze Tag only: lets bots path toward frozen teammates and hold near them to thaw. |
+| `g_freezetag_frozen_knockback_scale` | `1.0` | Freeze Tag only: multiplier for knockback applied to frozen players. |
+| `g_freezetag_multi_thaw_scale` | `0.5` | Freeze Tag only: extra thaw speed contributed by each additional live teammate near the frozen player; values are clamped from `0` to `4`, and total thaw rate is capped. |
+| `g_freezetag_round_respawn_all` | `1` | Freeze Tag only: respawns every round participant for the next round when `1`; set `0` to respawn only frozen, dead, or waiting players while live survivors stay in place. |
+| `g_freezetag_round_reset_alive_inventory` | `1` | Freeze Tag only: when full round respawns are enabled, resets live survivor inventory/loadout on the next-round respawn. Set `0` to preserve survivor inventory through that respawn. |
+| `g_freezetag_thaw_radius` | `96` | Freeze Tag only: teammate proximity radius, in units, required to thaw a frozen player. |
+| `g_freezetag_thaw_respawn_at_location` | `0` | Freeze Tag only: when `0`, thawed players respawn normally at player spawn points. Set `1` to restore them at the safe thaw location instead. |
+| `g_freezetag_thaw_time` | `3` | Freeze Tag only: seconds a live teammate must remain near a frozen player to thaw them. |
 | `g_frenzy` | `0` | Enables Weapons Frenzy: faster fire rates, faster rockets, regenerating ammo, and faster weapon switching. |
 | `g_grapple_offhand` | `0` | Enables offhand hook commands. |
 | `g_grapple_damage` | `10` | Grapple impact damage. |
@@ -341,6 +352,7 @@ When `g_gametype_cfg` is enabled, MuffMode executes a config named for the activ
 | Team Deathmatch | `gt-TDM.cfg` |
 | Capture the Flag | `gt-CTF.cfg` |
 | Clan Arena | `gt-CA.cfg` |
+| Freeze Tag | `gt-FT.cfg` |
 | Capture Strike | `gt-STRIKE.cfg` |
 | Red Rover | `gt-REDROVER.cfg` |
 | Horde Mode | `gt-HORDE.cfg` |

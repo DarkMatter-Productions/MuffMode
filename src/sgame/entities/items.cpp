@@ -4,6 +4,7 @@
 #include "bots/bot_includes.h"
 #include "monsters/m_player.h"	//doppelganger
 #include "muffmode/mm_captain.h"
+#include "muffmode/mm_freezetag.h"
 #include "muffmode/mm_items_rules.h"
 #include "muffmode/mm_ruleset.h"
 #include "muffmode/mm_ruleset_weapons.h"
@@ -2108,6 +2109,9 @@ bool Entity_IsVisibleToPlayer(gentity_t *ent, gentity_t *player) {
 		return false;
 	}
 
+	if (MM_FreezeTag_IsFrozenViewProxy(ent))
+		return MM_FreezeTag_IsFrozenViewProxyVisibleTo(ent, player);
+
 	// First-person following hides only the followed player from that viewer.
 	if (FollowFirstPersonEnabled(player) && player->client->follow_target && ent == player->client->follow_target)
 		return false;
@@ -2134,6 +2138,8 @@ TOUCH(Touch_Item) (gentity_t *ent, gentity_t *other, const trace_t &tr, bool oth
 		return;
 	if (other->health < 1)
 		return; // dead people can't pickup
+	if (MM_FreezeTag_IsFrozen(other))
+		return;
 	if (!ent->item)
 		return;
 	if (!ent->item->pickup)

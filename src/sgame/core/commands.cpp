@@ -6,6 +6,7 @@
 #include "muffmode/mm_captain.h"
 #include "muffmode/mm_command_contracts.h"
 #include "muffmode/mm_duel.h"
+#include "muffmode/mm_freezetag.h"
 #include "muffmode/mm_ghost.h"
 #include "muffmode/mm_loc.h"
 #include "muffmode/mm_maps.h"
@@ -71,6 +72,11 @@ static inline bool CheatsOk(gentity_t *ent) {
 static inline bool AliveOk(gentity_t *ent) {
 	if (ent->health <= 0 || ent->deadflag) {
 		//gi.LocClient_Print(ent, PRINT_HIGH, "You must be alive to use this command.\n");
+		return false;
+	}
+
+	if (MM_FreezeTag_IsFrozen(ent)) {
+		MM_FreezeTag_BlockFrozenCommand(ent);
 		return false;
 	}
 

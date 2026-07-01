@@ -67,7 +67,7 @@ For a more careful walkthrough, use the [Player Guide](docs/player-guide.md) or 
 <h2 align="center">Highlights</h2>
 
  - **Built for every lobby style** — supports **casual public servers**, **private friend sessions**, **pickups**, **scrims**, and more organized competitive events.
- - **A fuller mode lineup** — includes **Deathmatch**, **Duel**, **TDM**, **CTF**, **Clan Arena**, **Capture Strike**, **Red Rover**, **Horde**, **Instagib**, and **NadeFest**.
+ - **A fuller mode lineup** — includes **Deathmatch**, **Duel**, **TDM**, **CTF**, **Clan Arena**, **Freeze Tag**, **Capture Strike**, **Red Rover**, **Horde**, **Instagib**, and **NadeFest**.
  - **Flexible rulesets** — switch between [**Quake II Rerelease**, **Muff Mode**, **Q2RE Balanced**, **Quake III Arena style**, **Quake style**, and **Quake Champions style**](docs/rulesets.md) depending on the feel you want.
  - **Better match flow** — warmups, ready checks, countdowns, post-match delays, sudden death, overtime, round handling, and timeouts help games start cleanly and stay organized.
  - **Player-friendly interface improvements** — a purpose-built HUD, compact scoreboard, frag messages, timer support, help text, MOTD access, and match-state feedback keep important information visible without overwhelming the screen.
@@ -90,7 +90,7 @@ The project builds on **Windows** with **Visual Studio 2022 / MSBuild**. See the
 <h2 align="center">Credits</h2>
 
 This project was started by [themuffinator](https://github.com/themuffinator), later with regular and significant development/maintenance/testing by [ozy](https://github.com/ozy24). It would not be possible without the outstanding work from the Nightdive Team who worked on [Quake II Rerelease](https://bethesda.net/en/game/quakeii) ([source code here](https://github.com/id-Software/quake2-rerelease-dll)).
-Muff Mode exists thanks to the [DarkMatter Discord community](https://discord.gg/T32mFejwR4), the Nightdive team, id Software, the Quake II Rerelease player community, [Paril's Q2 Horde work](https://github.com/Paril/q2horde), ceeeKay's EyeCam code from [Q2Eaks](https://github.com/ceeeKay/Q2Eaks), and the [Stingy Hat Games modding tutorial](https://www.youtube.com/watch?v=PiSMiS3Epyk&t=261s&pp=ygUYU3Rpbmd5IEhhdCBHYW1lcyBxdWFrZSAy0gcJCTkLAYcqIYzv).
+Muff Mode exists thanks to the [DarkMatter Discord community](https://discord.gg/T32mFejwR4), the Nightdive team, id Software, the Quake II Rerelease player community, [Darrell "Doolittle" Bircsak's original Quake II Freeze Tag](https://darrellbircsak.com/2016/03/25/freeze-tag-reminisced/) and [rerelease port](https://github.com/dbircsak/freeze-tag-quake2-rerelease), [Paril's Q2 Horde work](https://github.com/Paril/q2horde), ceeeKay's EyeCam code from [Q2Eaks](https://github.com/ceeeKay/Q2Eaks), and the [Stingy Hat Games modding tutorial](https://www.youtube.com/watch?v=PiSMiS3Epyk&t=261s&pp=ygUYU3Rpbmd5IEhhdCBHYW1lcyBxdWFrZSAy0gcJCTkLAYcqIYzv).
 
 <h2 align="center">Disclaimer</h2>
 

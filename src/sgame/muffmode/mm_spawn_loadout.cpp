@@ -2,6 +2,7 @@
 // Licensed under the GNU General Public License 2.0.
 
 #include "g_local.h"
+#include "muffmode/mm_freezetag_rules.h"
 #include "muffmode/mm_gametype.h"
 #include "muffmode/mm_ruleset_weapons.h"
 #include "muffmode/mm_spawn_loadout.h"
@@ -116,7 +117,22 @@ void ApplyQcStartingWeapon(gclient_t *client)
 	}
 }
 
+bool UsesArenaLoadout()
+{
+	const bool freeze_tag_arena_loadout = g_freezetag_arena_loadout && g_freezetag_arena_loadout->integer != 0;
+
+	return MM_FreezeTagUsesArenaLoadout(
+		MM_GametypeHasFlag(GTF_ARENA),
+		GT(GT_FREEZE),
+		freeze_tag_arena_loadout);
+}
+
 } // namespace muffmode::spawn_loadout
+
+bool MM_UsesArenaSpawnLoadout()
+{
+	return muffmode::spawn_loadout::UsesArenaLoadout();
+}
 
 void MM_ApplyStartingHealthArmor(gentity_t *ent, gclient_t *client)
 {
@@ -125,7 +141,7 @@ void MM_ApplyStartingHealthArmor(gentity_t *ent, gclient_t *client)
 
 	int health = 0;
 	int armor = 0;
-	const bool arena = MM_GametypeHasFlag(GTF_ARENA);
+	const bool arena = muffmode::spawn_loadout::UsesArenaLoadout();
 
 	if (arena) {
 		health = clamp(g_arena_start_health->integer, 1, 9999);
@@ -156,7 +172,7 @@ void MM_ApplySpawnLoadout(gentity_t *ent, gclient_t *client, bool taken_loadout)
 		return;
 
 	if (!taken_loadout) {
-		const bool arena = MM_GametypeHasFlag(GTF_ARENA);
+		const bool arena = muffmode::spawn_loadout::UsesArenaLoadout();
 
 		if (g_instagib->integer || GT(GT_INSTAGIB)) {
 			client->pers.inventory[IT_WEAPON_RAILGUN] = 1;
