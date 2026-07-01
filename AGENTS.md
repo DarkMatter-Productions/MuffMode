@@ -65,6 +65,12 @@ Fast host tests:
 ./scripts/ci/run-host-tests.ps1 -Configuration Release -Platform x64
 ```
 
+GitHub push verification, before any explicitly requested push:
+
+```powershell
+./scripts/ci/verify-github-push.ps1
+```
+
 Release/hardening gates live in `docs/hardening-guide.md`. Use the narrowest relevant gate for the change, and say clearly when a command could not be run.
 
 ## Documentation And Release Metadata

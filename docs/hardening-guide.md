@@ -4,6 +4,28 @@
 
 This guide is the contributor-facing entrypoint for robustness checks. Run the same scripts locally that CI runs.
 
+## GitHub Push Verification
+
+Before pushing to GitHub, run the consolidated verifier from the repository root:
+
+```powershell
+./scripts/ci/verify-github-push.ps1
+```
+
+The verifier requires a clean worktree, checks that the target GitHub branch can be pushed fast-forward, confirms that the branch is covered by the configured push workflows, then runs the required local gates below. When verifying a local branch that will be pushed to the active CI branch, pass the remote branch explicitly:
+
+```powershell
+./scripts/ci/verify-github-push.ps1 -RemoteBranch muffdev
+```
+
+After pushing, the same entrypoint can wait for the matching GitHub Actions runs:
+
+```powershell
+./scripts/ci/verify-github-push.ps1 -RemoteBranch muffdev -SkipLocalGates -WaitForGitHub
+```
+
+Use `-IncludeAnalysis` and `-IncludeSanitizers` for slower local parity with the analysis workflow before high-risk pushes.
+
 ## Required Local Gates
 
 ```powershell
