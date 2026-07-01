@@ -1837,8 +1837,8 @@ static void Cmd_Timer_f(gentity_t *ent) {
 	MM_CmdTimer(ent);
 }
 
-static void Cmd_MatchInfo_f(gentity_t *ent) {
-	MM_CmdMatchInfo(ent);
+static void Cmd_InfoHud_f(gentity_t *ent) {
+	MM_CmdInfoHud(ent);
 }
 
 static void Cmd_FragMessages_f(gentity_t *ent) {
@@ -2350,7 +2350,7 @@ cmds_t client_cmds[] = {
 	{"time-out",		Cmd_TimeOut_f,			CF_ALLOW_DEAD | CF_ALLOW_SPEC},
 	{"time-in",			Cmd_TimeIn_f,			CF_ALLOW_DEAD | CF_ALLOW_SPEC},
 	{"timer",			Cmd_Timer_f,			CF_ALLOW_SPEC | CF_ALLOW_DEAD},
-	{"matchinfo",		Cmd_MatchInfo_f,		CF_ALLOW_SPEC | CF_ALLOW_DEAD},
+	{"infohud",			Cmd_InfoHud_f,			CF_ALLOW_SPEC | CF_ALLOW_DEAD},
 	{"unhook",			Cmd_UnHook_f,			CF_NONE},
 	{"unlockteam",		Cmd_UnlockTeam_f,		CF_ALLOW_DEAD},
 	{"unreadyall",		Cmd_UnReadyAll_f,		CF_ADMIN_ONLY | CF_ALLOW_INT | CF_ALLOW_SPEC},
