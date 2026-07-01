@@ -9,6 +9,7 @@ struct gentity_t;
 void MM_ClientInitPConfig(gentity_t *ent);
 void MM_CmdCrosshairID(gentity_t *ent);
 void MM_CmdTimer(gentity_t *ent);
+void MM_CmdMatchInfo(gentity_t *ent);
 void MM_CmdFragMessages(gentity_t *ent);
 void MM_CmdAnnouncer(gentity_t *ent);
 void MM_CmdKillBeep(gentity_t *ent);

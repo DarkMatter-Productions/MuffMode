@@ -71,7 +71,7 @@ enum {
 	CONFIG_ROUND_PROGRESS,	// DM HUD: "Round x of y" / "Wave x of y"
 	CONFIG_WARMUP_NOTICE,	// DM HUD: warmup requisite detail (e.g. more players needed)
 	CONFIG_POV_CENTER_POOL,	// per-client HUD lines: Strike OFFENSE/DEFENSE, CA/RR/LMS centre POV, ELIMINATED
-	CONFIG_COUNTDOWN_HEADER, // match/round countdown: "Round N\nBegins in..." (centerprint band)
+// CONFIG_COUNTDOWN_HEADER — countdown centerprint: "Round x of y\nBegins in..." (see HudCountdownProgressLabel)
 
 	CONFIG_LAST
 };

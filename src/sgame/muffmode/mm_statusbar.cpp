@@ -276,20 +276,9 @@ void EmitBottomTeamMiniscoreRows(statusbar_t &sb)
 	EmitTeamMiniscoreRow(sb, hud_vanchor_t::Bottom, kBottomMiniscoreRow2Yb, STAT_MINISCORE_SECOND_PIC, STAT_MINISCORE_SECOND_SCORE, STAT_MINISCORE_SECOND_POS);
 }
 
-// CA/RR: team-relative alive line below the two-row miniscore stack.
-void EmitArenaAliveUnderMiniscore(statusbar_t &sb)
-{
-	if (!GT(GT_CA) && !GT(GT_RR))
-		return;
-
-	constexpr int32_t kAliveYb = kBottomMiniscoreRow2Yb + kMiniscoreRowStep;
-	sb.ifstat(STAT_ROUND_NUMBER).xr(kRightHudTextXr).yb(kAliveYb).loc_stat_rstring(STAT_ROUND_NUMBER).endifstat();
-}
-
 void EmitStandardTeamMiniscore(statusbar_t &sb)
 {
 	EmitBottomTeamMiniscoreRows(sb);
-	EmitArenaAliveUnderMiniscore(sb);
 }
 
 // Team flag miniscore is vanilla-safe; FFA/Duel/RR/Horde player skin icons are MM cgame only.
@@ -390,10 +379,7 @@ void MM_InitStatusbar()
 
 		if (muffmode::statusbar::MiniscoreRowsInVanillaLayout())
 			muffmode::statusbar::EmitStandardTeamMiniscore(sb);
-		else {
-			// FFA/Duel/RR/Horde: skin-icon miniscore omitted — MM cgame draws via CG_DrawMuffModeHudEnhancements.
-			muffmode::statusbar::EmitArenaAliveUnderMiniscore(sb);
-		}
+		// FFA/Duel/RR/Horde: skin-icon miniscore omitted — MM cgame draws via CG_DrawMuffModeHudEnhancements.
 	}
 
 	const std::string layout = sb.sb.str();

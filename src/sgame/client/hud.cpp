@@ -13,7 +13,7 @@
 void MultiplayerScoreboard(gentity_t *ent);
 
 // Round counter in HUD: during countdown show the upcoming round (matches centerprint).
-static int HudRoundDisplayNumber()
+int HudRoundDisplayNumber()
 {
 	if (level.round_state != roundst_t::ROUND_COUNTDOWN)
 		return level.round_number;
@@ -24,6 +24,43 @@ static int HudRoundDisplayNumber()
 		return level.round_number;
 
 	return level.round_number + 1;
+}
+
+/*
+===============
+HudCountdownProgressLabel
+
+"x of y" progress for match/round countdown centerprint (e.g. "Round 2 of 15", "Wave 3 of 10").
+Vanilla-safe: consumed via PRINT_CENTER only, not layout tokens.
+===============
+*/
+const char *HudCountdownProgressLabel()
+{
+	if (!deathmatch->integer)
+		return "";
+
+	if (GT(GT_HORDE)) {
+		const int n = HudRoundDisplayNumber();
+		if (n <= 0)
+			return "";
+
+		const int limit = GT_ScoreLimit();
+		if (limit > 0)
+			return G_Fmt("Wave {} of {}", n, limit).data();
+		return G_Fmt("Wave {}", n).data();
+	}
+
+	if (!GTF(GTF_ROUNDS))
+		return "";
+
+	const int n = HudRoundDisplayNumber();
+	if (n <= 0)
+		return "";
+
+	const int limit = roundlimit->integer;
+	if (limit > 0)
+		return G_Fmt("Round {} of {}", n, limit).data();
+	return G_Fmt("Round {}", n).data();
 }
 
 static void UpdateCountdownHud(gentity_t *ent)
@@ -769,6 +806,22 @@ void Cmd_Help_f(gentity_t *ent) {
 
 //=======================================================================
 
+// [MuffMode] Per-player top-right match info (gametype, limits, round progress, Strike role, RR badge).
+static void ApplyMatchInfoHudPreference(gentity_t *ent)
+{
+	if (!deathmatch->integer || ent->client->sess.pc.show_match_info)
+		return;
+
+	ent->client->ps.stats[STAT_GAMETYPE_HUD] = 0;
+	ent->client->ps.stats[STAT_RULESET_HUD] = 0;
+	ent->client->ps.stats[STAT_ROUND_NUMBER] = 0;
+
+	if (GT(GT_STRIKE))
+		ent->client->ps.stats[STAT_ARENA_ROLE] = 0;
+	else if (GT(GT_RR))
+		ent->client->ps.stats[STAT_CTF_FLAG_PIC] = 0;
+}
+
 // [Paril-KEX] for stats we want to always be set in coop
 // even if we're spectating
 // [MuffMode] also drives arena round/role HUD stats in deathmatch gametypes.
@@ -791,7 +844,7 @@ static void G_SetGametypeStats(gentity_t *ent) {
 		gi.configstring(CONFIG_RULESET_HUD, G_Fmt("Ruleset: {}", rs_long_name[game.ruleset]).data());
 		ent->client->ps.stats[STAT_GAMETYPE_HUD] = CONFIG_GAMETYPE_HUD;
 		ent->client->ps.stats[STAT_RULESET_HUD] = CONFIG_RULESET_HUD;
-	} else if (deathmatch->integer && level.match_state == MATCH_IN_PROGRESS
+	} else if (deathmatch->integer && level.match_state == MATCH_IN_PROGRESS && level.round_state != roundst_t::ROUND_COUNTDOWN
 		&& (GT(GT_FFA) || GT(GT_TDM) || GT(GT_DUEL) || GT(GT_INSTAGIB) || GT(GT_NADEFEST))) {
 		const int limit = GT_ScoreLimit();
 		if (limit > 0) {
@@ -801,7 +854,7 @@ static void G_SetGametypeStats(gentity_t *ent) {
 			ent->client->ps.stats[STAT_GAMETYPE_HUD] = 0;
 		}
 		ent->client->ps.stats[STAT_RULESET_HUD] = 0;
-	} else if (deathmatch->integer && level.match_state == MATCH_IN_PROGRESS && GT(GT_CTF)) {
+	} else if (deathmatch->integer && level.match_state == MATCH_IN_PROGRESS && level.round_state != roundst_t::ROUND_COUNTDOWN && GT(GT_CTF)) {
 		const int limit = GT_ScoreLimit();
 		if (limit > 0) {
 			gi.configstring(CONFIG_GAMETYPE_HUD, G_Fmt("Capturelimit: {}", limit).data());
@@ -810,7 +863,7 @@ static void G_SetGametypeStats(gentity_t *ent) {
 			ent->client->ps.stats[STAT_GAMETYPE_HUD] = 0;
 		}
 		ent->client->ps.stats[STAT_RULESET_HUD] = 0;
-	} else if (level.match_state == MATCH_IN_PROGRESS && GT(GT_HORDE)) {
+	} else if (level.match_state == MATCH_IN_PROGRESS && level.round_state != roundst_t::ROUND_COUNTDOWN && GT(GT_HORDE)) {
 		const int display_round = HudRoundDisplayNumber();
 		if (display_round > 0) {
 			const int limit = GT_ScoreLimit();
@@ -823,7 +876,8 @@ static void G_SetGametypeStats(gentity_t *ent) {
 			ent->client->ps.stats[STAT_GAMETYPE_HUD] = 0;
 		}
 		ent->client->ps.stats[STAT_RULESET_HUD] = 0;
-	} else if (deathmatch->integer && level.match_state == MATCH_IN_PROGRESS && (GT(GT_CA) || GT(GT_RR) || GT(GT_STRIKE) || GT(GT_LMS))) {
+	} else if (deathmatch->integer && level.match_state == MATCH_IN_PROGRESS && level.round_state != roundst_t::ROUND_COUNTDOWN
+		&& (GT(GT_CA) || GT(GT_RR) || GT(GT_STRIKE) || GT(GT_LMS))) {
 		const int display_round = HudRoundDisplayNumber();
 		if (display_round > 0) {
 			const int limit = roundlimit->integer;
@@ -908,27 +962,7 @@ static void G_SetGametypeStats(gentity_t *ent) {
 	else
 		ent->client->ps.stats[STAT_COOP_RESPAWN] = 0;
 
-	if ((GT(GT_CA) || GT(GT_RR)) && deathmatch->integer && level.match_state == MATCH_IN_PROGRESS
-		&& level.round_state == roundst_t::ROUND_IN_PROGRESS) {
-		int allies = level.num_living_red;
-		int enemies = level.num_living_blue;
-
-		if (ent->client->sess.team == TEAM_BLUE) {
-			allies = level.num_living_blue;
-			enemies = level.num_living_red;
-		}
-
-		const int ci = (int)(ent - g_entities - 1);
-		if (ci >= 0 && (size_t)ci < CONFIG_POV_CENTER_POOL_SLOTS) {
-			const int cs = (int)(CONFIG_POV_CENTER_POOL + (size_t)ci);
-			gi.configstring(cs, G_Fmt("{} vs {}", allies, enemies).data());
-			ent->client->ps.stats[STAT_ROUND_NUMBER] = cs;
-		} else {
-			ent->client->ps.stats[STAT_ROUND_NUMBER] = 0;
-		}
-	} else if ((GT(GT_CA) || GT(GT_RR)) && deathmatch->integer && level.match_state == MATCH_IN_PROGRESS) {
-		ent->client->ps.stats[STAT_ROUND_NUMBER] = 0;
-	} else if (GT(GT_LMS) && deathmatch->integer && level.match_state == MATCH_IN_PROGRESS
+	if (GT(GT_LMS) && deathmatch->integer && level.match_state == MATCH_IN_PROGRESS
 		&& level.round_state == roundst_t::ROUND_IN_PROGRESS) {
 		gentity_t *pov = ent;
 		if (ent->client->follow_target && ent->client->follow_target->client)
@@ -961,6 +995,8 @@ static void G_SetGametypeStats(gentity_t *ent) {
 	} else if (!GT(GT_DUEL)) {
 		ent->client->ps.stats[STAT_CENTER_LINE] = 0;
 	}
+
+	ApplyMatchInfoHudPreference(ent);
 }
 
 void G_SetCoopStats(gentity_t *ent) {

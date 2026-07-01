@@ -1500,6 +1500,7 @@ bool ClientConnect(gentity_t *ent, char *userinfo, const char *social_id, bool i
 			//InitPlayerTeam(ent);
 			ent->client->sess.pc.show_id = true;
 			ent->client->sess.pc.show_timer = true;
+			ent->client->sess.pc.show_match_info = true;
 			ent->client->sess.pc.show_fragmessages = true;
 			ent->client->sess.pc.killbeep_num = 1;
 			ent->client->sess.pc.follow_killer = false;

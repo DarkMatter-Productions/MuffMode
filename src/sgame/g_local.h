@@ -3114,6 +3114,8 @@ void G_ClearLagCompensationHistory(gentity_t *ent);
 void MoveClientToIntermission(gentity_t *ent);
 void G_SetStats(gentity_t *ent);
 void G_SetCoopStats(gentity_t *ent);
+int HudRoundDisplayNumber();
+const char *HudCountdownProgressLabel();
 void G_SetSpectatorStats(gentity_t *ent);
 void G_CheckChaseStats(gentity_t *ent);
 void ValidateSelectedItem(gentity_t *ent);
@@ -3461,6 +3463,7 @@ struct client_persistant_t {
 struct client_config_t {
 	bool			show_id;
 	bool			show_timer;
+	bool			show_match_info;
 	bool			show_fragmessages;
 	int				killbeep_num;
 

@@ -261,6 +261,20 @@ void MM_CmdTimer(gentity_t *ent)
 
 /*
 =================
+MM_CmdMatchInfo
+=================
+*/
+void MM_CmdMatchInfo(gentity_t *ent)
+{
+	if (!muffmode::pconfig::RequireNoCommandArgs(ent))
+		return;
+
+	ent->client->sess.pc.show_match_info ^= true;
+	gi.LocClient_Print(ent, PRINT_HIGH, "Top-right match info: {}\n", ent->client->sess.pc.show_match_info ? "ON" : "OFF");
+}
+
+/*
+=================
 MM_CmdFragMessages
 =================
 */
