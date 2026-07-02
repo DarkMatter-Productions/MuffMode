@@ -2,9 +2,15 @@ name: Build Windows DLL
 
 on:
   push:
-    branches: [muffdev]
   pull_request:
-    branches: [muffdev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: muffmode-build-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build-windows:

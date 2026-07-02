@@ -17,7 +17,7 @@ This document records the supported build matrix for the current hardening branc
 | Host tests | Enforced in CI | `windows-2025-vs2026` | MSVC `v143` console test project | `Release|x64` | Runs `tests/host/MuffMode.HostTests.vcxproj` through `scripts/ci/run-host-tests.ps1`. |
 | Fuzz targets | Experimental scheduled job | `windows-2025-vs2026` | LLVM `clang-cl` libFuzzer | Parser target smoke | Builds `tests/fuzz/fuzz_numeric_parsers.cpp`; runtime fuzzing depends on sanitizer runtime availability. |
 
-The active CI trigger targets `muffdev`. Release packaging remains a manual workflow and is not treated as a verification matrix entry.
+The active build, analysis, and CodeQL workflows run on every push and pull request. Release packaging remains a manual workflow and is not treated as a verification matrix entry.
 
 ## Local Developer Matrix
 

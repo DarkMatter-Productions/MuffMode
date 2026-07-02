@@ -211,15 +211,17 @@ function Test-BranchMatchesWorkflow {
         [Parameter(Mandatory = $true)]
         [string]$Branch,
 
-        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [AllowNull()]
         [string[]]$Patterns
     )
 
-    if ($Patterns.Count -eq 0) {
+    $patternsToCheck = @($Patterns)
+    if ($patternsToCheck.Count -eq 0) {
         return $true
     }
 
-    foreach ($pattern in $Patterns) {
+    foreach ($pattern in $patternsToCheck) {
         if ($pattern -eq "*" -or $Branch -like $pattern) {
             return $true
         }
@@ -366,7 +368,7 @@ function Assert-GitHubWorkflowCoverage {
             return @()
         }
 
-        throw "$message`nPass -RemoteBranch muffdev when pushing HEAD to the CI branch, or -AllowNonCiBranch for a branch that is intentionally outside push CI."
+        throw "$message`nPass -RemoteBranch with the GitHub branch you intend to update, or -AllowNonCiBranch for a branch that is intentionally outside push CI."
     }
 
     Write-Host "GitHub push workflows for '$Branch': $($matching.FileName -join ', ')"

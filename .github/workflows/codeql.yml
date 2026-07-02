@@ -2,9 +2,7 @@ name: CodeQL
 
 on:
   push:
-    branches: [muffdev]
   pull_request:
-    branches: [muffdev]
   workflow_dispatch:
   schedule:
     - cron: "17 3 * * 1"
@@ -12,6 +10,10 @@ on:
 permissions:
   contents: read
   security-events: write
+
+concurrency:
+  group: muffmode-codeql-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   analyze:

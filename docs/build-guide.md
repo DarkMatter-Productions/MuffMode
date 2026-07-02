@@ -93,7 +93,7 @@ Before pushing to GitHub, run the consolidated local push verifier:
 ./scripts/ci/verify-github-push.ps1
 ```
 
-Use `-RemoteBranch muffdev` when verifying a local branch that will be pushed to the active CI branch.
+Use `-RemoteBranch <branch>` only when the GitHub branch you intend to update differs from the local branch name or upstream.
 
 Run the fast host-side smoke tests:
 

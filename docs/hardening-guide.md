@@ -12,16 +12,16 @@ Before pushing to GitHub, run the consolidated verifier from the repository root
 ./scripts/ci/verify-github-push.ps1
 ```
 
-The verifier requires a clean worktree, checks that the target GitHub branch can be pushed fast-forward, confirms that the branch is covered by the configured push workflows, then runs the required local gates below. When verifying a local branch that will be pushed to the active CI branch, pass the remote branch explicitly:
+The verifier requires a clean worktree, checks that the target GitHub branch can be pushed fast-forward, confirms that the branch is covered by the configured push workflows, then runs the required local gates below. If the remote branch you intend to update differs from the local branch name or upstream, pass it explicitly:
 
 ```powershell
-./scripts/ci/verify-github-push.ps1 -RemoteBranch muffdev
+./scripts/ci/verify-github-push.ps1 -RemoteBranch main
 ```
 
 After pushing, the same entrypoint can wait for the matching GitHub Actions runs:
 
 ```powershell
-./scripts/ci/verify-github-push.ps1 -RemoteBranch muffdev -SkipLocalGates -WaitForGitHub
+./scripts/ci/verify-github-push.ps1 -SkipLocalGates -WaitForGitHub
 ```
 
 Use `-IncludeAnalysis` and `-IncludeSanitizers` for slower local parity with the analysis workflow before high-risk pushes.
@@ -30,6 +30,7 @@ Use `-IncludeAnalysis` and `-IncludeSanitizers` for slower local parity with the
 
 ```powershell
 ./scripts/ci/check-generated-artifacts.ps1
+./scripts/ci/check-changelog.ps1
 ./scripts/ci/check-test-assets.ps1 -RepoOnly
 ./scripts/ci/check-dependency-inventory.ps1
 ./scripts/ci/check-regression-corpus.ps1
