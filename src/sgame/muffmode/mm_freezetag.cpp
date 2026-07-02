@@ -5,6 +5,7 @@
 #include "client/userinfo.h"
 #include "muffmode/mm_freezetag.h"
 #include "muffmode/mm_freezetag_rules.h"
+#include "muffmode/mm_ghost.h"
 #include "muffmode/mm_loc.h"
 #include "muffmode/mm_match.h"
 #include "muffmode/mm_spawn_loadout.h"
@@ -196,6 +197,8 @@ bool IsThawer(gentity_t *frozen, gentity_t *candidate)
 	if (!frozen || !candidate || frozen == candidate)
 		return false;
 	if (!candidate->client || !ClientIsPlaying(candidate->client))
+		return false;
+	if (MM_Ghost_IsPendingRestore(candidate))
 		return false;
 	if (candidate->client->eliminated || candidate->deadflag || candidate->health <= 0)
 		return false;
@@ -1330,6 +1333,23 @@ mm_freezetag_team_counts_t CountTeam(team_t team)
 		}
 	}
 
+	for (uint32_t i = 1; i <= game.maxclients; ++i) {
+		gentity_t *slot = &g_entities[i];
+		if (!slot->inuse || !slot->client || slot->client->pers.connected)
+			continue;
+		if (!MM_Ghost_IsReservedSlot(slot) || !RawFrozen(slot))
+			continue;
+		if (slot->client->sess.team != team)
+			continue;
+		if (!MM_FreezeTagClientCountsForRound(
+				ClientIsPlaying(slot->client),
+				IsFreezeTeam(slot->client->sess.team),
+				slot->client->eliminated))
+			continue;
+
+		counts.participants++;
+	}
+
 	return counts;
 }
 
@@ -1780,6 +1800,7 @@ bool MM_FreezeTag_ClientIsActiveFighter(gentity_t *ent)
 		ent && ent->client &&
 		ClientIsPlaying(ent->client) &&
 		IsFreezeTeam(ent->client->sess.team) &&
+		!MM_Ghost_IsPendingRestore(ent) &&
 		!ent->client->eliminated &&
 		!RawFrozen(ent) &&
 		!ent->deadflag &&

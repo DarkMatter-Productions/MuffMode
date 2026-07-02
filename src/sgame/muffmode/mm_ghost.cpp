@@ -24,9 +24,19 @@ constexpr int AUTO_GHOST_DEFAULT_REJOIN_SECONDS = 120;
 constexpr int AUTO_GHOST_MAX_REJOIN_SECONDS = 3600;
 constexpr int AUTO_GHOST_DEFAULT_MAX_RESERVATIONS = 3;
 constexpr float AUTO_GHOST_PLACEHOLDER_ALPHA = 0.25f;
+constexpr gtime_t AUTO_GHOST_FADE_OUT_TIME = 700_ms;
+constexpr gtime_t AUTO_GHOST_FADE_IN_TIME = 500_ms;
+constexpr gtime_t AUTO_GHOST_REINSTATE_DELAY = 3_sec;
+constexpr gtime_t AUTO_GHOST_EXPIRE_PULSE_TIME = 700_ms;
 } // namespace muffmode::ghost
 
 namespace muffmode::ghost::snapshot {
+
+enum class AutoGhostPhase {
+	Reserved,
+	Reinstating,
+	Expiring
+};
 
 struct EntityLifeSnapshot {
 	entity_state_t s{};
@@ -67,6 +77,13 @@ struct AutoGhostSnapshot {
 	gtime_t remaining;
 	gclient_t client{};
 	EntityLifeSnapshot entity{};
+	AutoGhostPhase phase = AutoGhostPhase::Reserved;
+	gtime_t phase_elapsed = 0_ms;
+	gtime_t reinstate_remaining = 0_ms;
+	int32_t pending_entnum = -1;
+	int32_t pending_spawn_count = 0;
+	bool pending_manual = false;
+	bool inventory_released = false;
 };
 
 std::array<AutoGhostSnapshot, MAX_CLIENTS> auto_ghosts;
@@ -123,7 +140,9 @@ bool HasUsableSocialId(const char *social_id)
 bool SnapshotMatchesCurrentMatch(const AutoGhostSnapshot &snapshot)
 {
 	return snapshot.valid &&
-		snapshot.remaining > 0_ms &&
+		(snapshot.remaining > 0_ms ||
+			snapshot.phase == AutoGhostPhase::Reinstating ||
+			snapshot.phase == AutoGhostPhase::Expiring) &&
 		!snapshot.match_id.empty() &&
 		snapshot.match_id == level.match_id &&
 		level.match_state == matchst_t::MATCH_IN_PROGRESS &&
@@ -148,8 +167,44 @@ int ActiveSnapshotCount(int except_index = -1)
 bool SnapshotMatchesSocialId(const AutoGhostSnapshot &snapshot, const char *social_id)
 {
 	return SnapshotMatchesCurrentMatch(snapshot) &&
+		snapshot.phase != AutoGhostPhase::Expiring &&
 		HasUsableSocialId(social_id) &&
 		muffmode::CStringEquals(snapshot.social_id, social_id);
+}
+
+bool IsClientSlot(gentity_t *ent)
+{
+	return ent && ent >= g_entities + 1 && ent < g_entities + game.maxclients + 1;
+}
+
+bool IsAutoGhostPlaceholder(const gentity_t *ent)
+{
+	return ent && ent->client &&
+		(muffmode::CStringEquals(ent->classname, "auto_ghost") ||
+			muffmode::CStringEquals(ent->classname, "auto_ghost_reinstating") ||
+			muffmode::CStringEquals(ent->classname, "auto_ghost_expiring"));
+}
+
+float TimeFraction(gtime_t elapsed, gtime_t duration)
+{
+	if (duration <= 0_ms)
+		return 1.0f;
+
+	return clamp(elapsed.seconds() / duration.seconds(), 0.0f, 1.0f);
+}
+
+void SetPlaceholderOpacity(gentity_t *ent, float alpha)
+{
+	if (!ent)
+		return;
+
+	alpha = clamp(alpha, 0.0f, 1.0f);
+	ent->s.alpha = alpha;
+	ent->s.renderfx |= RF_IR_VISIBLE;
+	if (alpha < 0.999f)
+		ent->s.renderfx |= RF_TRANSLUCENT;
+	else
+		ent->s.renderfx &= ~RF_TRANSLUCENT;
 }
 
 void RemovePlaceholder(size_t index)
@@ -158,11 +213,11 @@ void RemovePlaceholder(size_t index)
 		return;
 
 	gentity_t *ent = level.ghosts[index].ent;
-	if (!ent || ent < g_entities + 1 || ent >= g_entities + game.maxclients + 1)
+	if (!IsClientSlot(ent))
 		return;
 	if (!ent->client || ent->client->pers.connected)
 		return;
-	if (!auto_ghosts[index].valid && !muffmode::CStringEquals(ent->classname, "auto_ghost"))
+	if (!auto_ghosts[index].valid && !IsAutoGhostPlaceholder(ent))
 		return;
 
 	if (ent->linked)
@@ -209,7 +264,7 @@ void ClearSnapshot(size_t index, bool release_match_items = false)
 
 void ReleaseExpiredMatchItems(const AutoGhostSnapshot &snapshot)
 {
-	if (!snapshot.valid)
+	if (!snapshot.valid || snapshot.inventory_released)
 		return;
 
 	if (snapshot.client.pers.inventory[IT_FLAG_RED])
@@ -572,6 +627,127 @@ bool IsFlagRetentionTimeoutActive()
 	return level.timeout_in_place > 0_ms && !level.timeout_resuming;
 }
 
+gentity_t *PlaceholderEntity(size_t index)
+{
+	if (index >= auto_ghosts.size())
+		return nullptr;
+
+	gentity_t *ent = level.ghosts[index].ent;
+	return IsClientSlot(ent) ? ent : nullptr;
+}
+
+void UpdateReservedPlaceholderVisual(size_t index)
+{
+	auto &snapshot = auto_ghosts[index];
+	gentity_t *ent = PlaceholderEntity(index);
+	if (!IsAutoGhostPlaceholder(ent))
+		return;
+
+	ent->classname = "auto_ghost";
+	if (IsFlagRetentionTimeoutActive()) {
+		snapshot.phase_elapsed = 0_ms;
+		SetPlaceholderOpacity(ent, muffmode::ghost::AUTO_GHOST_PLACEHOLDER_ALPHA);
+		return;
+	}
+
+	snapshot.phase_elapsed += FRAME_TIME_MS;
+	const float fade = TimeFraction(snapshot.phase_elapsed, muffmode::ghost::AUTO_GHOST_FADE_OUT_TIME);
+	SetPlaceholderOpacity(ent, muffmode::ghost::AUTO_GHOST_PLACEHOLDER_ALPHA * (1.0f - fade));
+}
+
+void UpdateReinstatingPlaceholderVisual(size_t index)
+{
+	auto &snapshot = auto_ghosts[index];
+	gentity_t *ent = PlaceholderEntity(index);
+	if (!IsAutoGhostPlaceholder(ent))
+		return;
+
+	ent->classname = "auto_ghost_reinstating";
+	const float fade = TimeFraction(snapshot.phase_elapsed, muffmode::ghost::AUTO_GHOST_FADE_IN_TIME);
+	SetPlaceholderOpacity(ent, fade);
+}
+
+void UpdateExpiringPlaceholderVisual(size_t index)
+{
+	auto &snapshot = auto_ghosts[index];
+	gentity_t *ent = PlaceholderEntity(index);
+	if (!IsAutoGhostPlaceholder(ent))
+		return;
+
+	ent->classname = "auto_ghost_expiring";
+	const float t = TimeFraction(snapshot.phase_elapsed, muffmode::ghost::AUTO_GHOST_EXPIRE_PULSE_TIME);
+	const float pulse = t < 0.5f ? t * 2.0f : (1.0f - t) * 2.0f;
+	SetPlaceholderOpacity(ent, clamp(pulse, 0.0f, 1.0f));
+}
+
+void CopySnapshotDropStateToEntity(const AutoGhostSnapshot &snapshot, gentity_t *ent)
+{
+	if (!ent || !ent->client)
+		return;
+
+	ent->client->pers.inventory = snapshot.client.pers.inventory;
+	ent->client->pers.weapon = snapshot.client.pers.weapon;
+	ent->client->pers.lastweapon = snapshot.client.pers.lastweapon;
+	ent->client->pers.selected_item = snapshot.client.pers.selected_item;
+	ent->client->pers.selected_item_time = snapshot.client.pers.selected_item_time;
+	ent->client->pers.power_cubes = snapshot.client.pers.power_cubes;
+	ent->client->pu_time_quad = snapshot.client.pu_time_quad;
+	ent->client->pu_time_haste = snapshot.client.pu_time_haste;
+	ent->client->pu_time_double = snapshot.client.pu_time_double;
+	ent->client->pu_time_protection = snapshot.client.pu_time_protection;
+	ent->client->pu_time_invisibility = snapshot.client.pu_time_invisibility;
+	ent->client->pu_time_regeneration = snapshot.client.pu_time_regeneration;
+	ent->client->pers.team_state = snapshot.client.pers.team_state;
+	ent->client->resp.ctf_flagsince = snapshot.client.resp.ctf_flagsince;
+}
+
+void ReleaseTimedOutInventory(size_t index)
+{
+	if (index >= auto_ghosts.size())
+		return;
+
+	auto &snapshot = auto_ghosts[index];
+	if (!snapshot.valid || snapshot.inventory_released)
+		return;
+
+	gentity_t *ent = PlaceholderEntity(index);
+	if (IsAutoGhostPlaceholder(ent)) {
+		CopySnapshotDropStateToEntity(snapshot, ent);
+		TossClientItems(ent);
+	} else {
+		ReleaseExpiredMatchItems(snapshot);
+	}
+
+	snapshot.inventory_released = true;
+}
+
+void BeginSnapshotTimeoutExpiry(size_t index)
+{
+	if (index >= auto_ghosts.size())
+		return;
+
+	auto &snapshot = auto_ghosts[index];
+	if (!snapshot.valid)
+		return;
+
+	ReleaseTimedOutInventory(index);
+	level.ghosts[index].code = 0;
+
+	gentity_t *ent = PlaceholderEntity(index);
+	if (!IsAutoGhostPlaceholder(ent) || IsFlagRetentionTimeoutActive()) {
+		ExpireSnapshot(index);
+		return;
+	}
+
+	snapshot.phase = AutoGhostPhase::Expiring;
+	snapshot.phase_elapsed = 0_ms;
+	snapshot.reinstate_remaining = 0_ms;
+	snapshot.pending_entnum = -1;
+	snapshot.pending_spawn_count = 0;
+	snapshot.pending_manual = false;
+	UpdateExpiringPlaceholderVisual(index);
+}
+
 bool StartAutoGhostTimeout(gentity_t *ent)
 {
 	const int timeout_seconds = AutoGhostTimeoutSeconds();
@@ -699,6 +875,208 @@ bool RestoreSnapshot(gentity_t *ent, int ghost_index, bool manual)
 	return true;
 }
 
+bool EntityMatchesPendingRestore(const AutoGhostSnapshot &snapshot, const gentity_t *ent)
+{
+	return ent &&
+		snapshot.phase == AutoGhostPhase::Reinstating &&
+		snapshot.pending_entnum == static_cast<int32_t>(ent - g_entities) &&
+		snapshot.pending_spawn_count == ent->spawn_count;
+}
+
+gentity_t *PendingRestoreTarget(const AutoGhostSnapshot &snapshot)
+{
+	if (snapshot.phase != AutoGhostPhase::Reinstating ||
+			snapshot.pending_entnum <= 0 ||
+			snapshot.pending_entnum >= static_cast<int32_t>(globals.num_entities))
+		return nullptr;
+
+	gentity_t *ent = &g_entities[snapshot.pending_entnum];
+	if (!EntityMatchesPendingRestore(snapshot, ent) || !ent->inuse || !ent->client || !ent->client->pers.connected)
+		return nullptr;
+
+	return ent;
+}
+
+int PendingRestoreIndexForTarget(gentity_t *ent)
+{
+	if (!ent)
+		return -1;
+
+	for (size_t i = 0; i < GhostSlotCapacity(); i++)
+		if (EntityMatchesPendingRestore(auto_ghosts[i], ent))
+			return static_cast<int>(i);
+
+	return -1;
+}
+
+void PreparePendingRestoreClient(gentity_t *ent)
+{
+	if (!ent || !ent->client)
+		return;
+
+	gclient_t *client = ent->client;
+	client->pers.connected = true;
+	client->pers.spawned = true;
+	client->pers.ingame = true;
+	client->awaiting_respawn = false;
+	client->respawn_timeout = 0_ms;
+	client->showscores = false;
+	client->showinventory = false;
+	client->showhelp = false;
+	client->buttons = BUTTON_NONE;
+	client->oldbuttons = BUTTON_NONE;
+	client->latched_buttons = BUTTON_NONE;
+	client->cmd = {};
+	client->weapon_thunk = false;
+	client->weapon_fire_buffered = false;
+	client->ps.pmove.pm_type = PM_FREEZE;
+	client->ps.pmove.origin = ent->s.origin;
+	client->ps.pmove.velocity = {};
+	client->ps.pmove.pm_flags |= PMF_NO_POSITIONAL_PREDICTION;
+	client->ps.gunindex = 0;
+	client->ps.gunskin = 0;
+}
+
+void PrepareReinstatingPlaceholder(gentity_t *ent)
+{
+	if (!ent || !ent->client)
+		return;
+
+	ent->svflags = (ent->svflags | SVF_PLAYER) & ~SVF_NOCLIENT;
+	ent->solid = SOLID_NOT;
+	ent->clipmask = CONTENTS_NONE;
+	ent->movetype = MOVETYPE_NONE;
+	ent->takedamage = false;
+	ent->velocity = {};
+	ent->avelocity = {};
+	ent->groundentity = nullptr;
+	ent->groundentity_linkcount = 0;
+	ent->s.effects = EF_NONE;
+	ent->s.event = EV_NONE;
+	ent->s.sound = 0;
+	ent->s.loop_attenuation = 0;
+	ent->s.loop_volume = 0;
+	ent->inuse = true;
+	ent->classname = "auto_ghost_reinstating";
+	ent->sv.init = false;
+	SetPlaceholderOpacity(ent, max(ent->s.alpha, muffmode::ghost::AUTO_GHOST_PLACEHOLDER_ALPHA));
+	gi.linkentity(ent);
+}
+
+void CancelPendingRestore(size_t index)
+{
+	if (index >= auto_ghosts.size())
+		return;
+
+	auto &snapshot = auto_ghosts[index];
+	if (snapshot.phase != AutoGhostPhase::Reinstating)
+		return;
+
+	snapshot.phase = AutoGhostPhase::Reserved;
+	snapshot.phase_elapsed = 0_ms;
+	snapshot.reinstate_remaining = 0_ms;
+	snapshot.pending_entnum = -1;
+	snapshot.pending_spawn_count = 0;
+	snapshot.pending_manual = false;
+	if (!level.ghosts[index].code)
+		GenerateGhostCode(index);
+
+	gentity_t *placeholder = PlaceholderEntity(index);
+	if (IsAutoGhostPlaceholder(placeholder) && !placeholder->client->pers.connected)
+		placeholder->classname = "auto_ghost";
+}
+
+bool CancelPendingRestoreForTarget(gentity_t *ent, bool &target_is_placeholder)
+{
+	target_is_placeholder = false;
+	const int index = PendingRestoreIndexForTarget(ent);
+	if (index < 0)
+		return false;
+
+	target_is_placeholder = level.ghosts[index].ent == ent;
+	CancelPendingRestore(static_cast<size_t>(index));
+	return true;
+}
+
+bool BeginRestoreDelay(gentity_t *ent, int ghost_index, bool manual)
+{
+	if (!ent || !ent->client || ghost_index < 0 || ghost_index >= static_cast<int>(GhostSlotCapacity()))
+		return false;
+
+	auto &snapshot = auto_ghosts[ghost_index];
+	if (!SnapshotMatchesSocialId(snapshot, ent->client->pers.social_id))
+		return false;
+	if (snapshot.phase == AutoGhostPhase::Reinstating)
+		return EntityMatchesPendingRestore(snapshot, ent);
+
+	snapshot.phase = AutoGhostPhase::Reinstating;
+	snapshot.phase_elapsed = 0_ms;
+	snapshot.reinstate_remaining = muffmode::ghost::AUTO_GHOST_REINSTATE_DELAY;
+	snapshot.pending_entnum = static_cast<int32_t>(ent - g_entities);
+	snapshot.pending_spawn_count = ent->spawn_count;
+	snapshot.pending_manual = manual;
+	level.ghosts[ghost_index].code = 0;
+	if (level.timeout_auto && !level.timeout_resuming &&
+			level.timeout_in_place > 0_ms &&
+			level.timeout_in_place < muffmode::ghost::AUTO_GHOST_REINSTATE_DELAY) {
+		level.timeout_in_place = muffmode::ghost::AUTO_GHOST_REINSTATE_DELAY;
+		level.countdown_check = 0_sec;
+	}
+
+	PreparePendingRestoreClient(ent);
+	if (gentity_t *placeholder = PlaceholderEntity(static_cast<size_t>(ghost_index)))
+		if (IsAutoGhostPlaceholder(placeholder))
+			PrepareReinstatingPlaceholder(placeholder);
+
+	gi.LocClient_Print(ent, PRINT_CENTER, "Reinstating in 3 seconds.");
+	return true;
+}
+
+bool FinishPendingRestore(size_t index)
+{
+	if (index >= auto_ghosts.size())
+		return false;
+
+	auto &snapshot = auto_ghosts[index];
+	if (snapshot.phase != AutoGhostPhase::Reinstating)
+		return false;
+
+	gentity_t *target = PendingRestoreTarget(snapshot);
+	if (!target) {
+		CancelPendingRestore(index);
+		return false;
+	}
+
+	const bool manual = snapshot.pending_manual;
+	if (!RestoreSnapshot(target, static_cast<int>(index), manual)) {
+		CancelPendingRestore(index);
+		return false;
+	}
+
+	return true;
+}
+
+bool IsPendingRestoreTarget(gentity_t *ent)
+{
+	return PendingRestoreIndexForTarget(ent) >= 0;
+}
+
+bool FreezePendingRestoreFrame(gentity_t *ent)
+{
+	if (!IsPendingRestoreTarget(ent) || !ent || !ent->client)
+		return false;
+
+	PreparePendingRestoreClient(ent);
+	ent->velocity = {};
+	ent->avelocity = {};
+	ent->client->ps.pmove.pm_type = PM_FREEZE;
+	ent->client->ps.pmove.origin = ent->s.origin;
+	ent->client->ps.pmove.velocity = {};
+	ent->client->ps.gunindex = 0;
+	ent->client->ps.gunskin = 0;
+	return true;
+}
+
 } // namespace muffmode::ghost::snapshot
 
 namespace ghost_snapshot = muffmode::ghost::snapshot;
@@ -806,6 +1184,10 @@ bool MM_Ghost_CaptureDisconnect(gentity_t *ent) {
 	if (!ent || !ent->client || !deathmatch->integer)
 		return false;
 
+	bool target_is_placeholder = false;
+	if (ghost_snapshot::CancelPendingRestoreForTarget(ent, target_is_placeholder))
+		return target_is_placeholder;
+
 	return ghost_snapshot::CaptureActivePlayerSnapshot(ent, true);
 }
 
@@ -832,8 +1214,8 @@ void MM_Ghost_MakeDisconnectPlaceholder(gentity_t *ent) {
 	ent->s.sound = 0;
 	ent->s.loop_attenuation = 0;
 	ent->s.loop_volume = 0;
-	ent->s.renderfx = RF_TRANSLUCENT | RF_IR_VISIBLE;
-	ent->s.alpha = muffmode::ghost::AUTO_GHOST_PLACEHOLDER_ALPHA;
+	ent->s.renderfx = RF_IR_VISIBLE;
+	ghost_snapshot::SetPlaceholderOpacity(ent, muffmode::ghost::AUTO_GHOST_PLACEHOLDER_ALPHA);
 	ent->inuse = true;
 	ent->classname = "auto_ghost";
 	ent->client->pers.connected = false;
@@ -886,6 +1268,57 @@ bool MM_Ghost_IsReservedSlot(gentity_t *slot) {
 
 /*
 ================
+MM_Ghost_IsPendingRestore
+================
+*/
+bool MM_Ghost_IsPendingRestore(gentity_t *ent) {
+	return ghost_snapshot::IsPendingRestoreTarget(ent);
+}
+
+/*
+================
+MM_Ghost_RunPendingRestoreFrame
+================
+*/
+bool MM_Ghost_RunPendingRestoreFrame(gentity_t *ent) {
+	return ghost_snapshot::FreezePendingRestoreFrame(ent);
+}
+
+/*
+================
+MM_Ghost_EndPendingRestoreFrame
+================
+*/
+bool MM_Ghost_EndPendingRestoreFrame(gentity_t *ent) {
+	return ghost_snapshot::FreezePendingRestoreFrame(ent);
+}
+
+/*
+================
+MM_Ghost_ClientThink
+================
+*/
+bool MM_Ghost_ClientThink(gentity_t *ent, const usercmd_t *ucmd) {
+	if (!ghost_snapshot::IsPendingRestoreTarget(ent) || !ent || !ent->client)
+		return false;
+
+	gclient_t *client = ent->client;
+	client->oldbuttons = client->buttons;
+	client->buttons = ucmd ? ucmd->buttons : BUTTON_NONE;
+	client->latched_buttons = BUTTON_NONE;
+	if (ucmd) {
+		client->cmd = *ucmd;
+		client->resp.cmd_angles[0] = ucmd->angles[0];
+		client->resp.cmd_angles[1] = ucmd->angles[1];
+		client->resp.cmd_angles[2] = ucmd->angles[2];
+	}
+
+	ghost_snapshot::FreezePendingRestoreFrame(ent);
+	return true;
+}
+
+/*
+================
 MM_Ghost_HasActiveReservations
 ================
 */
@@ -912,7 +1345,7 @@ bool MM_Ghost_TryRestore(gentity_t *ent) {
 	if (ghost_index < 0)
 		return false;
 
-	return ghost_snapshot::RestoreSnapshot(ent, ghost_index, false);
+	return ghost_snapshot::BeginRestoreDelay(ent, ghost_index, false);
 }
 
 /*
@@ -951,17 +1384,38 @@ void MM_Ghost_RunFrame() {
 			ghost_snapshot::ExpireSnapshot(i);
 			continue;
 		}
-		if (snapshot.remaining <= 0_ms) {
-			ghost_snapshot::DropSnapshotFlags(i);
-			ghost_snapshot::ExpireSnapshot(i);
+
+		if (snapshot.phase == ghost_snapshot::AutoGhostPhase::Reinstating) {
+			if (!ghost_snapshot::PendingRestoreTarget(snapshot)) {
+				ghost_snapshot::CancelPendingRestore(i);
+				continue;
+			}
+
+			snapshot.phase_elapsed += FRAME_TIME_MS;
+			snapshot.reinstate_remaining -= FRAME_TIME_MS;
+			ghost_snapshot::UpdateReinstatingPlaceholderVisual(i);
+			if (snapshot.reinstate_remaining <= 0_ms)
+				ghost_snapshot::FinishPendingRestore(i);
 			continue;
 		}
 
-		snapshot.remaining -= FRAME_TIME_MS;
-		if (snapshot.remaining <= 0_ms) {
-			ghost_snapshot::DropSnapshotFlags(i);
-			ghost_snapshot::ExpireSnapshot(i);
+		if (snapshot.phase == ghost_snapshot::AutoGhostPhase::Expiring) {
+			snapshot.phase_elapsed += FRAME_TIME_MS;
+			ghost_snapshot::UpdateExpiringPlaceholderVisual(i);
+			if (snapshot.phase_elapsed >= muffmode::ghost::AUTO_GHOST_EXPIRE_PULSE_TIME)
+				ghost_snapshot::ExpireSnapshot(i);
+			continue;
 		}
+
+		if (snapshot.remaining <= 0_ms) {
+			ghost_snapshot::BeginSnapshotTimeoutExpiry(i);
+			continue;
+		}
+
+		ghost_snapshot::UpdateReservedPlaceholderVisual(i);
+		snapshot.remaining -= FRAME_TIME_MS;
+		if (snapshot.remaining <= 0_ms)
+			ghost_snapshot::BeginSnapshotTimeoutExpiry(i);
 	}
 }
 
@@ -1007,7 +1461,7 @@ void MM_CmdGhost(gentity_t *ent) {
 
 	for (size_t i = 0; i < ghost_snapshot::GhostSlotCapacity(); i++) {
 		if (level.ghosts[i].code && level.ghosts[i].code == n) {
-			if (ghost_snapshot::RestoreSnapshot(ent, static_cast<int>(i), true))
+			if (ghost_snapshot::BeginRestoreDelay(ent, static_cast<int>(i), true))
 				return;
 			break;
 		}

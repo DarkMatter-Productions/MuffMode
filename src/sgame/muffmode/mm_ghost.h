@@ -6,6 +6,7 @@
 #include <cstddef>
 
 struct gentity_t;
+struct usercmd_t;
 
 // [MuffMode] Match ghost system: rejoin a match in progress with state intact.
 void MM_Ghost_ClearAll();
@@ -17,6 +18,10 @@ bool MM_Ghost_CaptureDisconnect(gentity_t *ent);
 void MM_Ghost_MakeDisconnectPlaceholder(gentity_t *ent);
 gentity_t *MM_Ghost_ChooseReconnectSlot(const char *social_id, gentity_t **ignore, size_t num_ignore);
 bool MM_Ghost_IsReservedSlot(gentity_t *slot);
+bool MM_Ghost_IsPendingRestore(gentity_t *ent);
+bool MM_Ghost_RunPendingRestoreFrame(gentity_t *ent);
+bool MM_Ghost_EndPendingRestoreFrame(gentity_t *ent);
+bool MM_Ghost_ClientThink(gentity_t *ent, const usercmd_t *ucmd);
 bool MM_Ghost_HasActiveReservations();
 bool MM_Ghost_TryRestore(gentity_t *ent);
 void MM_Ghost_DropTimedOutFlags();

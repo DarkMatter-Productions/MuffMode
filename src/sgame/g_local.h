@@ -3108,6 +3108,7 @@ void CTF_CheckHurtCarrier(gentity_t *targ, gentity_t *attacker);
 //
 // sgame/client/death.cpp
 //
+void TossClientItems(gentity_t *self);
 void player_die(gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int damage, const vec3_t &point, const mod_t &mod);
 
 //

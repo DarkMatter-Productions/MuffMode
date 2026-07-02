@@ -18,7 +18,6 @@
 #include "muffmode/mm_vote.h"
 
 gentity_t *G_UnsafeSpawnPosition(vec3_t spot, bool check_players, const gentity_t *ignore = nullptr);
-void TossClientItems(gentity_t *self);
 bool ClientArenaEliminationCorpse(const gclient_t *client);
 
 //=======================================================================
@@ -1983,6 +1982,9 @@ void ClientThink(gentity_t *ent, usercmd_t *ucmd) {
 		return;
 	}
 
+	if (MM_Ghost_ClientThink(ent, ucmd))
+		return;
+
 	// [Paril-KEX] pass buttons through even if we are in intermission or
 	// following.
 	client->oldbuttons = client->buttons;
@@ -2641,6 +2643,9 @@ void ClientBeginServerFrame(gentity_t *ent) {
 			ClientSpawn(ent);
 		return;
 	}
+
+	if (MM_Ghost_RunPendingRestoreFrame(ent))
+		return;
 
 	if (MM_FreezeTag_RunClientFrame(ent))
 		return;

@@ -6,6 +6,7 @@
 #include "bots/bot_includes.h"
 // [MuffMode] AutoDoc regen lives in muffmode/mm_items_rules
 #include "muffmode/mm_freezetag.h"
+#include "muffmode/mm_ghost.h"
 #include "muffmode/mm_items_rules.h"
 #include "muffmode/mm_parse.h"
 
@@ -1577,6 +1578,9 @@ and right after spawning
 void ClientEndServerFrame(gentity_t *ent) {
 	// no player exists yet (load game)
 	if (!ent->client->pers.spawned)
+		return;
+
+	if (MM_Ghost_EndPendingRestoreFrame(ent))
 		return;
 
 	// expire the brief "last one standing" centerprint. Only clear it while the round is
