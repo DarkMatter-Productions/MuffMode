@@ -370,14 +370,22 @@ static bool ClientHordeEliminatedRound(const gclient_t *client) {
 		client->sess.team != TEAM_SPECTATOR;
 }
 
+static bool ClientArenaBotMidRoundRespawnBlocked(const gclient_t *client) {
+	return client && GTF(GTF_ARENA) && GTF(GTF_ELIMINATION) && GTF(GTF_ROUNDS) &&
+		level.match_state == matchst_t::MATCH_IN_PROGRESS &&
+		level.round_state == roundst_t::ROUND_IN_PROGRESS &&
+		notGT(GT_HORDE) && notGT(GT_LMS);
+}
+
 void ClientSetEliminated(gentity_t *self) {
 	self->client->eliminated = true;
 }
 
 void ClientRespawn(gentity_t *ent) {
 	if (deathmatch->integer || coop->integer) {
-		// spectators don't leave bodies
-		if (ClientIsPlaying(ent->client))
+		// spectators don't leave bodies; arena elimination corpses are queued at death
+		if (ClientIsPlaying(ent->client) &&
+				(!ClientArenaEliminationCorpse(ent->client) || ent->s.modelindex))
 			CopyToBodyQue(ent);
 		ent->svflags &= ~SVF_NOCLIENT;
 
@@ -1507,6 +1515,7 @@ bool ClientConnect(gentity_t *ent, char *userinfo, const char *social_id, bool i
 			P_PublishEngineTeam(ent);
 			//InitPlayerTeam(ent);
 			ent->client->sess.pc = MM_DefaultClientConfig();
+			ent->client->sess.pc.show_match_info = true;
 
 			InitClientResp(ent->client);
 		}
@@ -2701,7 +2710,10 @@ void ClientBeginServerFrame(gentity_t *ent) {
 			return;
 		}
 
+		// Arena elimination (CA/Strike): bots must not auto-respawn mid-round like FFA;
+		// eliminated fighters use ClientArenaEliminationRound above to enter spectator.
 		if (deathmatch->integer && (ent->svflags & SVF_BOT) && ClientIsPlaying(client) && !client->eliminated &&
+				!ClientArenaBotMidRoundRespawnBlocked(client) &&
 				level.time > client->respawn_time && !level.coop_level_restart_time) {
 			ClientRespawn(ent);
 			client->latched_buttons = BUTTON_NONE;

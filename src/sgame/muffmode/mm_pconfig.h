@@ -33,6 +33,7 @@ bool MM_PConfigSetKillBeep(gentity_t *ent, int value);
 bool MM_PConfigCycleKillBeep(gentity_t *ent);
 void MM_CmdCrosshairID(gentity_t *ent);
 void MM_CmdTimer(gentity_t *ent);
+void MM_CmdInfoHud(gentity_t *ent);
 void MM_CmdFragMessages(gentity_t *ent);
 void MM_CmdAnnouncer(gentity_t *ent);
 void MM_CmdKillBeep(gentity_t *ent);

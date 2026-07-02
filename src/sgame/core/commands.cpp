@@ -840,6 +840,19 @@ static void Cmd_Drop_f(gentity_t *ent) {
 	ValidateSelectedItem(ent);
 }
 
+static bool ShouldShowMenuBindHint(const gentity_t *ent)
+{
+	if (!ent || !ent->client)
+		return false;
+	if (level.match_state >= matchst_t::MATCH_COUNTDOWN)
+		return false;
+	if (level.round_state == roundst_t::ROUND_COUNTDOWN)
+		return false;
+	if (level.match_state == matchst_t::MATCH_WARMUP_READYUP && ent->client->resp.ready)
+		return false;
+	return true;
+}
+
 /*
 =================
 Cmd_Inven_f
@@ -863,7 +876,8 @@ static void Cmd_Inven_f(gentity_t *ent) {
 		P_Menu_Close(ent);
 		ent->client->follow_update = true;
 		if (!ent->client->initial_menu_closure) {
-			gi.LocClient_Print(ent, PRINT_CENTER, "%bind:inven:Open menu%{}", " ");
+			if (ShouldShowMenuBindHint(ent))
+				gi.LocClient_Print(ent, PRINT_CENTER, "%bind:inven:Open menu%{}", " ");
 			ent->client->initial_menu_closure = true;
 		}
 		return;
@@ -1846,6 +1860,10 @@ static void Cmd_Timer_f(gentity_t *ent) {
 	MM_CmdTimer(ent);
 }
 
+static void Cmd_InfoHud_f(gentity_t *ent) {
+	MM_CmdInfoHud(ent);
+}
+
 static void Cmd_FragMessages_f(gentity_t *ent) {
 	MM_CmdFragMessages(ent);
 }
@@ -2394,6 +2412,7 @@ cmds_t client_cmds[] = {
 	{"time-out",		Cmd_TimeOut_f,			CF_ALLOW_DEAD | CF_ALLOW_SPEC},
 	{"time-in",			Cmd_TimeIn_f,			CF_ALLOW_DEAD | CF_ALLOW_SPEC},
 	{"timer",			Cmd_Timer_f,			CF_ALLOW_SPEC | CF_ALLOW_DEAD},
+	{"infohud",			Cmd_InfoHud_f,			CF_ALLOW_SPEC | CF_ALLOW_DEAD},
 	{"unhook",			Cmd_UnHook_f,			CF_NONE},
 	{"unlockteam",		Cmd_UnlockTeam_f,		CF_ALLOW_DEAD},
 	{"unreadyall",		Cmd_UnReadyAll_f,		CF_ADMIN_ONLY | CF_ALLOW_INT | CF_ALLOW_SPEC},

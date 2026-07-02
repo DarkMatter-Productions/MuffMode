@@ -567,6 +567,7 @@ void MM_CmdReady(gentity_t *ent) {
 
 	ent->client->resp.ready = true;
 	ent->client->last_warmup_nudge_time = 0_sec;
+	gi.LocClient_Print(ent, PRINT_CENTER, "");
 	captain::BroadcastReadyStatus(ent);
 }
 
@@ -597,8 +598,10 @@ void MM_ToggleReadyUp(gentity_t *ent) {
 		return;
 
 	ent->client->resp.ready ^= true;
-	if (ent->client->resp.ready)
+	if (ent->client->resp.ready) {
 		ent->client->last_warmup_nudge_time = 0_sec;
+		gi.LocClient_Print(ent, PRINT_CENTER, "");
+	}
 	captain::BroadcastReadyStatus(ent);
 }
 

@@ -415,7 +415,10 @@ void MM_OnPowerupItemRespawned(gentity_t *ent)
 
 bool MM_ShouldAnnouncePowerupUse()
 {
-	return RS(RS_MM) || RS(RS_Q3A) || RS(RS_VANILLA_PLUS);
+	// RS_Q2RE was omitted here, so on the default ruleset Use_Powerup_BroadcastMsg
+	// played no powerup activation sound at all -- e.g. the quad damage use sound
+	// (items/damage.wav) was silent on Q2RE deathmatch servers.
+	return RS(RS_Q2RE) || RS(RS_MM) || RS(RS_Q3A) || RS(RS_VANILLA_PLUS);
 }
 
 // [MuffMode] AutoDoc tech regen with per-ruleset/per-mod tuning (moved from sgame/entities/items.cpp).

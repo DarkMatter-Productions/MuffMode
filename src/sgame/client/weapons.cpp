@@ -149,7 +149,7 @@ static void P_ProjectSourceInternal(gentity_t *ent, const vec3_t &angles, vec3_t
 			distance[2] = 0;
 	} else if (ent->client->pers.hand == LEFT_HANDED)
 		distance[1] *= -1;
-	else if (ent->client->pers.hand == CENTER_HANDED)
+	else if (ent->client->pers.hand == CENTER_HANDED || ent->client->pers.hand == CENTER_HANDED_VISIBLE)
 		distance[1] = 0;
 
 	vec3_t forward, right, up;

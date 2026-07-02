@@ -56,3 +56,19 @@ inline float MM_Horde_ComputeAdaptiveBudgetMult(float prev_wave_pressure)
 		return std::clamp(prev_wave_pressure, 0.92f, 1.f);
 	return 1.f;
 }
+
+// Post-peak budget taper: escalation on uses the stronger on_factor; off keeps legacy off_factor.
+inline float MM_Horde_EffectiveLateWaveFactor(bool escalation, float off_factor, float on_factor)
+{
+	return escalation ? on_factor : off_factor;
+}
+
+// Post-peak concurrent monster cap: ramps per wave past peak, clamped. Waves at or before peak use base_cap.
+inline int MM_Horde_LateMaxAlive(int base_cap, int round, int peak, int per_wave_bonus, int cap_ceiling, bool escalation)
+{
+	if (!escalation || round <= peak)
+		return base_cap;
+
+	const int raw = base_cap + (round - peak) * per_wave_bonus;
+	return std::min(raw, cap_ceiling);
+}

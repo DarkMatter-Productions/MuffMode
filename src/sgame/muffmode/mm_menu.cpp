@@ -475,7 +475,17 @@ void Update(gentity_t *ent)
 	if (!menu::GetEntries(ent, &entries, &num_entries))
 		return;
 
-	const auto &stats = ent->client->mstats;
+	// ent->client->mstats (client_match_stats_t) has no writers anywhere in the
+	// tree, so this screen always rendered zeros. Source the live per-match
+	// counters from resp.mstats[] via MS_Value. Field order matches the struct.
+	const client_match_stats_t stats = {
+		static_cast<uint32_t>(MS_Value(ent->client, MSTAT_DMG_DEALT)),
+		static_cast<uint32_t>(MS_Value(ent->client, MSTAT_DMG_RECEIVED)),
+		static_cast<uint32_t>(MS_Value(ent->client, MSTAT_SHOTS)),
+		static_cast<uint32_t>(MS_Value(ent->client, MSTAT_HITS)),
+		static_cast<uint32_t>(MS_Value(ent->client, MSTAT_KILLS_TOTAL)),
+		static_cast<uint32_t>(MS_Value(ent->client, MSTAT_DEATHS_TOTAL)),
+	};
 	MenuWriter writer{ entries, num_entries };
 	std::array<char, MAX_INFO_VALUE> value = {};
 	menu::CopyHostPlayerName(value);

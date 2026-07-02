@@ -565,6 +565,8 @@ late-wave path past `g_horde_content_peak_wave` (default 12):
 | Strict themes | `g_horde_theme_chance 1` from wave 15: every spawn matches the banner; console shows no off-theme fallback on themed waves |
 | Viability gate | Late waves never show a theme banner with < `g_horde_theme_min_monsters` on-theme bodies (silently plays a normal wave instead) |
 | Budget taper | Waves 25 and 35 stay bounded (watch clear time / `g_horde_spawn_points_remaining`); no multi-minute spawn tail |
+| Late escalation | With `g_horde_late_escalation 1` (default): wave 17 cap = 70, wave 50 budget ≈ 189 (1p, 1.0× map); with `0`, legacy flat cap 60 and 0.35 factor |
+| Late cap stress | Sustained ~70 concurrent homing-heavy bodies (floaters/parasites/hover) on largest map; no `SZ_GetSpace` / client break |
 | Finite parity | `roundlimit 25`: waves 13-25 get the same truthful themes + capped budget as endless, then the match ends cleanly at 25 |
 | Champions | Past the peak champions keep appearing at the tuned cadence (~1 per ~8 waves with defaults), not just the first ~2; raising `g_horde_champion_chance` increases both early and late frequency |
 | Loot | Late waves still drop early/mid weapons, not exclusively top-tier gear |

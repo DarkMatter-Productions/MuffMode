@@ -204,6 +204,8 @@ void EmitHordeRemainingStack(statusbar_t &sb)
 // VANILLA_BASE — top-right text stack (gametype / ruleset / round progress).
 constexpr int32_t kTopRightHudFirstYt = 2;
 constexpr int32_t kTopRightHudLineSpacing = 10;
+// Row 4: team badge / carried-flag icon (below the three text lines).
+constexpr int32_t kTopRightHudBadgeYt = kTopRightHudFirstYt + kTopRightHudLineSpacing * 3;
 
 void EmitHordeCoopWaveHeader(statusbar_t &sb)
 {
@@ -217,9 +219,8 @@ void EmitRedRoverTeamBadge(statusbar_t &sb)
 	if (!GT(GT_RR))
 		return;
 
-	// Row 3 of the top-right stack (below round + alive lines).
-	constexpr int32_t kBadgeYt = kTopRightHudFirstYt + kTopRightHudLineSpacing * 2;
-	sb.ifstat(STAT_CTF_FLAG_PIC).xr(kMiniscorePicXr).yt(kBadgeYt).pic(STAT_CTF_FLAG_PIC).endifstat();
+	// Row 4 of the top-right stack (below gametype / ruleset / round-or-role text).
+	sb.ifstat(STAT_CTF_FLAG_PIC).xr(kMiniscorePicXr).yt(kTopRightHudBadgeYt).pic(STAT_CTF_FLAG_PIC).endifstat();
 }
 
 void EmitTopRightMatchInfo(statusbar_t &sb)
@@ -256,7 +257,7 @@ void EmitTeamHeader(statusbar_t &sb)
 		return;
 
 	if (MM_GametypeHasFlag(GTF_CTF))
-		sb.ifstat(STAT_CTF_FLAG_PIC).xr(-24).yt(26).pic(STAT_CTF_FLAG_PIC).endifstat();
+		sb.ifstat(STAT_CTF_FLAG_PIC).xr(kMiniscorePicXr).yt(kTopRightHudBadgeYt).pic(STAT_CTF_FLAG_PIC).endifstat();
 
 	sb.ifstat(STAT_TEAMPLAY_INFO).xl(0).yb(-88).stat_string(STAT_TEAMPLAY_INFO).endifstat();
 }
@@ -276,20 +277,9 @@ void EmitBottomTeamMiniscoreRows(statusbar_t &sb)
 	EmitTeamMiniscoreRow(sb, hud_vanchor_t::Bottom, kBottomMiniscoreRow2Yb, STAT_MINISCORE_SECOND_PIC, STAT_MINISCORE_SECOND_SCORE, STAT_MINISCORE_SECOND_POS);
 }
 
-// CA/RR: team-relative alive line below the two-row miniscore stack.
-void EmitArenaAliveUnderMiniscore(statusbar_t &sb)
-{
-	if (!GT(GT_CA) && !GT(GT_RR))
-		return;
-
-	constexpr int32_t kAliveYb = kBottomMiniscoreRow2Yb + kMiniscoreRowStep;
-	sb.ifstat(STAT_ROUND_NUMBER).xr(kRightHudTextXr).yb(kAliveYb).loc_stat_rstring(STAT_ROUND_NUMBER).endifstat();
-}
-
 void EmitStandardTeamMiniscore(statusbar_t &sb)
 {
 	EmitBottomTeamMiniscoreRows(sb);
-	EmitArenaAliveUnderMiniscore(sb);
 }
 
 // Team flag miniscore is vanilla-safe; FFA/Duel/RR/Horde player skin icons are MM cgame only.
@@ -391,10 +381,7 @@ void MM_InitStatusbar()
 
 		if (muffmode::statusbar::MiniscoreRowsInVanillaLayout())
 			muffmode::statusbar::EmitStandardTeamMiniscore(sb);
-		else {
-			// FFA/Duel/RR/Horde: skin-icon miniscore omitted — MM cgame draws via CG_DrawMuffModeHudEnhancements.
-			muffmode::statusbar::EmitArenaAliveUnderMiniscore(sb);
-		}
+		// FFA/Duel/RR/Horde: skin-icon miniscore omitted — MM cgame draws via CG_DrawMuffModeHudEnhancements.
 	}
 
 	const std::string layout = sb.sb.str();

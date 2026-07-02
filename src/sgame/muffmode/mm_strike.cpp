@@ -23,6 +23,27 @@ team_t MM_Strike_DefendingTeam()
 	return level.strike_red_attacks ? TEAM_BLUE : TEAM_RED;
 }
 
+void MM_Strike_CheckMatchEnd()
+{
+	if (!GT(GT_STRIKE))
+		return;
+
+	const int scorelimit = GT_ScoreLimit();
+	if (!scorelimit)
+		return;
+
+	if (level.team_scores[TEAM_RED] == level.team_scores[TEAM_BLUE])
+		return;
+
+	if (level.team_scores[TEAM_RED] >= scorelimit) {
+		QueueIntermission(G_Fmt("{} WINS! (hit the {} limit)", Teams_TeamName(TEAM_RED), GT_ScoreLimitString()).data(), false, false);
+		return;
+	}
+	if (level.team_scores[TEAM_BLUE] >= scorelimit) {
+		QueueIntermission(G_Fmt("{} WINS! (hit the {} limit)", Teams_TeamName(TEAM_BLUE), GT_ScoreLimitString()).data(), false, false);
+	}
+}
+
 void MM_Strike_AwardTouchBonus()
 {
 	if (!GT(GT_STRIKE) || level.strike_flag_touch)
@@ -30,6 +51,9 @@ void MM_Strike_AwardTouchBonus()
 
 	level.strike_flag_touch = true;
 	G_AdjustTeamScore(MM_Strike_AttackingTeam(), STRIKE_TOUCH_POINTS);
+	MM_Strike_CheckMatchEnd();
+	if (level.match_state != matchst_t::MATCH_IN_PROGRESS)
+		return;
 	gi.LocBroadcast_Print(PRINT_CENTER, "Bonus point!\n{} reached the flag!\n",
 		Teams_TeamName(MM_Strike_AttackingTeam()));
 }
@@ -52,6 +76,7 @@ void MM_Strike_AwardTurnWin(bool captured)
 
 	AnnouncerSound(world, attacker == TEAM_RED ? "red_wins_round" : "blue_wins_round", "ctf/flagcap.wav", attacker == TEAM_BLUE);
 	Round_End();
+	MM_Strike_CheckMatchEnd();
 }
 
 void MM_Strike_EndDefenseTurn(bool timeout)

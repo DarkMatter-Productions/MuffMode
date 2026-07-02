@@ -11,7 +11,7 @@
 constexpr const char *GAMEVERSION = "baseq2";
 
 constexpr const char *GAMEMOD_TITLE = "Muff Mode";
-constexpr const char *GAMEMOD_VERSION = "0.60.0";
+constexpr const char *GAMEMOD_VERSION = "0.60.6";
 
 //==================================================================
 
@@ -1018,7 +1018,8 @@ enum monster_attack_state_t {
 enum handedness_t {
 	RIGHT_HANDED,
 	LEFT_HANDED,
-	CENTER_HANDED
+	CENTER_HANDED,
+	CENTER_HANDED_VISIBLE	// [MuffMode] hand 3: centered fire, weapon model still shown
 };
 
 enum class auto_switch_t {
@@ -3130,6 +3131,8 @@ void G_ClearLagCompensationHistory(gentity_t *ent);
 void MoveClientToIntermission(gentity_t *ent);
 void G_SetStats(gentity_t *ent);
 void G_SetCoopStats(gentity_t *ent);
+int HudRoundDisplayNumber();
+const char *HudCountdownProgressLabel();
 void G_SetSpectatorStats(gentity_t *ent);
 void G_CheckFollowStats(gentity_t *ent);
 void ValidateSelectedItem(gentity_t *ent);
@@ -3484,6 +3487,7 @@ struct client_persistant_t {
 struct client_config_t {
 	bool			show_id;
 	bool			show_timer;
+	bool			show_match_info;
 	bool			show_fragmessages;
 	int				killbeep_num;
 

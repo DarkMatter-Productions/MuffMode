@@ -440,6 +440,12 @@ truthful and budgets stay playable: a theme banner only shows when the theme can
 bodies, every spawn in a themed wave stays on-category, and the per-wave point budget tapers instead
 of growing linearly forever. Waves up to the peak are unchanged.
 
+With **`g_horde_late_escalation 1`** (default), post-peak waves also use a stronger budget growth factor
+and ramp the concurrent alive cap (`g_horde_max_alive` base + bonus per wave, clamped). Set to `0` for
+legacy post-peak behaviour (flat cap 60, `g_horde_late_wave_factor` 0.35 budget taper only). The alive
+cap exists to prevent client network-buffer overflow from large homing swarms (`SZ_GetSpace`); raise
+`g_horde_late_max_alive_cap` only after stress-testing on your hardware.
+
 Champions also keep coming: up to the peak they spend the per-run budget (`g_horde_champion_max_per_run`
 × `g_horde_champion_chance`) as usual, and past the peak they switch to a steady per-wave rate derived
 from those same two cvars — so an endless run never runs out of champions. Raise either cvar to make
@@ -448,9 +454,21 @@ champions more frequent (early and late alike).
 | Cvar | Default | Purpose |
 | --- | --- | --- |
 | `g_horde_content_peak_wave` | `12` | Wave where the tuned curve ends; late-wave logic fires above it. |
-| `g_horde_late_wave_factor` | `0.35` | Post-peak point-budget growth multiplier (lower = flatter late curve). |
+| `g_horde_late_escalation` | `1` | `1` = post-peak budget + alive-cap ramp (defaults below). `0` = legacy flat cap and 0.35 budget factor. |
+| `g_horde_late_wave_factor` | `0.35` | Post-peak budget growth when `g_horde_late_escalation` is `0`. |
+| `g_horde_late_budget_factor` | `0.6` | Post-peak budget growth when `g_horde_late_escalation` is `1`. |
+| `g_horde_late_max_alive_per_wave` | `2` | Added to `g_horde_max_alive` per wave past peak when escalation is on. |
+| `g_horde_late_max_alive_cap` | `70` | Ceiling for the ramped alive cap (~+17% over 60); tune after homing-swarm stress test. |
 | `g_horde_weight_floor` | `0.12` | Minimum monster spawn weight past the peak; keeps cheap chaff spendable. |
 | `g_horde_theme_min_monsters` | `2` | Minimum on-theme monsters required at a wave for that theme to roll. |
+
+Endless example (escalation is on by default; only `roundlimit` is required):
+
+```
+set roundlimit 0
+```
+
+To disable post-peak escalation: `set g_horde_late_escalation 0`.
 
 ## Horde Enhanced AI
 
@@ -459,7 +477,7 @@ Defaults to `1` (enabled); set to `0` to restore legacy horde monster targeting 
 
 | Cvar | Default | Purpose |
 | --- | --- | --- |
-| `g_horde_enhanced_ai` | `1` | Target spread, spawn tactics, adaptive pacing, per-spawn roles, retarget-on-kill, extended aggro, and attack stagger. |
+| `g_horde_enhanced_ai` | `1` | Target spread, spawn tactics, adaptive pacing, per-spawn roles, retarget-on-kill, extended aggro, attack stagger, and medic corpse-resurrect priority. |
 
 ## Debug-Only Weapon Balance Cvars
 

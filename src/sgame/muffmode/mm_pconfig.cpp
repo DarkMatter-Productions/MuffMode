@@ -587,6 +587,7 @@ client_config_t MM_DefaultClientConfig()
 	client_config_t config{};
 	config.show_id = true;
 	config.show_timer = true;
+	config.show_match_info = true;
 	config.show_fragmessages = true;
 	config.killbeep_num = 1;
 	config.follow_killer = false;
@@ -742,6 +743,23 @@ void MM_CmdTimer(gentity_t *ent)
 		return;
 
 	muffmode::pconfig::SetBoolPreference(ent, mm_pconfig_bool_setting_t::show_timer, "Match timer display");
+}
+
+/*
+=================
+MM_CmdInfoHud
+=================
+*/
+void MM_CmdInfoHud(gentity_t *ent)
+{
+	if (!ent || !ent->client)
+		return;
+
+	if (!muffmode::pconfig::RequireCommandArgc(ent, 1, 1, gi.argv(0)))
+		return;
+
+	ent->client->sess.pc.show_match_info ^= true;
+	gi.LocClient_Print(ent, PRINT_HIGH, "Info HUD: {}\n", ent->client->sess.pc.show_match_info ? "ON" : "OFF");
 }
 
 /*

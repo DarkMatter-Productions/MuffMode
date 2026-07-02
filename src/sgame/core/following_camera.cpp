@@ -324,6 +324,13 @@ void UpdateFollowCamera(gentity_t *ent) {
 		ent->s.modelindex3 = 0;
 	}
 
+	if (ent->client->eliminated) {
+		ent->svflags |= SVF_NOCLIENT;
+		ent->s.modelindex = 0;
+		ent->s.modelindex2 = 0;
+		ent->s.modelindex3 = 0;
+	}
+
 	if (targ->deadflag)
 		ent->client->ps.pmove.pm_type = PM_DEAD;
 	else

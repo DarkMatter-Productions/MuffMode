@@ -190,7 +190,7 @@ void ApplyUserinfoChanged(gentity_t *ent, const char *userinfo)
 
 	if (gi.Info_ValueForKey(userinfo, "hand", val, sizeof(val))) {
 		ent->client->pers.hand = static_cast<handedness_t>(
-			ParseUserinfoClampedIntOrDefault(val, RIGHT_HANDED, RIGHT_HANDED, CENTER_HANDED));
+			ParseUserinfoClampedIntOrDefault(val, RIGHT_HANDED, RIGHT_HANDED, CENTER_HANDED_VISIBLE));
 	} else {
 		ent->client->pers.hand = RIGHT_HANDED;
 	}

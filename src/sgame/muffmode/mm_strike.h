@@ -15,3 +15,4 @@ void MM_Strike_AwardTouchBonus();
 void MM_Strike_AwardTurnWin(bool captured);
 void MM_Strike_EndDefenseTurn(bool timeout);
 void MM_Strike_EndMutualElimination();
+void MM_Strike_CheckMatchEnd();

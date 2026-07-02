@@ -250,6 +250,10 @@ cvar_t *g_horde_wave_variety;
 cvar_t *g_horde_wave_min_types;
 cvar_t *g_horde_content_peak_wave;
 cvar_t *g_horde_late_wave_factor;
+cvar_t *g_horde_late_escalation;
+cvar_t *g_horde_late_budget_factor;
+cvar_t *g_horde_late_max_alive_per_wave;
+cvar_t *g_horde_late_max_alive_cap;
 cvar_t *g_horde_weight_floor;
 cvar_t *g_horde_theme_min_monsters;
 cvar_t *g_horde_start_chainsaw;
@@ -548,6 +552,10 @@ static void InitGame() {
 	g_horde_wave_min_types = gi.cvar("g_horde_wave_min_types", "3", CVAR_NOFLAGS);
 	g_horde_content_peak_wave = gi.cvar("g_horde_content_peak_wave", "12", CVAR_NOFLAGS);
 	g_horde_late_wave_factor = gi.cvar("g_horde_late_wave_factor", "0.35", CVAR_NOFLAGS);
+	g_horde_late_escalation = gi.cvar("g_horde_late_escalation", "1", CVAR_NOFLAGS);
+	g_horde_late_budget_factor = gi.cvar("g_horde_late_budget_factor", "0.6", CVAR_NOFLAGS);
+	g_horde_late_max_alive_per_wave = gi.cvar("g_horde_late_max_alive_per_wave", "2", CVAR_NOFLAGS);
+	g_horde_late_max_alive_cap = gi.cvar("g_horde_late_max_alive_cap", "70", CVAR_NOFLAGS);
 	g_horde_weight_floor = gi.cvar("g_horde_weight_floor", "0.12", CVAR_NOFLAGS);
 	g_horde_theme_min_monsters = gi.cvar("g_horde_theme_min_monsters", "2", CVAR_NOFLAGS);
 	g_horde_start_chainsaw = gi.cvar("g_horde_start_chainsaw", "1", CVAR_NOFLAGS);
@@ -1856,21 +1864,13 @@ void CheckDMExitRules() {
 	}
 
 	if (teams) {
-		// Strike: only decide the match between rounds, after both teams have had an
-		// equal number of attacking turns (end of turn 1 of the round-pair). Otherwise a
-		// team could clinch the limit before the other gets its turn. Ties fall through to
-		// overtime via the ScoreIsTied() check above.
-		bool strike_end_ok = !GT(GT_STRIKE) ||
-			(level.strike_turn == 1 && level.round_state == roundst_t::ROUND_ENDED);
-		if (strike_end_ok) {
-			if (level.team_scores[TEAM_RED] >= scorelimit) {
-				QueueIntermission(G_Fmt("{} WINS! (hit the {} limit)", Teams_TeamName(TEAM_RED), GT_ScoreLimitString()).data(), false, false);
-				return;
-			}
-			if (level.team_scores[TEAM_BLUE] >= scorelimit) {
-				QueueIntermission(G_Fmt("{} WINS! (hit the {} limit)", Teams_TeamName(TEAM_BLUE), GT_ScoreLimitString()).data(), false, false);
-				return;
-			}
+		if (level.team_scores[TEAM_RED] >= scorelimit) {
+			QueueIntermission(G_Fmt("{} WINS! (hit the {} limit)", Teams_TeamName(TEAM_RED), GT_ScoreLimitString()).data(), false, false);
+			return;
+		}
+		if (level.team_scores[TEAM_BLUE] >= scorelimit) {
+			QueueIntermission(G_Fmt("{} WINS! (hit the {} limit)", Teams_TeamName(TEAM_BLUE), GT_ScoreLimitString()).data(), false, false);
+			return;
 		}
 	} else {
 		for (auto ec : active_clients()) {
