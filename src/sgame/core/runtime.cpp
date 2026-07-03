@@ -1418,8 +1418,11 @@ void CalculateRanks() {
 				//if (ec == world + 1)
 				//	gi.Com_PrintFmt("new_rank2={} old_rank2={}\n", new_rank, old_rank);
 
-				if (new_rank == 0 && old_tied != new_tied) {
-					MM_Announce(new_tied ? mm_announce_event_t::LeadTied : mm_announce_event_t::LeadTaken, ec);
+				const bool entered_tied_for_first = (new_rank == 0 && new_tied && old_rank != 0);
+				const bool tied_state_changed_at_first = (new_rank == 0 && old_tied != new_tied);
+
+				if (entered_tied_for_first || tied_state_changed_at_first) {
+					MM_Announce((new_tied || entered_tied_for_first) ? mm_announce_event_t::LeadTied : mm_announce_event_t::LeadTaken, ec);
 
 					// find and update all spectators who want to follow leader
 					for (auto ec2 : active_clients()) {
