@@ -15,16 +15,16 @@
 // Vanilla base: layout tokens must be parseable by stock Q2RE cg_screen.cpp (no ifbit).
 // MM client enhancement: optional hook after notify (see mm_hud_enhancements.h). Layout parse is authoritative.
 //
-// STAT_GAMETYPE_HUD       — warmup (through ready-up): "Gametype: …"; in-progress: frag/capture/round/wave label
-// STAT_RULESET_HUD        — warmup (through ready-up): ruleset; Strike in-progress: capturelimit
-// STAT_CTF_FLAG_PIC       — CTF/Strike: carried flag blink; RR: current-team badge (top-right row 4)
+// STAT_GAMETYPE_HUD       — warmup (through ready-up): "Gametype: …"; in-progress: hidden (limits/rounds moved to miniscore)
+// STAT_RULESET_HUD        — warmup (through ready-up): ruleset; in-progress: hidden
+// STAT_ROUND_NUMBER       — below miniscore: match limit (frag/capture/round/wave cap); 0 = hidden
+// STAT_CTF_FLAG_PIC       — CTF/Strike: carried flag blink; RR: current-team badge (top-right row 3)
 // STAT_CENTER_LINE        — duel header pic; LMS/Freeze Tag: primary POV configstring lane
 // STAT_WARMUP_NOTICE      — layout slot reserved; warmup guidance uses centerprint (menu-bind band)
-// STAT_ROUND_NUMBER       — CONFIG_ROUND_PROGRESS (generic round modes); CA/RR no longer show alive "N vs M"
+// STAT_SCORELIMIT         — coop right-stack limit; DM miniscore uses STAT_ROUND_NUMBER instead
 // STAT_COUNTDOWN          — layout xv 118 yb -256 num(3); vanilla: centre = xv+50-8*l (118 exact for 1-digit); MM cgame re-centres per digit count
 // STAT_MINISCORE_*        — SetMiniScoreStats; visible MATCH_WARMUP_DELAYED through MATCH_IN_PROGRESS
-//                           Team modes (TDM/CA/CTF): CS_STATUSBAR miniscore rows (vanilla-safe icons).
-//                           FFA/Duel/RR/Horde skin icons: MM cgame only (CG_DrawMuffModeHudEnhancements); omitted from layout.
+//                           CS_STATUSBAR miniscore rows (team icons or FFA/Duel/RR/Horde player skins).
 // STAT_HORDE_REMAINING    — Horde only: remaining monsters (num)
 // STAT_ARENA_ROLE         — Strike top-right or CA/Freeze centre: primary POV configstring lane
 // STAT_LIVES              — Horde/LMS: right stack num(1) at yt 42; coop: lives_num at yt 2
@@ -43,7 +43,7 @@ inline bool MM_MiniscoreValVisible(int16_t stat_value)
 	return stat_value != 0;
 }
 
-// Bottom miniscore geometry — shared by mm_statusbar layout and MM cgame FFA enhancement draw.
+// Bottom miniscore geometry — shared by mm_statusbar layout.
 namespace muffmode::hud {
 inline constexpr int32_t kMiniscorePicXr = -26;
 inline constexpr int32_t kMiniscoreNumXr = -78;
@@ -52,8 +52,10 @@ inline constexpr int32_t kMiniscoreHighlightYInset = -2;
 inline constexpr int32_t kMiniscoreNumFieldWidth = 3;
 inline constexpr int32_t kMiniscoreRowStep = 27;
 inline constexpr int32_t kMiniscorePicSize = 24;
+inline constexpr int32_t kMiniscoreMetaBelowScoreStep = 26;
 inline constexpr int32_t kBottomMiniscoreRow1Yb = -110;
 inline constexpr int32_t kBottomMiniscoreRow2Yb = kBottomMiniscoreRow1Yb + kMiniscoreRowStep;
+inline constexpr int32_t kBottomMiniscoreMetaRow1Yb = kBottomMiniscoreRow2Yb + kMiniscoreMetaBelowScoreStep;
 } // namespace muffmode::hud
 
 static_assert(CONFIG_POV_CENTER_POOL >= CS_GENERAL && CONFIG_POV_CENTER_POOL < CS_GENERAL + MAX_GENERAL,

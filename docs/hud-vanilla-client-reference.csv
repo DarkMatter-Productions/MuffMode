@@ -1,0 +1,33 @@
+HUD Element,Category,Vanilla (stock Q2RE client),MuffMode-installed client,Notes,FFA,Duel,TDM,CTF,CA,Strike,RR,LMS,Horde,Instagib,Nadefest,Coop
+Core vitals (health / armor / ammo / weapon icon),Universal,Yes,Yes,Standard Quake II HUD strip at bottom-left,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Partial,Partial,Yes
+Reduced minihud (instagib / nadefest),Universal,Yes,Yes,Hides armor/ammo/pickup rows; health shifted right,No,No,No,No,No,No,No,No,No,Yes,Yes,No
+Pickup notification,Universal,Yes,Yes,Recent pickup icon + label bottom-left,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,No,No,Yes
+Powerup timer + icon,Universal,Yes,Yes,Bottom area,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes
+Tech powerup icon,Universal,Yes,Yes,Upper-right of vitals area,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes
+Match phase / timer (WARMUP / time remaining),Deathmatch,Yes,Yes,Bottom-centre text row (STAT_MATCH_STATE),Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,No
+Round countdown (3…2…1),Deathmatch,Partial,Yes,Vanilla uses fixed digit position; may sit slightly off-centre for 2-digit values,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,No
+Warmup / ready-up guidance,Deathmatch,Yes,Yes,Shown as centre screen text (centerprint) with menu-bind hint — not a HUD row,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,No
+Top-right gametype label,Deathmatch,Yes,Yes,Warmup only: Gametype name; hidden in-match,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,No
+Top-right ruleset label,Deathmatch,Yes,Yes,Warmup only: ruleset name; hidden in-match,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,No
+Top-right round progress (Round N of M),Deathmatch,No,No,Removed; round/limit shown as digits below miniscore,No,No,No,No,No,No,No,No,No,No,No,No
+Bottom miniscore — match limit,Deathmatch,Yes,Yes,Single numeric limit below scores (frag/capture/round/wave cap),Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,No
+Bottom miniscore — team icons + scores,Deathmatch,Yes,Yes,Two rows bottom-right with red/blue team icons,No,No,Yes,Yes,Yes,Yes,No,No,No,No,No,No
+Bottom miniscore — player skin icons + scores,Deathmatch,No,Yes,Omitted from server layout for vanilla compatibility; MM client draws 24×24 icons,Yes,Yes,No,No,No,No,Yes,No,Yes,Yes,Yes,No
+Miniscore highlight frame (your row),Deathmatch,Partial,Yes,Team modes: vanilla layout; FFA/Duel/RR/Horde: MM client only,Partial,Partial,Yes,Yes,Yes,Yes,MM-only,No,MM-only,Partial,Partial,No
+CA / RR alive count (N vs M),Deathmatch,Yes,Yes,Below miniscore area during active round,No,No,No,No,Yes,No,Yes,No,No,No,No,No
+Centre — eliminated label (ELIMINATED),Deathmatch,Yes,Yes,Shown when player is out in elimination team modes,No,No,No,No,Yes,No,Yes,No,No,No,No,No
+Centre — duel header graphic,Deathmatch,Yes,Yes,Top-centre duel banner image,No,Yes,No,No,No,No,No,No,No,No,No,No
+Centre — LMS enemies remaining,Deathmatch,Yes,Yes,Top-centre text during round,No,No,No,No,No,No,No,Yes,No,No,No,No
+Strike role label (OFFENSE / DEFENSE),Deathmatch,Yes,Yes,Top-right row 1 during in-match,No,No,No,No,No,Yes,No,No,No,No,No,No
+Horde monsters remaining,Deathmatch,Yes,Yes,Right stack numeric + Monsters label,No,No,No,No,No,No,No,No,Yes,No,No,Partial
+Lives remaining (big digit),Deathmatch / Coop,Yes,Yes,Right side yt 42 for Horde/LMS DM; coop uses separate lives_num stack,No,No,No,No,No,No,No,Yes,Yes,No,No,Partial
+Red Rover current-team badge,Deathmatch,Yes,Yes,Top-right team icon (row 3 of stack),No,No,No,No,No,No,Yes,No,No,No,No,No
+CTF carried-flag blink icon,Deathmatch,Yes,Yes,Top-right when carrying enemy flag,No,No,No,Yes,No,No,No,No,No,No,No,No
+Teamplay status line,Deathmatch,Yes,Yes,Bottom-centre team message row (CTF etc.),No,No,Yes,Yes,Yes,Yes,Yes,No,No,No,No,No
+Spectator / chase-cam labels,Deathmatch,Yes,Yes,SPECTATOR MODE and FOLLOWING rows,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,No
+Crosshair player name + colour dot,Deathmatch,Yes,Yes,When show_id player config enabled,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,No
+Team-colour screen border,Deathmatch,No,Yes,MM client only (cl_teamBorder); TDM/CTF when on a team,No,No,MM-only,MM-only,No,No,No,No,No,No,No,No
+Coop respawn status text,Coop,Yes,Yes,Top-centre during respawn states,No,No,No,No,No,No,No,No,No,No,No,Yes
+Coop teammate health bars,Coop,Yes,Yes,Top area health_bars token,No,No,No,No,No,No,No,No,No,No,No,Yes
+Coop story / keys / inventory HUD,Coop,Yes,Yes,Single-player style elements when not in deathmatch,No,No,No,No,No,No,No,No,No,No,No,Yes
+Horde coop wave header,Coop,Yes,Yes,Top-right gametype + ruleset in horde coop,No,No,No,No,No,No,No,No,Partial,No,No,Partial

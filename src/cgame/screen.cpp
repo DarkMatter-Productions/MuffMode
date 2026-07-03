@@ -4,7 +4,6 @@
 #include "hud_text.h"
 #include "messages.h"
 #include "mm_hud_enhancements.h"
-#include "muffmode/mm_hud_stat_contracts.h"
 #include "muffmode/mm_parse.h"
 
 #include <array>
@@ -1353,88 +1352,13 @@ static void CG_DrawTeamBorder(const player_state_t *ps, vrect_t hud_vrect, int32
 	cgi.SCR_DrawColorPic(x, y + h - border_width, w, border_width, "_white", border_color);
 }
 
-static int32_t CG_HudLayoutRightX(const vrect_t &hud_vrect, int32_t xr, int32_t scale, int32_t safe_x)
-{
-	return (hud_vrect.x + hud_vrect.width + xr) * scale - safe_x;
-}
-
-static int32_t CG_HudLayoutBottomY(const vrect_t &hud_vrect, int32_t yb, int32_t scale, int32_t safe_y)
-{
-	return (hud_vrect.y + hud_vrect.height + yb) * scale - safe_y;
-}
-
-static bool CG_MiniscorePicIsPlayerSkin(int32_t pic_index)
-{
-	if (pic_index <= 0)
-		return false;
-
-	const char *const pic = cgi.get_configstring(CS_IMAGES + pic_index);
-	// Player head icons from SetMiniScoreStats: /players/{skin}_i
-	return pic && strncmp(pic, "/players/", 9) == 0;
-}
-
-static void CG_DrawMiniscorePicSized(int32_t x, int32_t y, int32_t pic_index, int32_t scale)
-{
-	const char *const pic = cgi.get_configstring(CS_IMAGES + pic_index);
-
-	if (!pic || !*pic)
-		return;
-
-	const int32_t size = muffmode::hud::kMiniscorePicSize * scale;
-	cgi.SCR_DrawPic(x, y, size, size, pic);
-}
-
-static void CG_DrawFfaMiniscoreRow(const player_state_t *ps, const vrect_t &hud_vrect, int32_t yb, int32_t scale, int32_t safe_x, int32_t safe_y,
-	player_stat_t pic_stat, player_stat_t score_stat, player_stat_t highlight_stat)
-{
-	const int32_t pic_index = ps->stats[pic_stat];
-	const int32_t score = ps->stats[score_stat];
-	const int32_t highlight_index = ps->stats[highlight_stat];
-
-	if (!CG_MiniscorePicIsPlayerSkin(pic_index))
-		return;
-
-	if (pic_index <= 0 || score == -999)
-		return;
-
-	const int32_t y = CG_HudLayoutBottomY(hud_vrect, yb, scale, safe_y);
-	const int32_t pic_x = CG_HudLayoutRightX(hud_vrect, muffmode::hud::kMiniscorePicXr, scale, safe_x);
-	const int32_t num_x = CG_HudLayoutRightX(hud_vrect, muffmode::hud::kMiniscoreNumXr, scale, safe_x);
-
-	CG_DrawMiniscorePicSized(pic_x, y, pic_index, scale);
-	CG_DrawField(num_x, y, 0, muffmode::hud::kMiniscoreNumFieldWidth, score, scale);
-
-	if (highlight_index <= 0)
-		return;
-
-	// i_ctfj frame: native size, centred on the 24×24 skin icon (layout xr/yb offsets target full-size pics).
-	const char *const highlight_pic = cgi.get_configstring(CS_IMAGES + highlight_index);
-	if (!highlight_pic || !*highlight_pic)
-		return;
-
-	const int32_t pic_size = muffmode::hud::kMiniscorePicSize * scale;
-	int32_t hw = 0, hh = 0;
-	cgi.Draw_GetPicSize(&hw, &hh, highlight_pic);
-	cgi.SCR_DrawPic(
-		pic_x + (pic_size - hw * scale) / 2,
-		y + (pic_size - hh * scale) / 2,
-		hw * scale,
-		hh * scale,
-		highlight_pic);
-}
-
 void CG_DrawMuffModeHudEnhancements(const player_state_t *ps, vrect_t hud_vrect, vrect_t hud_safe, int32_t scale, int32_t playernum)
 {
+	(void)ps;
+	(void)hud_vrect;
+	(void)hud_safe;
+	(void)scale;
 	(void)playernum;
-
-	if (ps->stats[STAT_LAYOUTS] & LAYOUTS_HIDE_HUD)
-		return;
-
-	// FFA/Duel/RR/Horde skin-icon miniscore: omitted from CS_STATUSBAR for vanilla clients.
-	CG_DrawFfaMiniscoreRow(ps, hud_vrect, muffmode::hud::kBottomMiniscoreRow1Yb, scale, hud_safe.x, hud_safe.y,
-		STAT_MINISCORE_FIRST_PIC, STAT_MINISCORE_FIRST_SCORE, STAT_MINISCORE_FIRST_POS);
-	CG_DrawFfaMiniscoreRow(ps, hud_vrect, muffmode::hud::kBottomMiniscoreRow2Yb, scale, hud_safe.x, hud_safe.y,
-		STAT_MINISCORE_SECOND_PIC, STAT_MINISCORE_SECOND_SCORE, STAT_MINISCORE_SECOND_POS);
 }
 
 void CG_DrawHUD(int32_t isplit, const cg_server_data_t *data, vrect_t hud_vrect, vrect_t hud_safe, int32_t scale, int32_t playernum, const player_state_t *ps) {

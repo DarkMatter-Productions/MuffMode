@@ -175,6 +175,12 @@
     <ClInclude Include="..\..\src\sgame\muffmode\mm_admin.h">
       <Filter>sgame\muffmode</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_announcer.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_announcer_rules.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\src\sgame\muffmode\mm_debug.h">
       <Filter>sgame\muffmode</Filter>
     </ClInclude>
@@ -613,6 +619,9 @@
       <Filter>sgame\muffmode</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\sgame\muffmode\mm_admin.cpp">
+      <Filter>sgame\muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_announcer.cpp">
       <Filter>sgame\muffmode</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\sgame\muffmode\mm_gametype.cpp">

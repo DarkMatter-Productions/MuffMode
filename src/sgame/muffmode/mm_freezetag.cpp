@@ -3,6 +3,7 @@
 
 #include "g_local.h"
 #include "client/userinfo.h"
+#include "muffmode/mm_announcer.h"
 #include "muffmode/mm_freezetag.h"
 #include "muffmode/mm_freezetag_rules.h"
 #include "muffmode/mm_loc.h"
@@ -1415,7 +1416,7 @@ void AwardRound(team_t team, const char *reason)
 {
 	G_AdjustTeamScore(team, 1);
 	gi.LocBroadcast_Print(PRINT_CENTER, "{} wins the round!\n({})\n", Teams_TeamName(team), reason);
-	AnnouncerSound(world, team == TEAM_BLUE ? "blue_wins_round" : "red_wins_round", "ctf/flagcap.wav", team == TEAM_BLUE);
+	MM_AnnounceRaw(world, team == TEAM_BLUE ? "blue_wins_round" : "red_wins_round", "ctf/flagcap.wav", team == TEAM_BLUE);
 	Round_End();
 }
 

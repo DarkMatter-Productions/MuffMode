@@ -841,7 +841,6 @@ static void ApplyMatchInfoHudPreference(gentity_t *ent)
 
 	ent->client->ps.stats[STAT_GAMETYPE_HUD] = 0;
 	ent->client->ps.stats[STAT_RULESET_HUD] = 0;
-	ent->client->ps.stats[STAT_ROUND_NUMBER] = 0;
 
 	if (GT(GT_STRIKE))
 		ent->client->ps.stats[STAT_ARENA_ROLE] = 0;
@@ -871,75 +870,23 @@ static void G_SetGametypeStats(gentity_t *ent) {
 		gi.configstring(CONFIG_RULESET_HUD, G_Fmt("Ruleset: {}", rs_long_name[game.ruleset]).data());
 		ent->client->ps.stats[STAT_GAMETYPE_HUD] = CONFIG_GAMETYPE_HUD;
 		ent->client->ps.stats[STAT_RULESET_HUD] = CONFIG_RULESET_HUD;
-	} else if (deathmatch->integer && level.match_state == MATCH_IN_PROGRESS && level.round_state != roundst_t::ROUND_COUNTDOWN
-		&& (GT(GT_FFA) || GT(GT_TDM) || GT(GT_DUEL) || GT(GT_INSTAGIB) || GT(GT_NADEFEST))) {
-		const int limit = GT_ScoreLimit();
-		if (limit > 0) {
-			gi.configstring(CONFIG_GAMETYPE_HUD, G_Fmt("Fraglimit: {}", limit).data());
-			ent->client->ps.stats[STAT_GAMETYPE_HUD] = CONFIG_GAMETYPE_HUD;
-		} else {
-			ent->client->ps.stats[STAT_GAMETYPE_HUD] = 0;
-		}
-		ent->client->ps.stats[STAT_RULESET_HUD] = 0;
-	} else if (deathmatch->integer && level.match_state == MATCH_IN_PROGRESS && level.round_state != roundst_t::ROUND_COUNTDOWN && GT(GT_CTF)) {
-		const int limit = GT_ScoreLimit();
-		if (limit > 0) {
-			gi.configstring(CONFIG_GAMETYPE_HUD, G_Fmt("Capturelimit: {}", limit).data());
-			ent->client->ps.stats[STAT_GAMETYPE_HUD] = CONFIG_GAMETYPE_HUD;
-		} else {
-			ent->client->ps.stats[STAT_GAMETYPE_HUD] = 0;
-		}
-		ent->client->ps.stats[STAT_RULESET_HUD] = 0;
-	} else if (level.match_state == MATCH_IN_PROGRESS && level.round_state != roundst_t::ROUND_COUNTDOWN && GT(GT_HORDE)) {
-		const int display_round = HudRoundDisplayNumber();
-		if (display_round > 0) {
-			const int limit = GT_ScoreLimit();
-			if (limit > 0)
-				gi.configstring(CONFIG_GAMETYPE_HUD, G_Fmt("Wave {} of {}", display_round, limit).data());
-			else
-				gi.configstring(CONFIG_GAMETYPE_HUD, G_Fmt("Wave {}", display_round).data());
-			ent->client->ps.stats[STAT_GAMETYPE_HUD] = CONFIG_GAMETYPE_HUD;
-		} else {
-			ent->client->ps.stats[STAT_GAMETYPE_HUD] = 0;
-		}
-		ent->client->ps.stats[STAT_RULESET_HUD] = 0;
-	} else if (deathmatch->integer && level.match_state == MATCH_IN_PROGRESS && level.round_state != roundst_t::ROUND_COUNTDOWN
-		&& (GT(GT_CA) || GT(GT_FREEZE) || GT(GT_RR) || GT(GT_STRIKE) || GT(GT_LMS))) {
-		const int display_round = HudRoundDisplayNumber();
-		if (GT(GT_FREEZE)) {
-			std::string round_status;
-			if (MM_FreezeTag_BuildRoundHudStatus(display_round, round_status)) {
-				gi.configstring(CONFIG_GAMETYPE_HUD, round_status.c_str());
-				ent->client->ps.stats[STAT_GAMETYPE_HUD] = CONFIG_GAMETYPE_HUD;
-			} else {
-				ent->client->ps.stats[STAT_GAMETYPE_HUD] = 0;
-			}
-		} else if (display_round > 0) {
-			const int limit = roundlimit->integer;
-			if (limit > 0)
-				gi.configstring(CONFIG_GAMETYPE_HUD, G_Fmt("Round {} of {}", display_round, limit).data());
-			else
-				gi.configstring(CONFIG_GAMETYPE_HUD, G_Fmt("Round {}", display_round).data());
-			ent->client->ps.stats[STAT_GAMETYPE_HUD] = CONFIG_GAMETYPE_HUD;
-		} else {
-			ent->client->ps.stats[STAT_GAMETYPE_HUD] = 0;
-		}
-		if (GT(GT_STRIKE)) {
-			const int capture_limit = GT_ScoreLimit();
-			if (capture_limit > 0) {
-				gi.configstring(CONFIG_RULESET_HUD, G_Fmt("Capturelimit: {}", capture_limit).data());
-				ent->client->ps.stats[STAT_RULESET_HUD] = CONFIG_RULESET_HUD;
-			} else {
-				ent->client->ps.stats[STAT_RULESET_HUD] = 0;
-			}
-		} else if (GT(GT_FREEZE)) {
-			ent->client->ps.stats[STAT_RULESET_HUD] = 0;
-		} else if (!GT(GT_CA) && !GT(GT_RR)) {
-			ent->client->ps.stats[STAT_RULESET_HUD] = 0;
-		}
 	} else {
 		ent->client->ps.stats[STAT_GAMETYPE_HUD] = 0;
 		ent->client->ps.stats[STAT_RULESET_HUD] = 0;
+	}
+
+	if (deathmatch->integer && level.match_state == MATCH_IN_PROGRESS) {
+		const int limit = GT_ScoreLimit() > 0 ? GT_ScoreLimit() : 0;
+
+		if (limit > 0) {
+			ent->client->ps.stats[STAT_ROUND_NUMBER] = limit;
+			ent->client->ps.stats[STAT_SCORELIMIT] = 0;
+		} else {
+			ent->client->ps.stats[STAT_ROUND_NUMBER] = 0;
+			ent->client->ps.stats[STAT_SCORELIMIT] = 0;
+		}
+	} else {
+		ent->client->ps.stats[STAT_ROUND_NUMBER] = 0;
 	}
 
 	ent->client->ps.stats[STAT_WARMUP_NOTICE] = 0;
@@ -981,21 +928,6 @@ static void G_SetGametypeStats(gentity_t *ent) {
 			}
 		}
 
-		if (GTF(GTF_ROUNDS) && !GT(GT_CA) && !GT(GT_FREEZE) && !GT(GT_RR) && !GT(GT_STRIKE) && !GT(GT_HORDE) && !GT(GT_LMS)) {
-			const int display_round = HudRoundDisplayNumber();
-			if (display_round > 0) {
-				const int limit = GT_ScoreLimit();
-				if (limit > 0)
-					gi.configstring(CONFIG_ROUND_PROGRESS, G_Fmt("Round {} of {}", display_round, limit).data());
-				else
-					gi.configstring(CONFIG_ROUND_PROGRESS, G_Fmt("Round {}", display_round).data());
-				ent->client->ps.stats[STAT_ROUND_NUMBER] = CONFIG_ROUND_PROGRESS;
-			} else {
-				ent->client->ps.stats[STAT_ROUND_NUMBER] = 0;
-			}
-		} else {
-			ent->client->ps.stats[STAT_ROUND_NUMBER] = 0;
-		}
 	} else {
 		ent->client->ps.stats[STAT_HORDE_REMAINING] = 0;
 		ent->client->ps.stats[STAT_ARENA_ROLE] = 0;

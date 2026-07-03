@@ -3,12 +3,15 @@
 #include "g_local.h"
 #include "bots/bot_includes.h"
 #include "monsters/m_player.h"	//doppelganger
+#include "muffmode/mm_announcer.h"
 #include "muffmode/mm_captain.h"
 #include "muffmode/mm_freezetag.h"
 #include "muffmode/mm_items_rules.h"
 #include "muffmode/mm_ruleset.h"
 #include "muffmode/mm_ruleset_weapons.h"
 #include "muffmode/mm_skin.h"
+
+#include <optional>
 
 static gtime_t quad_drop_timeout_hack;
 static gtime_t haste_drop_timeout_hack;
@@ -1621,7 +1624,7 @@ bool Pickup_Pack(gentity_t *ent, gentity_t *other) {
 
 //======================================================================
 
-static void Use_Powerup_BroadcastMsg(gentity_t *ent, gitem_t *item, const char *sound_name, const char *announcer_name) {
+static void Use_Powerup_BroadcastMsg(gentity_t *ent, gitem_t *item, const char *sound_name, std::optional<mm_announce_event_t> announce_event) {
 	if (deathmatch->integer && g_quadhog->integer && item->id == IT_POWERUP_QUAD) {
 		gi.LocBroadcast_Print(PRINT_CENTER, "{} is the Quad Hog!\n", ent->client->resp.netname);
 	//} else {
@@ -1637,7 +1640,8 @@ static void Use_Powerup_BroadcastMsg(gentity_t *ent, gitem_t *item, const char *
 	if (deathmatch->integer) {
 		if (MM_ShouldAnnouncePowerupUse()) {
 			gi.sound(ent, CHAN_RELIABLE | CHAN_NO_PHS_ADD | CHAN_AUX, gi.soundindex(sound_name), 1, ATTN_NONE, 0);
-			AnnouncerSound(world, announcer_name, nullptr, false);
+			if (announce_event)
+				MM_Announce(*announce_event, world);
 		}
 	}
 }
@@ -1656,7 +1660,7 @@ void Use_Quad(gentity_t *ent, gitem_t *item) {
 
 	ent->client->pu_time_quad = max(level.time, ent->client->pu_time_quad) + timeout;
 
-	Use_Powerup_BroadcastMsg(ent, item, "items/damage.wav", "quad_damage");
+	Use_Powerup_BroadcastMsg(ent, item, "items/damage.wav", mm_announce_event_t::QuadDamage);
 }
 // =====================================================================
 
@@ -1674,7 +1678,7 @@ void Use_Haste(gentity_t *ent, gitem_t *item) {
 
 	ent->client->pu_time_haste = max(level.time, ent->client->pu_time_haste) + timeout;
 
-	Use_Powerup_BroadcastMsg(ent, item, "items/quadfire1.wav", "haste");
+	Use_Powerup_BroadcastMsg(ent, item, "items/quadfire1.wav", mm_announce_event_t::Haste);
 }
 
 //======================================================================
@@ -1693,7 +1697,7 @@ void Use_Double(gentity_t *ent, gitem_t *item) {
 
 	ent->client->pu_time_double = max(level.time, ent->client->pu_time_double) + timeout;
 
-	Use_Powerup_BroadcastMsg(ent, item, "misc/ddamage1.wav", nullptr);
+	Use_Powerup_BroadcastMsg(ent, item, "misc/ddamage1.wav", std::nullopt);
 }
 
 //======================================================================
@@ -1726,7 +1730,7 @@ void Use_Protection(gentity_t *ent, gitem_t *item) {
 
 	ent->client->pu_time_protection = max(level.time, ent->client->pu_time_protection) + timeout;
 
-	Use_Powerup_BroadcastMsg(ent, item, "items/protect.wav", "battlesuit");
+	Use_Powerup_BroadcastMsg(ent, item, "items/protect.wav", mm_announce_event_t::BattleSuit);
 }
 
 //======================================================================
@@ -1791,7 +1795,7 @@ void Use_Regeneration(gentity_t *ent, gitem_t *item) {
 
 	ent->client->pu_time_regeneration = max(level.time, ent->client->pu_time_regeneration) + timeout;
 
-	Use_Powerup_BroadcastMsg(ent, item, "items/protect.wav", "regeneration");
+	Use_Powerup_BroadcastMsg(ent, item, "items/protect.wav", mm_announce_event_t::Regeneration);
 }
 
 void Use_Invisibility(gentity_t *ent, gitem_t *item) {
@@ -1808,7 +1812,7 @@ void Use_Invisibility(gentity_t *ent, gitem_t *item) {
 
 	ent->client->pu_time_invisibility = max(level.time, ent->client->pu_time_invisibility) + timeout;
 
-	Use_Powerup_BroadcastMsg(ent, item, "items/protect.wav", "invisibility");
+	Use_Powerup_BroadcastMsg(ent, item, "items/protect.wav", mm_announce_event_t::Invisibility);
 }
 
 //======================================================================

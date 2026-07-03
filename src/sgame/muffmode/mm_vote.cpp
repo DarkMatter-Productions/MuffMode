@@ -3,6 +3,7 @@
 
 #include "g_local.h"
 #include "core/debug_log.h"
+#include "muffmode/mm_announcer.h"
 #include "muffmode/mm_captain.h"
 #include "muffmode/mm_gametype.h"
 #include "muffmode/mm_maps.h"
@@ -155,7 +156,7 @@ void MM_UpdateActiveVote()
 	if (level.time - level.vote_state.start_time >= 30_sec)
 	{
 		gi.LocBroadcast_Print(PRINT_HIGH, "Vote timed out.\n");
-		AnnouncerSound(world, "vote_failed", nullptr, false);
+		MM_Announce(mm_announce_event_t::VoteFailed, world);
 		MM_TransitionVoteState(VoteState::FAILED);
 		return;
 	}
@@ -186,13 +187,13 @@ void MM_UpdateActiveVote()
 	if (level.vote_state.yes_votes > halfpoint)
 	{
 		gi.LocBroadcast_Print(PRINT_HIGH, "Vote passed.\n");
-		AnnouncerSound(world, "vote_passed", nullptr, false);
+		MM_Announce(mm_announce_event_t::VotePassed, world);
 		MM_TransitionVoteState(VoteState::PASSED);
 	}
 	else if (level.vote_state.no_votes >= level.vote_state.num_eligible - halfpoint)
 	{
 		gi.LocBroadcast_Print(PRINT_HIGH, "Vote failed.\n");
-		AnnouncerSound(world, "vote_failed", nullptr, false);
+		MM_Announce(mm_announce_event_t::VoteFailed, world);
 		MM_TransitionVoteState(VoteState::FAILED);
 	}
 }
@@ -1118,7 +1119,7 @@ void MM_VoteCommandStore(gentity_t *ent)
 	ent->client->pers.vote_count++;
 
 	MuffModeLog("DEBUG", "VoteCommandStore: votes reset, playing announcer sound");
-	AnnouncerSound(world, "vote_now", "misc/pc_up.wav", true);
+	MM_Announce(mm_announce_event_t::VoteNow, world);
 
 	MuffModeLog("DEBUG", "VoteCommandStore: announcer done, transitioning to ACTIVE");
 	MM_TransitionVoteState(VoteState::ACTIVE);

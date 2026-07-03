@@ -50,6 +50,7 @@ constexpr int32_t kRightHudNumFieldWidth = 2;
 // Two-row miniscore geometry — see muffmode::hud in mm_hud_stat_contracts.h.
 using muffmode::hud::kBottomMiniscoreRow1Yb;
 using muffmode::hud::kBottomMiniscoreRow2Yb;
+using muffmode::hud::kBottomMiniscoreMetaRow1Yb;
 using muffmode::hud::kMiniscoreHighlightXr;
 using muffmode::hud::kMiniscoreHighlightYInset;
 using muffmode::hud::kMiniscoreNumFieldWidth;
@@ -204,8 +205,8 @@ void EmitHordeRemainingStack(statusbar_t &sb)
 // VANILLA_BASE — top-right text stack (gametype / ruleset / round progress).
 constexpr int32_t kTopRightHudFirstYt = 2;
 constexpr int32_t kTopRightHudLineSpacing = 10;
-// Row 4: team badge / carried-flag icon (below the three text lines).
-constexpr int32_t kTopRightHudBadgeYt = kTopRightHudFirstYt + kTopRightHudLineSpacing * 3;
+// Row 3: team badge / carried-flag icon (below up to two text lines).
+constexpr int32_t kTopRightHudBadgeYt = kTopRightHudFirstYt + kTopRightHudLineSpacing * 2;
 
 void EmitHordeCoopWaveHeader(statusbar_t &sb)
 {
@@ -219,7 +220,7 @@ void EmitRedRoverTeamBadge(statusbar_t &sb)
 	if (!GT(GT_RR))
 		return;
 
-	// Row 4 of the top-right stack (below gametype / ruleset / round-or-role text).
+	// Row 3 of the top-right stack (below gametype / ruleset text).
 	sb.ifstat(STAT_CTF_FLAG_PIC).xr(kMiniscorePicXr).yt(kTopRightHudBadgeYt).pic(STAT_CTF_FLAG_PIC).endifstat();
 }
 
@@ -227,16 +228,12 @@ void EmitTopRightMatchInfo(statusbar_t &sb)
 {
 	constexpr int32_t kGametypeYt = kTopRightHudFirstYt;
 	constexpr int32_t kRulesetYt = kTopRightHudFirstYt + kTopRightHudLineSpacing;
-	constexpr int32_t kRoundProgressYt = kTopRightHudFirstYt + kTopRightHudLineSpacing * 2;
 
 	sb.ifstat(STAT_GAMETYPE_HUD).xr(kRightHudTextXr).yt(kGametypeYt).loc_stat_rstring(STAT_GAMETYPE_HUD).endifstat();
 	if (GT(GT_STRIKE)) {
-		sb.ifstat(STAT_RULESET_HUD).xr(kRightHudTextXr).yt(kRulesetYt).loc_stat_rstring(STAT_RULESET_HUD).endifstat();
-		sb.ifstat(STAT_ARENA_ROLE).xr(kRightHudTextXr).yt(kRoundProgressYt).loc_stat_rstring(STAT_ARENA_ROLE).endifstat();
+		sb.ifstat(STAT_ARENA_ROLE).xr(kRightHudTextXr).yt(kGametypeYt).loc_stat_rstring(STAT_ARENA_ROLE).endifstat();
 	} else {
 		sb.ifstat(STAT_RULESET_HUD).xr(kRightHudTextXr).yt(kRulesetYt).loc_stat_rstring(STAT_RULESET_HUD).endifstat();
-		if (!GT(GT_HORDE) && !GT(GT_CA) && !GT(GT_RR) && !GT(GT_FREEZE))
-			sb.ifstat(STAT_ROUND_NUMBER).xr(kRightHudTextXr).yt(kRoundProgressYt).loc_stat_rstring(STAT_ROUND_NUMBER).endifstat();
 	}
 
 	EmitRedRoverTeamBadge(sb);
@@ -277,15 +274,21 @@ void EmitBottomTeamMiniscoreRows(statusbar_t &sb)
 	EmitTeamMiniscoreRow(sb, hud_vanchor_t::Bottom, kBottomMiniscoreRow2Yb, STAT_MINISCORE_SECOND_PIC, STAT_MINISCORE_SECOND_SCORE, STAT_MINISCORE_SECOND_POS);
 }
 
+void EmitMiniscoreMetaRows(statusbar_t &sb)
+{
+	sb.ifstat(STAT_MINISCORE_FIRST_PIC)
+		.ifstat(STAT_ROUND_NUMBER)
+			.xr(MiniscoreAlignedNumXr(kMiniscoreNumFieldWidth))
+			.yb(kBottomMiniscoreMetaRow1Yb)
+			.num(kMiniscoreNumFieldWidth, STAT_ROUND_NUMBER)
+		.endifstat()
+		.endifstat();
+}
+
 void EmitStandardTeamMiniscore(statusbar_t &sb)
 {
 	EmitBottomTeamMiniscoreRows(sb);
-}
-
-// Team flag miniscore is vanilla-safe; FFA/Duel/RR/Horde player skin icons are MM cgame only.
-static bool MiniscoreRowsInVanillaLayout()
-{
-	return Teams() && !GT(GT_RR);
+	EmitMiniscoreMetaRows(sb);
 }
 
 } // namespace muffmode::statusbar
@@ -379,9 +382,7 @@ void MM_InitStatusbar()
 
 		sb.endifstat();
 
-		if (muffmode::statusbar::MiniscoreRowsInVanillaLayout())
-			muffmode::statusbar::EmitStandardTeamMiniscore(sb);
-		// FFA/Duel/RR/Horde: skin-icon miniscore omitted — MM cgame draws via CG_DrawMuffModeHudEnhancements.
+		muffmode::statusbar::EmitStandardTeamMiniscore(sb);
 	}
 
 	const std::string layout = sb.sb.str();

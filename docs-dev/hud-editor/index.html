@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<!--
+  MuffMode HUD layout previewer (v1) — offline tooling, not shipped in the DLL.
+  Load a hud_dump.json produced by the in-game `hud_dump` command and eyeball the
+  CS_STATUSBAR layout across mock stat states. See README.md.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>MuffMode HUD Previewer</title>
+<style>
+  :root { --bg:#1b1d22; --panel:#24272e; --ink:#d7dae0; --muted:#8b919c; --line:#363b45; --accent:#6fb3ff; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:13px/1.45 system-ui, sans-serif; background:var(--bg); color:var(--ink); }
+  header { padding:10px 14px; border-bottom:1px solid var(--line); display:flex; gap:14px; align-items:center; flex-wrap:wrap; }
+  header h1 { font-size:14px; margin:0; font-weight:600; }
+  header .meta { color:var(--muted); }
+  header label.btn, button { background:var(--panel); color:var(--ink); border:1px solid var(--line); border-radius:6px; padding:5px 10px; cursor:pointer; font-size:12px; }
+  header label.btn:hover, button:hover { border-color:var(--accent); }
+  #wrap { display:flex; height:calc(100vh - 49px); }
+  #stage { flex:1; display:flex; align-items:center; justify-content:center; overflow:auto; background:#0d0e11; }
+  #canvasHost { position:relative; box-shadow:0 0 0 1px var(--line); }
+  canvas { display:block; image-rendering:pixelated; background:#000; cursor:crosshair; }
+  aside { width:320px; border-left:1px solid var(--line); background:var(--panel); display:flex; flex-direction:column; }
+  aside .sec { padding:10px 12px; border-bottom:1px solid var(--line); }
+  aside h2 { font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); margin:0 0 8px; }
+  #statList { overflow:auto; flex:1; }
+  .statRow { display:flex; align-items:center; gap:8px; padding:2px 12px; }
+  .statRow code { color:var(--accent); font-size:11px; }
+  .statRow .idx { color:var(--muted); width:22px; text-align:right; }
+  .statRow input[type=number] { width:64px; background:#191b20; color:var(--ink); border:1px solid var(--line); border-radius:4px; padding:2px 4px; }
+  .statRow.name code { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #info { font-size:12px; min-height:64px; white-space:pre-wrap; color:var(--ink); }
+  #info .hint { color:var(--muted); }
+  .row { display:flex; gap:8px; align-items:center; margin-bottom:6px; flex-wrap:wrap; }
+  .swatch { color:var(--muted); font-size:11px; }
+  kbd { background:#191b20; border:1px solid var(--line); border-radius:3px; padding:0 4px; font-size:11px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>MuffMode HUD Previewer</h1>
+  <label class="btn">Load hud_dump.json<input id="file" type="file" accept="application/json,.json" hidden /></label>
+  <button id="loadSample">Load sample</button>
+  <span class="meta" id="meta">no dump loaded</span>
+  <span style="flex:1"></span>
+  <label class="swatch"><input type="checkbox" id="grid" checked /> grid</label>
+  <button id="allOn">all stats on</button>
+  <button id="allOff">all off</button>
+</header>
+<div id="wrap">
+  <div id="stage"><div id="canvasHost"><canvas id="cv" width="960" height="720"></canvas></div></div>
+  <aside>
+    <div class="sec">
+      <h2>Selected element</h2>
+      <div id="info"><span class="hint">Click an element to inspect it. Drag it to read back the anchor value to paste into the C++ emitter.</span></div>
+    </div>
+    <div class="sec"><h2>Mock stats</h2><div class="row swatch">Non-zero = condition true / value shown. <kbd>num</kbd> uses the value.</div></div>
+    <div id="statList"></div>
+  </aside>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

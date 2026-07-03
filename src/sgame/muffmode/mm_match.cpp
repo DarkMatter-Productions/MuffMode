@@ -2,6 +2,7 @@
 // Licensed under the GNU General Public License 2.0.
 
 #include "g_local.h"
+#include "muffmode/mm_announcer.h"
 #include "muffmode/mm_captain.h"
 #include "muffmode/mm_command_contracts.h"
 #include "muffmode/mm_duel.h"
@@ -402,7 +403,7 @@ bool StartNewRound()
 				GT(GT_HORDE) ? MM_Horde_CountdownWaveNumber() : (level.round_number + 1));
 	}
 
-	AnnouncerSound(world, "round_begins_in", nullptr, false);
+	MM_Announce(mm_announce_event_t::RoundBeginsIn, world);
 
 	if (GT(GT_HORDE))
 		MM_Horde_OnRoundCountdown();
@@ -458,6 +459,7 @@ Starts a match
 ============
 */
 void Match_Start() {
+	MM_Announcer_OnMatchReset();
 	if (!deathmatch->integer)
 		return;
 
@@ -521,7 +523,7 @@ void Match_Start() {
 
 	gi.LocBroadcast_Print(PRINT_CENTER, "FIGHT!");
 	//gi.positioned_sound(world->s.origin, world, CHAN_AUTO | CHAN_RELIABLE, gi.soundindex("misc/tele_up.wav"), 1, ATTN_NONE, 0);
-	AnnouncerSound(world, "fight", "misc/tele_up.wav", true);
+	MM_Announce(mm_announce_event_t::FightWithBackup, world);
 }
 
 /*
@@ -530,6 +532,7 @@ Match_Reset
 ============
 */
 void Match_Reset() {
+	MM_Announcer_OnMatchReset();
 	//if (!g_dm_do_warmup->integer) {
 	//	Match_Start();
 	//	return;
@@ -846,13 +849,13 @@ void TickRoundState() {
 				const char *msg[2] = { "DEFEND", "CAPTURE" };
 				BroadcastTeamMessage(TEAM_RED, PRINT_CENTER, G_Fmt("Round {} has begun!\n{} THE FLAG!", level.round_number, msg[level.strike_red_attacks]).data());
 				BroadcastTeamMessage(TEAM_BLUE, PRINT_CENTER, G_Fmt("Round {} has begun!\n{} THE FLAG!", level.round_number, msg[!level.strike_red_attacks]).data());
-				AnnouncerSound(world, "fight", nullptr, false);
+				MM_Announce(mm_announce_event_t::FightWithBackup, world);
 			} else if (GT(GT_HORDE)) {
 				MM_Horde_OnRoundStarted();
 			} else {
 				gi.LocBroadcast_Print(PRINT_CHAT, "Round {} has begun!\n", level.round_number);
 				gi.LocBroadcast_Print(PRINT_CENTER, "FIGHT!");
-				AnnouncerSound(world, "fight", nullptr, false);
+				MM_Announce(mm_announce_event_t::FightWithBackup, world);
 			}
 		}
 		return;
@@ -876,14 +879,14 @@ void TickRoundState() {
 			if (!count_living_red && count_living_blue) {
 				G_AdjustTeamScore(TEAM_BLUE, 1);
 				gi.LocBroadcast_Print(PRINT_CENTER, "{} wins the round!\n(eliminated {})\n", Teams_TeamName(TEAM_BLUE), Teams_TeamName(TEAM_RED));
-				AnnouncerSound(world, "blue_wins_round", "ctf/flagcap.wav", true);
+				MM_Announce(mm_announce_event_t::BlueWinsRound, world);
 				Round_End();
 				return;
 			}
 			if (!count_living_blue && count_living_red) {
 				G_AdjustTeamScore(TEAM_RED, 1);
 				gi.LocBroadcast_Print(PRINT_CENTER, "{} wins the round!\n(eliminated {})\n", Teams_TeamName(TEAM_RED), Teams_TeamName(TEAM_BLUE));
-				AnnouncerSound(world, "red_wins_round", "ctf/flagcap.wav", false);
+				MM_Announce(mm_announce_event_t::RedWinsRound, world);
 				Round_End();
 				return;
 			}
@@ -944,7 +947,7 @@ void TickRoundState() {
 			if (MM_LMSRoundHasWinner(active, participants)) {
 				G_AdjustPlayerScore(survivor->client, 1, false, 0);
 				gi.LocBroadcast_Print(PRINT_CENTER, "{} wins the round!\n", survivor->client->resp.netname);
-				AnnouncerSound(world, "round_won", "ctf/flagcap.wav", true);
+				MM_Announce(mm_announce_event_t::RoundWon, world);
 				Round_End();
 				return;
 			}
@@ -980,7 +983,7 @@ void TickRoundState() {
 				if (leader && !tied) {
 					G_AdjustPlayerScore(leader->client, 1, false, 0);
 					gi.LocBroadcast_Print(PRINT_CENTER, "{} wins the round!\n(most health remaining)\n", leader->client->resp.netname);
-					AnnouncerSound(world, "round_won", "ctf/flagcap.wav", true);
+					MM_Announce(mm_announce_event_t::RoundWon, world);
 				} else {
 					gi.LocBroadcast_Print(PRINT_CENTER, "Round draw!");
 				}
@@ -1028,7 +1031,7 @@ void TickRoundState() {
 						best_round_frags, best_round_frags == 1 ? "frag" : "frags", best_round_dmg);
 				else
 					gi.LocBroadcast_Print(PRINT_CENTER, "Round over.");
-				AnnouncerSound(world, "round_won", "ctf/flagcap.wav", true);
+				MM_Announce(mm_announce_event_t::RoundWon, world);
 
 				Round_End();
 			}
@@ -1061,12 +1064,12 @@ void TickRoundState() {
 					G_AdjustTeamScore(TEAM_RED, 1);
 					gi.LocBroadcast_Print(PRINT_CENTER, "{} wins the round!\n(players remaining: {} vs {})\n", Teams_TeamName(TEAM_RED), living_red, living_blue);
 					//gi.positioned_sound(world->s.origin, world, CHAN_AUTO | CHAN_RELIABLE, gi.soundindex("ctf/flagcap.wav"), 1, ATTN_NONE, 0);
-					AnnouncerSound(world, "red_wins_round", "ctf/flagcap.wav", false);
+					MM_Announce(mm_announce_event_t::RedWinsRound, world);
 				} else if (living_blue > living_red) {
 					G_AdjustTeamScore(TEAM_BLUE, 1);
 					gi.LocBroadcast_Print(PRINT_CENTER, "{} wins the round!\n(players remaining: {} vs {})\n", Teams_TeamName(TEAM_BLUE), living_blue, living_red);
 					//gi.positioned_sound(world->s.origin, world, CHAN_AUTO | CHAN_RELIABLE, gi.soundindex("ctf/flagcap.wav"), 1, ATTN_NONE, 0);
-					AnnouncerSound(world, "blue_wins_round", "ctf/flagcap.wav", true);
+					MM_Announce(mm_announce_event_t::BlueWinsRound, world);
 				} else {
 					int total_health_red = 0, total_health_blue = 0;
 
@@ -1087,12 +1090,12 @@ void TickRoundState() {
 						G_AdjustTeamScore(TEAM_RED, 1);
 						gi.LocBroadcast_Print(PRINT_CENTER, "{} wins the round!\n(total health: {} vs {})\n", Teams_TeamName(TEAM_RED), total_health_red, total_health_blue);
 						//gi.positioned_sound(world->s.origin, world, CHAN_AUTO | CHAN_RELIABLE, gi.soundindex("ctf/flagcap.wav"), 1, ATTN_NONE, 0);
-						AnnouncerSound(world, "red_wins_round", "ctf/flagcap.wav", false);
+						MM_Announce(mm_announce_event_t::RedWinsRound, world);
 					} else if (total_health_blue > total_health_red) {
 						G_AdjustTeamScore(TEAM_BLUE, 1);
 						gi.LocBroadcast_Print(PRINT_CENTER, "{} wins the round!\n(total health: {} vs {})\n", Teams_TeamName(TEAM_BLUE), total_health_blue, total_health_red);
 						//gi.positioned_sound(world->s.origin, world, CHAN_AUTO | CHAN_RELIABLE, gi.soundindex("ctf/flagcap.wav"), 1, ATTN_NONE, 0);
-						AnnouncerSound(world, "blue_wins_round", "ctf/flagcap.wav", true);
+						MM_Announce(mm_announce_event_t::BlueWinsRound, world);
 					} else {
 						gi.LocBroadcast_Print(PRINT_CENTER, "Round draw!");
 					}
@@ -1136,11 +1139,15 @@ void TickCountdown() {
 
 	if (!level.countdown_check || level.countdown_check.seconds<int>() > t) {
 		if (!(t % 10) || t < 10) {
-			AnnouncerSound(world, nullptr, G_Fmt("world/{}{}.wav", t, t >= 20 ? "sec" : "").data(), false);
+			MM_AnnounceRaw(world, nullptr, G_Fmt("world/{}{}.wav", t, t >= 20 ? "sec" : "").data(), false);
 			//gi.positioned_sound(world->s.origin, world, CHAN_AUTO | CHAN_RELIABLE, gi.soundindex(G_Fmt("world/{}{}.wav", t, t >= 20 ? "sec" : "").data()), 1, ATTN_NONE, 0);
 			if (t <= 3) {
-				const char *s[3] = { "one", "two", "three" };
-				AnnouncerSound(world, G_Fmt("{}", s[t-1]).data(), nullptr, false);
+				const mm_announce_event_t countdown_vo[] = {
+					mm_announce_event_t::One,
+					mm_announce_event_t::Two,
+					mm_announce_event_t::Three,
+				};
+				MM_Announce(countdown_vo[t - 1], world);
 			}
 		}
 
@@ -1183,12 +1190,12 @@ void TickMatchEndWarning() {
 
 	if (!level.matchendwarn_check || level.matchendwarn_check.seconds<int>() > t) {
 		if (t && (t == 30 || t == 20 || t <= 10)) {
-			AnnouncerSound(world, nullptr, G_Fmt("world/{}{}.wav", t, t >= 20 ? "sec" : "").data(), false);
+			MM_AnnounceRaw(world, nullptr, G_Fmt("world/{}{}.wav", t, t >= 20 ? "sec" : "").data(), false);
 			//gi.positioned_sound(world->s.origin, world, CHAN_AUTO | CHAN_RELIABLE, gi.soundindex(G_Fmt("world/{}{}.wav", t, t >= 20 ? "sec" : "").data()), 1, ATTN_NONE, 0);
 			if (t >= 10)
 				gi.LocBroadcast_Print(PRINT_HIGH, "{} second warning!\n", t);
 		} else if (t == 300 || t == 60) {
-			AnnouncerSound(world, G_Fmt("{}_minute", t == 300 ? 5 : 1).data(), nullptr, false);
+			MM_Announce(t == 300 ? mm_announce_event_t::FiveMinute : mm_announce_event_t::OneMinute, world);
 		}
 		level.matchendwarn_check = gtime_t::from_sec(t);
 	}
@@ -1442,7 +1449,7 @@ countdown:
 
 				//gi.LocBroadcast_Print(PRINT_HIGH, "{}Match {} starting...\n", g_match_lock->integer ? "TEAMS LOCKED! " : "", level.match_id.data());
 				if (!level.prepare_to_fight) {
-					AnnouncerSound(world, (Teams() && level.num_playing_clients >= 4) ? "prepare_your_team" : "prepare_to_fight", nullptr, false);
+					MM_Announce((Teams() && level.num_playing_clients >= 4) ? mm_announce_event_t::PrepareYourTeam : mm_announce_event_t::PrepareToFight, world);
 					level.prepare_to_fight = true;
 				}
 			} else {

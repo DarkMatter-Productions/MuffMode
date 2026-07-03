@@ -4,6 +4,7 @@
 #include "g_local.h"
 #include "debug_log.h"
 #include "entities/shadow_lights.h"
+#include "muffmode/mm_announcer.h"
 #include "muffmode/mm_captain.h"
 #include "muffmode/mm_combat_heatmap.h"
 #include "muffmode/mm_duel.h"
@@ -1372,7 +1373,12 @@ void CalculateRanks() {
 				if (const auto warning_index = MM_FragWarningIndex(fraglimit->integer, leader->resp.score)) {
 					const int score_diff = static_cast<int>(*warning_index) + 1;
 					if (!level.frag_warning[*warning_index]) {
-						AnnouncerSound(world, G_Fmt("{}_frag{}", score_diff, score_diff > 1 ? "s" : "").data(), nullptr, false);
+						const mm_announce_event_t frag_events[] = {
+							mm_announce_event_t::OneFrag,
+							mm_announce_event_t::TwoFrags,
+							mm_announce_event_t::ThreeFrags,
+						};
+						MM_Announce(frag_events[score_diff - 1], world);
 						level.frag_warning[*warning_index] = true;
 						CheckDMExitRules();
 						return;
@@ -1413,7 +1419,7 @@ void CalculateRanks() {
 				//	gi.Com_PrintFmt("new_rank2={} old_rank2={}\n", new_rank, old_rank);
 
 				if (new_rank == 0 && old_tied != new_tied) {
-					AnnouncerSound(ec, new_tied ? "lead_tied" : "lead_taken", nullptr, false);
+					MM_Announce(new_tied ? mm_announce_event_t::LeadTied : mm_announce_event_t::LeadTaken, ec);
 
 					// find and update all spectators who want to follow leader
 					for (auto ec2 : active_clients()) {
@@ -1423,7 +1429,7 @@ void CalculateRanks() {
 						}
 					}
 				} else if (new_rank != 0 && old_rank == 0) {
-					AnnouncerSound(ec, "lead_lost", nullptr, false);
+					MM_Announce(mm_announce_event_t::LeadLost, ec);
 				}
 			}
 		} else if (Teams() && notGT(GT_RR) && GTF(GTF_FRAGS)) {
@@ -1446,10 +1452,10 @@ void CalculateRanks() {
 
 			if (old_rank == 2 && new_rank != 2) {
 				//a team just took the lead
-				AnnouncerSound(world, new_rank ? "blue_leads" : "red_leads", nullptr, false);
+				MM_Announce(new_rank ? mm_announce_event_t::BlueLeads : mm_announce_event_t::RedLeads, world);
 			} else if (old_rank != 2 && new_rank == 2) {
 				//teams just tied
-				AnnouncerSound(world, "teams_tied", nullptr, false);
+				MM_Announce(mm_announce_event_t::TeamsTied, world);
 			}
 			/*
 			else if ((GTF(GTF_CTF)) && new_rank != 2) {
@@ -1773,10 +1779,10 @@ void CheckDMExitRules() {
 					if (GT(GT_DUEL) && g_dm_overtime->integer > 0) {
 						level.overtime += gtime_t::from_sec(g_dm_overtime->integer);
 						gi.LocBroadcast_Print(PRINT_CENTER, "Overtime!\n{} added", G_TimeString(g_dm_overtime->integer * 1000, false));
-						AnnouncerSound(world, "overtime", "world/klaxon2.wav", true);
+						MM_Announce(mm_announce_event_t::Overtime, world);
 					} else if (!level.suddendeath) {
 						gi.LocBroadcast_Print(PRINT_CENTER, "Sudden Death!");
-						AnnouncerSound(world, "sudden_death", "world/klaxon2.wav", true);
+						MM_Announce(mm_announce_event_t::SuddenDeath, world);
 						level.suddendeath = true;
 					}
 
@@ -2024,9 +2030,9 @@ void BeginIntermission(gentity_t *targ) {
 	for (auto ec : active_clients()) {
 		MoveClientToIntermission(ec);
 		if (Teams())
-			AnnouncerSound(ec, level.team_scores[TEAM_RED] > level.team_scores[TEAM_BLUE] ? "red_wins" : "blue_wins", nullptr, false);
+			MM_Announce(level.team_scores[TEAM_RED] > level.team_scores[TEAM_BLUE] ? mm_announce_event_t::RedWins : mm_announce_event_t::BlueWins, ec);
 		else
-			AnnouncerSound(ec, ec->client->resp.rank == 0 ? "you_win" : "you_lose", nullptr, false);
+			MM_Announce(ec->client->resp.rank == 0 ? mm_announce_event_t::YouWin : mm_announce_event_t::YouLose, ec);
 	}
 
 }
