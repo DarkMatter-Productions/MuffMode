@@ -11,7 +11,7 @@
 constexpr const char *GAMEVERSION = "baseq2";
 
 constexpr const char *GAMEMOD_TITLE = "Muff Mode";
-constexpr const char *GAMEMOD_VERSION = "0.60.6";
+constexpr const char *GAMEMOD_VERSION = "0.60.8";
 
 //==================================================================
 
@@ -2745,7 +2745,7 @@ void MS_Adjust(gclient_t *cl, mstats_t index, int count);
 void MS_AdjustDuo(gclient_t *cl, mstats_t index1, mstats_t index2, int count);
 void MS_Set(gclient_t *cl, mstats_t index, int value);
 const char *stime();
-void AnnouncerSound(gentity_t *ent, const char *announcer_sound, const char *backup_sound, bool use_backup);
+void AnnouncerSound(gentity_t *ent, const char *announcer_sound, const char *backup_sound, bool use_backup, bool backup_alongside_vo = false);
 void QLSound(gentity_t *ent, const char *ql_sound, const char *backup_sound, bool use_backup);
 void G_StuffCmd(gentity_t *e, const char *fmt, ...);
 

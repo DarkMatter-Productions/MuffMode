@@ -6,6 +6,7 @@
 // [MuffMode] Shared module includes for MuffMode-only systems.
 #include "mm_vote_types.h"
 #include "mm_admin.h"
+#include "mm_announcer.h"
 #include "mm_captain.h"
 #include "mm_combat_heatmap.h"
 #include "mm_debug.h"

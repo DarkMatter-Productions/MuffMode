@@ -171,7 +171,7 @@ Frozen-player help calls use the regular `g_loc` / `g_loc_items` location system
 
 Thaw assist credit is automatic: the finishing rescuer scores for the thaw, and teammates who spend meaningful time helping the same successful thaw score assist credit. The assist threshold scales with `g_freezetag_thaw_time`.
 
-The in-match top-right HUD shows only the Freeze Tag round display, such as `Round 1 of 8`, so hosts should tune `roundlimit` as the visible match target for the mode. When `g_freezetag_arena_loadout` is enabled, freezes do not drop the player's starter weapon; timed powerups still follow the normal death-drop cvars.
+The in-match HUD shows the match limit (`fraglimit`, `capturelimit`, or `roundlimit` as applicable) as a single number below the miniscore, so hosts should tune that cvar as the visible match target for the mode. When `g_freezetag_arena_loadout` is enabled, freezes do not drop the player's starter weapon; timed powerups still follow the normal death-drop cvars.
 
 Players who join a Freeze Tag team during a live round are held as round spectators until the next round begins, preserving the active/frozen balance of the current round.
 

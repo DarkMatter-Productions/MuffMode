@@ -3,6 +3,7 @@
 // Client death, obituary and item-drop handling.
 #include "g_local.h"
 #include "monsters/m_player.h"
+#include "muffmode/mm_announcer.h"
 #include "muffmode/mm_captain.h"
 #include "muffmode/mm_freezetag.h"
 #include "muffmode/mm_freezetag_rules.h"
@@ -365,7 +366,7 @@ static void ClientObituary(gentity_t *self, gentity_t *inflictor, gentity_t *att
 				} else if (attacker->client->resp.kill_count && !(attacker->client->resp.kill_count % 10)) {
 					if (ShouldShowRampageMessages()) {
 						gi.LocBroadcast_Print(PRINT_CENTER, "{} is on a rampage\nwith {} frags!", attacker->client->resp.netname, attacker->client->resp.kill_count);
-						AnnouncerSound(attacker, "rampage1", nullptr, false);
+						MM_Announce(mm_announce_event_t::Rampage1, attacker);
 						attacker->client->pers.medal_time = level.time;
 						attacker->client->pers.medal_type = MEDAL_RAMPAGE;
 						attacker->client->pers.medal_count[MEDAL_RAMPAGE]++;
@@ -649,6 +650,7 @@ DIE(player_die) (gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 				G_AdjustPlayerScore(attacker->client, -1, GT(GT_TDM), -1);
 			attacker->client->resp.kill_count = 0;
 		} else {
+			MM_Announcer_OnPlayerFrag(attacker, self);
 			if (notGT(GT_LMS))
 				G_AdjustPlayerScore(attacker->client, 1, GT(GT_TDM), 1);
 			if (attacker->health > 0)
@@ -664,9 +666,9 @@ DIE(player_die) (gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 				attacker->client->pers.medal_count[MEDAL_EXCELLENT]++;
 
 				if (attacker->client->pers.medal_count[MEDAL_EXCELLENT] == 1)
-					AnnouncerSound(attacker, "first_excellent", nullptr, false);
+					MM_Announce(mm_announce_event_t::FirstExcellent, attacker);
 				else
-					AnnouncerSound(attacker, "excellent1", nullptr, false);
+					MM_Announce(mm_announce_event_t::Excellent1, attacker);
 			}
 			attacker->client->pers.kill_time = level.time;
 
@@ -675,7 +677,7 @@ DIE(player_die) (gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 				attacker->client->pers.medal_type = MEDAL_HUMILIATION;
 				attacker->client->pers.medal_count[MEDAL_HUMILIATION]++;
 
-				AnnouncerSound(attacker, "humiliation1", nullptr, false);
+				MM_Announce(mm_announce_event_t::Humiliation1, attacker);
 			}
 
 			for (auto ec : active_clients()) {

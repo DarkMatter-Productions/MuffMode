@@ -2,6 +2,7 @@
 // Licensed under the GNU General Public License 2.0.
 
 #include "g_local.h"
+#include "muffmode/mm_announcer.h"
 #include "muffmode/mm_horde.h"
 #include "muffmode/mm_horde_ai.h"
 #include "muffmode/mm_horde_ai_rules.h"
@@ -457,7 +458,7 @@ void MM_Horde_OnRoundStarted()
 		gi.LocBroadcast_Print(PRINT_CENTER, "{}", theme->announce);
 	else
 		gi.LocBroadcast_Print(PRINT_CENTER, brandom() ? "INCOMING!" : "LOCK AND LOAD!");
-	AnnouncerSound(world, "fight", nullptr, false);
+	MM_Announce(mm_announce_event_t::FightWithBackup, world);
 }
 
 void MM_Horde_NotifyEliminatedSpectator(gentity_t *ent)

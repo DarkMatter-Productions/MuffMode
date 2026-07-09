@@ -2,6 +2,7 @@
 // Licensed under the GNU General Public License 2.0.
 
 #include "fake_game_import.h"
+#include "muffmode/mm_announcer_rules.h"
 #include "muffmode/mm_command_contracts.h"
 #include "muffmode/mm_freezetag_rules.h"
 #include "muffmode/mm_hud_stat_contracts.h"
@@ -512,7 +513,7 @@ MM_TEST(freezetag_hud_status_formats_relative_and_spectator_counts) {
 }
 
 MM_TEST(freezetag_round_hud_status_formats_score_and_limit) {
-	MM_CHECK_EQ(MM_FreezeTagFormatRoundHudStatus(2, 8, 1, 0), std::string("Round 2 of 8"));
+	MM_CHECK_EQ(MM_FreezeTagFormatRoundHudStatus(2, 8, 1, 0), std::string("Round 2"));
 	MM_CHECK_EQ(MM_FreezeTagFormatRoundHudStatus(2, 0, 1, 0), std::string("Round 2"));
 	MM_CHECK_EQ(MM_FreezeTagFormatRoundHudStatus(0, 8, -2, 3), std::string());
 }
@@ -731,6 +732,48 @@ MM_TEST(hud_stat_contract_miniscore_val_visibility) {
 	MM_CHECK(MM_MiniscoreValVisible(1));
 	MM_CHECK(MM_StatusbarLayoutLengthWithinBudget(MM_STATUSBAR_LAYOUT_MAX_CHARS));
 	MM_CHECK_FALSE(MM_StatusbarLayoutLengthWithinBudget(MM_STATUSBAR_LAYOUT_MAX_CHARS + 1));
+}
+
+MM_TEST(announcer_decision_off_with_backup_plays_backup_only) {
+	const announce_action_t action = MM_AnnounceDecision(false, true, false, true, false);
+	MM_CHECK_FALSE(action.play_vo);
+	MM_CHECK(action.play_backup);
+	MM_CHECK_FALSE(action.play_sting);
+}
+
+MM_TEST(announcer_decision_off_without_backup_is_silent) {
+	const announce_action_t action = MM_AnnounceDecision(false, true, false, false, false);
+	MM_CHECK_FALSE(action.play_vo);
+	MM_CHECK_FALSE(action.play_backup);
+	MM_CHECK_FALSE(action.play_sting);
+}
+
+MM_TEST(announcer_decision_on_with_stem_plays_vo_only) {
+	const announce_action_t action = MM_AnnounceDecision(true, true, false, true, false);
+	MM_CHECK(action.play_vo);
+	MM_CHECK_FALSE(action.play_backup);
+	MM_CHECK_FALSE(action.play_sting);
+}
+
+MM_TEST(announcer_decision_on_with_stem_and_sting_plays_vo_and_sting) {
+	const announce_action_t action = MM_AnnounceDecision(true, true, false, true, true);
+	MM_CHECK(action.play_vo);
+	MM_CHECK_FALSE(action.play_backup);
+	MM_CHECK(action.play_sting);
+}
+
+MM_TEST(announcer_decision_on_null_stem_with_use_backup_plays_backup) {
+	const announce_action_t action = MM_AnnounceDecision(true, false, true, true, false);
+	MM_CHECK_FALSE(action.play_vo);
+	MM_CHECK(action.play_backup);
+	MM_CHECK_FALSE(action.play_sting);
+}
+
+MM_TEST(announcer_decision_on_null_stem_without_use_backup_is_silent) {
+	const announce_action_t action = MM_AnnounceDecision(true, false, false, true, false);
+	MM_CHECK_FALSE(action.play_vo);
+	MM_CHECK_FALSE(action.play_backup);
+	MM_CHECK_FALSE(action.play_sting);
 }
 
 } // namespace

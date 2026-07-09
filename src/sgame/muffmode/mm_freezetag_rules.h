@@ -88,14 +88,12 @@ inline std::string MM_FreezeTagFormatRoundHudStatus(
 	int blue_score)
 {
 	const int round = std::max(display_round, 0);
-	const int limit = std::max(round_limit, 0);
+	(void) round_limit;
 	(void) red_score;
 	(void) blue_score;
 
 	if (round <= 0)
 		return {};
-	if (limit > 0)
-		return "Round " + std::to_string(round) + " of " + std::to_string(limit);
 	return "Round " + std::to_string(round);
 }
 

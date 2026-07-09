@@ -1270,6 +1270,11 @@ void ClientBegin(gentity_t *ent) {
 	// [Paril-KEX] we're always connected by this point...
 	ent->client->pers.connected = true;
 
+	// InitGame() zeroes game.clients (TAG_GAME) on every map load; ClientConnect() is not
+	// called again when changing maps, so reload persisted prefs here every ClientBegin.
+	if (!(ent->svflags & SVF_BOT))
+		MM_ClientInitPConfig(ent);
+
 	if (deathmatch->integer && MM_Ghost_TryRestore(ent))
 		return;
 

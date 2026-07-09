@@ -2,6 +2,7 @@
 // Licensed under the GNU General Public License 2.0.
 
 #include "g_local.h"
+#include "muffmode/mm_announcer.h"
 #include "muffmode/mm_match.h"
 #include "muffmode/mm_strike.h"
 
@@ -74,7 +75,7 @@ void MM_Strike_AwardTurnWin(bool captured)
 			Teams_TeamName(attacker));
 	}
 
-	AnnouncerSound(world, attacker == TEAM_RED ? "red_wins_round" : "blue_wins_round", "ctf/flagcap.wav", attacker == TEAM_BLUE);
+	MM_AnnounceRaw(world, attacker == TEAM_RED ? "red_wins_round" : "blue_wins_round", "ctf/flagcap.wav", attacker == TEAM_BLUE);
 	Round_End();
 	MM_Strike_CheckMatchEnd();
 }
@@ -99,7 +100,7 @@ void MM_Strike_EndDefenseTurn(bool timeout)
 			Teams_TeamName(defender));
 	}
 
-	AnnouncerSound(world, defender == TEAM_RED ? "red_wins_round" : "blue_wins_round", "ctf/flagcap.wav", defender == TEAM_BLUE);
+	MM_AnnounceRaw(world, defender == TEAM_RED ? "red_wins_round" : "blue_wins_round", "ctf/flagcap.wav", defender == TEAM_BLUE);
 	Round_End();
 }
 
@@ -109,7 +110,7 @@ void MM_Strike_EndMutualElimination()
 		return;
 
 	gi.LocBroadcast_Print(PRINT_CENTER, "Turn over!\nNo survivors!\n");
-	AnnouncerSound(world, "round_won", "ctf/flagcap.wav", true);
+	MM_Announce(mm_announce_event_t::RoundWon, world);
 	Round_End();
 }
 
