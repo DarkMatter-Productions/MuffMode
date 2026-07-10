@@ -1992,7 +1992,10 @@ static void Cmd_Boot_f(gentity_t *ent) {
 		return;
 	}
 
-	gi.AddCommandString(G_Fmt("kick {}\n", targ - g_entities).data());
+	// The engine's `kick` command takes the 0-based lobby user number
+	// (host = 0), not the entity index - passing `targ - g_entities`
+	// kicks the player one slot over (or an empty slot).
+	gi.AddCommandString(G_Fmt("kick {}\n", P_GetLobbyUserNum(targ)).data());
 }
 
 static void Cmd_Doctor_f(gentity_t *ent) {
