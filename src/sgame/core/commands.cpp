@@ -2455,8 +2455,8 @@ void ClientCommand(gentity_t *ent) {
 	cmds_t		*cc;
 	const char	*cmd;
 
-	if (!ent->client)
-		return; // not fully in game yet
+	if (!ent || !ent->client)
+		return; // not fully in game yet (null ent: engine teardown, see ClientDisconnect)
 
 #if 0
 	// check if client is 888, print what is being sent and prevent any further processing

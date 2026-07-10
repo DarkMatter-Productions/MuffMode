@@ -1255,6 +1255,10 @@ to be placed into the game.  This will happen every level load.
 ============
 */
 void ClientBegin(gentity_t *ent) {
+	// Null-ent guard; same engine teardown class as ClientThink/ClientDisconnect.
+	if (!ent)
+		return;
+
 	ent->client = game.clients + (ent - g_entities - 1);
 	ent->client->awaiting_respawn = false;
 	ent->client->respawn_timeout = 0_ms;
@@ -1499,6 +1503,10 @@ loadgames will.
 ============
 */
 bool ClientConnect(gentity_t *ent, char *userinfo, const char *social_id, bool is_bot) {
+	// Null-ent guard; same engine teardown class as ClientThink/ClientDisconnect.
+	if (!ent)
+		return false;
+
 	ent->client->sess.team = deathmatch->integer ? TEAM_NONE : TEAM_FREE;
 
 	// they can connect
@@ -1607,7 +1615,10 @@ Will not be called between levels.
 ============
 */
 void ClientDisconnect(gentity_t *ent) {
-	if (!ent->client)
+	// The engine calls this with a null ent when a kick lands on an empty or
+	// still-connecting slot (crash observed at ClientDisconnect+0x1E: access
+	// violation reading offset 0x78, rcx = 0).
+	if (!ent || !ent->client)
 		return;
 
 	G_ClearLagCompensationHistory(ent);
@@ -1983,6 +1994,11 @@ void ClientThink(gentity_t *ent, usercmd_t *ucmd) {
 	gentity_t *other;
 	uint32_t   i;
 	pmove_t	   pm;
+
+	// The engine can dispatch a think for a client slot whose entity is
+	// already torn down (kick/disconnect race), passing a null ent.
+	if (!ent || !ent->client)
+		return;
 
 	level.current_entity = ent;
 	client = ent->client;
