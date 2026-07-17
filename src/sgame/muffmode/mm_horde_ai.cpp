@@ -14,18 +14,21 @@
 #include <vector>
 
 extern cvar_t *g_horde_enhanced_ai;
+extern cvar_t *g_horde_target_spread_weight;
+extern cvar_t *g_horde_retarget_interval;
 
 namespace muffmode::horde {
 
 namespace {
 
-constexpr float kTargetSpreadWeight = 512.0f;
 // Rough average spawn_points per monster body; used to turn wave point budget into an expected kill rate.
 constexpr float kAdaptivePointsPerMonster = 2.0f;
 // Seconds over which we expect a wave's monster bodies to be cleared at a "normal" pace.
 constexpr float kAdaptiveWaveSeconds = 90.0f;
 // Tactical spawns never pick a spot closer than this to any living fighter (independent of theme).
 constexpr float kSpawnMinPlayerDistance = 192.0f;
+constexpr float kTargetIsolationWeightFraction = 0.50f;
+constexpr float kTargetHealthWeightFraction = 0.375f;
 
 struct AdaptiveState {
 	int     wave = -1;
@@ -39,7 +42,7 @@ AdaptiveState adaptive_state;
 float         adaptive_last_wave_pressure = 1.0f;
 
 // Single-threaded reuse buffer (game DLL is not multi-threaded).
-gtime_t                              target_load_frame = 0_ms;
+gtime_t                              target_load_frame = gtime_t::from_ms(-1);
 std::array<int, MAX_CLIENTS + 1>     target_load = {};
 
 gentity_t *ClosestPlayerToPoint(vec3_t point)
@@ -77,7 +80,7 @@ void CountMonstersTargetingPlayers(int *counts, int count_capacity)
 			continue;
 		if (ent->health <= 0 || ent->deadflag || (ent->svflags & SVF_DEADMONSTER))
 			continue;
-		if (ent->monsterinfo.aiflags & AI_DO_NOT_COUNT)
+		if (ent->monsterinfo.aiflags & AI_GOOD_GUY)
 			continue;
 		if (!ent->enemy || !ent->enemy->client)
 			continue;
@@ -111,10 +114,12 @@ float FighterHealthFraction()
 	return health_sum / max_sum;
 }
 
-bool SpawnPointClear(gentity_t *spot)
+bool SpawnPointClear(gentity_t *spot, const vec3_t &check_mins, const vec3_t &check_maxs)
 {
-	const vec3_t point = spot->s.origin + vec3_t{ 0.0f, 0.0f, 9.0f };
-	return !gi.trace(point, PLAYER_MINS, PLAYER_MAXS, point, spot, CONTENTS_PLAYER | CONTENTS_MONSTER).startsolid;
+	const float lift = max(1.0f, -check_mins[2]);
+	const vec3_t point = spot->s.origin + vec3_t{ 0.0f, 0.0f, lift };
+	const trace_t tr = gi.trace(point, check_mins, check_maxs, point, spot, MASK_MONSTERSOLID);
+	return !tr.startsolid && !tr.allsolid;
 }
 
 bool SpawnFarEnoughFromFighters(gentity_t *spot, float min_dist)
@@ -150,13 +155,14 @@ bool SpawnSpotUsable(gentity_t *spot, vec3_t avoid_point)
 	return true;
 }
 
-bool TacticalSpawnSpotValid(gentity_t *spot, vec3_t avoid_point, float min_player_dist)
+bool TacticalSpawnSpotValid(gentity_t *spot, vec3_t avoid_point, float min_player_dist,
+	const vec3_t &check_mins, const vec3_t &check_maxs)
 {
 	if (!SpawnSpotUsable(spot, avoid_point))
 		return false;
 	if (!SpawnFarEnoughFromFighters(spot, min_player_dist))
 		return false;
-	if (!SpawnPointClear(spot))
+	if (!SpawnPointClear(spot, check_mins, check_maxs))
 		return false;
 
 	return true;
@@ -190,6 +196,137 @@ bool SupportsBlindfireClassname(const char *classname)
 		!Q_strcasecmp(classname, "monster_soldier_hypergun") ||
 		!Q_strcasecmp(classname, "monster_soldier_lasergun") ||
 		!Q_strcasecmp(classname, "monster_soldier_ripper");
+}
+
+bool IsHunterClassname(const char *classname)
+{
+	if (!classname)
+		return false;
+
+	return !Q_strcasecmp(classname, "monster_gekk") ||
+		!Q_strcasecmp(classname, "monster_berserk") ||
+		!Q_strcasecmp(classname, "monster_parasite") ||
+		!Q_strcasecmp(classname, "monster_brain") ||
+		!Q_strcasecmp(classname, "monster_mutant") ||
+		!Q_strcasecmp(classname, "monster_stalker") ||
+		!Q_strcasecmp(classname, "monster_flipper");
+}
+
+bool IsBulwarkClassname(const char *classname)
+{
+	if (!classname)
+		return false;
+
+	return !Q_strcasecmp(classname, "monster_gladb") ||
+		!Q_strcasecmp(classname, "monster_gladiator") ||
+		!Q_strcasecmp(classname, "monster_guncmdr") ||
+		!Q_strcasecmp(classname, "monster_tank") ||
+		!Q_strcasecmp(classname, "monster_tank_commander") ||
+		!Q_strcasecmp(classname, "monster_shambler") ||
+		!Q_strcasecmp(classname, "monster_supertank") ||
+		!Q_strcasecmp(classname, "monster_boss2") ||
+		!Q_strcasecmp(classname, "monster_carrier") ||
+		!Q_strcasecmp(classname, "monster_makron");
+}
+
+bool IsRangedAnchorClassname(const char *classname)
+{
+	if (!classname)
+		return false;
+
+	return !Q_strcasecmp(classname, "monster_gladb") ||
+		!Q_strcasecmp(classname, "monster_gladiator") ||
+		!Q_strcasecmp(classname, "monster_chick") ||
+		!Q_strcasecmp(classname, "monster_chick_heat") ||
+		!Q_strcasecmp(classname, "monster_boss2") ||
+		!Q_strcasecmp(classname, "monster_carrier") ||
+		!Q_strcasecmp(classname, "monster_makron");
+}
+
+mm_horde_target_role_t TargetRole(const gentity_t *from)
+{
+	const char *classname = from ? from->classname : nullptr;
+
+	if (IsHunterClassname(classname))
+		return mm_horde_target_role_t::Hunter;
+	if (IsBulwarkClassname(classname))
+		return mm_horde_target_role_t::Bulwark;
+	return mm_horde_target_role_t::Balanced;
+}
+
+bool IsAquaticMonster(const gentity_t *from)
+{
+	return from && ((from->flags & FL_SWIM) ||
+		(from->classname && !Q_strcasecmp(from->classname, "monster_flipper")));
+}
+
+bool HasLivingWaterFighter()
+{
+	for (auto ec : active_clients())
+		if (ClientIsPlaying(ec->client) && ec->health > 0 && !ec->client->eliminated &&
+			ec->waterlevel >= WATER_WAIST)
+			return true;
+
+	return false;
+}
+
+float NearestLivingAllyDistance(const gentity_t *candidate)
+{
+	float nearest = std::numeric_limits<float>::max();
+	int   allies = 0;
+
+	for (auto ec : active_clients()) {
+		if (ec == candidate || !ClientIsPlaying(ec->client) || ec->health <= 0 || ec->client->eliminated)
+			continue;
+
+		nearest = min(nearest, (ec->s.origin - candidate->s.origin).length());
+		allies++;
+	}
+
+	return allies > 0 ? nearest : 0.0f;
+}
+
+float TargetScore(gentity_t *from, gentity_t *candidate, int monsters_targeting)
+{
+	const float distance = (candidate->s.origin - (from ? from->s.origin : vec3_origin)).length();
+	const float nearest_ally = NearestLivingAllyDistance(candidate);
+	const float health_frac = static_cast<float>(max(candidate->health, 0)) /
+		static_cast<float>(max(candidate->max_health, 1));
+	const float spread_weight = max(0.0f, g_horde_target_spread_weight->value);
+
+	return MM_Horde_ComputeRoleTargetScore(monsters_targeting, distance, nearest_ally, health_frac,
+		spread_weight, spread_weight * kTargetIsolationWeightFraction,
+		spread_weight * kTargetHealthWeightFraction, TargetRole(from));
+}
+
+gentity_t *FindBestTarget(gentity_t *from, gentity_t *current)
+{
+	const bool water_only = IsAquaticMonster(from) && HasLivingWaterFighter();
+	gentity_t *best = nullptr;
+	float      best_score = std::numeric_limits<float>::max();
+
+	for (auto ec : active_clients()) {
+		if (!ClientIsPlaying(ec->client) || ec->health <= 0 || ec->client->eliminated)
+			continue;
+		if (water_only && ec->waterlevel < WATER_WAIST)
+			continue;
+
+		const int slot = static_cast<int>(ec - g_entities);
+		if (slot < 0 || slot >= static_cast<int>(target_load.size()))
+			continue;
+
+		int load = target_load[slot];
+		if (current && ec != current)
+			load++;
+
+		const float score = TargetScore(from, ec, load);
+		if (score < best_score) {
+			best_score = score;
+			best = ec;
+		}
+	}
+
+	return best;
 }
 
 } // namespace
@@ -260,11 +397,8 @@ void Adaptive_RecordPlayerDeath()
 		adaptive_state.playerDeathsWave++;
 }
 
-select_spawn_result_t SelectSpawnPoint(vec3_t avoid_point)
+select_spawn_result_t SelectSpawnPoint(vec3_t avoid_point, const vec3_t &check_mins, const vec3_t &check_maxs)
 {
-	if (!g_horde_enhanced_ai->integer)
-		return SelectDeathmatchSpawnPoint(nullptr, avoid_point, SPAWN_FARTHEST, false, true, false, false);
-
 	struct Candidate {
 		gentity_t *spot;
 		float      dist;
@@ -274,7 +408,9 @@ select_spawn_result_t SelectSpawnPoint(vec3_t avoid_point)
 
 	// Single-threaded reuse buffer (game DLL is not multi-threaded).
 	static std::vector<Candidate> candidates;
+	static std::vector<Candidate> close_candidates;
 	candidates.clear();
+	close_candidates.clear();
 
 	vec3_t cluster = vec3_origin;
 	int    fighters = 0;
@@ -300,22 +436,29 @@ select_spawn_result_t SelectSpawnPoint(vec3_t avoid_point)
 	const float min_player_dist = max(kSpawnMinPlayerDistance, cv_dist);
 
 	auto try_add_spot = [&](gentity_t *spot) {
-		if (!TacticalSpawnSpotValid(spot, avoid_point, min_player_dist))
+		if (!SpawnSpotUsable(spot, avoid_point) || !SpawnPointClear(spot, check_mins, check_maxs))
 			return;
 
 		const vec3_t delta = spot->s.origin - cluster;
-		candidates.push_back({
+		Candidate candidate = {
 			spot,
 			delta.length(),
 			std::atan2(delta.y, delta.x),
 			spot->s.origin[2],
-		});
+		};
+
+		if (TacticalSpawnSpotValid(spot, avoid_point, min_player_dist, check_mins, check_maxs))
+			candidates.push_back(candidate);
+		else
+			close_candidates.push_back(candidate);
 	};
 
 	gentity_t *spot = nullptr;
 	while ((spot = G_FindByString<&gentity_t::classname>(spot, "info_player_deathmatch")) != nullptr)
 		try_add_spot(spot);
 
+	// If every deathmatch spot is too close, still give team spawns a chance to
+	// provide a tactically safe location before falling back to the close set.
 	if (candidates.empty()) {
 		spot = nullptr;
 		while ((spot = G_FindByString<&gentity_t::classname>(spot, "info_player_team_red")) != nullptr)
@@ -325,12 +468,20 @@ select_spawn_result_t SelectSpawnPoint(vec3_t avoid_point)
 			try_add_spot(spot);
 	}
 
-	if (candidates.size() <= 1)
+	if (candidates.empty())
+		candidates.swap(close_candidates);
+
+	if (candidates.empty())
 		return SelectDeathmatchSpawnPoint(nullptr, avoid_point, SPAWN_FARTHEST, false, true, false, false);
+	if (candidates.size() == 1)
+		return { candidates.front().spot, true };
 
 	std::sort(candidates.begin(), candidates.end(), [](const Candidate &a, const Candidate &b) {
 		return a.dist < b.dist;
 	});
+
+	if (!g_horde_enhanced_ai->integer)
+		return { candidates.back().spot, true };
 
 	const float min_dist = candidates.front().dist;
 	const float max_dist = candidates.back().dist;
@@ -371,11 +522,21 @@ void ApplySpawnRoleTuning(gentity_t *ent, const char *classname)
 	if (!g_horde_enhanced_ai->integer || !ent || !classname)
 		return;
 
-	if (IsRangedGruntClassname(classname))
+	if (IsHunterClassname(classname))
+		ent->monsterinfo.combat_style = COMBAT_MELEE;
+	else if (IsRangedAnchorClassname(classname))
+		ent->monsterinfo.combat_style = COMBAT_RANGED;
+	else if (IsRangedGruntClassname(classname))
 		ent->monsterinfo.combat_style = COMBAT_MIXED;
 
 	if (SupportsBlindfireClassname(classname))
 		ent->monsterinfo.blindfire = true;
+
+	const float retarget_sec = max(0.0f, g_horde_retarget_interval->value);
+	if (retarget_sec > 0.0f) {
+		ent->monsterinfo.horde_retarget_time = level.time +
+			random_time(gtime_t::from_sec(retarget_sec * 0.75f), gtime_t::from_sec(retarget_sec * 1.25f));
+	}
 }
 
 gentity_t *PickTarget(gentity_t *from)
@@ -387,25 +548,7 @@ gentity_t *PickTarget(gentity_t *from)
 
 	RefreshTargetLoadCache();
 
-	gentity_t *best = nullptr;
-	float      best_score = std::numeric_limits<float>::max();
-
-	for (auto ec : active_clients()) {
-		if (!ClientIsPlaying(ec->client) || ec->health <= 0 || ec->client->eliminated)
-			continue;
-
-		const int slot = static_cast<int>(ec - g_entities);
-		if (slot < 0 || slot >= static_cast<int>(target_load.size()))
-			continue;
-
-		const float distance = (ec->s.origin - origin).length();
-		const float score = MM_Horde_ComputeTargetLoadScore(target_load[slot], distance, kTargetSpreadWeight);
-
-		if (score < best_score) {
-			best_score = score;
-			best = ec;
-		}
-	}
+	gentity_t *best = FindBestTarget(from, nullptr);
 
 	// Same-frame retarget/spawn callers share the frozen load cache; bump the chosen slot so the
 	// next picker sees this assignment (e.g. mass re-acquire on death).
@@ -418,9 +561,61 @@ gentity_t *PickTarget(gentity_t *from)
 	return best ? best : ClosestPlayerToPoint(origin);
 }
 
+bool MaybeRetarget(gentity_t *monster)
+{
+	if (!g_horde_enhanced_ai->integer || !monster || monster->health <= 0)
+		return false;
+	if (g_horde_retarget_interval->value <= 0.0f || monster->monsterinfo.horde_retarget_time > level.time)
+		return false;
+	if (monster->monsterinfo.aiflags & (AI_MEDIC | AI_COMBAT_POINT | AI_SOUND_TARGET))
+		return false;
+	if (!monster->enemy || !monster->enemy->client || monster->enemy->health <= 0 ||
+		monster->enemy->client->eliminated)
+		return false;
+
+	const float retarget_sec = max(0.1f, g_horde_retarget_interval->value);
+	monster->monsterinfo.horde_retarget_time = level.time +
+		random_time(gtime_t::from_sec(retarget_sec * 0.75f), gtime_t::from_sec(retarget_sec * 1.25f));
+
+	if (visible(monster, monster->enemy) && range_to(monster, monster->enemy) < 256.0f)
+		return false;
+
+	RefreshTargetLoadCache();
+
+	gentity_t *current = monster->enemy;
+	gentity_t *best = FindBestTarget(monster, current);
+	if (!best || best == current)
+		return false;
+
+	const int current_slot = static_cast<int>(current - g_entities);
+	const int best_slot = static_cast<int>(best - g_entities);
+	if (current_slot < 0 || current_slot >= static_cast<int>(target_load.size()) ||
+		best_slot < 0 || best_slot >= static_cast<int>(target_load.size()))
+		return false;
+
+	const float current_score = TargetScore(monster, current, target_load[current_slot]);
+	const float best_score = TargetScore(monster, best, target_load[best_slot] + 1);
+	const float switch_margin = max(32.0f, g_horde_target_spread_weight->value * 0.25f);
+	if (best_score + switch_margin >= current_score)
+		return false;
+
+	target_load[current_slot] = max(0, target_load[current_slot] - 1);
+	target_load[best_slot]++;
+	monster->oldenemy = nullptr;
+	monster->enemy = best;
+	monster->goalentity = best;
+	FoundTarget(monster);
+	return true;
+}
+
 } // namespace muffmode::horde
 
 gentity_t *MM_Horde_PickTarget(gentity_t *from)
 {
 	return muffmode::horde::PickTarget(from);
+}
+
+bool MM_Horde_MaybeRetarget(gentity_t *monster)
+{
+	return muffmode::horde::MaybeRetarget(monster);
 }

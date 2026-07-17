@@ -5,6 +5,7 @@
 #include "g_local.h"
 #include "muffmode/mm_combat_heatmap.h"
 #include "muffmode/mm_freezetag.h"
+#include "muffmode/mm_horde_ai_rules.h"
 
 /*
 ============
@@ -549,9 +550,10 @@ void T_Damage(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, const 
 		damage *= g_damage_scale->integer;
 	} // mal: just for debugging...
 
-	// horde champion: tapered outgoing-damage buff (weak champions hit hard, heavy ones store <= 1 = no buff)
-	if ((attacker->svflags & SVF_MONSTER) && attacker->monsterinfo.champion_damage_scale > 1.0f)
-		damage = (int)ceil(damage * attacker->monsterinfo.champion_damage_scale);
+	// [MuffMode] Horde champions and bosses use a positive outgoing-damage
+	// multiplier; zero is the inactive/default sentinel.
+	if (attacker->svflags & SVF_MONSTER)
+		damage = MM_Horde_ScaleOutgoingDamage(damage, attacker->monsterinfo.champion_damage_scale);
 
 	client = targ->client;
 

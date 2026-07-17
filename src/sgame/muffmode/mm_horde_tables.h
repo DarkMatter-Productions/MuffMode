@@ -35,7 +35,7 @@ struct WeightedItem {
 	int32_t                 max_level = -1;
 	float                   weight = 1.0f;
 	float                   lvl_w_adjust = 0.0f;
-	std::array<item_id_t, 4> drops = {};
+	std::array<item_id_t, 8> drops = {};
 	int32_t                 spawn_points = 1;
 	HordeCategory           categories = HordeCategory::None; // HCAT_* mask for themed waves
 };
@@ -51,22 +51,75 @@ struct ThemeDefinition {
 	const char   *announce;    // center-print banner
 };
 
+struct DirectorMonster {
+	const char *classname;
+	const char *display_name;
+	int32_t     min_level;
+	int32_t     max_level;
+	float       weight;
+	int32_t     spawn_points;
+	vec3_t      mins;
+	vec3_t      maxs;
+};
+
+// Boss encounters are richer than ordinary director monsters: a profile can preserve
+// campaign-authored stats, deploy a pair, or configure a summoner's reinforcement roster.
+struct BossDefinition {
+	const char *id;
+	const char *classname;
+	const char *display_name;
+	const char *source_map;
+	int32_t     min_level;
+	int32_t     max_level;
+	float       weight;
+	int32_t     spawn_points;
+	vec3_t      mins;
+	vec3_t      maxs;
+	float       health_multiplier;
+	float       model_scale;
+	uint8_t     units;
+	bool        machinegames;
+	float       damage_multiplier;
+	uint32_t    spawnflags;
+	int32_t     power_armor_type;
+	int32_t     power_armor_power;
+	int32_t     monster_slots;
+	const char *reinforcements;
+};
+
 constexpr size_t kHordeItemCount = 21;
 constexpr size_t kHordeMonsterCount = 28;
 constexpr size_t kHordeThemeCount = 5;
+constexpr size_t kHordeBossCount = 25;
+constexpr size_t kHordeAquaticCount = 2;
 
 extern const std::array<WeightedItem, kHordeItemCount> kItems;
 extern const std::array<WeightedItem, kHordeMonsterCount> kMonsters;
 extern const std::array<ThemeDefinition, kHordeThemeCount> kThemes;
+extern const std::array<BossDefinition, kHordeBossCount> kBosses;
+extern const std::array<DirectorMonster, kHordeAquaticCount> kAquatics;
+extern const BossDefinition kFallbackBoss;
 
 bool IsLateWave();
 int CountThemeCandidates(HordeCategory category, int wave);
 const ThemeDefinition *FindTheme(Theme theme);
 HordeCategory ActiveThemeCategory();
 
+const WeightedItem *FindMonsterRow(const char *classname);
 gitem_t *PickDropItem(const WeightedItem *monster_row);
 gitem_t *PickChampionDrop();
+gitem_t *PickBossDrop(float powerup_chance);
+gitem_t *UpgradeDrop(gitem_t *item);
 const char *PickMonsterForWave(const WeightedItem **out_row, int remaining_points);
+const BossDefinition *FindBossDefinition(const char *id);
+bool BossAvailableForWave(const BossDefinition &boss, int wave);
+int EffectiveBossUnits(const BossDefinition &boss);
+float EffectiveBossScale(const BossDefinition &boss, float authored_scale = 0.f);
+const BossDefinition *PickBossForWave(int wave, const BossDefinition *const *recent,
+	size_t recent_count);
+const DirectorMonster *PickAquaticForWave(int wave, int remaining_points);
 void PrecacheTableMonsters();
+void PrecacheDirectorMonsters();
+void PrecacheRewardItems();
 
 } // namespace muffmode::horde

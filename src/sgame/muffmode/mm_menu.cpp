@@ -548,9 +548,13 @@ void Open(gentity_t *ent, menu_hnd_t *p)
 
 namespace muffmode::menu::player_settings {
 
-void Update(gentity_t *ent);
+void OpenDisplay(gentity_t *ent, menu_hnd_t *p);
+void OpenSpectator(gentity_t *ent, menu_hnd_t *p);
+void OpenSkins(gentity_t *ent, menu_hnd_t *p);
+void ReturnToPlayerConfig(gentity_t *ent, menu_hnd_t *p);
 void ToggleShowId(gentity_t *ent, menu_hnd_t *p);
 void ToggleTimer(gentity_t *ent, menu_hnd_t *p);
+void ToggleMatchInfo(gentity_t *ent, menu_hnd_t *p);
 void ToggleFragMessages(gentity_t *ent, menu_hnd_t *p);
 void ToggleAnnouncer(gentity_t *ent, menu_hnd_t *p);
 void CycleKillBeep(gentity_t *ent, menu_hnd_t *p);
@@ -568,26 +572,59 @@ constexpr std::array<const char *, 4> kSkinChoices = {
 	"cyborg/oni911"
 };
 
-const menu_t kPlayerSettingsMenuTemplate[] = {
-	{ "*Player Settings", MENU_ALIGN_CENTER, nullptr },
+const menu_t kPlayerConfigMenuTemplate[] = {
+	{ "*Player Config", MENU_ALIGN_CENTER, nullptr },
+	{ "\35\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\37", MENU_ALIGN_CENTER, nullptr },
+	{ "*Choose a section", MENU_ALIGN_LEFT, nullptr },
+	{ "Display & Audio", MENU_ALIGN_LEFT, OpenDisplay },
+	{ "Spectator & Follow", MENU_ALIGN_LEFT, OpenSpectator },
+	{ "Skin Overrides", MENU_ALIGN_LEFT, OpenSkins },
 	{ "", MENU_ALIGN_LEFT, nullptr },
-	{ "*Display", MENU_ALIGN_LEFT, nullptr },
+	{ "*Changes save automatically", MENU_ALIGN_CENTER, nullptr },
+	{ "Move: navigate  Attack: select", MENU_ALIGN_CENTER, nullptr },
+	{ "$g_pc_return", MENU_ALIGN_LEFT, menu::info::ReturnToMain }
+};
+
+const menu_t kDisplayMenuTemplate[] = {
+	{ "*Display & Audio", MENU_ALIGN_CENTER, nullptr },
+	{ "\35\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\37", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_LEFT, ToggleShowId },
 	{ "", MENU_ALIGN_LEFT, ToggleTimer },
+	{ "", MENU_ALIGN_LEFT, ToggleMatchInfo },
 	{ "", MENU_ALIGN_LEFT, ToggleFragMessages },
 	{ "", MENU_ALIGN_LEFT, ToggleAnnouncer },
 	{ "", MENU_ALIGN_LEFT, CycleKillBeep },
 	{ "", MENU_ALIGN_LEFT, nullptr },
-	{ "*Spectator", MENU_ALIGN_LEFT, nullptr },
+	{ "*Voice pack is opt-in", MENU_ALIGN_CENTER, nullptr },
+	{ "Changes save automatically", MENU_ALIGN_CENTER, nullptr },
+	{ "", MENU_ALIGN_LEFT, nullptr },
+	{ "$g_pc_return", MENU_ALIGN_LEFT, ReturnToPlayerConfig }
+};
+
+const menu_t kSpectatorMenuTemplate[] = {
+	{ "*Spectator & Follow", MENU_ALIGN_CENTER, nullptr },
+	{ "\35\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\37", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_LEFT, ToggleFollowView },
 	{ "", MENU_ALIGN_LEFT, ToggleFollowKiller },
 	{ "", MENU_ALIGN_LEFT, ToggleFollowLeader },
 	{ "", MENU_ALIGN_LEFT, ToggleFollowPowerup },
 	{ "", MENU_ALIGN_LEFT, nullptr },
-	{ "*Skin Overrides", MENU_ALIGN_LEFT, nullptr },
+	{ "*Used while spectating", MENU_ALIGN_CENTER, nullptr },
+	{ "Changes save automatically", MENU_ALIGN_CENTER, nullptr },
+	{ "", MENU_ALIGN_LEFT, nullptr },
+	{ "$g_pc_return", MENU_ALIGN_LEFT, ReturnToPlayerConfig }
+};
+
+const menu_t kSkinMenuTemplate[] = {
+	{ "*Skin Overrides", MENU_ALIGN_CENTER, nullptr },
+	{ "\35\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\37", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_LEFT, CycleEnemySkin },
 	{ "", MENU_ALIGN_LEFT, CycleTeamSkin },
-	{ "$g_pc_return", MENU_ALIGN_LEFT, menu::info::ReturnToMain }
+	{ "", MENU_ALIGN_LEFT, nullptr },
+	{ "*Custom paths: eskin / tskin", MENU_ALIGN_CENTER, nullptr },
+	{ "Changes save automatically", MENU_ALIGN_CENTER, nullptr },
+	{ "", MENU_ALIGN_LEFT, nullptr },
+	{ "$g_pc_return", MENU_ALIGN_LEFT, ReturnToPlayerConfig }
 };
 
 int SkinChoiceIndex(std::string_view skin)
@@ -639,6 +676,11 @@ void ToggleTimer(gentity_t *ent, menu_hnd_t *p)
 	ToggleBool(ent, p, mm_pconfig_bool_setting_t::show_timer);
 }
 
+void ToggleMatchInfo(gentity_t *ent, menu_hnd_t *p)
+{
+	ToggleBool(ent, p, mm_pconfig_bool_setting_t::show_match_info);
+}
+
 void ToggleFragMessages(gentity_t *ent, menu_hnd_t *p)
 {
 	ToggleBool(ent, p, mm_pconfig_bool_setting_t::show_fragmessages);
@@ -646,7 +688,7 @@ void ToggleFragMessages(gentity_t *ent, menu_hnd_t *p)
 
 void ToggleAnnouncer(gentity_t *ent, menu_hnd_t *p)
 {
-	ToggleBool(ent, p, mm_pconfig_bool_setting_t::use_expanded);
+	ToggleBool(ent, p, mm_pconfig_bool_setting_t::announcer_enabled);
 }
 
 void CycleKillBeep(gentity_t *ent, menu_hnd_t *)
@@ -715,46 +757,90 @@ void SetBoolRow(menu_t *entry, const char *label, mm_pconfig_bool_setting_t sett
 	P_Menu_UpdateEntry(entry, G_Fmt("{}: {}", label, MM_PConfigBoolText(MM_PConfigGetBool(ent, setting))).data(), MENU_ALIGN_LEFT, select);
 }
 
-void Update(gentity_t *ent)
+void UpdateDisplay(gentity_t *ent)
 {
 	menu_t *entries = nullptr;
 	int num_entries = 0;
-	if (!menu::GetEntries(ent, &entries, &num_entries) || num_entries < muffmode::CountAsInt(kPlayerSettingsMenuTemplate))
+	if (!menu::GetEntries(ent, &entries, &num_entries) || num_entries < muffmode::CountAsInt(kDisplayMenuTemplate))
 		return;
 
-	SetBoolRow(entries + 3, "ID display", mm_pconfig_bool_setting_t::show_id, ToggleShowId, ent);
-	SetBoolRow(entries + 4, "Match timer", mm_pconfig_bool_setting_t::show_timer, ToggleTimer, ent);
+	SetBoolRow(entries + 2, "ID display", mm_pconfig_bool_setting_t::show_id, ToggleShowId, ent);
+	SetBoolRow(entries + 3, "Match timer", mm_pconfig_bool_setting_t::show_timer, ToggleTimer, ent);
+	SetBoolRow(entries + 4, "Match info HUD", mm_pconfig_bool_setting_t::show_match_info, ToggleMatchInfo, ent);
 	SetBoolRow(entries + 5, "Frag messages", mm_pconfig_bool_setting_t::show_fragmessages, ToggleFragMessages, ent);
-	SetBoolRow(entries + 6, "Announcer", mm_pconfig_bool_setting_t::use_expanded, ToggleAnnouncer, ent);
+	SetBoolRow(entries + 6, "Voice announcer", mm_pconfig_bool_setting_t::announcer_enabled, ToggleAnnouncer, ent);
 	P_Menu_UpdateEntry(entries + 7, G_Fmt("Kill beep: {}", MM_PConfigKillBeepName(ent->client->sess.pc.killbeep_num)).data(), MENU_ALIGN_LEFT, CycleKillBeep);
+}
 
-	P_Menu_UpdateEntry(entries + 10,
+void UpdateSpectator(gentity_t *ent)
+{
+	menu_t *entries = nullptr;
+	int num_entries = 0;
+	if (!menu::GetEntries(ent, &entries, &num_entries) || num_entries < muffmode::CountAsInt(kSpectatorMenuTemplate))
+		return;
+
+	P_Menu_UpdateEntry(entries + 2,
 		G_Fmt("Follow view: {}", MM_PConfigFollowViewName(ent->client->sess.pc.follow_first_person)).data(),
 		MENU_ALIGN_LEFT,
 		ToggleFollowView);
-	SetBoolRow(entries + 11, "Follow killer", mm_pconfig_bool_setting_t::follow_killer, ToggleFollowKiller, ent);
-	SetBoolRow(entries + 12, "Follow leader", mm_pconfig_bool_setting_t::follow_leader, ToggleFollowLeader, ent);
-	SetBoolRow(entries + 13, "Follow powerup", mm_pconfig_bool_setting_t::follow_powerup, ToggleFollowPowerup, ent);
+	SetBoolRow(entries + 3, "Follow killer", mm_pconfig_bool_setting_t::follow_killer, ToggleFollowKiller, ent);
+	SetBoolRow(entries + 4, "Follow leader", mm_pconfig_bool_setting_t::follow_leader, ToggleFollowLeader, ent);
+	SetBoolRow(entries + 5, "Follow powerup", mm_pconfig_bool_setting_t::follow_powerup, ToggleFollowPowerup, ent);
+}
+
+void UpdateSkins(gentity_t *ent)
+{
+	menu_t *entries = nullptr;
+	int num_entries = 0;
+	if (!menu::GetEntries(ent, &entries, &num_entries) || num_entries < muffmode::CountAsInt(kSkinMenuTemplate))
+		return;
 
 	if (!muffmode::CvarEnabled(g_allow_skin_overrides)) {
-		P_Menu_UpdateEntry(entries + 16, "Skin overrides: disabled", MENU_ALIGN_LEFT, nullptr);
-		P_Menu_UpdateEntry(entries + 17, "", MENU_ALIGN_LEFT, nullptr);
+		P_Menu_UpdateEntry(entries + 2, "Skin overrides: disabled", MENU_ALIGN_LEFT, nullptr);
+		P_Menu_UpdateEntry(entries + 3, "", MENU_ALIGN_LEFT, nullptr);
 		return;
 	}
 
-	P_Menu_UpdateEntry(entries + 16,
+	P_Menu_UpdateEntry(entries + 2,
 		G_Fmt("{} skin: {}", GT(GT_DUEL) ? "Opp" : "Enemy", SkinValueText(ent->client->sess.pc.enemy_skin)).data(),
 		MENU_ALIGN_LEFT,
 		CycleEnemySkin);
 
 	if (GT(GT_DUEL)) {
-		P_Menu_UpdateEntry(entries + 17, "Team skin: unavailable", MENU_ALIGN_LEFT, nullptr);
+		P_Menu_UpdateEntry(entries + 3, "Team skin: unavailable", MENU_ALIGN_LEFT, nullptr);
 	} else {
-		P_Menu_UpdateEntry(entries + 17,
+		P_Menu_UpdateEntry(entries + 3,
 			G_Fmt("Team skin: {}", SkinValueText(ent->client->sess.pc.team_skin)).data(),
 			MENU_ALIGN_LEFT,
 			CycleTeamSkin);
 	}
+}
+
+void OpenDisplay(gentity_t *ent, menu_hnd_t *)
+{
+	if (!menu::HasClient(ent))
+		return;
+
+	P_Menu_Close(ent);
+	P_Menu_Open(ent, kDisplayMenuTemplate, -1, muffmode::CountAsInt(kDisplayMenuTemplate), nullptr, UpdateDisplay);
+}
+
+void OpenSpectator(gentity_t *ent, menu_hnd_t *)
+{
+	if (!menu::HasClient(ent))
+		return;
+
+	P_Menu_Close(ent);
+	P_Menu_Open(ent, kSpectatorMenuTemplate, -1, muffmode::CountAsInt(kSpectatorMenuTemplate), nullptr, UpdateSpectator);
+}
+
+void OpenSkins(gentity_t *ent, menu_hnd_t *)
+{
+	if (!menu::HasClient(ent))
+		return;
+
+	P_Menu_Close(ent);
+	P_Menu_Open(ent, kSkinMenuTemplate, -1, muffmode::CountAsInt(kSkinMenuTemplate), nullptr, UpdateSkins);
 }
 
 void Open(gentity_t *ent, menu_hnd_t *)
@@ -763,7 +849,13 @@ void Open(gentity_t *ent, menu_hnd_t *)
 		return;
 
 	P_Menu_Close(ent);
-	P_Menu_Open(ent, kPlayerSettingsMenuTemplate, -1, muffmode::CountAsInt(kPlayerSettingsMenuTemplate), nullptr, Update);
+	P_Menu_Open(ent, kPlayerConfigMenuTemplate, -1, muffmode::CountAsInt(kPlayerConfigMenuTemplate), nullptr, nullptr);
+}
+
+void ReturnToPlayerConfig(gentity_t *ent, menu_hnd_t *)
+{
+	Open(ent, nullptr);
+	gi.local_sound(ent, CHAN_AUTO, gi.soundindex("misc/menu3.wav"), 1, ATTN_NONE, 0);
 }
 
 } // namespace muffmode::menu::player_settings
@@ -800,48 +892,49 @@ void ToggleReady(gentity_t *ent, menu_hnd_t *)
 	MM_ToggleReadyUp(ent);
 }
 
-constexpr int kHostName = 0;
-constexpr int kGametype = 1;
-constexpr int kLevel = 2;
-constexpr int kMatch = 3;
+constexpr int kGametypeName = 0;
+constexpr int kLevel = 1;
+constexpr int kMatch = 2;
 
-constexpr int kTeamsJoinRed = 5;
-constexpr int kTeamsJoinBlue = 6;
+constexpr int kTeamsJoinRed = 4;
+constexpr int kTeamsJoinBlue = 5;
 constexpr int kTeamsFollow = 8;
 constexpr int kTeamsReadyUp = 9;
-constexpr int kTeamsPlayerStats = 12;
-constexpr int kTeamsCallVote = 13;
-constexpr int kTeamsPlayerSettings = 14;
-constexpr int kTeamsAdmin = 15;
+constexpr int kTeamsPlayerSettings = 11;
+constexpr int kTeamsCallVote = 12;
+constexpr int kTeamsPlayerStats = 13;
+constexpr int kTeamsAdmin = 16;
 
-constexpr int kFreeJoin = 5;
+constexpr int kFreeJoin = 4;
 constexpr int kFreeFollow = 8;
 constexpr int kFreeReadyUp = 9;
-constexpr int kFreePlayerStats = 12;
-constexpr int kFreeCallVote = 13;
-constexpr int kFreePlayerSettings = 14;
-constexpr int kFreeAdmin = 15;
+constexpr int kFreePlayerSettings = 11;
+constexpr int kFreeCallVote = 12;
+constexpr int kFreePlayerStats = 13;
+constexpr int kFreeAdmin = 16;
 
-constexpr int kGameMod = 16;
-constexpr int kNotice = 17;
+constexpr int kGameMod = 18;
+constexpr int kNotice = 19;
 
 const menu_t kTeamsMenuTemplate[] = {
 	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_CENTER, nullptr },
-	{ "", MENU_ALIGN_CENTER, nullptr },
-	{ "", MENU_ALIGN_CENTER, nullptr },
+	{ "\35\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\37", MENU_ALIGN_CENTER, nullptr },
 	{ "$g_pc_join_red_team", MENU_ALIGN_LEFT, JoinRed },
 	{ "$g_pc_join_blue_team", MENU_ALIGN_LEFT, JoinBlue },
 	{ "Spectate", MENU_ALIGN_LEFT, JoinSpectator },
+	{ "", MENU_ALIGN_LEFT, nullptr },
 	{ "Follow Player", MENU_ALIGN_LEFT, menu::info::OpenFollowCamera },
 	{ "", MENU_ALIGN_LEFT, nullptr },  // Ready Up (set dynamically)
-	{ "Host Info", MENU_ALIGN_LEFT, menu::info::OpenHost },
-	{ "Match Info", MENU_ALIGN_LEFT, menu::info::OpenServer },
-	{ "Player Stats", MENU_ALIGN_LEFT, menu::stats::Open },
-	{ "Call a Vote", MENU_ALIGN_LEFT, ::G_Menu_CallVote },
-	{ "Player Settings", MENU_ALIGN_LEFT, menu::player_settings::Open },
 	{ "", MENU_ALIGN_LEFT, nullptr },
+	{ "Player Config", MENU_ALIGN_LEFT, menu::player_settings::Open },
+	{ "Call a Vote", MENU_ALIGN_LEFT, ::G_Menu_CallVote },
+	{ "Player Stats", MENU_ALIGN_LEFT, menu::stats::Open },
+	{ "Server Info", MENU_ALIGN_LEFT, menu::info::OpenHost },
+	{ "Match Info", MENU_ALIGN_LEFT, menu::info::OpenServer },
+	{ "", MENU_ALIGN_LEFT, nullptr },
+	{ "Move: navigate  Attack: select", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_CENTER, nullptr }
 };
@@ -850,22 +943,27 @@ const menu_t kFreeMenuTemplate[] = {
 	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_CENTER, nullptr },
-	{ "", MENU_ALIGN_CENTER, nullptr },
-	{ "", MENU_ALIGN_LEFT, nullptr },
+	{ "\35\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\37", MENU_ALIGN_CENTER, nullptr },
 	{ "Join Game", MENU_ALIGN_LEFT, JoinFree },
 	{ "", MENU_ALIGN_LEFT, nullptr },
 	{ "Spectate", MENU_ALIGN_LEFT, JoinSpectator },
+	{ "", MENU_ALIGN_LEFT, nullptr },
 	{ "Follow Player", MENU_ALIGN_LEFT, menu::info::OpenFollowCamera },
 	{ "", MENU_ALIGN_LEFT, nullptr },  // Ready Up (set dynamically)
-	{ "Host Info", MENU_ALIGN_LEFT, menu::info::OpenHost },
-	{ "Match Info", MENU_ALIGN_LEFT, menu::info::OpenServer },
-	{ "Player Stats", MENU_ALIGN_LEFT, menu::stats::Open },
-	{ "Call a Vote", MENU_ALIGN_LEFT, ::G_Menu_CallVote },
-	{ "Player Settings", MENU_ALIGN_LEFT, menu::player_settings::Open },
 	{ "", MENU_ALIGN_LEFT, nullptr },
+	{ "Player Config", MENU_ALIGN_LEFT, menu::player_settings::Open },
+	{ "Call a Vote", MENU_ALIGN_LEFT, ::G_Menu_CallVote },
+	{ "Player Stats", MENU_ALIGN_LEFT, menu::stats::Open },
+	{ "Server Info", MENU_ALIGN_LEFT, menu::info::OpenHost },
+	{ "Match Info", MENU_ALIGN_LEFT, menu::info::OpenServer },
+	{ "", MENU_ALIGN_LEFT, nullptr },
+	{ "Move: navigate  Attack: select", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_CENTER, nullptr }
 };
+
+static_assert(std::size(kTeamsMenuTemplate) == 20);
+static_assert(std::size(kFreeMenuTemplate) == 20);
 
 } // namespace muffmode::menu::join
 
@@ -1406,8 +1504,7 @@ void Update(gentity_t *ent)
 		entries[index].SelectFunc = nullptr;
 	}
 
-	menu::SetGametypeName(entries + kHostName);
-	menu::SetText(entries + kGametype, "");
+	menu::SetGametypeName(entries + kGametypeName);
 	menu::SetLevelName(entries + kLevel);
 
 	switch (level.match_state) {
@@ -1437,7 +1534,7 @@ void Update(gentity_t *ent)
 	menu::SetGamemodName(entries + kGameMod);
 
 	int player_settings_index = teams ? kTeamsPlayerSettings : kFreePlayerSettings;
-	menu::SetText(entries[player_settings_index], "Player Settings");
+	menu::SetText(entries[player_settings_index], "Player Config");
 	entries[player_settings_index].align = MENU_ALIGN_LEFT;
 	entries[player_settings_index].SelectFunc = menu::player_settings::Open;
 

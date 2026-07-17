@@ -1,6 +1,6 @@
 # MuffMode announcer voice pack
 
-MuffMode match announcements use per-client voice lines when a player enables the announcer (`announcer on` or Player Settings → Announcer). The server requests sounds at fixed paths; clients resolve them from their local game files and pak search order.
+MuffMode match announcements use per-client voice lines when a player enables the announcer (`announcer on` or Player Config → Display & Audio → Voice announcer). The server requests sounds at fixed paths; clients resolve them from their local game files and pak search order.
 
 This document lists every announcer stem, the on-disk layout, and how to ship a custom voice pack.
 

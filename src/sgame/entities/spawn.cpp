@@ -408,6 +408,45 @@ static const std::initializer_list<field_t> entity_fields = {
 	FIELD_AUTO(bfg_off),
 	FIELD_AUTO(plasmabeam_on),
 	FIELD_AUTO(plasmabeam_off),
+
+	// [MuffMode] Bespoke Horde spawn-anchor aliases. These reuse generic
+	// gentity fields so authored .ent overrides need no private map format.
+	FIELD_AUTO_NAMED("horde_monster", map),
+	FIELD_AUTO_NAMED("horde_min_wave", count),
+	FIELD_AUTO_NAMED("horde_max_wave", health),
+	FIELD_AUTO_NAMED("horde_weight", random),
+	FIELD_AUTO_NAMED("horde_cooldown", wait),
+	FIELD_AUTO_NAMED("horde_boss", message),
+	FIELD_AUTO_NAMED("horde_boss_health_mult", speed),
+	FIELD_AUTO_NAMED("horde_boss_damage_mult", accel),
+	FIELD_AUTO_NAMED("horde_boss_scale", s.scale),
+	{ "horde_boss_spawnflags", [](gentity_t *s, const char *v) {
+		s->sounds = ED_LoadInteger<int32_t>(v);
+		s->noise_index2 = 1;
+	} },
+	{ "horde_boss_power_armor", [](gentity_t *s, const char *v) {
+		s->monsterinfo.power_armor_power = ED_LoadInteger<int32_t>(v);
+		s->volume = 1.f;
+	} },
+	{ "horde_boss_power_armor_type", [](gentity_t *s, const char *v) {
+		const int32_t type = ED_LoadInteger<int32_t>(v);
+
+		if (type == 0)
+			s->monsterinfo.power_armor_type = IT_NULL;
+		else if (type == 1)
+			s->monsterinfo.power_armor_type = IT_POWER_SCREEN;
+		else
+			s->monsterinfo.power_armor_type = IT_POWER_SHIELD;
+		s->decel = 1.f;
+	} },
+	{ "horde_boss_monster_slots", [](gentity_t *s, const char *v) {
+		s->monsterinfo.monster_slots = ED_LoadInteger<int32_t>(v);
+		s->attenuation = 1.f;
+	} },
+	{ "horde_boss_reinforcements", [](gentity_t *s, const char *v) {
+		s->model = ED_NewString(v);
+		s->noise_index = 1;
+	} },
 //-muff
 
 	FIELD_AUTO_NAMED("monster_slots", monsterinfo.monster_slots)
@@ -1181,6 +1220,8 @@ static void ParseWorldEntities() {
 
 		// remove things (except the world) from different skill levels or deathmatch
 		if (ent != g_entities) {
+			MM_Horde_ConvertMapMonsterSpawn(ent);
+
 			if (G_InhibitEntity(ent)) {
 				G_FreeEntity(ent);
 				inhibit++;
@@ -1420,6 +1461,8 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
 
 		// remove things (except the world) from different skill levels or deathmatch
 		if (ent != g_entities) {
+			MM_Horde_ConvertMapMonsterSpawn(ent);
+
 			if (G_InhibitEntity(ent)) {
 				G_FreeEntity(ent);
 				inhibit++;

@@ -1216,7 +1216,7 @@ void AnnouncerSound(gentity_t *ent, const char *announcer_sound, const char *bac
 				continue;
 
 			const announce_action_t action = MM_AnnounceDecision(
-				ec->client->sess.pc.use_expanded, has_stem, use_backup, has_backup, backup_alongside_vo);
+				ec->client->sess.pc.announcer_enabled, has_stem, use_backup, has_backup, backup_alongside_vo);
 
 			if (action.play_sting)
 				gi.local_sound(ec, CHAN_RELIABLE | CHAN_AUTO, gi.soundindex(backup_sound), 1, ATTN_NONE, 0);
@@ -1236,14 +1236,14 @@ void QLSound(gentity_t *ent, const char *ql_sound, const char *backup_sound, boo
 		if (ent == world || ent == ec || (!ClientIsPlaying(ec->client) && ec->client->follow_target == ent)) {
 			if (ec->client->sess.is_a_bot)
 				continue;
-			if (!ec->client->sess.pc.use_expanded || (ql_sound == nullptr && use_backup)) {
+			if (!ec->client->sess.pc.announcer_enabled || (ql_sound == nullptr && use_backup)) {
 				if (backup_sound)
 					gi.local_sound(ec, CHAN_RELIABLE | CHAN_NO_PHS_ADD | CHAN_AUX, gi.soundindex(backup_sound), 1, ATTN_NONE, 0);
 				continue;
 			}
 			//gi.local_sound(ec, CHAN_AUTO | CHAN_RELIABLE, gi.soundindex(ql_sound), 1, ATTN_NONE, 0);
 			
-			if (ec->client->sess.pc.use_expanded && ql_sound)
+			if (ec->client->sess.pc.announcer_enabled && ql_sound)
 				gi.local_sound(ec, CHAN_RELIABLE | CHAN_NO_PHS_ADD | CHAN_AUX, gi.soundindex(G_Fmt("{}.wav", ql_sound).data()), 1, ATTN_NONE, 0);
 		}
 	}

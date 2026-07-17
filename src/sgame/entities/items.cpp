@@ -6,6 +6,7 @@
 #include "muffmode/mm_announcer.h"
 #include "muffmode/mm_captain.h"
 #include "muffmode/mm_freezetag.h"
+#include "muffmode/mm_horde.h"
 #include "muffmode/mm_items_rules.h"
 #include "muffmode/mm_ruleset.h"
 #include "muffmode/mm_ruleset_weapons.h"
@@ -1744,6 +1745,9 @@ void Powerup_ApplyRegeneration(gentity_t *ent) {
 
 	cl = ent->client;
 	if (!cl)
+		return;
+
+	if (MM_Horde_PowerupsPaused())
 		return;
 
 	if (ent->health <= 0 || ent->client->eliminated)

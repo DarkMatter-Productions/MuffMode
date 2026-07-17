@@ -2,6 +2,7 @@
 // Licensed under the GNU General Public License 2.0.
 
 #include "g_local.h"
+#include "muffmode/mm_announcer_rules.h"
 #include "muffmode/mm_command_contracts.h"
 #include "muffmode/mm_pconfig.h"
 #include "muffmode/mm_pconfig_rules.h"
@@ -50,7 +51,7 @@ struct config_load_stats_t {
 constexpr uint32_t k_config_field_show_id = bit_v<0>;
 constexpr uint32_t k_config_field_show_timer = bit_v<1>;
 constexpr uint32_t k_config_field_show_fragmessages = bit_v<2>;
-constexpr uint32_t k_config_field_use_expanded = bit_v<3>;
+constexpr uint32_t k_config_field_announcer_enabled = bit_v<3>;
 constexpr uint32_t k_config_field_killbeep = bit_v<4>;
 constexpr uint32_t k_config_field_follow_killer = bit_v<5>;
 constexpr uint32_t k_config_field_follow_leader = bit_v<6>;
@@ -58,11 +59,13 @@ constexpr uint32_t k_config_field_follow_powerup = bit_v<7>;
 constexpr uint32_t k_config_field_enemy_skin = bit_v<8>;
 constexpr uint32_t k_config_field_team_skin = bit_v<9>;
 constexpr uint32_t k_config_field_follow_first_person = bit_v<10>;
+constexpr uint32_t k_config_field_show_match_info = bit_v<11>;
 constexpr uint32_t k_all_config_fields =
 	k_config_field_show_id |
 	k_config_field_show_timer |
+	k_config_field_show_match_info |
 	k_config_field_show_fragmessages |
-	k_config_field_use_expanded |
+	k_config_field_announcer_enabled |
 	k_config_field_killbeep |
 	k_config_field_follow_killer |
 	k_config_field_follow_leader |
@@ -296,10 +299,12 @@ config_line_result_t ApplyConfigLine(client_config_t &config, std::string_view r
 		return apply_known(k_config_field_show_id, ApplyBoolLine(config.show_id, args, name, line_number));
 	if (EqualsI(command, "timer"))
 		return apply_known(k_config_field_show_timer, ApplyBoolLine(config.show_timer, args, name, line_number));
+	if (EqualsI(command, "infohud") || EqualsI(command, "matchinfo"))
+		return apply_known(k_config_field_show_match_info, ApplyBoolLine(config.show_match_info, args, name, line_number));
 	if (EqualsI(command, "fm") || EqualsI(command, "fragmessages"))
 		return apply_known(k_config_field_show_fragmessages, ApplyBoolLine(config.show_fragmessages, args, name, line_number));
 	if (EqualsI(command, "announcer"))
-		return apply_known(k_config_field_use_expanded, ApplyBoolLine(config.use_expanded, args, name, line_number));
+		return apply_known(k_config_field_announcer_enabled, ApplyBoolLine(config.announcer_enabled, args, name, line_number));
 	if (EqualsI(command, "followkiller"))
 		return apply_known(k_config_field_follow_killer, ApplyBoolLine(config.follow_killer, args, name, line_number));
 	if (EqualsI(command, "followleader"))
@@ -370,8 +375,9 @@ std::string RenderConfigText(gentity_t *ent)
 
 	fmt::format_to(std::back_inserter(text), FMT_STRING("id {}\n"), BoolInt(config.show_id));
 	fmt::format_to(std::back_inserter(text), FMT_STRING("timer {}\n"), BoolInt(config.show_timer));
+	fmt::format_to(std::back_inserter(text), FMT_STRING("infohud {}\n"), BoolInt(config.show_match_info));
 	fmt::format_to(std::back_inserter(text), FMT_STRING("fm {}\n"), BoolInt(config.show_fragmessages));
-	fmt::format_to(std::back_inserter(text), FMT_STRING("announcer {}\n"), BoolInt(config.use_expanded));
+	fmt::format_to(std::back_inserter(text), FMT_STRING("announcer {}\n"), BoolInt(config.announcer_enabled));
 	fmt::format_to(std::back_inserter(text), FMT_STRING("kb {}\n"), config.killbeep_num);
 	fmt::format_to(std::back_inserter(text), FMT_STRING("followkiller {}\n"), BoolInt(config.follow_killer));
 	fmt::format_to(std::back_inserter(text), FMT_STRING("followleader {}\n"), BoolInt(config.follow_leader));
@@ -516,10 +522,12 @@ bool *MM_PConfigBoolField(gentity_t *ent, mm_pconfig_bool_setting_t setting)
 		return &config.show_id;
 	case mm_pconfig_bool_setting_t::show_timer:
 		return &config.show_timer;
+	case mm_pconfig_bool_setting_t::show_match_info:
+		return &config.show_match_info;
 	case mm_pconfig_bool_setting_t::show_fragmessages:
 		return &config.show_fragmessages;
-	case mm_pconfig_bool_setting_t::use_expanded:
-		return &config.use_expanded;
+	case mm_pconfig_bool_setting_t::announcer_enabled:
+		return &config.announcer_enabled;
 	case mm_pconfig_bool_setting_t::follow_first_person:
 		return &config.follow_first_person;
 	case mm_pconfig_bool_setting_t::follow_killer:
@@ -594,7 +602,7 @@ client_config_t MM_DefaultClientConfig()
 	config.follow_leader = false;
 	config.follow_powerup = false;
 	config.follow_first_person = true;
-	config.use_expanded = false;
+	config.announcer_enabled = MM_ANNOUNCER_DEFAULT_ENABLED;
 	config.enemy_skin[0] = 0;
 	config.team_skin[0] = 0;
 	return config;
@@ -755,11 +763,7 @@ void MM_CmdInfoHud(gentity_t *ent)
 	if (!ent || !ent->client)
 		return;
 
-	if (!muffmode::pconfig::RequireCommandArgc(ent, 1, 1, gi.argv(0)))
-		return;
-
-	ent->client->sess.pc.show_match_info ^= true;
-	gi.LocClient_Print(ent, PRINT_HIGH, "Info HUD: {}\n", ent->client->sess.pc.show_match_info ? "ON" : "OFF");
+	muffmode::pconfig::SetBoolPreference(ent, mm_pconfig_bool_setting_t::show_match_info, "Match info HUD");
 }
 
 /*
@@ -785,7 +789,7 @@ void MM_CmdAnnouncer(gentity_t *ent)
 	if (!ent || !ent->client)
 		return;
 
-	muffmode::pconfig::SetBoolPreference(ent, mm_pconfig_bool_setting_t::use_expanded, "Match announcer");
+	muffmode::pconfig::SetBoolPreference(ent, mm_pconfig_bool_setting_t::announcer_enabled, "Match announcer");
 }
 
 /*

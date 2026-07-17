@@ -1357,6 +1357,11 @@ void ai_run(gentity_t *self, float dist) {
 			return;
 	}
 
+	// [MuffMode] Horde periodically redistributes pressure when another fighter is
+	// materially less burdened; close engagements and special AI goals stay sticky.
+	if (GT(GT_HORDE) && g_horde_enhanced_ai->integer)
+		MM_Horde_MaybeRetarget(self);
+
 	// if we're dodging, make sure to keep the attack_state AS_SLIDING
 	retval = ai_checkattack(self, dist);
 

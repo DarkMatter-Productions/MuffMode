@@ -2165,7 +2165,9 @@ struct monsterinfo_t {
 	gtime_t	  strafe_check_time; // time until we should reconsider strafing
 	int32_t	  base_health; // health that we had on spawn, before any co-op adjustments
 	int32_t   health_scaling; // number of players we've been scaled up to
-	float	  champion_damage_scale; // horde: tapered outgoing-damage multiplier for champions (<= 1 means no buff / not a champion)
+	float	  champion_damage_scale; // horde: positive outgoing-damage multiplier for champions/bosses; 0 means inactive
+	gtime_t	  horde_retarget_time; // next enhanced-Horde target load rebalance
+	uint8_t	  horde_reward_class; // horde: 0=none, 1=regular, 2=champion, 3=boss
 	gtime_t   next_move_time; // high tick rate
 	gtime_t	  bad_move_time; // don't try straight moves until this is over
 	gtime_t	  bump_time; // don't slide against walls for a bit
@@ -2417,6 +2419,32 @@ extern cvar_t *g_coop_health_scaling;
 extern cvar_t *g_coop_instanced_items;
 extern cvar_t *g_coop_num_lives;
 extern cvar_t *g_horde_lives;
+extern cvar_t *g_horde_boss_powerup_chance;
+extern cvar_t *g_horde_boss_tier_window;
+extern cvar_t *g_horde_boss_machinegames;
+extern cvar_t *g_horde_boss_pairs;
+extern cvar_t *g_horde_boss_repeat_window;
+extern cvar_t *g_horde_boss_force;
+extern cvar_t *g_horde_boss_scale_limit;
+extern cvar_t *g_horde_boss_health_per_wave;
+extern cvar_t *g_horde_boss_damage_per_wave;
+extern cvar_t *g_horde_boss_pair_health_mult;
+extern cvar_t *g_horde_boss_armor_mult;
+extern cvar_t *g_horde_champion_drop_chance;
+extern cvar_t *g_horde_drop_chance;
+extern cvar_t *g_horde_drop_profile_bias;
+extern cvar_t *g_horde_featured_spawns;
+extern cvar_t *g_horde_map_monster_spawns;
+extern cvar_t *g_horde_map_spawn_chance;
+extern cvar_t *g_horde_map_spawn_cooldown;
+extern cvar_t *g_horde_map_spawn_min_dist;
+extern cvar_t *g_horde_streak_drop_bonus;
+extern cvar_t *g_horde_streak_max_tier;
+extern cvar_t *g_horde_streak_score_bonus;
+extern cvar_t *g_horde_streak_step;
+extern cvar_t *g_horde_streak_upgrade_chance;
+extern cvar_t *g_horde_wave_survival_bonus;
+extern cvar_t *g_horde_wave_type_ramp;
 extern cvar_t *g_lms_lives;
 extern cvar_t *g_horde_start_chainsaw;
 extern cvar_t *g_horde_item_respawn_scale;
@@ -3448,6 +3476,10 @@ struct client_persistant_t {
 	gtime_t			fog_transition_time;
 	gtime_t			megahealth_time; // relative megahealth time value
 	int32_t			lives; // player lives left (1 = no respawns remaining)
+	gtime_t			horde_reinforcement_protection; // duration carried through a delayed rally respawn
+	int32_t			horde_wave_kills;
+	int32_t			horde_kill_streak;
+	int32_t			horde_wave_deaths;
 	uint8_t			n64_crouch_warn_times;
 	gtime_t			n64_crouch_warning;
 
@@ -3496,7 +3528,7 @@ struct client_config_t {
 	bool			follow_powerup;
 	bool			follow_first_person;
 
-	bool			use_expanded;
+	bool			announcer_enabled;
 
 	// [MuffMode] Per-viewer skin overrides (eskin/tskin): how this player sees
 	// enemies and teammates on their own screen. Empty = no override.

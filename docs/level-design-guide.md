@@ -131,6 +131,87 @@ Example:
 | `trigger_coop_relay` | Always behaves like `trigger_relay`, avoiding co-op progression blockers when players are absent. |
 | `func_rotating` | Explodes non-player entities such as dropped items so rotators do not remain blocked. |
 
+## Horde Spawn Anchors
+
+Horde automatically reuses combat-oriented single-player `monster_*` placements as spawn geography. The
+campaign monster itself is not created: its origin and angles become an inert anchor. `monster_flipper`
+locations and underwater `monster_gekk` locations become water anchors that can produce Flippers or Gekks; boss
+classes become boss anchors; flying classes become aerial anchors; other combat monsters become ground anchors.
+Decorative stands, commander bodies, and fixed monster turrets are left unused. Exact source-class matches are
+preferred, but a compatible anchor can host another Horde monster when needed.
+
+Bespoke maps and `.ent` overrides can place explicit anchors:
+
+| Entity | Intended use |
+| --- | --- |
+| `info_horde_spawn` | Walking/ground monster placement. |
+| `info_horde_flying_spawn` | Flyer, Floater, Hover, Daedalus, and compatible flying boss placement. |
+| `info_horde_water_spawn` | Fully submerged Flipper/Gekk placement. |
+| `info_horde_boss_spawn` | Large, deliberately cleared boss arena placement. |
+
+All anchors are optional. The director validates hull clearance, minimum fighter distance, wave bounds, water
+volume where applicable, and PHS relevance; if an anchor is unsafe it falls back through other compatible
+monster anchors and then player spawn locations.
+
+| Key | Default | Effect |
+| --- | --- | --- |
+| `horde_monster` | unset | Restricts an explicit anchor to one exact `monster_*` classname. Omit it for any habitat-compatible Horde monster. |
+| `horde_min_wave` | `0` | Earliest wave that may use the anchor. |
+| `horde_max_wave` | `0` | Last wave that may use the anchor; `0` has no upper bound. |
+| `horde_weight` | `1` | Relative selection weight among valid anchors. |
+| `horde_cooldown` | `0` | Positive per-anchor reuse delay in seconds; `0` uses `g_horde_map_spawn_cooldown`. |
+| `horde_boss` | unset | On `info_horde_boss_spawn`, selects a named boss profile ID and implies its required `horde_monster` class. The profile can also influence the boss-wave roll before spawning begins. |
+| `horde_boss_health_mult` | profile value | Positive replacement for the profile's authored health multiplier. Global, fighter, pair, and endless-wave multipliers still apply. |
+| `horde_boss_damage_mult` | profile value | Positive replacement for the profile's outgoing-damage multiplier. |
+| `horde_boss_scale` | profile value | Replacement model/hull scale, still bounded by `g_horde_boss_scale_limit` unless that cvar is `0`. |
+| `horde_boss_spawnflags` | profile value | Raw class-specific monster spawnflags. Set `0` to clear profile flags. Do not include common monster `AMBUSH`, `TRIGGER_SPAWN`, or `SIGHT` bits (`1`, `2`, `4`); the built-in Masters profile handles the Shambler's overlapping precision flag internally. |
+| `horde_boss_power_armor_type` | profile value | `0` none, `1` power screen, `2` power shield. |
+| `horde_boss_power_armor` | profile value | Power-armor capacity before `g_horde_boss_armor_mult`. |
+| `horde_boss_monster_slots` | profile value | Summon capacity for Carrier-style profiles. |
+| `horde_boss_reinforcements` | profile value | Rerelease reinforcement list, for example `monster_stalker 1` or a semicolon-separated weighted list. An empty value disables profile reinforcements. |
+| `target` / `killtarget` | unset | Fires when a monster successfully spawns here. `delay` applies through normal target handling. |
+| `deathtarget` | unset | Copied to the spawned monster and fired when that monster dies. |
+| `healthtarget` / `itemtarget` | unset | Copied to the spawned monster for normal monster-death behavior. |
+
+Use `gametype horde` on explicit anchors unless the same entity string is Horde-only. Author the origin as a
+monster origin, not as a player origin; the director preserves authored height rather than applying the player
+spawn lift.
+
+Example staged boss arena:
+
+```text
+{
+"classname" "info_horde_boss_spawn"
+"origin" "0 0 64"
+"angles" "0 180 0"
+"gametype" "horde"
+"horde_boss" "garbage_carrier"
+"horde_min_wave" "12"
+"horde_weight" "4"
+"horde_cooldown" "30"
+"horde_boss_monster_slots" "6"
+"horde_boss_reinforcements" "monster_stalker 1;monster_gekk 2"
+"target" "boss_gate_close"
+"deathtarget" "boss_gate_open"
+}
+```
+
+For `children_of_makron` or `masters_of_the_machine`, provide two suitably separated boss anchors when possible.
+Both units receive a native health bar. A copied `deathtarget` fires for each killed unit, so route pair-completion
+logic through `trigger_deathcount` with `count 2` when a door or phase must wait for the whole encounter.
+
+Example water ambush:
+
+```text
+{
+"classname" "info_horde_water_spawn"
+"origin" "512 -256 -96"
+"gametype" "horde"
+"horde_min_wave" "2"
+"horde_weight" "2"
+}
+```
+
 ## New Entities
 
 | Entity | Behavior |
@@ -149,6 +230,10 @@ Example:
 | `target_position` | Alias for `info_notnull`. |
 | `func_bobbing` | Quake III Arena sine mover. Accepts `height`, `speed`, `phase`, and `dmg`; spawnflags `X_AXIS` and `Y_AXIS` change the bob axis from Z. Crushes through blockers like Q3. |
 | `func_pendulum` | Quake III Arena pendulum mover. Uses brush length plus gravity for swing timing and accepts `speed`, `phase`, and `dmg`. Crushes through blockers like Q3. |
+| `info_horde_spawn` | Authored Horde ground-monster anchor; see [Horde Spawn Anchors](#horde-spawn-anchors). |
+| `info_horde_flying_spawn` | Authored Horde aerial-monster anchor. |
+| `info_horde_water_spawn` | Authored fully submerged Flipper/Gekk anchor. |
+| `info_horde_boss_spawn` | Authored large-boss anchor. |
 | `trigger_deathcount` | Fires targets after a minimum death count. Uses `count`, default `10`; `REPEAT` repeats every count. |
 | `trigger_no_monsters` | Fires when all monsters are dead or none are present. Removed in deathmatch except Horde. `ONCE` removes after firing. |
 | `trigger_monsters` | Fires when monsters are present. Removed in deathmatch except Horde. `ONCE` removes after firing. |
@@ -171,4 +256,6 @@ Example:
 - Use `notteam` and `notfree` for clean team/free-for-all variants.
 - Use `nobots` and `nohumans` to improve spawn quality for mixed bot and human servers.
 - Prefer `.ent` overrides for server-side map variants that should not require repacking a BSP.
+- Keep Horde boss anchors clear for the largest intended hull and use `deathtarget` for arena release scripting.
+- Place water anchors fully inside safe water and verify nearby fighters share a PHS with the pool.
 - Test entity changes under every gametype listed in the map's rotation.

@@ -13,9 +13,10 @@ void Adaptive_BeginWave();
 void Adaptive_RecordWaveEnd();
 void Adaptive_RecordPlayerDeath();
 
-select_spawn_result_t SelectSpawnPoint(vec3_t avoid_point);
+select_spawn_result_t SelectSpawnPoint(vec3_t avoid_point, const vec3_t &check_mins, const vec3_t &check_maxs);
 void ApplySpawnRoleTuning(gentity_t *ent, const char *classname);
 
 gentity_t *PickTarget(gentity_t *from);
+bool MaybeRetarget(gentity_t *monster);
 
 } // namespace muffmode::horde

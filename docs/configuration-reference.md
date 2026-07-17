@@ -41,7 +41,7 @@ The most useful player-facing commands are documented in the [Player Guide](play
 
 | Area | Commands |
 | --- | --- |
-| Display | `announcer`, `eskin`, `fm`, `help`, `id`, `kb`, `timer`, `tskin` |
+| Display | `announcer`, `eskin`, `fm`, `help`, `id`, `infohud`, `kb`, `timer`, `tskin` |
 | Match state | `ready`, `notready`, `readyup`, `readyteam`, `forfeit`, `time-out`, `time-in` |
 | Team selection | `team auto`, `team red`, `team blue`, `team free`, `team spectator` |
 | Voting | `callvote`, `cv`, `vote yes`, `vote no` |
@@ -52,9 +52,9 @@ The most useful player-facing commands are documented in the [Player Guide](play
 | Reconnect recovery | `ghost <code>` |
 | Captains | `captain`, `captain <player>` |
 
-MuffMode stores server-side player preference files in `baseq2/pcfg/sid-<encoded-social-id>.cfg`, using a safe hex encoding of the engine-provided social ID. Missing or unusually long social IDs keep session-only preferences instead of using fallback filenames. These files are loaded through a restricted player-config parser, not through the general server command buffer. Supported entries are `id`, `timer`, `fm`, `announcer`, `kb`, `followview`, `followkiller`, `followleader`, `followpowerup`, `eskin`, and `tskin`.
+MuffMode stores server-side player preference files in `baseq2/pcfg/sid-<encoded-social-id>.cfg`, using a safe hex encoding of the engine-provided social ID. Missing or unusually long social IDs keep session-only preferences instead of using fallback filenames. These files are loaded through a restricted player-config parser, not through the general server command buffer. Supported entries are `id`, `timer`, `infohud`, `fm`, `announcer`, `kb`, `followview`, `followkiller`, `followleader`, `followpowerup`, `eskin`, and `tskin`.
 
-The in-game **Player Settings** menu exposes the same saved preferences for normal play: display toggles, kill beep selection, follow view, spectator auto-follow toggles, and quick skin override presets. Free-form skin paths are still entered with `eskin <model/skin>` and `tskin <model/skin>`.
+The in-game **Player Config** menu exposes the same saved preferences through separate Display & Audio, Spectator & Follow, and Skin Overrides pages. The optional voice announcer defaults to off and can be enabled with `announcer on` or from Display & Audio; stock fallback cues remain available where defined. Free-form skin paths are still entered with `eskin <model/skin>` and `tskin <model/skin>`.
 
 ## Vote Commands
 
@@ -376,13 +376,17 @@ These cvars tune Horde pacing, wave budget, player scaling, and map-size scaling
 | `g_horde_points_max` | `0` | Optional maximum point budget; `0` disables. |
 | `g_horde_spawn_interval_min` | `0.3` | Minimum time between monster spawns, in seconds. |
 | `g_horde_spawn_interval_max` | `0.5` | Maximum time between monster spawns, in seconds. |
+| `g_horde_spawn_burst_count` | `6` | Number of successful spawns in a pressure burst before adding a short rest. `0` disables burst rests and restores a steady stream. |
+| `g_horde_spawn_burst_rest` | `2.0` | Seconds added after each completed spawn burst. |
 | `g_horde_warmup_cap` | `30` | Maximum warmup monsters alive. |
 | `g_horde_max_alive` | `60` | Maximum live monsters during active waves; `0` disables the cap. |
 | `g_horde_wave_spawn_delay_ms` | `500` | Delay before a new wave starts spawning monsters. |
 | `g_horde_player_scale` | `1` | Scales wave budget by active fighter count. |
 | `g_horde_player_scale_factor` | `0.4` | Additional budget factor per extra fighter. |
 | `g_horde_player_scale_max` | `8` | Maximum fighter count considered by player scaling. |
-| `g_horde_lives` | `1` | Lives granted to each fighter per wave. |
+| `g_horde_lives` | `1` | Lives granted to each fighter per wave. Values above `1` allow real mid-wave respawns until the counter reaches zero. |
+| `g_horde_featured_spawns` | `3` | Successful early-wave spawns reserved for monster types newly unlocked on that wave. `0` leaves every unlock to weighted chance. |
+| `g_horde_wave_type_ramp` | `3` | Adds one to the effective non-themed minimum roster breadth every N waves. `0` disables the ramp and uses `g_horde_wave_min_types` unchanged. |
 | `g_horde_mark_monsters_threshold` | `3` | Starts marking remaining monsters when the living count is at or below this value. |
 | `g_horde_mark_monsters_max` | `8` | Maximum monster marker slots. |
 | `g_horde_map_scale` | `1` | Enables map-size-based budget scaling. |
@@ -392,7 +396,9 @@ These cvars tune Horde pacing, wave budget, player scaling, and map-size scaling
 
 ## Horde Champions And Themes
 
-Champions are stronger monster variants. Themes bias a wave toward a monster category when enough matching monsters are available. When techs are enabled (see `g_allow_techs`), a champion always drops a random tech on death instead of its usual strong item.
+Champions are stronger monster variants. Themes bias a wave toward a monster category when enough matching
+monsters are available. Champion rewards are rolled on death rather than guaranteed at spawn, and summon or
+resurrection kills cannot be farmed for repeat score, rally progress, or drops.
 
 | Cvar | Default | Purpose |
 | --- | --- | --- |
@@ -413,6 +419,144 @@ Champions are stronger monster variants. Themes bias a wave toward a monster cat
 | `g_horde_wave_variety` | `1` | Enables roster variety limits for non-themed waves. |
 | `g_horde_wave_min_types` | `3` | Minimum monster type count when wave variety can be satisfied. |
 
+## Horde Bosses, Water Ambushes, And Reinforcements
+
+Scheduled boss waves replace the champion roll for that wave, reduce the normal escort budget, spawn the boss
+first, and pause briefly before escorts arrive. Bosses use their real hull for spawn validation and stay marked
+for the team and drive the native named boss health bars. The 25-profile catalog combines the core Quake II
+Supertank, Guardian, Hornet, Carrier, Black Widow, Makron, and Black Widow II with every named Call of the Machine
+boss encounter and its explicit Arachnid mini-boss. Children of Makron and Masters of the Machine deploy two
+bosses and use both native health bars; the defeat announcement and boss-kill rally occur only after the complete
+encounter is gone.
+
+Selection follows unlock tiers, avoids the configured number of recent profiles when the current tier has enough
+alternatives, and gives a compatible authored `horde_boss` anchor priority over the global roll. Boss health gains
+20% per additional active fighter, then applies profile, pair, global, and post-unlock wave multipliers. Damage
+uses the equivalent profile/global/endless growth path. Power armor can be scaled separately. The default model
+scale limit keeps Modir and other unusually large campaign variants usable on multiplayer maps; set it to `0` to
+preserve unrestricted authored geometry.
+
+Carrier/Widow reinforcements and medic-resurrected monsters count toward live pressure and wave completion, but
+do not grant repeat rewards. If an encounter cannot fit any available authored or player spawn after repeated
+attempts, Horde falls back to a compact Tank Commander. If part of a pair has already deployed, the director keeps
+the active unit instead of replacing it; if the fallback also fails, the escort wave continues without stalling.
+
+Aquatic attempts can use authored `monster_flipper` placements, underwater `monster_gekk` placements, or
+explicit water anchors, choosing either a Flipper or swimming Gekk. If no authored water location is usable, the
+director falls back to a fully submerged ambush near waist-deep fighters. Maps without suitable water simply
+continue with the normal roster.
+
+Eliminated fighters can be rallied back by team kills. A boss kill immediately earns the pending rally; otherwise
+the configured kill threshold is required. Rallying grants one life, uses normal Horde spawn/loadout handling,
+and applies short spawn protection. The per-wave cap prevents an endless death loop.
+
+| Cvar | Default | Purpose |
+| --- | --- | --- |
+| `g_horde_boss_waves` | `1` | Enables scheduled boss waves. |
+| `g_horde_boss_min_wave` | `6` | First wave eligible for the boss schedule. |
+| `g_horde_boss_interval` | `6` | Waves between scheduled bosses after the first; `0` disables the schedule. |
+| `g_horde_boss_budget_mult` | `0.8` | Multiplies the normal wave budget on boss waves before the boss cost is deducted. Values below `0.1` are treated as `0.1`. |
+| `g_horde_boss_health_mult` | `1.0` | Multiplies boss health after automatic active-fighter scaling. Values below `0.1` are treated as `0.1`. |
+| `g_horde_boss_damage_mult` | `1.15` | Boss outgoing-damage multiplier. Values below `0.1` are treated as `0.1`. |
+| `g_horde_boss_tier_window` | `3` | Carries forward bosses whose unlock wave is within this many waves of the newest unlocked boss. Profiles unlocked since the previous scheduled boss wave are always admitted once, so cadence cannot skip a tier; `0` otherwise keeps only the newest tier. |
+| `g_horde_boss_powerup_chance` | `0.35` | Chance that a killed boss's guaranteed strong reward is a timed powerup; clamped to `0`-`1`. |
+| `g_horde_boss_machinegames` | `1` | Includes the Call of the Machine named profiles in progression rolls. Explicit `g_horde_boss_force` still permits one while this is `0`. |
+| `g_horde_boss_pairs` | `1` | Enables the two-unit `children_of_makron` and `masters_of_the_machine` profiles. |
+| `g_horde_boss_repeat_window` | `2` | Avoids this many most-recent boss profiles when the active tier has enough alternatives; exclusions relax oldest-first if necessary. |
+| `g_horde_boss_force` | empty | Forces one profile ID on every scheduled boss wave, bypassing unlock and MachineGames filters. Pair profiles still require `g_horde_boss_pairs 1`. |
+| `g_horde_boss_scale_limit` | `2.5` | Maximum applied boss model/hull scale. `0` disables the cap and preserves unrestricted profile or anchor scale. |
+| `g_horde_boss_health_per_wave` | `0.05` | Adds this fraction of health for each wave after the selected profile's unlock wave. Negative values behave as `0`. |
+| `g_horde_boss_damage_per_wave` | `0.01` | Adds this fraction of outgoing damage for each wave after the selected profile's unlock wave. Negative values behave as `0`. |
+| `g_horde_boss_pair_health_mult` | `1.0` | Per-unit health multiplier for paired encounters. Values below `0.05` are treated as `0.05`. |
+| `g_horde_boss_armor_mult` | `1.0` | Multiplies any power-screen or power-shield capacity produced by the boss class/profile/anchor. `0` removes its capacity. |
+| `g_horde_water_spawns` | `1` | Enables authored or dynamic aquatic Flipper/Gekk attempts. |
+| `g_horde_water_spawn_chance` | `0.30` | Chance per normal spawn opportunity to attempt an aquatic spawn; clamped to `0`-`1`. |
+| `g_horde_water_max_alive` | `4` | Maximum simultaneous aquatic Horde monsters. `0` removes this separate cap. |
+| `g_horde_reinforcement_kills` | `12` | Monster kills required to rally one eliminated fighter; values below `1` are treated as `1`. |
+| `g_horde_reinforcements_per_wave` | `1` | Maximum mid-wave rallies. `0` disables rallies, including the boss-kill rally. |
+| `g_horde_reinforcement_protection` | `2.0` | Seconds of Protection granted to a rallied fighter. |
+
+### Call Of The Machine Boss Catalog
+
+The shipped `baseq2/pak0.pak` contains 20 `target_healthbar` entities representing 18 named encounters. The table
+below records their English rerelease names and entity-lump tuning. Difficulty-split `0.75`/`1.25` encounters use
+`1.25` as the portable profile, while Horde on the original map keeps the active difficulty variant's exact
+anchor value. Carrier base health remains the rerelease class's skill-dependent `2000`-`4000` before multipliers.
+
+| Profile ID | Shipped encounter | Map | Class | Authored tuning |
+| --- | --- | --- | --- | --- |
+| `gate_warden` | Gate Warden | `mgu1m3` | `monster_boss2` | `2x` health, `1.25` scale; the active map variant retains its Hornet attack flag. |
+| `makron` | Makron | `mgu1m5` | `monster_makron` | `1.25` scale. |
+| `children_of_makron` | Children of Makron | `mgu1m5` | `monster_makron` | Two units, each `0.8` scale. |
+| `bloodstarved_mutant` | Bloodstarved Mutant | `mgu2m2` | `monster_mutant` | `6x` health, `1.5` scale. |
+| `strogg_supertank` | Strogg Supertank | `mgu3m4` | `monster_supertank` | `0.75x`/`1.25x` health by difficulty. |
+| `strogg_carrier` | Strogg Carrier | `mgu3m4` | `monster_carrier` | `0.75x`/`1.25x` health by difficulty. |
+| `strogg_megatank` | Strogg Megatank | `mgu3m4` | `monster_boss5` | `0.75x`/`1.25x` health; shielded Supertank class with its heat-seeking rockets and default 400 shield. |
+| `ancient_carrier` | Ancient Carrier | `mgu3secret` | `monster_carrier` | `0.75x`/`1.25x` health by difficulty. |
+| `commander` | Commander | `mgu4m1` | `monster_tank_commander` | `2x` health, `1.3` scale, 250-point shield, heat-seeking rockets. |
+| `garbage_carrier` | Garbage Carrier | `mgu4m3` | `monster_carrier` | `1x`/`1.25x` health, four summon slots, Stalker reinforcements. |
+| `arachnid` | Arachnid mini-boss | `mgu5m2` | `monster_arachnid` | `1.5x` health; this encounter has no campaign health-bar name. |
+| `system_administrator` | The System Administrator | `mgu5m3` | `monster_makron` | `0.75x` health. |
+| `janitor` | The Janitor | `mgu5m3` | `monster_supertank` | `0.2` scale with full Supertank health and attacks. |
+| `overburden` | Overburden | `mgu6m1` | `monster_supertank` | Power-screen type authored without extra capacity. |
+| `underminer` | The Underminer | `mgu6m2` | `monster_supertank` | `2x` health. |
+| `modir` | Modir | `mgu6m3` | `monster_shambler` | `40x` health, `5.5` authored scale; geometry is capped by `g_horde_boss_scale_limit` by default. |
+| `servitor_of_creation` | Servitor of Creation | `mguboss` | `monster_boss2` | `1.25x` health, `1.125` scale, alternate Hornet attack set. |
+| `servitors_of_creation` | Servitors of Creation | `mguboss` | `monster_supertank` | `1.25x` health. |
+| `masters_of_the_machine` | Masters of the Machine | `mguboss` | `monster_shambler` | Two units, each `3x` health and `1.125` scale, with the authored precision-lightning flag. |
+
+The remaining forceable profile IDs are `supertank`, `guardian`, `hornet`, `carrier`, `black_widow`, and
+`black_widow_ii`. `tank_commander` is the automatic compact fallback profile and may also be forced explicitly.
+
+## Horde Authored Spawn Sources
+
+With authored spawn sources enabled, Horde converts usable campaign `monster_*` placements into inert typed
+anchors instead of spawning the campaign monsters. `monster_flipper` and underwater `monster_gekk` become water
+anchors; campaign boss classes become boss anchors; flying classes become aerial anchors; other combat monsters
+become ground anchors.
+Canonical `mgu*` bosses are recognized by map, targetname, and class, so their boss profile and active-difficulty
+health/scale/armor/summon tuning survive conversion. Normal entity inhibition runs before the inert anchor is
+finalized, preventing easy/medium/hard duplicate placements from appearing together.
+Exact source-class matches receive a strong preference, then the director uses other compatible monster anchors,
+and finally ordinary deathmatch/team/player starts. Every location must still fit the requested hull, share a PHS
+with a living fighter, and satisfy the minimum distance. Decorative stands, commander bodies, and fixed monster
+turrets are ignored.
+
+Custom maps and `.ent` overrides can use the explicit `info_horde_*` entities documented in
+[Level Design Guide](level-design-guide.md#horde-spawn-anchors).
+
+| Cvar | Default | Purpose |
+| --- | --- | --- |
+| `g_horde_map_monster_spawns` | `1` | Enables converted campaign monster placements and explicit `info_horde_*` anchors. |
+| `g_horde_map_spawn_chance` | `0.75` | Chance for a non-water, non-boss spawn to prefer an authored compatible anchor before player spawns; clamped to `0`-`1`. Bosses always try authored anchors, while water uses `g_horde_water_spawn_chance`. |
+| `g_horde_map_spawn_cooldown` | `3.0` | Default seconds before the same authored anchor can be reused. An anchor's positive `horde_cooldown` overrides it. |
+| `g_horde_map_spawn_min_dist` | `192` | Minimum distance from every living fighter for an authored anchor. |
+
+## Horde Rewards And Momentum
+
+Monster loot is decided when the monster dies. Ordinary kills can yield nothing; when they do yield an item,
+the monster's weapon or combat role heavily biases the result (for example Infantry favors bullets, Gunner
+favors bullets/grenades, Chick favors rockets, and Gladiator favors slugs). The profile bias still leaves room
+for the general wave-appropriate loot curve. Champions have a higher but non-guaranteed strong-drop chance.
+Bosses always drop a strong reward and may upgrade it to Quad, Double, Protection, Haste, Regeneration, or
+Invisibility.
+
+Consecutive credited kills build personal momentum tiers. Each tier adds kill score, improves drop chance, and
+can upgrade small ammo/health/armor into a more valuable version. Death resets the streak. A fighter who
+contributes at least one kill and finishes the wave without dying receives the configured survival score bonus.
+
+| Cvar | Default | Purpose |
+| --- | --- | --- |
+| `g_horde_drop_chance` | `0.35` | Base chance for a regular credited monster kill to drop an item. |
+| `g_horde_drop_profile_bias` | `0.85` | Chance that a successful regular drop uses the monster-specific profile instead of the general wave loot pool. |
+| `g_horde_champion_drop_chance` | `0.75` | Base chance for a killed champion to drop a strong reward. |
+| `g_horde_streak_step` | `5` | Consecutive credited kills required per momentum tier; values below `1` behave as `1`. |
+| `g_horde_streak_max_tier` | `3` | Maximum momentum tier. `0` disables momentum bonuses. |
+| `g_horde_streak_score_bonus` | `1` | Additional score per credited kill for each active momentum tier. |
+| `g_horde_streak_drop_bonus` | `0.08` | Added regular/champion drop chance per momentum tier. |
+| `g_horde_streak_upgrade_chance` | `0.20` | Per-tier chance to upgrade a successful regular/champion drop to its next value class. |
+| `g_horde_wave_survival_bonus` | `2` | Score awarded after a contributed, deathless wave. `0` disables it. |
+
 ## Horde Item Respawn
 
 In Horde, non-weapon items (health, ammo, armor, powerups) respawn slower than in other modes. The
@@ -420,6 +564,8 @@ effective respawn time is `base × g_dm_item_respawn_rate × g_horde_item_respaw
 is the item's built-in respawn time. **Weapons are exempt** from `g_horde_item_respawn_scale` — they
 respawn at exactly `g_weapon_respawn_time` (× `g_dm_item_respawn_rate`), so the configured value is the
 real in-game time. `gt-HORDE.cfg` ships `g_weapon_respawn_time 60` and `g_horde_item_respawn_scale 4`.
+Active held powerup and timed-tech deadlines pause from wave end until the next wave starts; Regeneration and
+AutoDoc ticks pause too, so inter-round preparation neither consumes nor exploits their duration.
 
 | Cvar | Default | Purpose |
 | --- | --- | --- |
@@ -477,7 +623,9 @@ Defaults to `1` (enabled); set to `0` to restore legacy horde monster targeting 
 
 | Cvar | Default | Purpose |
 | --- | --- | --- |
-| `g_horde_enhanced_ai` | `1` | Target spread, spawn tactics, adaptive pacing, per-spawn roles, retarget-on-kill, extended aggro, attack stagger, and medic corpse-resurrect priority. |
+| `g_horde_enhanced_ai` | `1` | Target spread, tactical hull-aware placement, adaptive pacing, per-spawn roles, periodic retargeting, extended aggro, attack stagger, and medic corpse-resurrect priority. |
+| `g_horde_target_spread_weight` | `512` | Score penalty for each monster already assigned to a fighter. Hunters also use half this value to prefer isolated fighters; heavies use 37.5% to prefer healthier fighters. `0` leaves distance as the main target score. |
+| `g_horde_retarget_interval` | `8.0` | Seconds between per-monster target-load rebalance checks. Close engagements and special AI goals remain sticky. `0` disables periodic retargeting. |
 
 ## Debug-Only Weapon Balance Cvars
 

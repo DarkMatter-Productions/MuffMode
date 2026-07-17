@@ -3,6 +3,7 @@
 
 #include "g_local.h"
 #include "muffmode/mm_gametype.h"
+#include "muffmode/mm_horde.h"
 #include "muffmode/mm_items_rules.h"
 #include "muffmode/mm_ruleset.h"
 
@@ -429,6 +430,9 @@ void Tech_ApplyAutoDoc(gentity_t *ent)
 
 	gclient_t *const client = ent->client;
 	if (ent->health <= 0 || client->eliminated)
+		return;
+
+	if (MM_Horde_PowerupsPaused())
 		return;
 
 	const bool mod_regen = (g_instagib->integer || GT(GT_INSTAGIB)) || (g_nadefest->integer || GT(GT_NADEFEST));

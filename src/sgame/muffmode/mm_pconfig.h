@@ -9,8 +9,9 @@ struct client_config_t;
 enum class mm_pconfig_bool_setting_t {
 	show_id,
 	show_timer,
+	show_match_info,
 	show_fragmessages,
-	use_expanded,
+	announcer_enabled,
 	follow_first_person,
 	follow_killer,
 	follow_leader,

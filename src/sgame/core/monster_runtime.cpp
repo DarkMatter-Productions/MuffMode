@@ -547,6 +547,7 @@ static void M_MoveFrame(gentity_t *self) {
 
 void G_MonsterKilled(gentity_t *self) {
 	level.killed_monsters++;
+	MM_Horde_OnMonsterKilled(self);
 
 	if (coop->integer && self->enemy && self->enemy->client)
 		G_AdjustPlayerScore(self->enemy->client, 1, false, 0);
@@ -610,8 +611,12 @@ void M_ProcessPain(gentity_t *e) {
 				}
 			}
 
-			if (!(e->monsterinfo.aiflags & AI_DO_NOT_COUNT) && !(e->spawnflags & SPAWNFLAG_MONSTER_DEAD))
-				G_MonsterKilled(e);
+			if (!(e->spawnflags & SPAWNFLAG_MONSTER_DEAD)) {
+				if (!(e->monsterinfo.aiflags & AI_DO_NOT_COUNT))
+					G_MonsterKilled(e);
+				else if (!(e->monsterinfo.aiflags & AI_GOOD_GUY))
+					MM_Horde_OnMonsterKilled(e);
+			}
 
 			e->touch = nullptr;
 			monster_death_use(e);
@@ -620,7 +625,8 @@ void M_ProcessPain(gentity_t *e) {
 		if (!e->deadflag) {
 			int32_t score_value = ceil(e->monsterinfo.base_health / 100);
 			if (score_value < 1) score_value = 1;
-			if (e->monsterinfo.damage_attacker && e->monsterinfo.damage_attacker->client)
+			if (e->monsterinfo.damage_attacker && e->monsterinfo.damage_attacker->client &&
+				(notGT(GT_HORDE) || e->monsterinfo.horde_reward_class != 0))
 				MM_Horde_AdjustPlayerScore(e->monsterinfo.damage_attacker->client, score_value);
 		}
 		e->die(e, e->monsterinfo.damage_inflictor, e->monsterinfo.damage_attacker, e->monsterinfo.damage_blood, e->monsterinfo.damage_from, e->monsterinfo.damage_mod);

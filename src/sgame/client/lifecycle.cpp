@@ -8,6 +8,7 @@
 #include "muffmode/mm_freezetag.h"
 #include "muffmode/mm_ghost.h"
 #include "muffmode/mm_horde.h"
+#include "muffmode/mm_horde_ai_rules.h"
 #include "muffmode/mm_lms.h"
 #include "muffmode/mm_menu.h"
 #include "muffmode/mm_parse.h"
@@ -748,6 +749,7 @@ void ClientSpawn(gentity_t *ent) {
 	client_persistant_t		saved;
 	client_respawn_t		resp;
 	client_session_t		sess;
+	const gtime_t			horde_reinforcement_protection = client->pers.horde_reinforcement_protection;
 
 	if (GTF(GTF_ROUNDS) && level.match_state == matchst_t::MATCH_IN_PROGRESS && notGT(GT_HORDE)) {
 		const bool round_locked = level.round_state == roundst_t::ROUND_IN_PROGRESS ||
@@ -769,7 +771,8 @@ void ClientSpawn(gentity_t *ent) {
 	MM_FreezeTag_ClearClient(ent);
 
 	if (GT(GT_HORDE) && level.match_state == matchst_t::MATCH_IN_PROGRESS &&
-		level.round_state == roundst_t::ROUND_IN_PROGRESS && !ent->client->eliminated)
+		MM_Horde_ShouldEliminateMidWaveSpawn(level.round_state == roundst_t::ROUND_IN_PROGRESS,
+			ent->client->eliminated, ent->client->pers.lives))
 		ClientSetEliminated(ent);
 	bool eliminated = ent->client->eliminated;
 	int lives = 0;
@@ -910,6 +913,11 @@ void ClientSpawn(gentity_t *ent) {
 			client->pers.health = client->pers.max_health;
 	}
 
+	// InitClientPersistant clears pers on a successful deathmatch spawn; carry the
+	// rally duration across that reset so delayed and immediate spawns behave alike.
+	if (GT(GT_HORDE) && horde_reinforcement_protection > 0_ms)
+		client->pers.horde_reinforcement_protection = horde_reinforcement_protection;
+
 	// restore social ID
 	Q_strlcpy(ent->client->pers.social_id, social_id, sizeof(social_id));
 
@@ -1022,6 +1030,12 @@ void ClientSpawn(gentity_t *ent) {
 		gi.linkentity(ent);
 		return;
 	}
+
+	if (GT(GT_HORDE) && client->pers.horde_reinforcement_protection > 0_ms) {
+		client->pu_time_protection = level.time + client->pers.horde_reinforcement_protection;
+		client->pers.horde_reinforcement_protection = 0_ms;
+	}
+
 	ent->client->ps.stats[STAT_SHOW_STATUSBAR] = 1;
 
 	// ensure playing players are visible (clear SVF_NOCLIENT that may have been set by Entities_Reset)
@@ -1520,7 +1534,6 @@ bool ClientConnect(gentity_t *ent, char *userinfo, const char *social_id, bool i
 			P_PublishEngineTeam(ent);
 			//InitPlayerTeam(ent);
 			ent->client->sess.pc = MM_DefaultClientConfig();
-			ent->client->sess.pc.show_match_info = true;
 
 			InitClientResp(ent->client);
 		}
@@ -1965,7 +1978,7 @@ static void ClientTimerActions(gentity_t *ent) {
 
 	if (GT(GT_HORDE) && ent->client->eliminated && ent->client->sess.team != TEAM_SPECTATOR &&
 		level.round_state == roundst_t::ROUND_IN_PROGRESS)
-		gi.LocClient_Print(ent, PRINT_CENTER, "You will rejoin when the next wave countdown begins.");
+		MM_Horde_NotifyEliminatedSpectator(ent);
 
 	ent->client->time_residual = level.time + 1_sec;
 }
@@ -2647,6 +2660,7 @@ void ClientBeginServerFrame(gentity_t *ent) {
 		return;
 
 	client = ent->client;
+	MM_Horde_PauseClientPowerups(ent);
 
 	if (client->awaiting_respawn) {
 		int32_t retry_frames = gi.frame_time_ms > 0 ? 500 / gi.frame_time_ms : 5;

@@ -893,7 +893,7 @@ static void G_SetGametypeStats(gentity_t *ent) {
 
 	if (level.match_state == MATCH_IN_PROGRESS) {
 		if (GT(GT_HORDE)) {
-			ent->client->ps.stats[STAT_HORDE_REMAINING] = level.total_monsters - level.killed_monsters;
+			ent->client->ps.stats[STAT_HORDE_REMAINING] = MM_Horde_LivingThreatCount();
 		} else {
 			ent->client->ps.stats[STAT_HORDE_REMAINING] = 0;
 		}

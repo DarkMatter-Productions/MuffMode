@@ -577,6 +577,126 @@ MM_TEST(horde_target_load_score_prefers_lower_burden_at_equal_distance) {
 	MM_CHECK(MM_Horde_ComputeTargetLoadScore(1, dist, spread) < MM_Horde_ComputeTargetLoadScore(1, dist + spread, spread));
 }
 
+MM_TEST(horde_role_targeting_distinguishes_hunters_and_bulwarks) {
+	const float grouped_hunter = MM_Horde_ComputeRoleTargetScore(1, 800.f, 64.f, 0.5f,
+		512.f, 256.f, 192.f, mm_horde_target_role_t::Hunter);
+	const float isolated_hunter = MM_Horde_ComputeRoleTargetScore(1, 800.f, 1024.f, 0.5f,
+		512.f, 256.f, 192.f, mm_horde_target_role_t::Hunter);
+	MM_CHECK(isolated_hunter < grouped_hunter);
+
+	const float wounded_bulwark = MM_Horde_ComputeRoleTargetScore(1, 800.f, 256.f, 0.2f,
+		512.f, 256.f, 192.f, mm_horde_target_role_t::Bulwark);
+	const float healthy_bulwark = MM_Horde_ComputeRoleTargetScore(1, 800.f, 256.f, 1.0f,
+		512.f, 256.f, 192.f, mm_horde_target_role_t::Bulwark);
+	MM_CHECK(healthy_bulwark < wounded_bulwark);
+}
+
+MM_TEST(horde_boss_wave_cadence_is_configurable) {
+	MM_CHECK_FALSE(MM_Horde_IsBossWave(5, 6, 6));
+	MM_CHECK(MM_Horde_IsBossWave(6, 6, 6));
+	MM_CHECK_FALSE(MM_Horde_IsBossWave(7, 6, 6));
+	MM_CHECK(MM_Horde_IsBossWave(12, 6, 6));
+	MM_CHECK_FALSE(MM_Horde_IsBossWave(12, 6, 0));
+}
+
+MM_TEST(horde_midwave_spawns_preserve_remaining_lives) {
+	MM_CHECK(MM_Horde_ShouldEliminateMidWaveSpawn(true, false, 0));
+	MM_CHECK_FALSE(MM_Horde_ShouldEliminateMidWaveSpawn(true, false, 1));
+	MM_CHECK_FALSE(MM_Horde_ShouldEliminateMidWaveSpawn(true, true, 1));
+	MM_CHECK_FALSE(MM_Horde_ShouldEliminateMidWaveSpawn(false, false, 0));
+}
+
+MM_TEST(horde_burst_and_reinforcement_thresholds_are_bounded) {
+	MM_CHECK_FALSE(MM_Horde_ShouldRestAfterSpawn(5, 6));
+	MM_CHECK(MM_Horde_ShouldRestAfterSpawn(6, 6));
+	MM_CHECK_FALSE(MM_Horde_ShouldRestAfterSpawn(100, 0));
+
+	MM_CHECK_FALSE(MM_Horde_ReinforcementReady(11, 12, 0, 1));
+	MM_CHECK(MM_Horde_ReinforcementReady(12, 12, 0, 1));
+	MM_CHECK_FALSE(MM_Horde_ReinforcementReady(12, 12, 1, 1));
+	MM_CHECK_FALSE(MM_Horde_ReinforcementReady(12, 12, 0, 0));
+
+	MM_CHECK_FALSE(MM_Horde_WaveCleared(false, 0));
+	MM_CHECK_FALSE(MM_Horde_WaveCleared(true, 1));
+	MM_CHECK(MM_Horde_WaveCleared(true, 0));
+}
+
+MM_TEST(horde_performance_tiers_scale_score_and_drop_momentum) {
+	MM_CHECK_EQ(MM_Horde_PerformanceTier(0, 5, 3), 0);
+	MM_CHECK_EQ(MM_Horde_PerformanceTier(4, 5, 3), 0);
+	MM_CHECK_EQ(MM_Horde_PerformanceTier(5, 5, 3), 1);
+	MM_CHECK_EQ(MM_Horde_PerformanceTier(14, 5, 3), 2);
+	MM_CHECK_EQ(MM_Horde_PerformanceTier(99, 5, 3), 3);
+	MM_CHECK_EQ(MM_Horde_PerformanceTier(4, 0, 3), 3);
+	MM_CHECK_EQ(MM_Horde_PerformanceTier(10, 5, 0), 0);
+
+	MM_CHECK_EQ(MM_Horde_DropChance(0.35f, 0.08f, 0), 0.35f);
+	MM_CHECK_EQ(MM_Horde_DropChance(0.35f, 0.08f, 3), 0.59f);
+	MM_CHECK_EQ(MM_Horde_DropChance(0.9f, 0.2f, 3), 1.0f);
+	MM_CHECK_EQ(MM_Horde_DropChance(-1.0f, 0.2f, 0), 0.0f);
+}
+
+MM_TEST(horde_progression_ramps_roster_breadth_and_unlock_showcases) {
+	MM_CHECK_EQ(MM_Horde_EffectiveMinTypes(3, 1, 3, 12), 3);
+	MM_CHECK_EQ(MM_Horde_EffectiveMinTypes(3, 4, 3, 12), 4);
+	MM_CHECK_EQ(MM_Horde_EffectiveMinTypes(3, 10, 3, 12), 6);
+	MM_CHECK_EQ(MM_Horde_EffectiveMinTypes(3, 20, 3, 5), 5);
+	MM_CHECK_EQ(MM_Horde_EffectiveMinTypes(3, 20, 0, 12), 3);
+	MM_CHECK_EQ(MM_Horde_EffectiveMinTypes(3, 20, 3, 0), 0);
+
+	MM_CHECK_EQ(MM_Horde_MonsterUnlockWave(-1), 1);
+	MM_CHECK_EQ(MM_Horde_MonsterUnlockWave(1), 1);
+	MM_CHECK_EQ(MM_Horde_MonsterUnlockWave(8), 8);
+}
+
+MM_TEST(horde_boss_tier_window_keeps_late_bosses_progressive) {
+	MM_CHECK(MM_Horde_BossWithinTierWindow(9, 12, 3));
+	MM_CHECK(MM_Horde_BossWithinTierWindow(12, 12, 3));
+	MM_CHECK_FALSE(MM_Horde_BossWithinTierWindow(8, 12, 3));
+	MM_CHECK_FALSE(MM_Horde_BossWithinTierWindow(1, 12, 3));
+	MM_CHECK(MM_Horde_BossWithinTierWindow(12, 14, 2));
+	MM_CHECK_FALSE(MM_Horde_BossWithinTierWindow(11, 14, 2));
+
+	// A profile that unlocked after the previous scheduled boss wave gets one
+	// draw even if the newest tier has already moved beyond the carryover window.
+	MM_CHECK(MM_Horde_BossInSelectionBand(8, 12, 3, 12, 6, 6));
+	MM_CHECK_FALSE(MM_Horde_BossInSelectionBand(6, 12, 3, 12, 6, 6));
+	MM_CHECK(MM_Horde_BossInSelectionBand(14, 14, 2, 18, 6, 6));
+	MM_CHECK(MM_Horde_BossInSelectionBand(6, 10, 1, 10, 10, 6));
+}
+
+MM_TEST(horde_boss_encounter_profiles_bound_pairs_scale_and_endless_growth) {
+	MM_CHECK_EQ(MM_Horde_EffectiveBossUnits(2, true, 2), 2);
+	MM_CHECK_EQ(MM_Horde_EffectiveBossUnits(3, true, 2), 2);
+	MM_CHECK_EQ(MM_Horde_EffectiveBossUnits(2, false, 2), 1);
+	MM_CHECK_EQ(MM_Horde_EffectiveBossUnits(1, true, 2), 1);
+
+	MM_CHECK_EQ(MM_Horde_EffectiveBossScale(5.5f, 0.f, 2.5f), 2.5f);
+	MM_CHECK_EQ(MM_Horde_EffectiveBossScale(1.25f, 0.8f, 2.5f), 0.8f);
+	MM_CHECK_EQ(MM_Horde_EffectiveBossScale(0.f, 0.f, 0.f), 1.f);
+	MM_CHECK_EQ(MM_Horde_EffectiveBossScale(-1.f, -1.f, 0.f), 1.f);
+
+	MM_CHECK_EQ(MM_Horde_BossWaveMultiplier(12, 12, 0.05f), 1.f);
+	MM_CHECK_EQ(MM_Horde_BossWaveMultiplier(18, 12, 0.05f), 1.3f);
+	MM_CHECK_EQ(MM_Horde_BossWaveMultiplier(18, 12, -1.f), 1.f);
+
+	MM_CHECK_FALSE(MM_Horde_BossEncounterDefeated(true, 0));
+	MM_CHECK_FALSE(MM_Horde_BossEncounterDefeated(false, 1));
+	MM_CHECK(MM_Horde_BossEncounterDefeated(false, 0));
+}
+
+MM_TEST(horde_outgoing_damage_scale_supports_buffs_and_reductions) {
+	MM_CHECK_EQ(MM_Horde_ScaleOutgoingDamage(100, 0.f), 100);
+	MM_CHECK_EQ(MM_Horde_ScaleOutgoingDamage(100, 1.f), 100);
+	MM_CHECK_EQ(MM_Horde_ScaleOutgoingDamage(100, 0.5f), 50);
+	MM_CHECK_EQ(MM_Horde_ScaleOutgoingDamage(100, 1.25f), 125);
+	MM_CHECK_EQ(MM_Horde_ScaleOutgoingDamage(1, 0.1f), 1);
+	MM_CHECK_EQ(MM_Horde_ScaleOutgoingDamage(0, 2.f), 0);
+	MM_CHECK_EQ(MM_Horde_ScaleOutgoingDamage(100, std::numeric_limits<float>::infinity()), 100);
+	MM_CHECK_EQ(MM_Horde_ScaleOutgoingDamage(100, std::numeric_limits<float>::max()),
+		std::numeric_limits<int>::max());
+}
+
 MM_TEST(horde_adaptive_spawn_mult_bounds_and_direction) {
 	MM_CHECK_EQ(MM_Horde_ClampAdaptiveSpawnMult(2.f), 1.35f);
 	MM_CHECK_EQ(MM_Horde_ClampAdaptiveSpawnMult(0.1f), 0.65f);
@@ -739,6 +859,10 @@ MM_TEST(announcer_decision_off_with_backup_plays_backup_only) {
 	MM_CHECK_FALSE(action.play_vo);
 	MM_CHECK(action.play_backup);
 	MM_CHECK_FALSE(action.play_sting);
+}
+
+MM_TEST(announcer_voice_pack_is_opt_in_by_default) {
+	MM_CHECK_FALSE(MM_ANNOUNCER_DEFAULT_ENABLED);
 }
 
 MM_TEST(announcer_decision_off_without_backup_is_silent) {
