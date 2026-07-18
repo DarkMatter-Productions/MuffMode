@@ -567,6 +567,9 @@
     <ClCompile Include="..\..\src\sgame\client\menu.cpp">
       <Filter>sgame\client</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_alloc_guard.cpp">
+      <Filter>sgame\muffmode</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\src\sgame\muffmode\mm_debug.cpp">
       <Filter>sgame\muffmode</Filter>
     </ClCompile>
