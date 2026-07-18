@@ -52,14 +52,15 @@ struct ThemeDefinition {
 };
 
 struct DirectorMonster {
-	const char *classname;
-	const char *display_name;
-	int32_t     min_level;
-	int32_t     max_level;
-	float       weight;
-	int32_t     spawn_points;
-	vec3_t      mins;
-	vec3_t      maxs;
+	const char             *classname;
+	const char             *display_name;
+	int32_t                 min_level;
+	int32_t                 max_level;
+	float                   weight;
+	int32_t                 spawn_points;
+	vec3_t                  mins;
+	vec3_t                  maxs;
+	std::array<item_id_t, 8> drops = {}; // death loot; empty falls back to the generic wave pool
 };
 
 // Boss encounters are richer than ordinary director monsters: a profile can preserve
@@ -106,7 +107,8 @@ const ThemeDefinition *FindTheme(Theme theme);
 HordeCategory ActiveThemeCategory();
 
 const WeightedItem *FindMonsterRow(const char *classname);
-gitem_t *PickDropItem(const WeightedItem *monster_row);
+const DirectorMonster *FindAquaticRow(const char *classname);
+gitem_t *PickDropItem(const std::array<item_id_t, 8> *drops);
 gitem_t *PickChampionDrop();
 gitem_t *PickBossDrop(float powerup_chance);
 gitem_t *UpgradeDrop(gitem_t *item);

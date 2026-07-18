@@ -119,6 +119,15 @@ constexpr uint8_t kHordeRewardChampion = 2;
 constexpr uint8_t kHordeRewardBoss = 3;
 constexpr size_t  kBossHistorySize = 8;
 
+// Shared by MapMonsterAnchorKind (converted campaign placements) and MonsterHabitat (director
+// roster spawns) so the two classifiers can't drift apart. monster_boss2/monster_carrier are
+// flyers here too; MapMonsterAnchorKind still resolves them to Boss because its own boss check
+// runs first and returns before this list is consulted.
+constexpr std::array<const char *, 8> kFlyingMonsterClasses = {
+	"monster_flyer", "monster_floater", "monster_hover", "monster_daedalus",
+	"monster_fixbot", "monster_kamikaze", "monster_boss2", "monster_carrier",
+};
+
 struct DirectorState {
 	const BossDefinition                    *boss = nullptr;
 	std::array<gentity_t *, MAX_HEALTH_BARS> bossEntities = {};
@@ -199,6 +208,16 @@ void ClearBossHealthBars()
 			G_FreeEntity(bar);
 		bar = nullptr;
 	}
+
+	// A map-authored target_health_bar may still occupy the other slot; only clear the
+	// shared name configstring when nothing is left to display, and restore whatever
+	// bar is still active otherwise (mirrors vanilla use_target_healthbar's occupancy scan).
+	for (gentity_t *active_bar : level.health_bar_entities) {
+		if (active_bar) {
+			gi.configstring(CONFIG_HEALTH_BAR_NAME, active_bar->message);
+			return;
+		}
+	}
 	gi.configstring(CONFIG_HEALTH_BAR_NAME, "");
 }
 
@@ -206,6 +225,19 @@ void AttachBossHealthBar(gentity_t *boss, int slot)
 {
 	if (!boss || !boss->inuse || slot < 0 || slot >= static_cast<int>(MAX_HEALTH_BARS))
 		return;
+
+	// level.health_bar_entities is the shared global slot array (also used by map-authored
+	// target_health_bar entities); the boss-unit slot passed in only indexes this director's
+	// own bookkeeping arrays, so find a free global slot rather than assuming they match.
+	int global_slot = -1;
+	for (size_t i = 0; i < level.health_bar_entities.size(); i++) {
+		if (!level.health_bar_entities[i]) {
+			global_slot = static_cast<int>(i);
+			break;
+		}
+	}
+	if (global_slot < 0)
+		return; // every health bar slot is already occupied
 
 	gentity_t *bar = G_Spawn();
 	bar->classname = "horde_boss_healthbar";
@@ -215,7 +247,7 @@ void AttachBossHealthBar(gentity_t *boss, int slot)
 	bar->svflags |= SVF_NOCLIENT;
 
 	director.bossHealthBars[slot] = bar;
-	level.health_bar_entities[slot] = bar;
+	level.health_bar_entities[global_slot] = bar;
 	gi.configstring(CONFIG_HEALTH_BAR_NAME, bar->message);
 }
 
@@ -387,7 +419,7 @@ bool IsLivingThreat(const gentity_t *ent)
 		return false;
 	if (ent->health <= 0 || ent->deadflag || (ent->svflags & SVF_DEADMONSTER))
 		return false;
-	if (ent->monsterinfo.aiflags & AI_GOOD_GUY)
+	if (ent->monsterinfo.aiflags & (AI_GOOD_GUY | AI_DO_NOT_COUNT))
 		return false;
 
 	return true;
@@ -395,12 +427,22 @@ bool IsLivingThreat(const gentity_t *ent)
 
 int LivingThreatCount()
 {
-	int count = 0;
+	// Memoized per server frame: this is a full entity-list scan, and it is legitimately
+	// queried from several independent places within the same frame (spawning, monster
+	// markers, wave-clear check, and once per connected player for the HUD stat).
+	static gtime_t cached_time = gtime_t::from_ms(-1);
+	static int cached_count = 0;
 
+	if (cached_time == level.time)
+		return cached_count;
+
+	int count = 0;
 	for (size_t i = 1; i < globals.num_entities; i++)
 		if (IsLivingThreat(&g_entities[i]))
 			count++;
 
+	cached_time = level.time;
+	cached_count = count;
 	return count;
 }
 
@@ -574,7 +616,6 @@ void GrantWaveLives()
 
 		ec->client->pers.lives = lives;
 		ec->client->eliminated = false;
-		ec->client->horde_elim_msg_wave = 0;
 
 		// Eliminated fighters spectate in freecam with deadflag cleared and health restored.
 		if (was_eliminated || ec->deadflag || ec->health <= 0)
@@ -620,7 +661,6 @@ void ProcessReinforcement()
 
 	fighter->client->pers.lives = 1;
 	fighter->client->eliminated = false;
-	fighter->client->horde_elim_msg_wave = 0;
 	fighter->client->respawn_time = level.time;
 
 	const float protection_sec = max(0.0f, g_horde_reinforcement_protection->value);
@@ -777,11 +817,7 @@ SpawnAnchorKind MapMonsterAnchorKind(const gentity_t *ent)
 		if (ClassnameMatches(classname, candidate))
 			return SpawnAnchorKind::Boss;
 
-	static constexpr std::array<const char *, 6> flying = {
-		"monster_flyer", "monster_floater", "monster_hover",
-		"monster_daedalus", "monster_fixbot", "monster_kamikaze",
-	};
-	for (const char *candidate : flying)
+	for (const char *candidate : kFlyingMonsterClasses)
 		if (ClassnameMatches(classname, candidate))
 			return SpawnAnchorKind::Flying;
 
@@ -906,6 +942,10 @@ bool MM_Horde_ConvertMapMonsterSpawn(gentity_t *ent)
 	ent->noise_index = kind == horde::SpawnAnchorKind::Boss && authored_reinforcements ? 1 : 0;
 	ent->dmg = 0;
 	ent->mass = horde::kConvertedAnchorMarker;
+	// Horde always runs with deathmatch 1, so G_InhibitEntity (called right after this by the
+	// SpawnEntities loop) would otherwise free every converted anchor whose source monster was
+	// authored NOT_DEATHMATCH -- true of virtually all campaign monster_* placements.
+	ent->spawnflags &= ~SPAWNFLAG_NOT_DEATHMATCH;
 	return true;
 }
 
@@ -1107,10 +1147,7 @@ void MM_Horde_NotifyEliminatedSpectator(gentity_t *ent)
 		return;
 	if (ent->client->sess.team == TEAM_SPECTATOR)
 		return;
-	if (ent->client->horde_elim_msg_wave == level.round_number)
-		return;
 
-	ent->client->horde_elim_msg_wave = static_cast<int16_t>(level.round_number);
 	if (horde::ReinforcementAvailable()) {
 		const int needed = max(1, g_horde_reinforcement_kills->integer) -
 			horde::director.reinforcementKills;
@@ -1181,25 +1218,34 @@ void MM_Horde_OnMonsterKilled(gentity_t *ent)
 
 		if (ent->monsterinfo.horde_reward_class == horde::kHordeRewardBoss) {
 			drop = horde::PickBossDrop(g_horde_boss_powerup_chance->value);
-		} else {
-			const float base_chance = ent->monsterinfo.horde_reward_class == horde::kHordeRewardChampion
-				? g_horde_champion_drop_chance->value
-				: g_horde_drop_chance->value;
-			const float chance = MM_Horde_DropChance(base_chance,
+		} else if (ent->monsterinfo.horde_reward_class == horde::kHordeRewardChampion) {
+			const float chance = MM_Horde_DropChance(g_horde_champion_drop_chance->value,
 				g_horde_streak_drop_bonus->value, performance_tier);
 
 			if (frandom() < chance) {
-				if (ent->monsterinfo.horde_reward_class == horde::kHordeRewardChampion) {
-					drop = horde::PickChampionDrop();
-				} else if (horde::ClassnameMatches(ent->classname, "monster_flipper")) {
-					static constexpr std::array<item_id_t, 7> flipper_drops = {
-						IT_HEALTH_SMALL, IT_HEALTH_SMALL, IT_HEALTH_SMALL, IT_HEALTH_SMALL,
-						IT_ARMOR_SHARD, IT_ARMOR_SHARD, IT_HEALTH_MEDIUM,
-					};
-					drop = GetItemByIndex(random_element(flipper_drops));
-				} else {
-					drop = horde::PickDropItem(horde::FindMonsterRow(ent->classname));
+				// When techs are enabled, roll a random tech instead of the champion's
+				// strong-item pool -- no other Horde monster drops techs.
+				drop = AllowTechs()
+					? GetItemByIndex(tech_ids[irandom(static_cast<int32_t>(q_countof(tech_ids)))])
+					: horde::PickChampionDrop();
+
+				const float upgrade_chance = clamp(
+					performance_tier * max(0.f, g_horde_streak_upgrade_chance->value), 0.f, 1.f);
+				if (drop && frandom() < upgrade_chance)
+					drop = horde::UpgradeDrop(drop);
+			}
+		} else {
+			const float chance = MM_Horde_DropChance(g_horde_drop_chance->value,
+				g_horde_streak_drop_bonus->value, performance_tier);
+
+			if (frandom() < chance) {
+				const horde::WeightedItem *row = horde::FindMonsterRow(ent->classname);
+				const std::array<item_id_t, 8> *drops = row ? &row->drops : nullptr;
+				if (!drops) {
+					if (const horde::DirectorMonster *aquatic = horde::FindAquaticRow(ent->classname))
+						drops = &aquatic->drops;
 				}
+				drop = horde::PickDropItem(drops);
 
 				const float upgrade_chance = clamp(
 					performance_tier * max(0.f, g_horde_streak_upgrade_chance->value), 0.f, 1.f);
@@ -1857,12 +1903,7 @@ const BossDefinition *SelectBossForWave(int wave)
 
 SpawnAnchorKind MonsterHabitat(const char *classname)
 {
-	static constexpr std::array<const char *, 8> flying = {
-		"monster_flyer", "monster_floater", "monster_hover", "monster_daedalus",
-		"monster_fixbot", "monster_kamikaze", "monster_boss2", "monster_carrier",
-	};
-
-	for (const char *candidate : flying)
+	for (const char *candidate : kFlyingMonsterClasses)
 		if (ClassnameMatches(classname, candidate))
 			return SpawnAnchorKind::Flying;
 

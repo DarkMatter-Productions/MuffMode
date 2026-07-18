@@ -11,7 +11,7 @@
 constexpr const char *GAMEVERSION = "baseq2";
 
 constexpr const char *GAMEMOD_TITLE = "Muff Mode";
-constexpr const char *GAMEMOD_VERSION = "0.60.8";
+constexpr const char *GAMEMOD_VERSION = "0.70.0";
 
 //==================================================================
 
@@ -3823,7 +3823,6 @@ struct gclient_t {
 	gtime_t	 last_firing_time;
 
 	bool		eliminated;
-	int16_t		horde_elim_msg_wave;
 
 	bool		ready_to_exit;
 

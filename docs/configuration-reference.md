@@ -397,8 +397,10 @@ These cvars tune Horde pacing, wave budget, player scaling, and map-size scaling
 ## Horde Champions And Themes
 
 Champions are stronger monster variants. Themes bias a wave toward a monster category when enough matching
-monsters are available. Champion rewards are rolled on death rather than guaranteed at spawn, and summon or
-resurrection kills cannot be farmed for repeat score, rally progress, or drops.
+monsters are available. A killed champion rolls a strong reward at `g_horde_champion_drop_chance` (100% by
+default) -- a random tech when techs are enabled (no other Horde monster drops techs), otherwise a pick from
+the champion strong-item pool. Summon or resurrection kills cannot be farmed for repeat score, rally progress,
+or drops.
 
 | Cvar | Default | Purpose |
 | --- | --- | --- |
@@ -549,7 +551,7 @@ contributes at least one kill and finishes the wave without dying receives the c
 | --- | --- | --- |
 | `g_horde_drop_chance` | `0.35` | Base chance for a regular credited monster kill to drop an item. |
 | `g_horde_drop_profile_bias` | `0.85` | Chance that a successful regular drop uses the monster-specific profile instead of the general wave loot pool. |
-| `g_horde_champion_drop_chance` | `0.75` | Base chance for a killed champion to drop a strong reward. |
+| `g_horde_champion_drop_chance` | `1.0` | Base chance for a killed champion to drop a strong reward (or tech, when techs are enabled). |
 | `g_horde_streak_step` | `5` | Consecutive credited kills required per momentum tier; values below `1` behave as `1`. |
 | `g_horde_streak_max_tier` | `3` | Maximum momentum tier. `0` disables momentum bonuses. |
 | `g_horde_streak_score_bonus` | `1` | Additional score per credited kill for each active momentum tier. |

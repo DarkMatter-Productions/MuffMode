@@ -547,6 +547,7 @@ static void M_MoveFrame(gentity_t *self) {
 
 void G_MonsterKilled(gentity_t *self) {
 	level.killed_monsters++;
+	// [MuffMode] Horde rolls kill rewards/scoring off every counted kill
 	MM_Horde_OnMonsterKilled(self);
 
 	if (coop->integer && self->enemy && self->enemy->client)
@@ -614,6 +615,8 @@ void M_ProcessPain(gentity_t *e) {
 			if (!(e->spawnflags & SPAWNFLAG_MONSTER_DEAD)) {
 				if (!(e->monsterinfo.aiflags & AI_DO_NOT_COUNT))
 					G_MonsterKilled(e);
+				// [MuffMode] Horde reinforcements/summons are AI_DO_NOT_COUNT so they don't
+				// inflate level.total_monsters, but they still need a kill-reward roll
 				else if (!(e->monsterinfo.aiflags & AI_GOOD_GUY))
 					MM_Horde_OnMonsterKilled(e);
 			}
@@ -625,6 +628,7 @@ void M_ProcessPain(gentity_t *e) {
 		if (!e->deadflag) {
 			int32_t score_value = ceil(e->monsterinfo.base_health / 100);
 			if (score_value < 1) score_value = 1;
+			// [MuffMode] Uncounted Horde spawns (horde_reward_class == 0) shouldn't award score
 			if (e->monsterinfo.damage_attacker && e->monsterinfo.damage_attacker->client &&
 				(notGT(GT_HORDE) || e->monsterinfo.horde_reward_class != 0))
 				MM_Horde_AdjustPlayerScore(e->monsterinfo.damage_attacker->client, score_value);

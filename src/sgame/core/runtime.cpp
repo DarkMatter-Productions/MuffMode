@@ -641,7 +641,7 @@ static void InitGame() {
 	g_horde_map_spawn_min_dist = gi.cvar("g_horde_map_spawn_min_dist", "192", CVAR_NOFLAGS);
 	g_horde_drop_chance = gi.cvar("g_horde_drop_chance", "0.35", CVAR_NOFLAGS);
 	g_horde_drop_profile_bias = gi.cvar("g_horde_drop_profile_bias", "0.85", CVAR_NOFLAGS);
-	g_horde_champion_drop_chance = gi.cvar("g_horde_champion_drop_chance", "0.75", CVAR_NOFLAGS);
+	g_horde_champion_drop_chance = gi.cvar("g_horde_champion_drop_chance", "1.0", CVAR_NOFLAGS);
 	g_horde_streak_step = gi.cvar("g_horde_streak_step", "5", CVAR_NOFLAGS);
 	g_horde_streak_max_tier = gi.cvar("g_horde_streak_max_tier", "3", CVAR_NOFLAGS);
 	g_horde_streak_score_bonus = gi.cvar("g_horde_streak_score_bonus", "1", CVAR_NOFLAGS);

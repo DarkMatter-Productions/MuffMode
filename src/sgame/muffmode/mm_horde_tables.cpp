@@ -258,7 +258,9 @@ const std::array<BossDefinition, kHordeBossCount> kBosses = {{
 }};
 
 const std::array<DirectorMonster, kHordeAquaticCount> kAquatics = {{
-	{ "monster_flipper", "Flipper", 2, -1, 1.00f, 1, { -16.f, -16.f, -8.f }, { 16.f, 16.f, 20.f } },
+	{ "monster_flipper", "Flipper", 2, -1, 1.00f, 1, { -16.f, -16.f, -8.f }, { 16.f, 16.f, 20.f },
+		{ IT_HEALTH_SMALL, IT_HEALTH_SMALL, IT_HEALTH_SMALL, IT_HEALTH_SMALL,
+			IT_ARMOR_SHARD, IT_ARMOR_SHARD, IT_HEALTH_MEDIUM } },
 	{ "monster_gekk", "Gekk", 2, -1, 0.70f, 2, { -18.f, -18.f, -24.f }, { 18.f, 18.f, 24.f } },
 }};
 
@@ -489,15 +491,27 @@ const WeightedItem *FindMonsterRow(const char *classname)
 	return nullptr;
 }
 
-gitem_t *PickDropItem(const WeightedItem *monster_row)
+const DirectorMonster *FindAquaticRow(const char *classname)
+{
+	if (!classname)
+		return nullptr;
+
+	for (const auto &monster : kAquatics)
+		if (!Q_strcasecmp(monster.classname, classname))
+			return &monster;
+
+	return nullptr;
+}
+
+gitem_t *PickDropItem(const std::array<item_id_t, 8> *drops)
 {
 	gitem_t *profile_item = nullptr;
 
-	if (monster_row) {
+	if (drops) {
 		std::array<item_id_t, 8> choices = {};
 		int                      num_choices = 0;
 
-		for (item_id_t id : monster_row->drops) {
+		for (item_id_t id : *drops) {
 			if (id != IT_NULL)
 				choices[num_choices++] = id;
 		}
