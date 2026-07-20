@@ -259,6 +259,9 @@
     <ClInclude Include="..\..\src\sgame\muffmode\mm_parse.h">
       <Filter>sgame\muffmode</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_spawn_rules.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\src\sgame\muffmode\mm_time_format.h">
       <Filter>sgame\muffmode</Filter>
     </ClInclude>

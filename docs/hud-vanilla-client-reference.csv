@@ -20,6 +20,7 @@ Centre — duel header graphic,Deathmatch,Yes,Yes,Top-centre duel banner image,N
 Centre — LMS enemies remaining,Deathmatch,Yes,Yes,Top-centre text during round,No,No,No,No,No,No,No,Yes,No,No,No,No
 Strike role label (OFFENSE / DEFENSE),Deathmatch,Yes,Yes,Top-right row 1 during in-match,No,No,No,No,No,Yes,No,No,No,No,No,No
 Horde monsters remaining,Deathmatch,Yes,Yes,Right stack numeric + Monsters label,No,No,No,No,No,No,No,No,Yes,No,No,Partial
+Horde wave number,Deathmatch,Yes,Yes,Right stack between Lives and Monsters (reuses STAT_SCORELIMIT),No,No,No,No,No,No,No,No,Yes,No,No,Partial
 Lives remaining (big digit),Deathmatch / Coop,Yes,Yes,Right side yt 42 for Horde/LMS DM; coop uses separate lives_num stack,No,No,No,No,No,No,No,Yes,Yes,No,No,Partial
 Red Rover current-team badge,Deathmatch,Yes,Yes,Top-right team icon (row 3 of stack),No,No,No,No,No,No,Yes,No,No,No,No,No
 CTF carried-flag blink icon,Deathmatch,Yes,Yes,Top-right when carrying enemy flag,No,No,No,Yes,No,No,No,No,No,No,No,No

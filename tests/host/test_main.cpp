@@ -14,6 +14,7 @@
 #include "muffmode/mm_parse.h"
 #include "muffmode/mm_pconfig_rules.h"
 #include "muffmode/mm_red_rover_rules.h"
+#include "muffmode/mm_spawn_rules.h"
 #include "muffmode/mm_time_format.h"
 #include "muffmode/mm_util.h"
 
@@ -813,13 +814,16 @@ MM_TEST(hud_statusbar_layout_vanilla_token_whitelist) {
 		"if 272 xv 0 yt 48 if 272 loc_stat_rstring 272 endif "
 		"if 264 xr -16 yt 42 if 264 num 3 264 endif "
 		"if 47 xr -24 yt 58 loc_rstring 0 $g_lives endif "
-		"if 264 xr -24 yt 68 loc_rstring 0 Monsters endif "
+		"if 258 xr -78 yt 68 if 258 num 3 258 endif "
+		"if 258 xr -2 yt 94 loc_rstring 0 Wave endif "
+		"if 265 xr -24 yt 104 loc_rstring 0 Monsters endif "
 		"if 18 xl 0 yb -60 if 18 pic 18 endif endif";
 	MM_CHECK_FALSE(MM_StatusbarLayoutContainsBannedToken(sample));
 	MM_CHECK(MM_StatusbarLayoutUsesOnlyVanillaTokens(sample));
 
 	MM_CHECK(MM_StatusbarLayoutUsesOnlyVanillaTokens("if 1 string2 \"USE VIEW JUMP\" endif "));
 	MM_CHECK(MM_StatusbarLayoutUsesOnlyVanillaTokens("if 1 loc_rstring 0 Monsters endif "));
+	MM_CHECK(MM_StatusbarLayoutUsesOnlyVanillaTokens("if 1 loc_rstring 0 Wave endif "));
 	MM_CHECK_FALSE(MM_StatusbarLayoutUsesOnlyVanillaTokens("if 1 unknown_token 2 endif "));
 	MM_CHECK_FALSE(MM_StatusbarLayoutUsesOnlyVanillaTokens("if not_a_stat endif "));
 	MM_CHECK_FALSE(MM_StatusbarLayoutUsesOnlyVanillaTokens("string2 \"unterminated "));
@@ -829,6 +833,7 @@ MM_TEST(hud_statusbar_layout_vanilla_token_whitelist) {
 MM_TEST(hud_stat_count_within_max_stats) {
 	MM_CHECK((int)STAT_LAST <= (int)MAX_STATS);
 	MM_CHECK((int)STAT_ARENA_ROLE < (int)MAX_STATS);
+	MM_CHECK((int)STAT_SCORELIMIT < (int)MAX_STATS);
 }
 
 MM_TEST(hud_pov_configstring_lanes_do_not_overlap_global_countdown_or_each_other) {
@@ -898,6 +903,67 @@ MM_TEST(announcer_decision_on_null_stem_without_use_backup_is_silent) {
 	MM_CHECK_FALSE(action.play_vo);
 	MM_CHECK_FALSE(action.play_backup);
 	MM_CHECK_FALSE(action.play_sting);
+}
+
+MM_TEST(spawn_rules_reset_adopts_single_entity_string_copy) {
+	mm_level_cpp_state_t state;
+	state.vote_arg = "map q2dm1";
+	state.entstring = "old_map_entities";
+	state.match_id = "match-old";
+
+	std::string lump = "{ \"classname\" \"worldspawn\" }";
+	MM_ResetLevelCppState(state, std::move(lump));
+
+	MM_CHECK(state.vote_arg.empty());
+	MM_CHECK(state.match_id.empty());
+	MM_CHECK_EQ(state.entstring, std::string("{ \"classname\" \"worldspawn\" }"));
+	MM_CHECK_EQ(std::string(MM_EntityStringCStr(state)), state.entstring);
+	MM_CHECK(lump.empty());
+}
+
+MM_TEST(spawn_rules_repeated_resets_do_not_retain_prior_strings) {
+	mm_level_cpp_state_t state;
+
+	for (int i = 0; i < 8; i++) {
+		std::string lump = "entity_lump_" + std::to_string(i);
+		const std::string expected = lump;
+		MM_ResetLevelCppState(state, std::move(lump));
+		MM_CHECK_EQ(state.entstring, expected);
+		MM_CHECK(state.vote_arg.empty());
+		MM_CHECK(state.match_id.empty());
+	}
+
+	MM_ResetLevelCppState(state, std::string("final"));
+	MM_CHECK_EQ(state.entstring, std::string("final"));
+}
+
+MM_TEST(spawn_rules_replace_path_filename_preserves_directory) {
+	char path[64] = "C:\\Games\\Quake2\\game_x64.dll";
+	MM_CHECK(MM_ReplacePathFilename(path, sizeof(path), "muffmode_alloc.log"));
+	MM_CHECK_EQ(std::string(path), std::string("C:\\Games\\Quake2\\muffmode_alloc.log"));
+
+	char unix_path[64] = "/opt/quake2/game_x64.dll";
+	MM_CHECK(MM_ReplacePathFilename(unix_path, sizeof(unix_path), "muffmode_alloc.log"));
+	MM_CHECK_EQ(std::string(unix_path), std::string("/opt/quake2/muffmode_alloc.log"));
+
+	char bare[32] = "game_x64.dll";
+	MM_CHECK(MM_ReplacePathFilename(bare, sizeof(bare), "muffmode_alloc.log"));
+	MM_CHECK_EQ(std::string(bare), std::string("muffmode_alloc.log"));
+
+	char tiny[8] = "a\\b.dll";
+	MM_CHECK_FALSE(MM_ReplacePathFilename(tiny, sizeof(tiny), "muffmode_alloc.log"));
+}
+
+MM_TEST(spawn_rules_join_directory_file_adds_separator_when_needed) {
+	char out[64] = {};
+	MM_CHECK(MM_JoinDirectoryFile(out, sizeof(out), "C:\\Temp", "muffmode_alloc.log"));
+	MM_CHECK_EQ(std::string(out), std::string("C:\\Temp\\muffmode_alloc.log"));
+
+	MM_CHECK(MM_JoinDirectoryFile(out, sizeof(out), "C:\\Temp\\", "muffmode_alloc.log"));
+	MM_CHECK_EQ(std::string(out), std::string("C:\\Temp\\muffmode_alloc.log"));
+
+	char tiny[8] = {};
+	MM_CHECK_FALSE(MM_JoinDirectoryFile(tiny, sizeof(tiny), "C:\\Temp", "muffmode_alloc.log"));
 }
 
 } // namespace

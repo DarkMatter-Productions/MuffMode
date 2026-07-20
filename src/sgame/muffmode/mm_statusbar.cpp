@@ -196,6 +196,13 @@ void EmitHordeRemainingStack(statusbar_t &sb)
 	if (g_horde_lives->integer > 0)
 		y += kLabelBelowNum;
 
+	// Lives → Wave → Monsters (honkhonk ordering), right-aligned.
+	// Wave reuses STAT_SCORELIMIT (unused by Horde; DM match limit is STAT_ROUND_NUMBER).
+	sb.ifstat(STAT_SCORELIMIT)
+		.xr(MiniscoreAlignedNumXr(kMiniscoreNumFieldWidth)).yt(y += 10).num(kMiniscoreNumFieldWidth, STAT_SCORELIMIT)
+		.xr(kRightHudTextXr).yt(y += kLabelBelowNum).loc_rstring("Wave")
+		.endifstat();
+
 	sb.ifstat(STAT_HORDE_REMAINING)
 		.xr(MiniscoreAlignedNumXr(kMiniscoreNumFieldWidth)).yt(y += 10).num(kMiniscoreNumFieldWidth, STAT_HORDE_REMAINING)
 		.xr(kRightHudTextXr).yt(y += kLabelBelowNum).loc_rstring("Monsters")

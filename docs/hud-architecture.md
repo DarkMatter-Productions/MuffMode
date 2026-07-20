@@ -58,6 +58,7 @@ Use `ifstat` + configstrings instead (same pattern as `STAT_WARMUP_NOTICE` / `ST
 | `STAT_CENTER_LINE` | `hud.cpp` | `xv 0 yt 26` | Duel pic; LMS primary-lane POV text |
 | `STAT_COUNTDOWN` | match | `yb -256 num` | Layout position (same on all clients) |
 | `STAT_HORDE_REMAINING` | `hud.cpp` | Horde right stack `num` | Horde only |
+| `STAT_SCORELIMIT` | `hud.cpp` | Horde: Wave between Lives and Monsters; coop: score limit | Horde reuses this slot (stats enum at `MAX_STATS`); DM match limit stays on `STAT_ROUND_NUMBER` |
 | `STAT_ARENA_ROLE` | `hud.cpp` | Strike top-right or CA/Freeze centre yt 48 | Per-client via the primary POV configstring lane |
 | `STAT_MINISCORE_*` | `hud.cpp` | bottom corners | Team / FFA miniscore |
 

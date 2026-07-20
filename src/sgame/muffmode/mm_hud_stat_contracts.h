@@ -21,7 +21,7 @@
 // STAT_CTF_FLAG_PIC       — CTF/Strike: carried flag blink; RR: current-team badge (top-right row 3)
 // STAT_CENTER_LINE        — duel header pic; LMS/Freeze Tag: primary POV configstring lane
 // STAT_WARMUP_NOTICE      — layout slot reserved; warmup guidance uses centerprint (menu-bind band)
-// STAT_SCORELIMIT         — coop right-stack limit; DM miniscore uses STAT_ROUND_NUMBER instead
+// STAT_SCORELIMIT         — coop right-stack limit; Horde: current/upcoming wave (right stack); DM miniscore uses STAT_ROUND_NUMBER
 // STAT_COUNTDOWN          — layout xv 118 yb -256 num(3); vanilla: centre = xv+50-8*l (118 exact for 1-digit); MM cgame re-centres per digit count
 // STAT_MINISCORE_*        — SetMiniScoreStats; visible MATCH_WARMUP_DELAYED through MATCH_IN_PROGRESS
 //                           CS_STATUSBAR miniscore rows (team icons or FFA/Duel/RR/Horde player skins).

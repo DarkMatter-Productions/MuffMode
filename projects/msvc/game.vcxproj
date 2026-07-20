@@ -205,6 +205,7 @@
     <ClInclude Include="..\..\src\sgame\muffmode\mm_ruleset_weapons.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_skin.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_spawn_filter.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_spawn_rules.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_spawn_loadout.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_statusbar.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_strike.h" />

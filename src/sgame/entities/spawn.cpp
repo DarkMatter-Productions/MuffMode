@@ -1335,9 +1335,11 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
 	}
 	// Save entity string into a std::string BEFORE FreeTags, because if an .ent
 	// override file was loaded, 'entities' points to TAG_LEVEL memory that will
-	// be freed. This copy ensures we have a safe copy for parsing later.
-	std::string saved_entstring(entities);
-	level.entstring = entities;
+	// be freed. This single owned copy is moved into level.entstring after reset.
+	std::string saved_entstring(entities ? entities : "");
+	const size_t ent_lump_bytes = saved_entstring.size();
+	MuffModeLog("MAP", "SpawnEntities: phase=pre-reset map='%s' ent_lump_bytes=%zu",
+		mapname, ent_lump_bytes);
 //#endif
 	//ParseWorldEntityString(mapname, RS(RS_Q3A));
 
@@ -1372,19 +1374,16 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
 		}
 	}
 
-	// After FreeTags, 'entities' may be a dangling pointer if it was from an .ent file.
-	// Redirect it to our saved copy.
-	entities = saved_entstring.c_str();
-
-	memset(&level, 0, sizeof(level));
-	
-	// CRITICAL: Reinitialize all C++ objects after memset
-	// memset corrupts C++ objects like std::string, so we must reconstruct them
-	new (&level.vote_state) VoteStateData();
-	new (&level.entstring) std::string(saved_entstring);
-	new (&level.match_id) std::string();
+	// Proper C++ reset: destroy prior non-trivial members (std::string / VoteStateData)
+	// instead of memset + placement-new, which leaked heap blocks on every gamemap.
+	level = {};
+	level.entstring = std::move(saved_entstring);
+	entities = level.entstring.c_str();
 	MM_Ghost_ClearAll();
-	
+
+	MuffModeLog("MAP", "SpawnEntities: phase=reset-complete ent_lump_bytes=%zu",
+		level.entstring.size());
+
 	memset(g_entities, 0, game.maxentities * sizeof(g_entities[0]));
 	
 	// all other flags are not important atm
@@ -1421,12 +1420,12 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
 
 	gentity_t *ent = nullptr;
 	int			inhibit = 0;
+	int			horde_anchors_converted = 0;
 	const char *com_token;
-	//const char *entities = level.entstring.c_str();
 
 	// Log entity string state before parsing
-	size_t ent_str_len = entities ? strlen(entities) : 0;
-	MuffModeLog("DEBUG", "SpawnEntities: entity string ptr=%p, len=%zu, first_32='%.32s'",
+	const size_t ent_str_len = level.entstring.size();
+	MuffModeLog("MAP", "SpawnEntities: phase=parse-begin ptr=%p len=%zu first_32='%.32s'",
 	           (void*)entities, ent_str_len, entities ? entities : "(null)");
 	if (ent_str_len > 0) {
 		// Log last 64 chars to see if string is truncated
@@ -1461,7 +1460,8 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
 
 		// remove things (except the world) from different skill levels or deathmatch
 		if (ent != g_entities) {
-			MM_Horde_ConvertMapMonsterSpawn(ent);
+			if (MM_Horde_ConvertMapMonsterSpawn(ent))
+				horde_anchors_converted++;
 
 			if (G_InhibitEntity(ent)) {
 				G_FreeEntity(ent);
@@ -1485,6 +1485,11 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
 
 	if (inhibit && g_verbose->integer)
 		gi.Com_PrintFmt("{} entities inhibited.\n", inhibit);
+
+	MuffModeLog("MAP",
+		"SpawnEntities: phase=parse-complete entities=%d inhibited=%d horde_anchors=%d num_entities=%u",
+		ent_count, inhibit, horde_anchors_converted,
+		static_cast<unsigned>(globals.num_entities));
 
 	// precache start_items
 	PrecacheStartItems();
@@ -1520,7 +1525,9 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
 
 	level.init = true;
 	
-	MuffModeLog("MAP", "Map '%s' loaded successfully (entities spawned, init=true)", level.mapname);
+	MuffModeLog("MAP",
+		"SpawnEntities: phase=complete map='%s' entities=%d horde_anchors=%d init=true",
+		level.mapname, ent_count, horde_anchors_converted);
 	MuffModeLog_Separator();
 }
 

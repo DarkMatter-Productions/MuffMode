@@ -255,7 +255,7 @@ enum player_stat_t {
 	// [Paril-KEX]
 	STAT_ACTIVE_WEAPON,
 
-	STAT_SCORELIMIT, // match limit value for miniscore HUD (frag/round/capture); 0 = hidden
+	STAT_SCORELIMIT, // coop right-stack limit; Horde: current/upcoming wave; DM miniscore uses STAT_ROUND_NUMBER
 	STAT_CENTER_LINE,
 
 	STAT_SHOW_STATUSBAR,
