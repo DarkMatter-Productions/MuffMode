@@ -262,7 +262,7 @@ void GrantWaveLives()
 
 		ec->client->pers.lives = lives;
 		ec->client->eliminated = false;
-		ec->client->horde_elim_msg_wave = 0;
+		ec->client->horde_elim_msg_next = 0_sec;
 
 		// Eliminated fighters spectate in freecam with deadflag cleared and health restored.
 		if (was_eliminated || ec->deadflag || ec->health <= 0)
@@ -461,6 +461,9 @@ void MM_Horde_OnRoundStarted()
 	MM_Announce(mm_announce_event_t::FightWithBackup, world);
 }
 
+// How often an eliminated fighter is reminded they're waiting on the next wave.
+constexpr gtime_t kHordeElimReminderInterval = 20_sec;
+
 void MM_Horde_NotifyEliminatedSpectator(gentity_t *ent)
 {
 	if (!horde::Active())
@@ -471,10 +474,10 @@ void MM_Horde_NotifyEliminatedSpectator(gentity_t *ent)
 		return;
 	if (ent->client->sess.team == TEAM_SPECTATOR)
 		return;
-	if (ent->client->horde_elim_msg_wave == level.round_number)
+	if (level.time < ent->client->horde_elim_msg_next)
 		return;
 
-	ent->client->horde_elim_msg_wave = static_cast<int16_t>(level.round_number);
+	ent->client->horde_elim_msg_next = level.time + kHordeElimReminderInterval;
 	gi.LocClient_Print(ent, PRINT_CENTER, "You will rejoin when the next wave countdown begins.");
 }
 

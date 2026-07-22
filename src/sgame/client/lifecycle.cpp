@@ -1967,7 +1967,7 @@ static void ClientTimerActions(gentity_t *ent) {
 
 	if (GT(GT_HORDE) && ent->client->eliminated && ent->client->sess.team != TEAM_SPECTATOR &&
 		level.round_state == roundst_t::ROUND_IN_PROGRESS)
-		gi.LocClient_Print(ent, PRINT_CENTER, "You will rejoin when the next wave countdown begins.");
+		MM_Horde_NotifyEliminatedSpectator(ent);
 
 	ent->client->time_residual = level.time + 1_sec;
 }
