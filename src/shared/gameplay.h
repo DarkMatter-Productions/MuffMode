@@ -266,7 +266,7 @@ enum player_stat_t {
 	STAT_GAMETYPE_HUD,
 	STAT_RULESET_HUD,
 	STAT_ROUND_NUMBER,
-	STAT_WARMUP_NOTICE,
+	STAT_HORDE_WAVE, // repurposed from the never-wired STAT_WARMUP_NOTICE slot
 	STAT_ARENA_ROLE,
 
 	// don't use; just for verification

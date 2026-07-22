@@ -184,7 +184,7 @@ void EmitRoundCounter(statusbar_t &sb, round_counter_profile_t profile, const ch
 	EmitRightLabeledValue(sb, hud_vanchor_t::Top, 2, 22, STAT_ROUND_NUMBER, label);
 }
 
-void EmitHordeRemainingStack(statusbar_t &sb)
+void EmitHordeWaveAndRemainingStack(statusbar_t &sb)
 {
 	if (!GT(GT_HORDE))
 		return;
@@ -195,6 +195,11 @@ void EmitHordeRemainingStack(statusbar_t &sb)
 	// Lives share yt 42 via EmitRightLivesStack (always in layout).
 	if (g_horde_lives->integer > 0)
 		y += kLabelBelowNum;
+
+	sb.ifstat(STAT_HORDE_WAVE)
+		.xr(MiniscoreAlignedNumXr(kMiniscoreNumFieldWidth)).yt(y += 10).num(kMiniscoreNumFieldWidth, STAT_HORDE_WAVE)
+		.xr(kRightHudTextXr).yt(y += kLabelBelowNum).loc_rstring("Wave")
+		.endifstat();
 
 	sb.ifstat(STAT_HORDE_REMAINING)
 		.xr(MiniscoreAlignedNumXr(kMiniscoreNumFieldWidth)).yt(y += 10).num(kMiniscoreNumFieldWidth, STAT_HORDE_REMAINING)
@@ -335,7 +340,7 @@ void MM_InitStatusbar()
 			muffmode::statusbar::EmitHordeCoopWaveHeader(sb);
 
 		if (GT(GT_HORDE))
-			muffmode::statusbar::EmitHordeRemainingStack(sb);
+			muffmode::statusbar::EmitHordeWaveAndRemainingStack(sb);
 	}
 	if (!deathmatch->integer) {
 		sb.ifstat(STAT_POWERUP_ICON).yb(-76).endifstat();
@@ -372,10 +377,11 @@ void MM_InitStatusbar()
 		sb.ifstat(STAT_MATCH_STATE).xv(0).yb(-78).stat_string(STAT_MATCH_STATE).endifstat();
 		if (GT(GT_LMS))
 			sb.ifstat(STAT_CENTER_LINE).xv(0).yt(26).stat_string(STAT_CENTER_LINE).endifstat();
-		sb.ifstat(STAT_WARMUP_NOTICE).xv(0).yb(-90).stat_string(STAT_WARMUP_NOTICE).endifstat();
 		sb.ifstat(STAT_FOLLOW).xv(0).yb(-68).string("FOLLOWING").xv(80).stat_string(STAT_FOLLOW).endifstat();
 		sb.ifstat(STAT_SPECTATOR).xv(0).yb(-58).stat_string(STAT_SPECTATOR).endifstat();
-		sb.ifstat(STAT_FOLLOW).xv(0).yb(-48).string2("USE VIEW JUMP/CROUCH TARGET FIRE STOP").endifstat();
+		// Extra clearance vs. the SPECTATOR line above: at the default proportional HUD font
+		// (scr_usekfont 1), a 10px gap here overlaps the previous row's glyphs.
+		sb.ifstat(STAT_FOLLOW).xv(0).yb(-36).string2("USE VIEW JUMP/CROUCH TARGET FIRE STOP").endifstat();
 
 		sb.ifstat(STAT_CROSSHAIR_ID_VIEW).xv(122).yb(-128).stat_pname(STAT_CROSSHAIR_ID_VIEW).endifstat();
 		sb.ifstat(STAT_CROSSHAIR_ID_VIEW_COLOR).xv(156).yb(-118).pic(STAT_CROSSHAIR_ID_VIEW_COLOR).endifstat();
@@ -429,7 +435,7 @@ bool MM_DumpStatusbar(std::string *out_path)
 	MM_HUD_STAT(STAT_TECH) MM_HUD_STAT(STAT_HELPICON)
 	MM_HUD_STAT(STAT_COOP_RESPAWN) MM_HUD_STAT(STAT_LIVES)
 	MM_HUD_STAT(STAT_GAMETYPE_HUD) MM_HUD_STAT(STAT_RULESET_HUD)
-	MM_HUD_STAT(STAT_ROUND_NUMBER) MM_HUD_STAT(STAT_HORDE_REMAINING)
+	MM_HUD_STAT(STAT_ROUND_NUMBER) MM_HUD_STAT(STAT_HORDE_REMAINING) MM_HUD_STAT(STAT_HORDE_WAVE)
 	MM_HUD_STAT(STAT_ARENA_ROLE)
 	MM_HUD_STAT(STAT_SCORELIMIT)
 	MM_HUD_STAT(STAT_KEY_A) MM_HUD_STAT(STAT_KEY_B) MM_HUD_STAT(STAT_KEY_C)
@@ -439,7 +445,7 @@ bool MM_DumpStatusbar(std::string *out_path)
 	MM_HUD_STAT(STAT_MINISCORE_FIRST_POS)
 	MM_HUD_STAT(STAT_MINISCORE_SECOND_PIC) MM_HUD_STAT(STAT_MINISCORE_SECOND_SCORE)
 	MM_HUD_STAT(STAT_MINISCORE_SECOND_POS)
-	MM_HUD_STAT(STAT_COUNTDOWN) MM_HUD_STAT(STAT_MATCH_STATE) MM_HUD_STAT(STAT_CENTER_LINE) MM_HUD_STAT(STAT_WARMUP_NOTICE)
+	MM_HUD_STAT(STAT_COUNTDOWN) MM_HUD_STAT(STAT_MATCH_STATE) MM_HUD_STAT(STAT_CENTER_LINE)
 	MM_HUD_STAT(STAT_FOLLOW) MM_HUD_STAT(STAT_SPECTATOR)
 	MM_HUD_STAT(STAT_CROSSHAIR_ID_VIEW) MM_HUD_STAT(STAT_CROSSHAIR_ID_VIEW_COLOR)
 #undef MM_HUD_STAT

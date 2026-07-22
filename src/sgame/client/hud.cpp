@@ -889,13 +889,13 @@ static void G_SetGametypeStats(gentity_t *ent) {
 		ent->client->ps.stats[STAT_ROUND_NUMBER] = 0;
 	}
 
-	ent->client->ps.stats[STAT_WARMUP_NOTICE] = 0;
-
 	if (level.match_state == MATCH_IN_PROGRESS) {
 		if (GT(GT_HORDE)) {
 			ent->client->ps.stats[STAT_HORDE_REMAINING] = level.total_monsters - level.killed_monsters;
+			ent->client->ps.stats[STAT_HORDE_WAVE] = level.round_number;
 		} else {
 			ent->client->ps.stats[STAT_HORDE_REMAINING] = 0;
+			ent->client->ps.stats[STAT_HORDE_WAVE] = 0;
 		}
 
 		ent->client->ps.stats[STAT_ARENA_ROLE] = 0;
@@ -930,6 +930,7 @@ static void G_SetGametypeStats(gentity_t *ent) {
 
 	} else {
 		ent->client->ps.stats[STAT_HORDE_REMAINING] = 0;
+		ent->client->ps.stats[STAT_HORDE_WAVE] = 0;
 		ent->client->ps.stats[STAT_ARENA_ROLE] = 0;
 		ent->client->ps.stats[STAT_ROUND_NUMBER] = 0;
 	}
