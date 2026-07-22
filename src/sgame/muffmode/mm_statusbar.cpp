@@ -197,9 +197,8 @@ void EmitHordeRemainingStack(statusbar_t &sb)
 		y += kLabelBelowNum;
 
 	// Lives → Wave → Monsters (honkhonk ordering), right-aligned.
-	// Wave reuses STAT_SCORELIMIT (unused by Horde; DM match limit is STAT_ROUND_NUMBER).
-	sb.ifstat(STAT_SCORELIMIT)
-		.xr(MiniscoreAlignedNumXr(kMiniscoreNumFieldWidth)).yt(y += 10).num(kMiniscoreNumFieldWidth, STAT_SCORELIMIT)
+	sb.ifstat(STAT_HORDE_WAVE)
+		.xr(MiniscoreAlignedNumXr(kMiniscoreNumFieldWidth)).yt(y += 10).num(kMiniscoreNumFieldWidth, STAT_HORDE_WAVE)
 		.xr(kRightHudTextXr).yt(y += kLabelBelowNum).loc_rstring("Wave")
 		.endifstat();
 
@@ -379,7 +378,6 @@ void MM_InitStatusbar()
 		sb.ifstat(STAT_MATCH_STATE).xv(0).yb(-78).stat_string(STAT_MATCH_STATE).endifstat();
 		if (GT(GT_LMS))
 			sb.ifstat(STAT_CENTER_LINE).xv(0).yt(26).stat_string(STAT_CENTER_LINE).endifstat();
-		sb.ifstat(STAT_WARMUP_NOTICE).xv(0).yb(-90).stat_string(STAT_WARMUP_NOTICE).endifstat();
 		sb.ifstat(STAT_FOLLOW).xv(0).yb(-68).string("FOLLOWING").xv(80).stat_string(STAT_FOLLOW).endifstat();
 		sb.ifstat(STAT_SPECTATOR).xv(0).yb(-58).stat_string(STAT_SPECTATOR).endifstat();
 		sb.ifstat(STAT_FOLLOW).xv(0).yb(-48).string2("USE VIEW JUMP/CROUCH TARGET FIRE STOP").endifstat();
@@ -436,7 +434,7 @@ bool MM_DumpStatusbar(std::string *out_path)
 	MM_HUD_STAT(STAT_TECH) MM_HUD_STAT(STAT_HELPICON)
 	MM_HUD_STAT(STAT_COOP_RESPAWN) MM_HUD_STAT(STAT_LIVES)
 	MM_HUD_STAT(STAT_GAMETYPE_HUD) MM_HUD_STAT(STAT_RULESET_HUD)
-	MM_HUD_STAT(STAT_ROUND_NUMBER) MM_HUD_STAT(STAT_HORDE_REMAINING)
+	MM_HUD_STAT(STAT_ROUND_NUMBER) MM_HUD_STAT(STAT_HORDE_REMAINING) MM_HUD_STAT(STAT_HORDE_WAVE)
 	MM_HUD_STAT(STAT_ARENA_ROLE)
 	MM_HUD_STAT(STAT_SCORELIMIT)
 	MM_HUD_STAT(STAT_KEY_A) MM_HUD_STAT(STAT_KEY_B) MM_HUD_STAT(STAT_KEY_C)
@@ -446,7 +444,7 @@ bool MM_DumpStatusbar(std::string *out_path)
 	MM_HUD_STAT(STAT_MINISCORE_FIRST_POS)
 	MM_HUD_STAT(STAT_MINISCORE_SECOND_PIC) MM_HUD_STAT(STAT_MINISCORE_SECOND_SCORE)
 	MM_HUD_STAT(STAT_MINISCORE_SECOND_POS)
-	MM_HUD_STAT(STAT_COUNTDOWN) MM_HUD_STAT(STAT_MATCH_STATE) MM_HUD_STAT(STAT_CENTER_LINE) MM_HUD_STAT(STAT_WARMUP_NOTICE)
+	MM_HUD_STAT(STAT_COUNTDOWN) MM_HUD_STAT(STAT_MATCH_STATE) MM_HUD_STAT(STAT_CENTER_LINE)
 	MM_HUD_STAT(STAT_FOLLOW) MM_HUD_STAT(STAT_SPECTATOR)
 	MM_HUD_STAT(STAT_CROSSHAIR_ID_VIEW) MM_HUD_STAT(STAT_CROSSHAIR_ID_VIEW_COLOR)
 #undef MM_HUD_STAT
