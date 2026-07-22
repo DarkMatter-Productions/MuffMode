@@ -1410,29 +1410,8 @@ void Update(gentity_t *ent)
 	menu::SetText(entries + kGametype, "");
 	menu::SetLevelName(entries + kLevel);
 
-	switch (level.match_state) {
-	case matchst_t::MATCH_NONE:
-		menu::SetText(entries[kMatch], "");
-		break;
-
-	case matchst_t::MATCH_WARMUP_DELAYED:
-	case matchst_t::MATCH_WARMUP_DEFAULT:
-	case matchst_t::MATCH_WARMUP_READYUP:
-		menu::SetText(entries[kMatch], "*MATCH WARMUP");
-		break;
-
-	case matchst_t::MATCH_COUNTDOWN:
-		menu::SetText(entries[kMatch], "*MATCH IS STARTING");
-		break;
-
-	case matchst_t::MATCH_IN_PROGRESS:
-		menu::SetText(entries[kMatch], "*MATCH IN PROGRESS");
-		break;
-
-	default:
-		menu::SetText(entries[kMatch], menu::kBreaker);
-		break;
-	}
+	// Match status text removed from this menu -- crowded the join options below it.
+	menu::SetText(entries[kMatch], "");
 
 	menu::SetGamemodName(entries + kGameMod);
 
