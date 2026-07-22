@@ -1335,13 +1335,11 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
 	// Redirect it to our saved copy.
 	entities = saved_entstring.c_str();
 
-	memset(&level, 0, sizeof(level));
-	
-	// CRITICAL: Reinitialize all C++ objects after memset
-	// memset corrupts C++ objects like std::string, so we must reconstruct them
-	new (&level.vote_state) VoteStateData();
-	new (&level.entstring) std::string(saved_entstring);
-	new (&level.match_id) std::string();
+	// A plain memset here would zero std::string members' internal pointers
+	// without running their destructors first, leaking whatever heap buffer
+	// they held (notably level.entstring, the map's full entity-lump text).
+	level = {};
+	level.entstring = saved_entstring;
 	MM_Ghost_ClearAll();
 	
 	memset(g_entities, 0, game.maxentities * sizeof(g_entities[0]));
