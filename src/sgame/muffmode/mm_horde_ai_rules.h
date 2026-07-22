@@ -72,3 +72,10 @@ inline int MM_Horde_LateMaxAlive(int base_cap, int round, int peak, int per_wave
 	const int raw = base_cap + (round - peak) * per_wave_bonus;
 	return std::min(raw, cap_ceiling);
 }
+
+// A mid-wave (re)spawn with lives remaining is a living respawn, not an elimination —
+// mirrors the LMS lives model. Only auto-eliminate spawners who are already out of lives.
+inline bool MM_Horde_ShouldEliminateMidWaveSpawn(bool wave_in_progress, bool already_eliminated, int lives)
+{
+	return wave_in_progress && !already_eliminated && lives <= 0;
+}

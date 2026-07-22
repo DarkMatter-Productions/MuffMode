@@ -8,6 +8,7 @@
 #include "muffmode/mm_freezetag.h"
 #include "muffmode/mm_ghost.h"
 #include "muffmode/mm_horde.h"
+#include "muffmode/mm_horde_ai_rules.h"
 #include "muffmode/mm_lms.h"
 #include "muffmode/mm_menu.h"
 #include "muffmode/mm_parse.h"
@@ -769,7 +770,8 @@ void ClientSpawn(gentity_t *ent) {
 	MM_FreezeTag_ClearClient(ent);
 
 	if (GT(GT_HORDE) && level.match_state == matchst_t::MATCH_IN_PROGRESS &&
-		level.round_state == roundst_t::ROUND_IN_PROGRESS && !ent->client->eliminated)
+		MM_Horde_ShouldEliminateMidWaveSpawn(level.round_state == roundst_t::ROUND_IN_PROGRESS,
+			ent->client->eliminated, ent->client->pers.lives))
 		ClientSetEliminated(ent);
 	bool eliminated = ent->client->eliminated;
 	int lives = 0;

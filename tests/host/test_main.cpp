@@ -588,6 +588,13 @@ MM_TEST(horde_adaptive_spawn_mult_bounds_and_direction) {
 	MM_CHECK_EQ(MM_Horde_ComputeAdaptiveBudgetMult(1.f), 1.f);
 }
 
+MM_TEST(horde_midwave_spawns_preserve_remaining_lives) {
+	MM_CHECK(MM_Horde_ShouldEliminateMidWaveSpawn(true, false, 0));
+	MM_CHECK_FALSE(MM_Horde_ShouldEliminateMidWaveSpawn(true, false, 1));
+	MM_CHECK_FALSE(MM_Horde_ShouldEliminateMidWaveSpawn(true, true, 1));
+	MM_CHECK_FALSE(MM_Horde_ShouldEliminateMidWaveSpawn(false, false, 0));
+}
+
 MM_TEST(horde_late_escalation_budget_factor) {
 	MM_CHECK_EQ(MM_Horde_EffectiveLateWaveFactor(false, 0.35f, 0.6f), 0.35f);
 	MM_CHECK_EQ(MM_Horde_EffectiveLateWaveFactor(true, 0.35f, 0.6f), 0.6f);
