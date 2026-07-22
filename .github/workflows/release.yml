@@ -44,7 +44,7 @@ on:
         type: boolean
         default: false
       require_copilot:
-        description: Fail instead of using the deterministic English README fallback. Localized README translations always require Copilot.
+        description: Fail if Copilot is unavailable instead of falling back to a deterministic English-only README (skips localized translations when unchecked).
         required: true
         type: boolean
         default: false
@@ -81,8 +81,11 @@ jobs:
           elseif (-not [string]::IsNullOrWhiteSpace($env:LEGACY_RELEASE_BOT_TOKEN)) {
             Write-Host "Copilot auth: RELEASE_BOT_TOKEN repository secret (legacy fallback)."
           }
+          elseif ("${{ inputs.require_copilot }}" -eq "true") {
+            throw "Set COPILOT_GITHUB_TOKEN (fine-grained user PAT with Copilot Requests) so localized README files can be translated, or leave require_copilot unchecked to skip localized READMEs."
+          }
           else {
-            throw "Set COPILOT_GITHUB_TOKEN (fine-grained user PAT with Copilot Requests) so localized README files can be translated."
+            Write-Warning "No Copilot token configured; this release will skip localized README translations (English README only)."
           }
 
           if ([string]::IsNullOrWhiteSpace($env:DISCORD_RELEASE_WEBHOOK)) {
@@ -207,8 +210,11 @@ jobs:
             "COPILOT_GITHUB_TOKEN=$env:SECRET_LEGACY_TOKEN" >> $env:GITHUB_ENV
             Write-Host "Copilot auth: RELEASE_BOT_TOKEN repository secret (legacy fallback)."
           }
+          elseif ("${{ inputs.require_copilot }}" -eq "true") {
+            throw "Set COPILOT_GITHUB_TOKEN (fine-grained user PAT with Copilot Requests) so localized README files can be translated, or leave require_copilot unchecked to skip localized READMEs."
+          }
           else {
-            throw "Set COPILOT_GITHUB_TOKEN (fine-grained user PAT with Copilot Requests) so localized README files can be translated."
+            Write-Warning "No Copilot token configured; this release will skip localized README translations (English README only)."
           }
 
       - name: Setup Node.js

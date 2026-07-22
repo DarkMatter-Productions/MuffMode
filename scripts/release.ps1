@@ -2001,8 +2001,16 @@ function New-TranslatedHtmlReadmes {
         return @()
     }
 
-    if (-not (Test-ReleaseCopilotUserToken)) {
-        throw "COPILOT_GITHUB_TOKEN is required for localized README translation. Localized README files must be real translations, not English copies."
+    if ((-not (Test-GitHubCopilotCommand)) -or (-not (Test-ReleaseCopilotUserToken))) {
+        if ($RequireCopilot) {
+            if (-not (Test-GitHubCopilotCommand)) {
+                throw "GitHub Copilot CLI is required because -RequireCopilot was supplied, but 'copilot' was not found on PATH."
+            }
+            throw "COPILOT_GITHUB_TOKEN is required because -RequireCopilot was supplied, but no user Copilot token is configured. Localized README files must be real translations, not English copies."
+        }
+
+        Write-Warning "GitHub Copilot is not configured; skipping localized README translations (English README only)."
+        return @()
     }
 
     Assert-GitHubCopilot
