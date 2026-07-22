@@ -28,10 +28,6 @@ bool FollowFirstPersonEnabled(const gentity_t *ent) {
 	return ent && ent->client && ent->client->sess.pc.follow_first_person;
 }
 
-const char *FollowViewModeName(const gentity_t *ent) {
-	return FollowFirstPersonEnabled(ent) ? "first-person" : "third-person";
-}
-
 static void ClearFollowEntityPresentation(gentity_t *ent) {
 	if (!ent)
 		return;
@@ -48,17 +44,8 @@ static void PrintFollowTargetChange(gentity_t *ent, gentity_t *previous_target, 
 	if (!ent || !ent->client || previous_target == target)
 		return;
 
-	if (!target) {
-		if (previous_target)
-			gi.LocClient_Print(ent, PRINT_HIGH, "Stopped following.\n");
-		return;
-	}
-
-	if (!target->client)
-		return;
-
-	gi.LocClient_Print(ent, PRINT_HIGH, "Following {} ({})\n",
-		target->client->resp.netname, FollowViewModeName(ent));
+	if (!target && previous_target)
+		gi.LocClient_Print(ent, PRINT_HIGH, "Stopped following.\n");
 }
 
 static void PrintNoFollowTargets(gentity_t *ent) {

@@ -378,7 +378,7 @@ void MM_InitStatusbar()
 		if (GT(GT_LMS))
 			sb.ifstat(STAT_CENTER_LINE).xv(0).yt(26).stat_string(STAT_CENTER_LINE).endifstat();
 		sb.ifstat(STAT_FOLLOW).xv(0).yb(-68).string("FOLLOWING").xv(80).stat_string(STAT_FOLLOW).endifstat();
-		sb.ifstat(STAT_SPECTATOR).xv(0).yb(-58).stat_string(STAT_SPECTATOR).endifstat();
+		sb.ifstat(STAT_SPECTATOR).xv(0).yb(-58).stat_string2(STAT_SPECTATOR).endifstat();
 
 		sb.ifstat(STAT_CROSSHAIR_ID_VIEW).xv(122).yb(-128).stat_pname(STAT_CROSSHAIR_ID_VIEW).endifstat();
 		sb.ifstat(STAT_CROSSHAIR_ID_VIEW_COLOR).xv(156).yb(-118).pic(STAT_CROSSHAIR_ID_VIEW_COLOR).endifstat();

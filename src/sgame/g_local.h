@@ -11,7 +11,7 @@
 constexpr const char *GAMEVERSION = "baseq2";
 
 constexpr const char *GAMEMOD_TITLE = "Muff Mode";
-constexpr const char *GAMEMOD_VERSION = "0.60.11";
+constexpr const char *GAMEMOD_VERSION = "0.60.12";
 
 //==================================================================
 
@@ -3226,7 +3226,6 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
 //
 bool FollowTargetAllowed(gentity_t *viewer, gentity_t *target);
 bool FollowFirstPersonEnabled(const gentity_t *ent);
-const char *FollowViewModeName(const gentity_t *ent);
 void ToggleFollowViewMode(gentity_t *ent);
 void SyncFollowPresentation(gentity_t *ent);
 void SetFollowTarget(gentity_t *ent, gentity_t *target);
