@@ -89,6 +89,12 @@ Minimum crash triage record:
 
 Add a regression seed or host test before closing a crash fix whenever the failure can be reduced.
 
+### Kex `bad allocation` / `muffmode_alloc.log`
+
+The engine dialog `Standard exception caught in kexPlatformApp::Main: bad allocation` is caught inside Kex, so it often produces no `CRASHLOG.TXT` or minidump. MuffMode's `mm_alloc_guard` logs oversized or failed game-DLL `operator new` calls to `muffmode_alloc.log` (and mirrors lines to DebugView via `OutputDebugStringA`).
+
+Look for the log next to the loaded `game_x64.dll`, then `%TEMP%\muffmode_alloc.log`, then the process working directory. A healthy deploy writes a `LOADED` breadcrumb as soon as the DLL loads. If you see the Kex dialog with a `LOADED` line but no `FAILED`/`HUGE` line, the failing allocation was almost certainly outside the game DLL (engine heap / another module).
+
 ## Performance Profiling
 
 Follow [docs-dev/robustness/profiling-guide.md](../docs-dev/robustness/profiling-guide.md).
