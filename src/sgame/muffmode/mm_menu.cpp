@@ -815,12 +815,12 @@ constexpr int kTeamsPlayerSettings = 14;
 constexpr int kTeamsAdmin = 15;
 
 constexpr int kFreeJoin = 5;
-constexpr int kFreeFollow = 8;
-constexpr int kFreeReadyUp = 9;
-constexpr int kFreePlayerStats = 12;
-constexpr int kFreeCallVote = 13;
-constexpr int kFreePlayerSettings = 14;
-constexpr int kFreeAdmin = 15;
+constexpr int kFreeFollow = 7;
+constexpr int kFreeReadyUp = 8;
+constexpr int kFreePlayerStats = 11;
+constexpr int kFreeCallVote = 12;
+constexpr int kFreePlayerSettings = 13;
+constexpr int kFreeAdmin = 14;
 
 constexpr int kGameMod = 16;
 constexpr int kNotice = 17;
@@ -853,7 +853,6 @@ const menu_t kFreeMenuTemplate[] = {
 	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_LEFT, nullptr },
 	{ "Join Game", MENU_ALIGN_LEFT, JoinFree },
-	{ "", MENU_ALIGN_LEFT, nullptr },
 	{ "Spectate", MENU_ALIGN_LEFT, JoinSpectator },
 	{ "Follow Player", MENU_ALIGN_LEFT, menu::info::OpenFollowCamera },
 	{ "", MENU_ALIGN_LEFT, nullptr },  // Ready Up (set dynamically)
@@ -862,6 +861,7 @@ const menu_t kFreeMenuTemplate[] = {
 	{ "Player Stats", MENU_ALIGN_LEFT, menu::stats::Open },
 	{ "Call a Vote", MENU_ALIGN_LEFT, ::G_Menu_CallVote },
 	{ "Player Settings", MENU_ALIGN_LEFT, menu::player_settings::Open },
+	{ "", MENU_ALIGN_LEFT, nullptr },
 	{ "", MENU_ALIGN_LEFT, nullptr },
 	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_CENTER, nullptr }
