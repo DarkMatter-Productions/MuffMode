@@ -2203,13 +2203,8 @@ function Assert-ReleasePackageContents {
         throw "Release package root does not exist: $PackageRoot"
     }
 
-    foreach ($requiredFile in @(
+    $requiredFiles = @(
         "README.html",
-        "README.de.html",
-        "README.pl.html",
-        "README.fr.html",
-        "README.hu.html",
-        "README.bg.html",
         "README.md",
         "CHANGELOG.md",
         "LICENSE",
@@ -2259,7 +2254,19 @@ function Assert-ReleasePackageContents {
         "rerelease\maps\vd6dm2.ent",
         "rerelease\maps\ven_dm2.ent",
         "rerelease\maps\ztn2dm5.ent"
-    )) {
+    )
+
+    if ((Test-GitHubCopilotCommand) -and (Test-ReleaseCopilotUserToken)) {
+        $requiredFiles += @(
+            "README.de.html",
+            "README.pl.html",
+            "README.fr.html",
+            "README.hu.html",
+            "README.bg.html"
+        )
+    }
+
+    foreach ($requiredFile in $requiredFiles) {
         $path = Join-Path $PackageRoot $requiredFile
         if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
             throw "Release package is missing required file: $requiredFile"
