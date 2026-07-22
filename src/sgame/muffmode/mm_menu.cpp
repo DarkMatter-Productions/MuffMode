@@ -805,8 +805,8 @@ constexpr int kGametype = 1;
 constexpr int kLevel = 2;
 constexpr int kMatch = 3;
 
-constexpr int kTeamsJoinRed = 5;
-constexpr int kTeamsJoinBlue = 6;
+constexpr int kTeamsJoinRed = 4;
+constexpr int kTeamsJoinBlue = 5;
 constexpr int kTeamsFollow = 8;
 constexpr int kTeamsReadyUp = 9;
 constexpr int kTeamsPlayerStats = 12;
@@ -814,7 +814,7 @@ constexpr int kTeamsCallVote = 13;
 constexpr int kTeamsPlayerSettings = 14;
 constexpr int kTeamsAdmin = 15;
 
-constexpr int kFreeJoin = 5;
+constexpr int kFreeJoin = 4;
 constexpr int kFreeFollow = 7;
 constexpr int kFreeReadyUp = 8;
 constexpr int kFreePlayerStats = 11;
@@ -830,9 +830,9 @@ const menu_t kTeamsMenuTemplate[] = {
 	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_CENTER, nullptr },
-	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "$g_pc_join_red_team", MENU_ALIGN_LEFT, JoinRed },
 	{ "$g_pc_join_blue_team", MENU_ALIGN_LEFT, JoinBlue },
+	{ "", MENU_ALIGN_LEFT, nullptr },
 	{ "Spectate", MENU_ALIGN_LEFT, JoinSpectator },
 	{ "Follow Player", MENU_ALIGN_LEFT, menu::info::OpenFollowCamera },
 	{ "", MENU_ALIGN_LEFT, nullptr },  // Ready Up (set dynamically)
@@ -851,8 +851,8 @@ const menu_t kFreeMenuTemplate[] = {
 	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_CENTER, nullptr },
-	{ "", MENU_ALIGN_LEFT, nullptr },
 	{ "Join Game", MENU_ALIGN_LEFT, JoinFree },
+	{ "", MENU_ALIGN_LEFT, nullptr },
 	{ "Spectate", MENU_ALIGN_LEFT, JoinSpectator },
 	{ "Follow Player", MENU_ALIGN_LEFT, menu::info::OpenFollowCamera },
 	{ "", MENU_ALIGN_LEFT, nullptr },  // Ready Up (set dynamically)
