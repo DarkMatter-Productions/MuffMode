@@ -59,11 +59,6 @@ static void PrintFollowTargetChange(gentity_t *ent, gentity_t *previous_target, 
 
 	gi.LocClient_Print(ent, PRINT_HIGH, "Following {} ({})\n",
 		target->client->resp.netname, FollowViewModeName(ent));
-
-	if (!previous_target) {
-		gi.LocClient_Print(ent, PRINT_HIGH,
-			"Use +use for view, jump/crouch or invnext/invprev for targets, attack to stop.\n");
-	}
 }
 
 static void PrintNoFollowTargets(gentity_t *ent) {
