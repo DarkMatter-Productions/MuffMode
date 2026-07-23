@@ -3,6 +3,7 @@
 // Entity physics and movement integration.
 
 #include "g_local.h"
+#include "muffmode/mm_arena.h"
 
 /*
 
@@ -119,8 +120,117 @@ G_Impact
 Two entities have touched, so run their touch functions
 ==================
 */
+static void G_InheritOwnerArena(gentity_t *ent) {
+	if (notGT(GT_ARENA) || !ent || ent->arena != 0 || !ent->owner)
+		return;
+
+	const int owner_arena = MM_Arena_Id(ent->owner);
+	if (owner_arena > 0)
+		ent->arena = owner_arena;
+}
+
+static bool G_IsArenaTransientOrdnance(const gentity_t *ent) {
+	if (ent->svflags & SVF_PROJECTILE)
+		return true;
+
+	if (ent->owner && ent->owner->client &&
+		ent->owner->client->grapple_ent == ent)
+		return true;
+
+	if (ent->item && ent->spawnflags.has(SPAWNFLAG_ITEM_DROPPED))
+		return true;
+
+	if (!ent->classname)
+		return false;
+
+	return !strcmp(ent->classname, "nuke") ||
+		!strcmp(ent->classname, "prox_mine") ||
+		!strcmp(ent->classname, "prox_field") ||
+		!strcmp(ent->classname, "tesla_mine") ||
+		!strcmp(ent->classname, "tesla trigger") ||
+		!strcmp(ent->classname, "food_cube_trap") ||
+		!strcmp(ent->classname, "pain daemon");
+}
+
+static void G_ShiftArenaPauseClock(gtime_t &clock, bool preserve_elapsed) {
+	if (!clock || clock == HOLD_FOREVER)
+		return;
+	if (!preserve_elapsed && clock <= level.time)
+		return;
+
+	const int64_t frame_ms = static_cast<int64_t>(gi.frame_time_ms);
+	if (frame_ms <= 0)
+		return;
+	const int64_t clock_ms = clock.milliseconds();
+	if (clock_ms > std::numeric_limits<int64_t>::max() - frame_ms)
+		clock = HOLD_FOREVER;
+	else
+		clock += gtime_t::from_ms(frame_ms);
+}
+
+static bool G_PauseArenaEntity(gentity_t *ent) {
+	if (notGT(GT_ARENA) || !ent)
+		return false;
+
+	const int arena_id = MM_Arena_Id(ent);
+	if (arena_id <= 0 || !MM_Arena_IsPaused(arena_id))
+		return false;
+
+	// Local RA3 timeouts freeze only this room. nextthink and animation clocks
+	// are always absolute; ordnance timestamps may be elapsed-time baselines,
+	// while generic entity debounce fields only need extending when pending.
+	const bool ordnance = G_IsArenaTransientOrdnance(ent);
+	G_ShiftArenaPauseClock(ent->nextthink, true);
+	G_ShiftArenaPauseClock(ent->timestamp, ordnance);
+	G_ShiftArenaPauseClock(ent->last_move_time, ordnance);
+	G_ShiftArenaPauseClock(ent->touch_debounce_time, false);
+	G_ShiftArenaPauseClock(ent->pain_debounce_time, false);
+	G_ShiftArenaPauseClock(ent->damage_debounce_time, false);
+	G_ShiftArenaPauseClock(ent->bmodel_anim.next_tick, true);
+	return true;
+}
+
+static bool G_HandleArenaOrdnanceState(gentity_t *ent) {
+	if (notGT(GT_ARENA) || !G_IsArenaTransientOrdnance(ent))
+		return false;
+
+	const int arena_id = MM_Arena_Id(ent);
+	if (arena_id <= 0)
+		return false;
+	if (MM_Arena_OrdnanceActive(arena_id))
+		return false;
+
+	const bool has_ordnance_children = ent->classname &&
+		(!strcmp(ent->classname, "prox_mine") ||
+		 !strcmp(ent->classname, "tesla_mine"));
+	if (has_ordnance_children) {
+		for (gentity_t *child = ent->teamchain; child; ) {
+			gentity_t *next = child->teamchain;
+			G_FreeEntity(child);
+			child = next;
+		}
+	}
+
+	if (ent->owner && ent->owner->client &&
+		ent->owner->client->grapple_ent == ent)
+		Weapon_Grapple_DoReset(ent->owner->client);
+	else
+		G_FreeEntity(ent);
+	return true;
+}
+
 void G_Impact(gentity_t *e1, const trace_t &trace) {
 	gentity_t *e2 = trace.ent;
+
+	// Persistent ordnance can deliberately clear owner after arming. Snapshot
+	// its arena while the ownership chain is still available so mines, teslas,
+	// traps, and their child fields remain isolated for their full lifetime.
+	G_InheritOwnerArena(e1);
+
+	// [MuffMode] Projectiles and touch callbacks are scoped to their logical
+	// arena. MM_Arena_CanInteract resolves projectile owner chains.
+	if (GT(GT_ARENA) && !MM_Arena_CanInteract(e1, e2))
+		return;
 
 	if (e1->touch && (e1->solid != SOLID_NOT || (e1->flags & FL_ALWAYS_TOUCH)))
 		e1->touch(e1, e2, trace, false);
@@ -190,11 +300,49 @@ G_PushEntity
 Does not change the entities velocity at all
 ============
 */
+static trace_t G_ArenaProjectileTrace(gentity_t *ent, const vec3_t &start,
+	const vec3_t &end) {
+	trace_t trace = gi.trace(start, ent->mins, ent->maxs, end, ent, G_GetClipMask(ent));
+
+	const bool projectile = (ent->svflags & SVF_PROJECTILE) ||
+		(ent->clipmask & CONTENTS_PROJECTILECLIP);
+	if (notGT(GT_ARENA) || !projectile)
+		return trace;
+
+	struct skipped_entity_t {
+		gentity_t *ent;
+		int32_t spawn_count;
+	};
+	constexpr size_t MAX_ARENA_TRACE_SKIPS = 64;
+	skipped_entity_t skipped[MAX_ARENA_TRACE_SKIPS];
+	size_t skipped_count = 0;
+
+	// Engine traces can ignore only one entity. Temporarily unlink foreign
+	// arena blockers so rockets pass through them instead of exploding or
+	// stopping before a legitimate target in their owner's arena.
+	while (trace.ent && trace.ent != world &&
+		!MM_Arena_CanInteract(ent, trace.ent) &&
+		skipped_count < MAX_ARENA_TRACE_SKIPS) {
+		skipped[skipped_count++] = { trace.ent, trace.ent->spawn_count };
+		gi.unlinkentity(trace.ent);
+		trace = gi.trace(start, ent->mins, ent->maxs, end, ent, G_GetClipMask(ent));
+	}
+
+	for (size_t i = skipped_count; i > 0; --i) {
+		const skipped_entity_t &entry = skipped[i - 1];
+		if (entry.ent->inuse && entry.ent->spawn_count == entry.spawn_count)
+			gi.linkentity(entry.ent);
+	}
+
+	return trace;
+}
+
 static trace_t G_PushEntity(gentity_t *ent, const vec3_t &push) {
 	vec3_t start = ent->s.origin;
 	vec3_t end = start + push;
 
-	trace_t trace = gi.trace(start, ent->mins, ent->maxs, end, ent, G_GetClipMask(ent));
+	G_InheritOwnerArena(ent);
+	trace_t trace = G_ArenaProjectileTrace(ent, start, end);
 
 	ent->s.origin = trace.endpos + (trace.plane.normal * .5f);
 	gi.linkentity(ent);
@@ -300,6 +448,9 @@ static bool G_Push(gentity_t *pusher, vec3_t &move, vec3_t &amove) {
 
 		if (!check->linked)
 			continue; // not linked in anywhere
+
+		if (GT(GT_ARENA) && !MM_Arena_CanInteract(pusher, check))
+			continue;
 
 		// if the entity is standing on the pusher, it will definitely be moved
 		if (check->groundentity != pusher) {
@@ -1014,6 +1165,12 @@ void G_RunEntity(gentity_t *ent) {
 	trace_t trace;
 	vec3_t	previous_origin;
 	bool	has_previous_origin = false;
+
+	G_InheritOwnerArena(ent);
+	if (G_PauseArenaEntity(ent))
+		return;
+	if (G_HandleArenaOrdnanceState(ent))
+		return;
 
 	if (level.timeout_in_place)
 		return;

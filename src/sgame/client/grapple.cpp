@@ -2,6 +2,7 @@
 // Licensed under the GNU General Public License 2.0.
 // Grapple and off-hand hook weapon behavior.
 #include "g_local.h"
+#include "muffmode/mm_arena.h"
 #include "muffmode/mm_freezetag.h"
 
 namespace {
@@ -226,7 +227,8 @@ static bool Weapon_Grapple_FireHook(gentity_t *self, const vec3_t &start, const 
 	gi.linkentity(grapple);
 
 	tr = gi.traceline(self->s.origin, grapple->s.origin, grapple, grapple->clipmask);
-	if (tr.fraction < 1.0f) {
+	if (tr.fraction < 1.0f &&
+		(notGT(GT_ARENA) || MM_Arena_CanInteract(self, tr.ent))) {
 		grapple->s.origin = tr.endpos + (tr.plane.normal * 1.f);
 		grapple->touch(grapple, tr.ent, tr, false);
 		return false;

@@ -12,6 +12,7 @@ This folder contains the server config bundle shipped with Muff Mode. Use it as 
 | `gt-TDM.cfg` | Team Deathmatch preset. |
 | `gt-CTF.cfg` | Capture the Flag preset. |
 | `gt-CA.cfg` | Clan Arena preset. |
+| `gt-ARENA.cfg` | MuffMode-native multi-arena preset with per-room RA/CA/Red Rover/Practice support on validated RA2-authored maps. RA2 map assets are not included. |
 | `gt-FT.cfg` | Freeze Tag preset. |
 | `gt-STRIKE.cfg` | Capture Strike preset. |
 | `gt-REDROVER.cfg` | Red Rover preset. |
@@ -24,8 +25,12 @@ This folder contains the server config bundle shipped with Muff Mode. Use it as 
 1. Install Muff Mode into the outer `Quake 2` folder.
 2. Start Quake II Rerelease or your dedicated server.
 3. Open the console and run `exec server-base.cfg`.
-4. Run one gametype preset, for example `exec gt-FFA.cfg` or `exec gt-DUEL.cfg`.
+4. Run one gametype preset, for example `exec gt-FFA.cfg`, `exec gt-DUEL.cfg`, or `exec gt-ARENA.cfg`.
 5. Run `doctor` after editing configs to check for risky cvar combinations.
+
+Before using or making `arena` votable, install RA2-compatible maps you are
+licensed to host and configure an RA2-only `g_map_list` in `gt-ARENA.cfg`.
+Ordinary maps do not activate Arena.
 
 When `g_gametype_cfg` is `1`, Muff Mode automatically executes the matching `gt-[GAMETYPE].cfg` after later gametype changes by vote or admin command.
 

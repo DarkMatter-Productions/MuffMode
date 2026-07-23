@@ -331,9 +331,9 @@ static void Trap_UpdateState(gentity_t *danger) {
 	danger->sv.velocity = danger->velocity;
 
 	if (danger->owner != nullptr && danger->owner->client != nullptr) {
-		player_skinnum_t pl_skinnum;
-		pl_skinnum.skinnum = danger->owner->s.skinnum;
-		danger->sv.team = pl_skinnum.team_index;
+		// sv.team carries the engine-facing red/blue projection. Arena keeps
+		// persistent logical-team identity in the owning client's resp state.
+		danger->sv.team = danger->owner->sv.team;
 	}
 
 	if (danger->groundentity != nullptr) {

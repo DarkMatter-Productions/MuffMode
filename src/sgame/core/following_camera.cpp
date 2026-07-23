@@ -4,6 +4,7 @@
 
 #include "g_local.h"
 // [MuffMode] Join menu lives in muffmode/mm_menu
+#include "muffmode/mm_arena.h"
 #include "muffmode/mm_menu.h"
 #include "muffmode/mm_parse.h"
 #include "muffmode/mm_pconfig.h"
@@ -18,14 +19,21 @@ bool FollowTargetAllowed(gentity_t *viewer, gentity_t *target) {
 	if (!viewer || !viewer->client || !FollowTargetIsActive(target))
 		return false;
 
-	if (viewer->client->eliminated && viewer->client->sess.team != target->client->sess.team)
+	if (GT(GT_ARENA) && !MM_Arena_CanFollow(viewer, target))
+		return false;
+
+	// RA3's normal (non-competition) Rocket Arena lets eliminated fighters
+	// observe either side. Other elimination modes retain teammate-only follow.
+	if (viewer->client->eliminated && notGT(GT_ARENA) &&
+		viewer->client->sess.team != target->client->sess.team)
 		return false;
 
 	return true;
 }
 
 bool FollowFirstPersonEnabled(const gentity_t *ent) {
-	return ent && ent->client && ent->client->sess.pc.follow_first_person;
+	return ent && ent->client &&
+		(ent->client->sess.pc.follow_first_person || MM_Arena_ForceFirstPerson(ent));
 }
 
 static void ClearFollowEntityPresentation(gentity_t *ent) {
@@ -109,6 +117,12 @@ void SyncFollowPresentation(gentity_t *ent) {
 void ToggleFollowViewMode(gentity_t *ent) {
 	if (!ent || !ent->client)
 		return;
+
+	if (MM_Arena_ForceFirstPerson(ent)) {
+		gi.LocClient_Print(ent, PRINT_HIGH,
+			"Competition mode requires first-person follow.\n");
+		return;
+	}
 
 	const bool first_person = !ent->client->sess.pc.follow_first_person;
 	if (!MM_PConfigSetBool(ent, mm_pconfig_bool_setting_t::follow_first_person, first_person))

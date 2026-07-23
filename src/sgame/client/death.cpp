@@ -4,6 +4,7 @@
 #include "g_local.h"
 #include "monsters/m_player.h"
 #include "muffmode/mm_announcer.h"
+#include "muffmode/mm_arena.h"
 #include "muffmode/mm_captain.h"
 #include "muffmode/mm_freezetag.h"
 #include "muffmode/mm_freezetag_rules.h"
@@ -12,6 +13,21 @@
 #include "muffmode/mm_spawn_loadout.h"
 
 static bool ShouldShowRampageMessages();
+
+template<typename... Args>
+static void ClientObituaryBroadcast(gentity_t *scope, print_type_t level,
+	const char *base, Args &&...args)
+{
+	if (!GT(GT_ARENA)) {
+		gi.LocBroadcast_Print(level, base, std::forward<Args>(args)...);
+		return;
+	}
+
+	for (auto recipient : active_clients()) {
+		if (MM_Arena_ChatRecipient(scope, recipient, mm_arena_chat_scope_t::Arena))
+			gi.LocClient_Print(recipient, level, base, std::forward<Args>(args)...);
+	}
+}
 
 struct monster_name_t {
 	const char *classname;
@@ -185,7 +201,7 @@ static void ClientObituary(gentity_t *self, gentity_t *inflictor, gentity_t *att
 
 	// send generic/self
 	if (base) {
-		gi.LocBroadcast_Print(PRINT_MEDIUM, base, self->client->resp.netname);
+		ClientObituaryBroadcast(self, PRINT_MEDIUM, base, self->client->resp.netname);
 		self->enemy = nullptr;
 		return;
 	}
@@ -200,7 +216,8 @@ static void ClientObituary(gentity_t *self, gentity_t *inflictor, gentity_t *att
 		const char *monname = MonsterName(attacker->classname);
 
 		if (monname)
-			gi.LocBroadcast_Print(PRINT_MEDIUM, "{} was killed by a{} {}\n", self->client->resp.netname, IsVowel(monname[0]) ? "n" : "", monname);
+			ClientObituaryBroadcast(self, PRINT_MEDIUM, "{} was killed by a{} {}\n",
+				self->client->resp.netname, IsVowel(monname[0]) ? "n" : "", monname);
 		return;
 	}
 
@@ -322,7 +339,8 @@ static void ClientObituary(gentity_t *self, gentity_t *inflictor, gentity_t *att
 		break;
 	}
 
-	gi.LocBroadcast_Print(PRINT_MEDIUM, base, self->client->resp.netname, attacker->client->resp.netname);
+	ClientObituaryBroadcast(self, PRINT_MEDIUM, base,
+		self->client->resp.netname, attacker->client->resp.netname);
 
 	if (Teams()) {
 		// if at start and same team, clear.
@@ -358,14 +376,15 @@ static void ClientObituary(gentity_t *self, gentity_t *inflictor, gentity_t *att
 			}
 		}
 		if (!(attacker->svflags & SVF_BOT)) {
-			if (Teams() && OnSameTeam(self, attacker)) {
+			if ((Teams() || GT(GT_ARENA)) && OnSameTeam(self, attacker)) {
 				gi.LocClient_Print(attacker, PRINT_CENTER, "You fragged {}, your team mate :(", self->client->resp.netname);
 			} else {
 				if (level.match_state == matchst_t::MATCH_WARMUP_READYUP) {
 					BroadcastReadyReminderMessage();
 				} else if (attacker->client->resp.kill_count && !(attacker->client->resp.kill_count % 10)) {
 					if (ShouldShowRampageMessages()) {
-						gi.LocBroadcast_Print(PRINT_CENTER, "{} is on a rampage\nwith {} frags!", attacker->client->resp.netname, attacker->client->resp.kill_count);
+						ClientObituaryBroadcast(self, PRINT_CENTER, "{} is on a rampage\nwith {} frags!",
+							attacker->client->resp.netname, attacker->client->resp.kill_count);
 						MM_Announce(mm_announce_event_t::Rampage1, attacker);
 						attacker->client->pers.medal_time = level.time;
 						attacker->client->pers.medal_type = MEDAL_RAMPAGE;
@@ -373,7 +392,8 @@ static void ClientObituary(gentity_t *self, gentity_t *inflictor, gentity_t *att
 					}
 				} else if (kill_count >= 10) {
 					if (ShouldShowRampageMessages()) {
-						gi.LocBroadcast_Print(PRINT_CENTER, "{} put an end to {}'s\nrampage!", attacker->client->resp.netname, self->client->resp.netname);
+						ClientObituaryBroadcast(self, PRINT_CENTER, "{} put an end to {}'s\nrampage!",
+							attacker->client->resp.netname, self->client->resp.netname);
 					}
 				} else if (Teams() || level.match_state != matchst_t::MATCH_IN_PROGRESS) {
 					if (attacker->client->sess.pc.show_fragmessages)
@@ -394,7 +414,7 @@ static void ClientObituary(gentity_t *self, gentity_t *inflictor, gentity_t *att
 	if (base)
 		return;
 
-	gi.LocBroadcast_Print(PRINT_MEDIUM, "$g_mod_generic_died", self->client->resp.netname);
+	ClientObituaryBroadcast(self, PRINT_MEDIUM, "$g_mod_generic_died", self->client->resp.netname);
 }
 
 static void DropPlayerTimedPowerup(gentity_t *self, item_id_t item_id, gtime_t expiration_time, void (*expire_think)(gentity_t *), bool quad_hog_visuals = false) {
@@ -595,7 +615,11 @@ static bool ShouldShowRampageMessages() {
 }
 
 bool ClientArenaEliminationCorpse(const gclient_t *client) {
-	return client && client->eliminated && GTF(GTF_ARENA) && GTF(GTF_ELIMINATION);
+	if (!client)
+		return false;
+	if (GT(GT_ARENA))
+		return MM_Arena_IsEliminated(client);
+	return client->eliminated && GTF(GTF_ARENA) && GTF(GTF_ELIMINATION);
 }
 
 static void ClientFinalizeArenaEliminationCorpse(gentity_t *self) {
@@ -609,6 +633,12 @@ static void ClientFinalizeArenaEliminationCorpse(gentity_t *self) {
 	if (self->client->anim_end > 0)
 		CopyToBodyQue(self);
 
+	// The body queue owns the visible, collidable corpse. Keep the eliminated
+	// player entity as a hidden freecam anchor only.
+	self->solid = SOLID_NOT;
+	self->movetype = MOVETYPE_NONE;
+	self->mins = {};
+	self->maxs = {};
 	self->svflags |= SVF_NOCLIENT;
 	self->s.modelindex = 0;
 	self->s.modelindex2 = 0;
@@ -642,7 +672,10 @@ DIE(player_die) (gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 
 	self->maxs[2] = -8;
 
-	if (attacker && attacker->client && level.match_state == matchst_t::MATCH_IN_PROGRESS) {
+	if (GT(GT_ARENA)) {
+		// [MuffMode] Logical teams and scores are owned by the victim's
+		// arena. The singleton frag/team score path below must stay untouched.
+	} else if (attacker && attacker->client && level.match_state == matchst_t::MATCH_IN_PROGRESS) {
 		if (attacker == self || mod.friendly_fire) {
 			// LMS: resp.score is the round-win tally and the match-win quantity, so no
 			// kill/suicide frag adjustments may touch it - only round wins move the score.
@@ -747,7 +780,8 @@ DIE(player_die) (gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 		CTF_ScoreBonuses(self, inflictor, attacker);
 		// Arena loadout modes (Horde/LMS) don't scatter a full kit when the fighter is
 		// eliminated; they keep spectating until the next round/wave.
-		if (!((GT(GT_HORDE) || GT(GT_LMS)) && self->client->eliminated))
+		if (notGT(GT_ARENA) &&
+			!((GT(GT_HORDE) || GT(GT_LMS)) && self->client->eliminated))
 			TossClientItems(self);
 		Weapon_Grapple_DoReset(self->client);
 
@@ -777,7 +811,7 @@ DIE(player_die) (gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 	self->flags &= ~FL_POWER_ARMOR;
 
 	// clear inventory
-	if (Teams())
+	if (Teams() || GT(GT_ARENA))
 		self->client->pers.inventory.fill(0);
 
 	// if there's a sphere around, let it know the player died.
@@ -912,6 +946,11 @@ DIE(player_die) (gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 	self->client->ps.gunframe = 0;
 
 	self->deadflag = true;
+	MM_Arena_OnDeath(self, attacker);
+	if (GT(GT_ARENA) && MM_Arena_IsEliminated(self->client)) {
+		self->takedamage = false;
+		ClientFinalizeArenaEliminationCorpse(self);
+	}
 
 	gi.linkentity(self);
 }

@@ -5,6 +5,7 @@
 #include "debug_log.h"
 #include "entities/shadow_lights.h"
 #include "muffmode/mm_announcer.h"
+#include "muffmode/mm_arena.h"
 #include "muffmode/mm_captain.h"
 #include "muffmode/mm_combat_heatmap.h"
 #include "muffmode/mm_duel.h"
@@ -140,6 +141,31 @@ cvar_t *g_allow_voting;
 cvar_t *g_arena_dmg_armor;
 cvar_t *g_arena_start_armor;
 cvar_t *g_arena_start_health;
+cvar_t *g_arena_players_per_team;
+cvar_t *g_arena_rounds;
+cvar_t *g_arena_falling_damage;
+cvar_t *g_arena_weapon_mask;
+cvar_t *g_arena_ammo_shells;
+cvar_t *g_arena_ammo_bullets;
+cvar_t *g_arena_ammo_grenades;
+cvar_t *g_arena_ammo_rockets;
+cvar_t *g_arena_ammo_cells;
+cvar_t *g_arena_ammo_slugs;
+cvar_t *g_arena_config;
+cvar_t *g_arena_default_type;
+cvar_t *g_arena_health_protect;
+cvar_t *g_arena_armor_protect;
+cvar_t *g_arena_fast_switch;
+cvar_t *g_arena_grapple;
+cvar_t *g_arena_excessive;
+cvar_t *g_arena_competition;
+cvar_t *g_arena_unbalanced;
+cvar_t *g_arena_lock;
+cvar_t *g_arena_lock_count;
+cvar_t *g_arena_max_players;
+cvar_t *g_arena_vote_time;
+cvar_t *g_arena_timeouts;
+cvar_t *g_arena_rocket_speed;
 cvar_t *g_auto_ghost_max;
 cvar_t *g_auto_ghost_time;
 cvar_t *g_auto_ghost_timeout;
@@ -457,7 +483,8 @@ int _gt[] = {
 	/* GT_HORDE */ GTF_ROUNDS,
 	/* GT_BALL */ 0, // removed
 	/* GT_INSTAGIB */ GTF_FRAGS,
-	/* GT_NADEFEST */ GTF_FRAGS
+	/* GT_NADEFEST */ GTF_FRAGS,
+	/* GT_ARENA */ GTF_ARENA | GTF_MULTI_ARENA
 };
 
 // =================================================
@@ -786,6 +813,31 @@ static void InitGame() {
 	g_arena_dmg_armor = gi.cvar("g_arena_dmg_armor", "0", CVAR_NOFLAGS);
 	g_arena_start_armor = gi.cvar("g_arena_start_armor", "200", CVAR_NOFLAGS);
 	g_arena_start_health = gi.cvar("g_arena_start_health", "200", CVAR_NOFLAGS);
+	g_arena_players_per_team = gi.cvar("g_arena_players_per_team", "1", CVAR_LATCH);
+	g_arena_rounds = gi.cvar("g_arena_rounds", "1", CVAR_NOFLAGS);
+	g_arena_falling_damage = gi.cvar("g_arena_falling_damage", "1", CVAR_NOFLAGS);
+	g_arena_weapon_mask = gi.cvar("g_arena_weapon_mask", "255", CVAR_NOFLAGS);
+	g_arena_ammo_shells = gi.cvar("g_arena_ammo_shells", "100", CVAR_NOFLAGS);
+	g_arena_ammo_bullets = gi.cvar("g_arena_ammo_bullets", "200", CVAR_NOFLAGS);
+	g_arena_ammo_grenades = gi.cvar("g_arena_ammo_grenades", "20", CVAR_NOFLAGS);
+	g_arena_ammo_rockets = gi.cvar("g_arena_ammo_rockets", "50", CVAR_NOFLAGS);
+	g_arena_ammo_cells = gi.cvar("g_arena_ammo_cells", "150", CVAR_NOFLAGS);
+	g_arena_ammo_slugs = gi.cvar("g_arena_ammo_slugs", "50", CVAR_NOFLAGS);
+	g_arena_config = gi.cvar("g_arena_config", "arena.cfg", CVAR_LATCH);
+	g_arena_default_type = gi.cvar("g_arena_default_type", "rocket", CVAR_NOFLAGS);
+	g_arena_health_protect = gi.cvar("g_arena_health_protect", "1", CVAR_NOFLAGS);
+	g_arena_armor_protect = gi.cvar("g_arena_armor_protect", "2", CVAR_NOFLAGS);
+	g_arena_fast_switch = gi.cvar("g_arena_fast_switch", "1", CVAR_NOFLAGS);
+	g_arena_grapple = gi.cvar("g_arena_grapple", "0", CVAR_NOFLAGS);
+	g_arena_excessive = gi.cvar("g_arena_excessive", "0", CVAR_NOFLAGS);
+	g_arena_competition = gi.cvar("g_arena_competition", "0", CVAR_NOFLAGS);
+	g_arena_unbalanced = gi.cvar("g_arena_unbalanced", "0", CVAR_NOFLAGS);
+	g_arena_lock = gi.cvar("g_arena_lock", "0", CVAR_NOFLAGS);
+	g_arena_lock_count = gi.cvar("g_arena_lock_count", "6", CVAR_NOFLAGS);
+	g_arena_max_players = gi.cvar("g_arena_max_players", "0", CVAR_NOFLAGS);
+	g_arena_vote_time = gi.cvar("g_arena_vote_time", "30", CVAR_NOFLAGS);
+	g_arena_timeouts = gi.cvar("g_arena_timeouts", "3", CVAR_NOFLAGS);
+	g_arena_rocket_speed = gi.cvar("g_arena_rocket_speed", "900", CVAR_NOFLAGS);
 	g_auto_ghost_max = gi.cvar("g_auto_ghost_max", "3", CVAR_NOFLAGS);
 	g_auto_ghost_time = gi.cvar("g_auto_ghost_time", "120", CVAR_NOFLAGS);
 	g_auto_ghost_timeout = gi.cvar("g_auto_ghost_timeout", "0", CVAR_NOFLAGS);
@@ -1424,7 +1476,33 @@ void CalculateRanks() {
 
 	if (level.sorted_clients[0] >= 0) {
 		// set the rank value for all clients that are connected and not spectators
-		if (teams && notGT(GT_RR)) {
+		if (GT(GT_ARENA)) {
+			// Rank each fighter against only the fighters in the same room.
+			// The global sorted list is still maintained for generic client
+			// bookkeeping, but never defines a cross-arena winner.
+			for (gentity_t *player : active_clients()) {
+				gclient_t *client = player->client;
+				const int arena_id = MM_Arena_Id(player);
+				if (!MM_Arena_IsFighter(client) || arena_id <= 0) {
+					client->resp.rank = 0;
+					continue;
+				}
+				int ahead = 0;
+				int tied = 0;
+				for (gentity_t *other : active_clients()) {
+					if (!MM_Arena_IsFighter(other->client) ||
+						MM_Arena_Id(other) != arena_id)
+						continue;
+					if (other->client->resp.score > client->resp.score)
+						ahead++;
+					else if (other->client->resp.score == client->resp.score)
+						tied++;
+				}
+				client->resp.old_score = client->resp.score;
+				client->resp.rank = ahead |
+					(tied > 1 ? RANK_TIED_FLAG : 0);
+			}
+		} else if (teams && notGT(GT_RR)) {
 			// in team games, rank is just the order of the teams, 0=red, 1=blue, 2=tied
 			for (size_t i = 0; i < level.num_connected_clients; i++) {
 				cl = ClientFromSortedSlot(i);
@@ -1768,7 +1846,11 @@ static void CheckNeedPass() {
 }
 
 void QueueIntermission(const char *msg, bool boo, bool reset) {
-	if (level.intermission_queued || level.match_state < matchst_t::MATCH_IN_PROGRESS)
+	// [MuffMode] GT_ARENA deliberately keeps the singleton match state in
+	// warmup while its rooms run independent state machines. Its session
+	// timelimit/no-human exit still needs the shared intermission path.
+	if (level.intermission_queued ||
+		(notGT(GT_ARENA) && level.match_state < matchst_t::MATCH_IN_PROGRESS))
 		return;
 
 	level.tied_overtime_start = 0_sec;
@@ -1792,6 +1874,8 @@ void QueueIntermission(const char *msg, bool boo, bool reset) {
 }
 
 int GT_ScoreLimit() {
+	if (GT(GT_ARENA))
+		return 0; // each RA2/RA3 arena owns its own series limit
 	if (GT(GT_STRIKE))
 		return capturelimit->integer;
 	if (GTF(GTF_ROUNDS))
@@ -1837,6 +1921,13 @@ void CheckDMExitRules() {
 			level.intermission_queued = 0_ms;
 			Match_End();
 		}
+		return;
+	}
+
+	if (GT(GT_ARENA)) {
+		// [MuffMode] Multi-arena map exit handling cannot depend on the
+		// singleton match/round state below.
+		MM_Arena_CheckExitRules();
 		return;
 	}
 
@@ -2145,6 +2236,8 @@ void BeginIntermission(gentity_t *targ) {
 	// move all clients to the intermission point
 	for (auto ec : active_clients()) {
 		MoveClientToIntermission(ec);
+		if (GT(GT_ARENA))
+			continue;
 		if (Teams())
 			MM_Announce(level.team_scores[TEAM_RED] > level.team_scores[TEAM_BLUE] ? mm_announce_event_t::RedWins : mm_announce_event_t::BlueWins, ec);
 		else

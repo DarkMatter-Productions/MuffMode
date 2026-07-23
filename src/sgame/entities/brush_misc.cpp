@@ -98,6 +98,19 @@ void SP_func_wall(gentity_t *self) {
 	gi.linkentity(self);
 }
 
+// RA2 map compatibility: a visible brush that never blocks movement or
+// projectiles.
+void SP_func_illusionary(gentity_t *self) {
+	if (!MM_Arena_Active()) {
+		G_FreeEntity(self);
+		return;
+	}
+	self->movetype = MOVETYPE_NONE;
+	self->solid = SOLID_NOT;
+	gi.setmodel(self, self->model);
+	gi.linkentity(self);
+}
+
 // [Paril-KEX]
 /*QUAKED func_animation (0 .5 .8) ? START_ON x x x x x x x NOT_EASY NOT_MEDIUM NOT_HARD NOT_DM NOT_COOP
 Similar to func_wall, but triggering it will toggle animation

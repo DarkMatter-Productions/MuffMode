@@ -2,6 +2,7 @@
 // Licensed under the GNU General Public License 2.0.
 
 #include "g_local.h"
+#include "muffmode/mm_arena.h"
 #include "muffmode/mm_pconfig.h"
 #include "muffmode/mm_pconfig_rules.h"
 #include "muffmode/mm_skin.h"
@@ -20,6 +21,12 @@
 //=======================================================================
 
 namespace {
+
+enum class skin_relationship_t {
+	None,
+	Teammate,
+	Enemy
+};
 
 bool MM_IsClientEntity(gentity_t *ent) {
 	return ent && ent->inuse && ent->client && ent->client->pers.connected;
@@ -97,22 +104,40 @@ gentity_t *MM_EffectiveSkinOverrideViewer(gentity_t *viewer) {
 }
 
 bool MM_SkinOverridesEnabled() {
-	return Teams() || GT(GT_DUEL);
+	return Teams() || GT(GT_DUEL) || GT(GT_ARENA);
 }
 
-bool MM_IsSkinOverrideEnemy(gentity_t *perspective, gentity_t *target) {
+skin_relationship_t MM_SkinOverrideRelationship(gentity_t *perspective, gentity_t *target) {
 	if (!MM_IsClientEntity(perspective) || !MM_IsClientEntity(target))
-		return false;
+		return skin_relationship_t::None;
 
 	if (GT(GT_DUEL))
 		return perspective != target &&
 			ClientIsPlaying(perspective->client) &&
-			ClientIsPlaying(target->client);
+			ClientIsPlaying(target->client) ?
+			skin_relationship_t::Enemy : skin_relationship_t::None;
+
+	if (GT(GT_ARENA)) {
+		// Arena sides are a transient red/blue projection. Skin relationships
+		// follow the persistent logical team, and only exist between fighters
+		// in the same room; observers, coaches, queued players, and fighters in
+		// other arenas are unrelated for per-viewer overrides.
+		if (!MM_Arena_IsFighter(perspective->client) ||
+			!MM_Arena_IsFighter(target->client) ||
+			MM_Arena_Id(perspective) <= 0 ||
+			MM_Arena_Id(target) <= 0 ||
+			!MM_Arena_SameArena(perspective, target))
+			return skin_relationship_t::None;
+
+		return MM_Arena_SameTeam(perspective, target) ?
+			skin_relationship_t::Teammate : skin_relationship_t::Enemy;
+	}
 
 	if (!Teams())
-		return false;
+		return skin_relationship_t::None;
 
-	return perspective->client->sess.team != target->client->sess.team;
+	return perspective->client->sess.team == target->client->sess.team ?
+		skin_relationship_t::Teammate : skin_relationship_t::Enemy;
 }
 
 bool MM_ShouldOverrideTarget(gentity_t *viewer, gentity_t *target, const char **skin) {
@@ -131,14 +156,13 @@ bool MM_ShouldOverrideTarget(gentity_t *viewer, gentity_t *target, const char **
 	if (team_viewer == target || !ClientIsPlaying(target->client))
 		return false;
 
-	const bool is_enemy = MM_IsSkinOverrideEnemy(team_viewer, target);
-	const bool is_teammate = !is_enemy && Teams() &&
-		team_viewer->client->sess.team == target->client->sess.team;
-
-	if (!is_enemy && !is_teammate)
+	const skin_relationship_t relationship =
+		MM_SkinOverrideRelationship(team_viewer, target);
+	if (relationship == skin_relationship_t::None)
 		return false;
 
-	*skin = MM_StoredSkinOverride(viewer, is_enemy);
+	*skin = MM_StoredSkinOverride(viewer,
+		relationship == skin_relationship_t::Enemy);
 
 	return **skin != 0;
 }

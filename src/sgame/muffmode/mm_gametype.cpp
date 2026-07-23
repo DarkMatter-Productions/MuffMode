@@ -41,6 +41,7 @@ constexpr gametype_avail_t k_gametype_availability[GT_NUM_GAMETYPES] = {
 	/* GT_BALL */ gametype_avail_t::Removed,
 	/* GT_INSTAGIB */ gametype_avail_t::Enabled,
 	/* GT_NADEFEST */ gametype_avail_t::Enabled,
+	/* GT_ARENA */ gametype_avail_t::Enabled,
 };
 
 // Sessions running at or below the splitscreen player cap cannot safely
@@ -320,7 +321,9 @@ bool MM_IsGametypeEnabled(gametype_t gt)
 
 gametype_t MM_CurrentGametype()
 {
-	return (gametype_t)clamp(g_gametype ? g_gametype->integer : (int)GT_FFA, (int)GT_NONE, (int)GT_NUM_GAMETYPES - 1);
+	const int current = g_gametype ? MM_EFFECTIVE_GT : (int)GT_FFA;
+	return (gametype_t)clamp(current, (int)GT_NONE,
+		(int)GT_NUM_GAMETYPES - 1);
 }
 
 int MM_CurrentGametypeFlags()
@@ -475,6 +478,13 @@ void MM_ChangeGametype(gametype_t gt, bool force_cfg)
 			if (g_nadefest->integer)
 				gi.cvar_forceset("g_nadefest", "0");
 		}
+
+		// Rocket Arena's RA3-compatible preset enables self-armor damage. Other
+		// arena modes historically default to protected armor, so do not leak the
+		// Arena preset into CA/Strike/Red Rover when changing modes in-place.
+		if (old_gt == gametype_t::GT_ARENA && gt != gametype_t::GT_ARENA &&
+			g_arena_dmg_armor->integer)
+			gi.cvar_forceset("g_arena_dmg_armor", "0");
 
 		if (g_gametype_cfg->integer && deathmatch->integer)
 			muffmode::gametype::MM_ExecGametypeCfg(gt);
@@ -671,6 +681,10 @@ void MM_GTSetLongName()
 			s = gt_long_name[GT_INSTAGIB];
 		} else if (GT(GT_NADEFEST)) {
 			s = gt_long_name[GT_NADEFEST];
+		} else if (GT_RAW(GT_ARENA)) {
+			// Individual arenas own their mutators; global modification cvars
+			// must not rename the whole multi-arena session.
+			s = MM_Arena_Active() ? gt_long_name[GT_ARENA] : "Rocket Arena (inactive)";
 		} else if (GT(GT_CTF)) {
 			if (g_instagib->integer) {
 				s = "Insta-CTF";

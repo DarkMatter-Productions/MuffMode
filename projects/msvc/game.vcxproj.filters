@@ -181,6 +181,12 @@
     <ClInclude Include="..\..\src\sgame\muffmode\mm_announcer_rules.h">
       <Filter>sgame\muffmode</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_arena.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_arena_rules.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\src\sgame\muffmode\mm_debug.h">
       <Filter>sgame\muffmode</Filter>
     </ClInclude>
@@ -194,6 +200,12 @@
       <Filter>sgame\muffmode</Filter>
     </ClInclude>
     <ClInclude Include="..\..\src\sgame\muffmode\mm_captain.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_chat.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_scoring.h">
       <Filter>sgame\muffmode</Filter>
     </ClInclude>
     <ClInclude Include="..\..\src\sgame\muffmode\mm_ghost.h">
@@ -579,6 +591,12 @@
     <ClCompile Include="..\..\src\sgame\muffmode\mm_captain.cpp">
       <Filter>sgame\muffmode</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_chat.cpp">
+      <Filter>sgame\muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_scoring.cpp">
+      <Filter>sgame\muffmode</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\src\sgame\muffmode\mm_combat_heatmap.cpp">
       <Filter>sgame\muffmode</Filter>
     </ClCompile>
@@ -628,6 +646,9 @@
       <Filter>sgame\muffmode</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\sgame\muffmode\mm_announcer.cpp">
+      <Filter>sgame\muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_arena.cpp">
       <Filter>sgame\muffmode</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\sgame\muffmode\mm_gametype.cpp">

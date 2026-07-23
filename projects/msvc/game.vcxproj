@@ -171,7 +171,11 @@
     <ClInclude Include="..\..\src\sgame\muffmode\mm_admin.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_announcer.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_announcer_rules.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_arena.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_arena_rules.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_captain.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_chat.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_scoring.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_command_contracts.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_hud_stat_contracts.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_combat_heatmap.h" />
@@ -302,7 +306,10 @@
     <ClCompile Include="..\..\src\sgame\muffmode\mm_admin.cpp" />
     <ClCompile Include="..\..\src\sgame\muffmode\mm_alloc_guard.cpp" />
     <ClCompile Include="..\..\src\sgame\muffmode\mm_announcer.cpp" />
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_arena.cpp" />
     <ClCompile Include="..\..\src\sgame\muffmode\mm_captain.cpp" />
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_chat.cpp" />
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_scoring.cpp" />
     <ClCompile Include="..\..\src\sgame\muffmode\mm_combat_heatmap.cpp" />
     <ClCompile Include="..\..\src\sgame\muffmode\mm_debug.cpp" />
     <ClCompile Include="..\..\src\sgame\muffmode\mm_duel.cpp" />

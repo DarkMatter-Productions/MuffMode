@@ -3,10 +3,12 @@
 // Damage, death and combat rule helpers.
 
 #include "g_local.h"
+#include "muffmode/mm_arena.h"
 #include "muffmode/mm_combat_heatmap.h"
 #include "muffmode/mm_freezetag.h"
 #include "muffmode/mm_horde.h"
 #include "muffmode/mm_horde_ai_rules.h"
+#include "muffmode/mm_scoring.h"
 
 /*
 ============
@@ -19,6 +21,9 @@ explosions and melee attacks.
 bool CanDamage(gentity_t *targ, gentity_t *inflictor) {
 	vec3_t	dest;
 	trace_t trace;
+
+	if (GT(GT_ARENA) && !MM_Arena_CanInteract(targ, inflictor))
+		return false;
 
 	// bmodels need special checking because their origin is 0,0,0
 	vec3_t inflictor_center;
@@ -459,6 +464,9 @@ bool OnSameTeam(gentity_t *ent1, gentity_t *ent2) {
 	else if (ent1 == ent2)
 		return false;
 
+	if (GT(GT_ARENA))
+		return MM_Arena_SameTeam(ent1, ent2);
+
 	if (!ent1->client || !ent2->client)
 		return false;
 
@@ -482,6 +490,12 @@ bool OnSameTeam(gentity_t *ent1, gentity_t *ent2) {
 // check if the two entities are on a team and that
 // they wouldn't damage each other
 bool CheckTeamDamage(gentity_t *targ, gentity_t *attacker) {
+	// [MuffMode] Arena weapons must acquire same-side targets independently
+	// of the global friendly-fire cvar. Per-room health/armor protection is
+	// applied in T_Damage while preserving the configured knockback.
+	if (GT(GT_ARENA))
+		return false;
+
 	// always damage teammates if friendly fire is enabled
 	if (g_friendly_fire->integer)
 		return false;
@@ -510,6 +524,7 @@ void T_Damage(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, const 
 	int			asave = 0, psave = 0;
 	int			te_sparks;
 	bool		sphere_notified;
+	bool		arena_nonlethal_hit = false;
 
 	if (!targ->takedamage)
 		return;
@@ -517,7 +532,17 @@ void T_Damage(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, const 
 	if (!attacker)
 		attacker = world;
 
-	if ((g_instagib->integer || GT(GT_INSTAGIB)) && attacker->client && targ->client) {
+	// [MuffMode] Reject cross-arena damage before knockback, hit statistics,
+	// armor consumption, effects, and health changes. Practice arenas may
+	// instead zero damage while retaining knockback.
+	if (GT(GT_ARENA) &&
+		!MM_Arena_FilterDamage(targ, attacker, damage, knockback))
+		return;
+	if (GT(GT_ARENA))
+		arena_nonlethal_hit = damage <= 0;
+
+	if (!arena_nonlethal_hit && notGT(GT_ARENA) &&
+		(g_instagib->integer || GT(GT_INSTAGIB)) && attacker->client && targ->client) {
 		// [Kex] always kill no matter what on instagib
 		damage = 9999;
 	}
@@ -532,7 +557,7 @@ void T_Damage(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, const 
 			mod.friendly_fire = true;
 
 			// if we're not a nuke & friendly fire is disabled, just kill the damage
-			if (!g_friendly_fire->integer && (mod.id != MOD_NUKE)) {
+			if (notGT(GT_ARENA) && !g_friendly_fire->integer && (mod.id != MOD_NUKE)) {
 				damage = 0;
 			}
 		}
@@ -557,6 +582,10 @@ void T_Damage(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, const 
 		damage = MM_Horde_ScaleOutgoingDamage(damage, attacker->monsterinfo.champion_damage_scale);
 
 	client = targ->client;
+	std::array<int32_t, IT_TOTAL> arena_inventory_before{};
+	const bool arena_inventory_snapshot = GT(GT_ARENA) && client;
+	if (arena_inventory_snapshot)
+		arena_inventory_before = client->pers.inventory;
 
 	// PMM - defender sphere takes half damage
 	if (damage && (client) && (client->owned_sphere) && (client->owned_sphere->spawnflags == SF_SPHERE_DEFENDER)) {
@@ -581,7 +610,7 @@ void T_Damage(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, const 
 	damage = Tech_ApplyPowerAmp(attacker, damage);
 	damage = MM_Horde_ModifyDamage(targ, attacker, damage, static_cast<int>(mod.id));
 
-	if (RS(RS_Q3A)) {
+	if (RS(RS_Q3A) && !arena_nonlethal_hit) {
 		knockback = damage;
 		if (knockback > 200)
 			knockback = 200;
@@ -650,7 +679,7 @@ void T_Damage(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, const 
 	save = 0;
 
 	if (!(dflags & DAMAGE_NO_PROTECTION)) {
-		if (IsCombatDisabled()) {
+		if (notGT(GT_ARENA) && IsCombatDisabled()) {
 			take = 0;
 			save = damage;
 		}
@@ -687,12 +716,15 @@ void T_Damage(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, const 
 	}
 
 	// check for getting out of self damage
-	if (targ == attacker && deathmatch->integer && g_dm_no_self_damage->integer) {
+	if (targ == attacker && deathmatch->integer && notGT(GT_ARENA) &&
+		g_dm_no_self_damage->integer) {
 		take = 0;
 		save = damage;
 	}
 
-	if (g_vampiric_damage->integer && targ->health > 0 && attacker != targ && !OnSameTeam(targ, attacker) && take > 0) {
+	if (notGT(GT_ARENA) && g_vampiric_damage->integer &&
+		targ->health > 0 && attacker != targ &&
+		!OnSameTeam(targ, attacker) && take > 0) {
 		int vtake = take;
 		int hmax = clamp(g_vampiric_health_max->integer, 100, 9999);
 
@@ -708,12 +740,13 @@ void T_Damage(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, const 
 	}
 
 	// team armor protect
-	if (Teams() && targ->client && attacker->client &&
+	if (notGT(GT_ARENA) && Teams() && targ->client && attacker->client &&
 			targ->client->sess.team == attacker->client->sess.team && targ != attacker &&
 			g_teamplay_armor_protect->integer) {
 		psave = asave = 0;
 	} else {
-		if (targ == attacker && GTF(GTF_ARENA) && !g_arena_dmg_armor->integer) {
+		if (targ == attacker && GTF(GTF_ARENA) && notGT(GT_ARENA) &&
+			!g_arena_dmg_armor->integer) {
 			take = 0;
 			save = damage;
 		} else {
@@ -725,13 +758,30 @@ void T_Damage(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, const 
 		}
 	}
 
+	if (GT(GT_ARENA) && client && !(dflags & DAMAGE_NO_PROTECTION)) {
+		const int calculated_armor_loss = psave + asave;
+		int protected_health_damage = take;
+		int protected_armor_loss = calculated_armor_loss;
+		MM_Arena_AdjustProtection(targ, attacker,
+			protected_health_damage, protected_armor_loss);
+
+		take = max(0, protected_health_damage);
+		if (arena_inventory_snapshot && calculated_armor_loss > 0 &&
+			protected_armor_loss == 0) {
+			// RA3 armor protection still lets armor absorb the hit, but does
+			// not consume it. CheckArmor mutates eagerly, so restore the
+			// pre-hit inventory after using its calculated absorption.
+			client->pers.inventory = arena_inventory_before;
+		}
+	}
+
 	// treat cheat/powerup savings the same as armor
 	asave += save;
 
 	if (!(dflags & DAMAGE_NO_PROTECTION)) {
 		// Arena modes always block self-health damage; g_arena_dmg_armor only
 		// affects whether self-hit damage can be absorbed by armor.
-		if (targ == attacker && GTF(GTF_ARENA)) {
+		if (targ == attacker && GTF(GTF_ARENA) && notGT(GT_ARENA)) {
 			take = 0;
 			save = 0;	// damage;
 		}
@@ -764,15 +814,12 @@ void T_Damage(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, const 
 
 		// arena player scoring: 1 point per 100 damage dealt to opponents, capped to 0 health
 		// (Red Rover and LMS score by frags / round-wins only, so they opt out of arena damage-scoring)
-		if (GTF(GTF_ARENA) && notGT(GT_RR) && notGT(GT_LMS) && !OnSameTeam(targ, attacker)) {
-			attacker->client->pers.dmg_scorer += stat_take + psave + asave;
-
-			if (attacker->client->pers.dmg_scorer >= 100) {
-				int32_t score_add = floor(attacker->client->pers.dmg_scorer / 100);
-				attacker->client->pers.dmg_scorer -= score_add * 100;
-
-				G_AdjustPlayerScore(attacker->client, score_add, false, 0);
-			}
+		const bool arena_damage_scoring =
+			GT(GT_ARENA) && MM_Arena_DamageScoringEnabled(attacker);
+		if (((GTF(GTF_ARENA) && notGT(GT_ARENA) && notGT(GT_RR) && notGT(GT_LMS)) ||
+				arena_damage_scoring) &&
+			!OnSameTeam(targ, attacker)) {
+			MM_AwardDamageScore(attacker->client, stat_take + psave + asave);
 		}
 
 		// Red Rover: tally enemy damage dealt this round for the round-winner tie-break and
@@ -819,7 +866,7 @@ void T_Damage(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, const 
 				SpawnDamage(te_sparks, point, normal, take);
 		}
 
-		if (!IsCombatDisabled()) {
+		if (GT(GT_ARENA) || !IsCombatDisabled()) {
 			if (ShouldRecordCombatHeat(attacker, client))
 				muffmode::combat_heatmap::AddEvent(CombatHeatOrigin(targ, inflictor, point), static_cast<float>(take));
 			targ->health = targ->health - take;
@@ -1034,6 +1081,14 @@ Like T_RadiusDamage, but ignores walls (skips CanDamage check, among others)
 ============
 */
 
+static bool NukeAffectsClient(const gentity_t *inflictor, const gentity_t *player) {
+	if (notGT(GT_ARENA))
+		return true;
+
+	const int arena_id = MM_Arena_Id(inflictor);
+	return arena_id <= 0 || MM_Arena_Id(player) == arena_id;
+}
+
 void T_RadiusNukeDamage(gentity_t *inflictor, gentity_t *attacker, float damage, gentity_t *ignore, float radius, mod_t mod) {
 	float	 points;
 	gentity_t *ent = nullptr;
@@ -1057,6 +1112,10 @@ void T_RadiusNukeDamage(gentity_t *inflictor, gentity_t *attacker, float damage,
 			continue;
 		if (!(ent->client || (ent->svflags & SVF_MONSTER) || (ent->flags & FL_DAMAGEABLE)))
 			continue;
+		if (GT(GT_ARENA) &&
+			(ent->client ? !NukeAffectsClient(inflictor, ent) :
+				!MM_Arena_CanInteract(inflictor, ent)))
+			continue;
 
 		v = ent->mins + ent->maxs;
 		v = ent->s.origin + (v * 0.5f);
@@ -1078,23 +1137,23 @@ void T_RadiusNukeDamage(gentity_t *inflictor, gentity_t *attacker, float damage,
 			T_Damage(ent, inflictor, attacker, dir, inflictor->s.origin, vec3_origin, (int)points, (int)points, DAMAGE_RADIUS, mod);
 		}
 	}
-	ent = g_entities + 1; // skip the worldspawn
-	// cycle through players
-	while (ent) {
-		if ((ent->client) && (ent->client->nuke_time != level.time + 2_sec) && (ent->inuse)) {
-			tr = gi.traceline(inflictor->s.origin, ent->s.origin, inflictor, MASK_SOLID);
-			if (tr.fraction == 1.0f)
-				ent->client->nuke_time = level.time + 2_sec;
-			else {
-				dist = realrange(ent, inflictor);
-				if (dist < 2048)
-					ent->client->nuke_time = max(ent->client->nuke_time, level.time + 1.5_sec);
-				else
-					ent->client->nuke_time = max(ent->client->nuke_time, level.time + 1_sec);
-			}
-			ent++;
-		} else
-			ent = nullptr;
+	// Players outside the direct damage radius still receive the flash, but
+	// never leak that client-side effect into another arena.
+	for (gentity_t *player : active_clients()) {
+		if (!NukeAffectsClient(inflictor, player) ||
+			player->client->nuke_time == level.time + 2_sec)
+			continue;
+
+		tr = gi.traceline(inflictor->s.origin, player->s.origin, inflictor, MASK_SOLID);
+		if (tr.fraction == 1.0f)
+			player->client->nuke_time = level.time + 2_sec;
+		else {
+			dist = realrange(player, inflictor);
+			if (dist < 2048)
+				player->client->nuke_time = max(player->client->nuke_time, level.time + 1.5_sec);
+			else
+				player->client->nuke_time = max(player->client->nuke_time, level.time + 1_sec);
+		}
 	}
 }
 

@@ -2,6 +2,7 @@
 // Licensed under the GNU General Public License 2.0.
 // Proximity mine projectile behavior.
 #include "g_local.h"
+#include "muffmode/mm_arena.h"
 
 namespace {
 
@@ -69,7 +70,7 @@ static DIE(prox_die) (gentity_t *self, gentity_t *inflictor, gentity_t *attacker
 }
 
 static TOUCH(Prox_Field_Touch) (gentity_t *ent, gentity_t *other, const trace_t &tr, bool other_touching_self) -> void {
-	if (deathmatch->integer && IsCombatDisabled())
+	if (deathmatch->integer && notGT(GT_ARENA) && IsCombatDisabled())
 		return;
 
 	if (!(other->svflags & SVF_MONSTER) && !other->client)
@@ -77,6 +78,9 @@ static TOUCH(Prox_Field_Touch) (gentity_t *ent, gentity_t *other, const trace_t 
 
 	// trigger the prox mine if it's still there, and still mine.
 	gentity_t *prox = ent->owner;
+
+	if (GT(GT_ARENA) && !MM_Arena_CanInteract(prox, other))
+		return;
 
 	// teammate avoidance
 	if (CheckTeamDamage(prox->teammaster, other))
@@ -129,6 +133,9 @@ static THINK(prox_open) (gentity_t *ent) -> void {
 
 		gentity_t *search = nullptr;
 		while ((search = findradius(search, ent->s.origin, PROX_DAMAGE_RADIUS + 10.0f)) != nullptr) {
+			if (GT(GT_ARENA) && !MM_Arena_CanInteract(ent, search))
+				continue;
+
 			if (!search->classname) // tag token and other weird stuff
 				continue;
 

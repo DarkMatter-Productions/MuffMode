@@ -4,6 +4,7 @@
 #include "g_local.h"
 #include "core/debug_log.h"
 #include "muffmode/mm_announcer.h"
+#include "muffmode/mm_arena.h"
 #include "muffmode/mm_captain.h"
 #include "muffmode/mm_gametype.h"
 #include "muffmode/mm_maps.h"
@@ -222,6 +223,18 @@ void MM_PrintAvailableMaps(gentity_t *ent)
 } // namespace muffmode::vote
 
 namespace vote = muffmode::vote;
+
+bool MM_ParseVoteChoice(const char *arg, int &vote)
+{
+	return vote::MM_ParseVoteChoice(arg, vote);
+}
+
+bool MM_VoteClientEligible(const gentity_t *ent)
+{
+	return ent && ent->inuse && ent->client && ent->client->pers.connected &&
+		!(ent->svflags & SVF_BOT) && !ent->client->sess.is_a_bot &&
+		ClientCanVote(ent->client);
+}
 
 void MM_TransitionVoteState(VoteState new_state)
 {
@@ -1070,7 +1083,9 @@ void MM_VoteCommandStore(gentity_t *ent)
 		return;
 	}
 
-	if (!g_allow_vote_midgame->integer && level.match_state >= matchst_t::MATCH_COUNTDOWN)
+	if (!g_allow_vote_midgame->integer &&
+		(level.match_state >= matchst_t::MATCH_COUNTDOWN ||
+		 MM_Arena_GlobalVoteBlocked(ent)))
 	{
 		gi.LocClient_Print(ent, PRINT_HIGH, "Voting is only allowed during the warm up period.\n");
 		clear_idle_staged_vote();
@@ -1238,6 +1253,9 @@ void MM_CmdVote(gentity_t *ent)
 	if (!ent || !ent->client)
 		return;
 
+	if (MM_Arena_CastVote(ent, gi.argc() == 2 ? gi.argv(1) : nullptr))
+		return;
+
 	if (!ClientCanVote(ent->client))
 	{
 		gi.LocClient_Print(ent, PRINT_HIGH, "Not allowed to vote as spectator.\n");
@@ -1263,7 +1281,7 @@ void MM_CmdVote(gentity_t *ent)
 	}
 
 	int vote = 0;
-	if (!vote::MM_ParseVoteChoice(gi.argv(1), vote))
+	if (!MM_ParseVoteChoice(gi.argv(1), vote))
 	{
 		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid vote. Use yes or no.\n");
 		return;

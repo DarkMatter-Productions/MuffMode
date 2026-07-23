@@ -1,6 +1,7 @@
 // Copyright (c) ZeniMax Media Inc.
 // Licensed under the GNU General Public License 2.0.
 #include "g_local.h"
+#include "muffmode/mm_arena.h"
 #include "muffmode/mm_parse.h"
 
 constexpr spawnflags_t SPAWNFLAG_TRIGGER_MONSTER = 0x01_spawnflag;
@@ -82,7 +83,10 @@ static TOUCH(Touch_Multi) (gentity_t *self, gentity_t *other, const trace_t &tr,
 	} else
 		return;
 
-	if (IsCombatDisabled())
+	if (GT(GT_ARENA) && !MM_Arena_CanUseEntity(other, self))
+		return;
+
+	if (notGT(GT_ARENA) && IsCombatDisabled())
 		return;
 
 	if (self->spawnflags.has(SPAWNFLAG_TRIGGER_CLIP)) {
@@ -134,6 +138,9 @@ static BoxEntitiesResult_t latched_trigger_filter(gentity_t *other, void *data) 
 		if (!self->spawnflags.has(SPAWNFLAG_TRIGGER_MONSTER))
 			return BoxEntitiesResult_t::Skip;
 	} else
+		return BoxEntitiesResult_t::Skip;
+
+	if (GT(GT_ARENA) && !MM_Arena_CanUseEntity(other, self))
 		return BoxEntitiesResult_t::Skip;
 
 	if (self->movedir) {
@@ -1350,6 +1357,14 @@ static TOUCH(trigger_teleport_touch) (gentity_t *self, gentity_t *other, const t
 
 	if (!other->client)
 		return;
+
+	// [MuffMode] RA3-style positive arena trigger_teleports select an arena
+	// and enter its observer flow. Untagged/lobby/shared triggers retain
+	// vanilla spatial teleport behavior for RA2 map compatibility.
+	if (GT(GT_ARENA) && self->arena > 0) {
+		MM_Arena_MoveTo(other, self->arena, true);
+		return;
+	}
 
 	if (self->delay)
 		return;

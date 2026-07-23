@@ -4,6 +4,7 @@
 #include "bots/bot_includes.h"
 #include "monsters/m_player.h"	//doppelganger
 #include "muffmode/mm_announcer.h"
+#include "muffmode/mm_arena.h"
 #include "muffmode/mm_captain.h"
 #include "muffmode/mm_freezetag.h"
 #include "muffmode/mm_horde.h"
@@ -1898,7 +1899,7 @@ bool Pickup_Ammo(gentity_t *ent, gentity_t *other) {
 	bool weapon = !!(ent->item->flags & IF_WEAPON);
 	int	 count, oldcount;
 
-	if (weapon && InfiniteAmmoOn(ent->item))
+	if (weapon && (InfiniteAmmoOn(ent->item) || MM_Arena_InfiniteAmmoEnabled(other)))
 		count = AMMO_INFINITE;
 	else if (ent->count)
 		count = ent->count;
@@ -1921,7 +1922,7 @@ bool Pickup_Ammo(gentity_t *ent, gentity_t *other) {
 
 void Drop_Ammo(gentity_t *ent, gitem_t *item) {
 	// [Paril-KEX]
-	if (InfiniteAmmoOn(item))
+	if (InfiniteAmmoOn(item) || MM_Arena_InfiniteAmmoEnabled(ent))
 		return;
 
 	item_id_t index = item->id;
@@ -2863,7 +2864,10 @@ void Use_Compass(gentity_t *ent, gitem_t *inv) {
 
 	// [MuffMode] Compass toggles ready status in deathmatch
 	if (deathmatch->integer) {
-		MM_ToggleReadyUp(ent);
+		if (GT(GT_ARENA))
+			MM_Arena_ToggleReady(ent);
+		else
+			MM_ToggleReadyUp(ent);
 		return;
 	}
 	if (!level.valid_poi) {

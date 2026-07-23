@@ -2,6 +2,8 @@
 // Licensed under the GNU General Public License 2.0.
 
 #include "g_local.h"
+#include "muffmode/mm_arena.h"
+#include "muffmode/mm_chat.h"
 #include "muffmode/mm_loc.h"
 #include "muffmode/mm_loc_parse.h"
 
@@ -233,7 +235,14 @@ std::string MM_LocNearby(gentity_t *ent, bool team_only)
 	for (auto other : active_clients()) {
 		if (other == ent || !other->client || other->health <= 0)
 			continue;
-		if (team_only && other->client->sess.team != ent->client->sess.team)
+		if (GT(GT_ARENA)) {
+			if (MM_Arena_Id(ent) <= 0 ||
+				MM_Arena_Id(other) != MM_Arena_Id(ent))
+				continue;
+			if (team_only && !MM_Arena_SameTeam(ent, other))
+				continue;
+		} else if (team_only &&
+			other->client->sess.team != ent->client->sess.team)
 			continue;
 		if (!visible(ent, other))
 			continue;
@@ -348,18 +357,12 @@ void MM_CmdLoc(gentity_t *ent)
 	if (body.size() > MM_MAX_LOC_FINAL)
 		body.resize(MM_MAX_LOC_FINAL);
 
-	const bool team_game = Teams();
-	const std::string text = team_game
-		? std::string(G_Fmt("(TEAM) {}: {}\n", ent->client->resp.netname, body.c_str()))
-		: std::string(G_Fmt("{}: {}\n", ent->client->resp.netname, body.c_str()));
-
-	for (auto recipient : active_clients()) {
-		if (team_game && recipient->client->sess.team != ent->client->sess.team)
-			continue;
-
-		gi.WriteByte(svc_print);
-		gi.WriteByte(PRINT_CHAT);
-		gi.WriteString(text.c_str());
-		gi.unicast(recipient, true);
-	}
+	const bool arena_team = GT(GT_ARENA) &&
+		MM_Arena_SameSquad(ent->client, ent->client);
+	const bool team_chat = Teams() || arena_team;
+	const mm_arena_chat_scope_t scope = arena_team
+		? mm_arena_chat_scope_t::Team
+		: (GT(GT_ARENA) ? mm_arena_chat_scope_t::Arena :
+			mm_arena_chat_scope_t::World);
+	MM_SendScopedChat(ent, scope, body, team_chat);
 }

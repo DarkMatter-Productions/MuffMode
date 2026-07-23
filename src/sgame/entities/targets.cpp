@@ -3,6 +3,7 @@
 #include <limits>
 
 #include "g_local.h"
+#include "muffmode/mm_arena.h"
 #include "muffmode/mm_parse.h"
 
 static bool TargetParseFiniteFloat(const char *token, float &out) {
@@ -999,25 +1000,38 @@ constexpr spawnflags_t SPAWNFLAGS_EARTHQUAKE_TOGGLE = 2_spawnflag;
 [[maybe_unused]] constexpr spawnflags_t SPAWNFLAGS_EARTHQUAKE_UNKNOWN_ROGUE = 4_spawnflag;
 constexpr spawnflags_t SPAWNFLAGS_EARTHQUAKE_ONE_SHOT = 8_spawnflag;
 
-static THINK(target_earthquake_think) (gentity_t *self) -> void {
-	uint32_t i;
-	gentity_t *e;
+static bool target_earthquake_affects(const gentity_t *self, const gentity_t *player) {
+	if (notGT(GT_ARENA))
+		return true;
 
+	const int arena_id = MM_Arena_Id(self);
+	return arena_id <= 0 || MM_Arena_Id(player) == arena_id;
+}
+
+static void target_earthquake_sound(gentity_t *self) {
+	if (notGT(GT_ARENA)) {
+		gi.positioned_sound(self->s.origin, self, CHAN_VOICE, self->noise_index, 1.0, ATTN_NONE, 0);
+		return;
+	}
+
+	for (gentity_t *player : active_clients()) {
+		if (target_earthquake_affects(self, player))
+			gi.local_sound(player, self, CHAN_VOICE, self->noise_index, 1.0, ATTN_NONE, 0);
+	}
+}
+
+static THINK(target_earthquake_think) (gentity_t *self) -> void {
 	if (!(self->spawnflags & SPAWNFLAGS_EARTHQUAKE_SILENT)) {
 		if (self->last_move_time < level.time) {
-			gi.positioned_sound(self->s.origin, self, CHAN_VOICE, self->noise_index, 1.0, ATTN_NONE, 0);
+			target_earthquake_sound(self);
 			self->last_move_time = level.time + 6.5_sec;
 		}
 	}
 
-	const uint32_t client_entity_limit = TargetClientEntityLimit();
-	for (i = 1, e = g_entities + i; i < client_entity_limit; i++, e++) {
-		if (!e->inuse)
+	for (gentity_t *player : active_clients()) {
+		if (!target_earthquake_affects(self, player))
 			continue;
-		if (!e->client)
-			break;
-
-		e->client->quake_time = level.time + 1000_ms;
+		player->client->quake_time = level.time + 1000_ms;
 	}
 
 	if (level.time < self->timestamp)
@@ -1026,18 +1040,11 @@ static THINK(target_earthquake_think) (gentity_t *self) -> void {
 
 static USE(target_earthquake_use) (gentity_t *self, gentity_t *other, gentity_t *activator) -> void {
 	if (self->spawnflags.has(SPAWNFLAGS_EARTHQUAKE_ONE_SHOT)) {
-		uint32_t i;
-		gentity_t *e;
-
-		const uint32_t client_entity_limit = TargetClientEntityLimit();
-		for (i = 1, e = g_entities + i; i < client_entity_limit; i++, e++) {
-			if (!e->inuse)
+		for (gentity_t *player : active_clients()) {
+			if (!target_earthquake_affects(self, player))
 				continue;
-			if (!e->client)
-				break;
-
-			e->client->v_dmg_pitch = -self->speed * 0.1f;
-			e->client->v_dmg_time = level.time + DAMAGE_TIME();
+			player->client->v_dmg_pitch = -self->speed * 0.1f;
+			player->client->v_dmg_time = level.time + DAMAGE_TIME();
 		}
 
 		return;

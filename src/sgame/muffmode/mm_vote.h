@@ -10,6 +10,8 @@
 // [MuffMode] Vote registry helpers owned by mm_vote.cpp.
 vcmds_t *FindVoteCmdByName(const char *name);
 bool ValidateMenuVoteCommand(gentity_t *ent, vcmds_t *cc, const char *arg);
+bool MM_ParseVoteChoice(const char *arg, int &vote);
+bool MM_VoteClientEligible(const gentity_t *ent);
 
 // [MuffMode] Vote state machine implementation hooks.
 void MM_TransitionVoteState(VoteState new_state);

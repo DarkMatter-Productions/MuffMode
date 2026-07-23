@@ -238,11 +238,22 @@ void EmitTopRightMatchInfo(statusbar_t &sb)
 	sb.ifstat(STAT_GAMETYPE_HUD).xr(kRightHudTextXr).yt(kGametypeYt).loc_stat_rstring(STAT_GAMETYPE_HUD).endifstat();
 	if (GT(GT_STRIKE)) {
 		sb.ifstat(STAT_ARENA_ROLE).xr(kRightHudTextXr).yt(kGametypeYt).loc_stat_rstring(STAT_ARENA_ROLE).endifstat();
+	} else if (GT(GT_ARENA)) {
+		sb.ifstat(STAT_ARENA_ROLE).xr(kRightHudTextXr).yt(kRulesetYt).loc_stat_rstring(STAT_ARENA_ROLE).endifstat();
 	} else {
 		sb.ifstat(STAT_RULESET_HUD).xr(kRightHudTextXr).yt(kRulesetYt).loc_stat_rstring(STAT_RULESET_HUD).endifstat();
 	}
 
 	EmitRedRoverTeamBadge(sb);
+}
+
+void EmitCountdownAndMatchState(statusbar_t &sb)
+{
+	// Vanilla num(3) right-aligns in a 50px field (2 + 3*16). Digit centre:
+	// xv + 50 - 8*l. hx=160 therefore needs xv(118) for one digit.
+	sb.ifstat(STAT_COUNTDOWN).xv(118).yb(-256).num(3, STAT_COUNTDOWN).endifstat();
+	// Match timer / warmup — bottom-centre, classic MuffMode placement.
+	sb.ifstat(STAT_MATCH_STATE).xv(0).yb(-78).stat_string(STAT_MATCH_STATE).endifstat();
 }
 
 // VANILLA_BASE — centre eliminated/frozen label (CA/RR/Freeze team modes, not Strike).
@@ -302,7 +313,9 @@ void EmitStandardTeamMiniscore(statusbar_t &sb)
 void MM_InitStatusbar()
 {
 	statusbar_t sb;
-	bool minhud = (g_instagib->integer || GT(GT_INSTAGIB)) || (g_nadefest->integer || GT(GT_NADEFEST));
+	bool minhud = notGT(GT_ARENA) &&
+		((g_instagib->integer || GT(GT_INSTAGIB)) ||
+		 (g_nadefest->integer || GT(GT_NADEFEST)));
 
 	sb.yb(-24);
 
@@ -364,18 +377,16 @@ void MM_InitStatusbar()
 		if (Teams())
 			muffmode::statusbar::EmitTeamHeader(sb);
 
-		muffmode::statusbar::EmitTopRightMatchInfo(sb);
+		if (notGT(GT_ARENA))
+			muffmode::statusbar::EmitTopRightMatchInfo(sb);
 
 		if (MM_GametypeHasFlag(GTF_ELIMINATION) && MM_GametypeHasFlag(GTF_TEAMS)) {
 			if (!GT(GT_STRIKE))
 				muffmode::statusbar::EmitCenterArenaRole(sb, 48);
 		}
 
-		// Vanilla num(3) right-aligns in a 50px field (2 + 3*16). Digit centre: xv + 50 - 8*l.
-		// hx=160 → l=1 needs xv(118), l=2 needs xv(126). Use 118 for 3…2…1 (brief "10" sits ~8px left).
-		sb.ifstat(STAT_COUNTDOWN).xv(118).yb(-256).num(3, STAT_COUNTDOWN).endifstat();
-		// Match timer / warmup — bottom-centre (xv 0 yb -78, classic MuffMode placement).
-		sb.ifstat(STAT_MATCH_STATE).xv(0).yb(-78).stat_string(STAT_MATCH_STATE).endifstat();
+		if (notGT(GT_ARENA))
+			muffmode::statusbar::EmitCountdownAndMatchState(sb);
 		if (GT(GT_LMS))
 			sb.ifstat(STAT_CENTER_LINE).xv(0).yt(26).stat_string(STAT_CENTER_LINE).endifstat();
 		sb.ifstat(STAT_FOLLOW).xv(0).yb(-68).string("FOLLOWING").xv(80).stat_string(STAT_FOLLOW).endifstat();
@@ -384,6 +395,14 @@ void MM_InitStatusbar()
 		sb.ifstat(STAT_CROSSHAIR_ID_VIEW_COLOR).xv(156).yb(-118).pic(STAT_CROSSHAIR_ID_VIEW_COLOR).endifstat();
 
 		sb.endifstat();
+
+		// Arena lobby, line, coach and free-observer roles intentionally project
+		// to engine spectators, whose combat statusbar gate is zero. Keep the
+		// room-local identity and clock visible without exposing fighter vitals.
+		if (GT(GT_ARENA)) {
+			muffmode::statusbar::EmitTopRightMatchInfo(sb);
+			muffmode::statusbar::EmitCountdownAndMatchState(sb);
+		}
 
 		muffmode::statusbar::EmitStandardTeamMiniscore(sb);
 	}

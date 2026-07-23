@@ -54,22 +54,81 @@ The **Player Config** menu separates **Display & Audio**, **Spectator & Follow**
 | Command | What it does |
 | --- | --- |
 | `announcer [on|off]` | Toggle Quake Live style voice announcements. The voice pack is off by default; stock fallback cues still play where defined. |
-| `eskin <model/skin>` or `eskin off` | In team games, re-skin all enemies on your screen only; in duel, re-skin your opponent (e.g. `eskin male/grunt`). No argument shows the current setting. |
+| `eskin <model/skin>` or `eskin off` | In team games and Rocket Arena, re-skin enemies on your screen only; in duel, re-skin your opponent (e.g. `eskin male/grunt`). Other Rocket Arena rooms and nonfighters are unaffected. No argument shows the current setting. |
 | `fm [on|off]` | Toggle frag messages. |
 | `help` | Toggle help text drawing. |
 | `id [on|off]` | Toggle crosshair player identification. |
 | `infohud [on|off]` | Toggle the top-right match-info HUD and save the preference. |
 | `kb [0-4]` | Cycle kill beeps, or set one directly. `0`/`off` disables it. Named values are `clang`, `beep-boop`, `insane`, and `tang-tang`. |
 | `timer [on|off]` | Toggle the match timer. |
-| `tskin <model/skin>` or `tskin off` | In team games, re-skin all teammates on your screen only (not available in duel). No argument shows the current setting. |
+| `tskin <model/skin>` or `tskin off` | In team games and Rocket Arena, re-skin teammates on your screen only (not available in duel). No argument shows the current setting. |
 
 ## Gameplay Commands
+
+Rocket Arena maps can contain many simultaneous rooms. Start in arena 0 (the
+lobby), use a map selector teleporter or `arena go <id>` to choose a room, and
+use `arena list` to see what each room is running. The map must expose a
+validated RA2 entity contract; ordinary Quake II maps never become synthetic
+Arena rooms.
+
+Each room can independently run Rocket Arena, Clan Arena, Red Rover, or
+Practice. Rocket Arena uses the familiar winner-stays line; Clan Arena is a
+red/blue elimination match; Red Rover moves defeated players to the other
+side; Practice keeps hits and knockback non-lethal. A room's teams, ready state,
+vote, timeout, score, and settings do not affect any other room.
+Practice is teamless, grants unlimited ammunition, scores damage dealt, and
+immediately respawns environmental deaths.
+The normal Multiplayer menu remains the hub. Use **Choose Arena** or
+**Change Arena** for the room browser, then **Teams & Line** for the focused
+team and queue page. Both submenus paginate when needed and return directly to
+the uncluttered Multiplayer menu.
+
+The usual MuffMode commands remain the shortest route: `team auto/red/blue`,
+`captain`, `lockteam`, `unlockteam`, `ready`, `readyteam`, `vote yes|no`,
+`time-out`, and `time-in` automatically operate on your current arena.
+RA3-era convenience spellings are also accepted by the server: `teamlock`, `teamunlock`,
+`teamcaptain`, `teamname`, `teamkick`, `teammute`, `teamunmute`,
+`specinvite`, `specrevoke`, `specwho`, `timeout`, and `timein`. Q2RE treats
+`timeout` as a local client setting, so use `arena timeout` or MuffMode's
+`time-out` command instead. These aliases do not make Arena an RA3 replica.
+
+Use `say_arena <message>` (or `arena say <message>`) for room-local chat.
+Q2RE/KEX handles bare `say` before the game DLL can route it, so bare `say`
+remains map-wide. Use `arena say_team <message>` for a reliably room-local
+logical-team channel; KEX also owns bare `say_team`, which follows the engine's
+projected red/blue team rather than MuffMode's logical arena team. `say_world`
+explicitly reaches the whole map. In the lobby, `say_arena` becomes world
+chat. Matching RA3, the portable logical-team channel is exempt from chat
+flood limiting only in a Clan Arena room with competition mode enabled.
+When a room enables the RA3 grapple option, `use Grapple` selects it and
+`+hook` provides MuffMode's offhand binding.
 
 In Freeze Tag, dying during a live round freezes you in place instead of sending you to a respawn screen. While frozen, your body stays on the field with a white shell and you view it from a third-person camera that can look around. Live teammates thaw you by standing nearby, and extra teammates near the same frozen player speed up the thaw. The primary rescuer scores for the thaw, while teammates who spend meaningful time helping a successful thaw receive assist credit. Press attack while frozen to send a throttled team help call with a teammate marker and location when location data is available. The HUD shows frozen/thawing state and a clean round display in the top-right. Frozen bodies can be nudged by damage and pulled with the grapple; thawed players normally respawn at player spawn points with white-shell gibs thrown at the thaw spot, though servers can opt into restoring them at the safe thaw location, and thawed players use normal map/item-control loadouts unless the server enables the optional arena kit. Players who join a team during a live round wait until the next round starts.
 
 | Command | What it does |
 | --- | --- |
-| `ready`, `notready`, `readyup` | Set or toggle ready status. |
+| `arena` | Show current room status, or list rooms while in the lobby. |
+| `arena list` | List the discovered rooms, names, modes, populations, and states. |
+| `arena go <id>` | Enter or observe an arena. |
+| `arena leave` | Return to the lobby. |
+| `arena status` / `arena settings` | Show current state or effective rules. |
+| `arena line [on\|off]` / `arena queue` | Join, leave, or inspect a Rocket Arena challenge line. |
+| `arena create [name]` | Create a logical team. |
+| `arena join <team-id\|player\|red\|blue> [password]` | Join a logical or fixed team. |
+| `arena teamleave` | Leave your current team but remain in the arena. |
+| `arena ready [0\|1]` | In competition mode, toggle ready state or set it explicitly. |
+| `arena propose <key> <value>` / `arena vote <yes\|no>` | Start or answer an arena-local settings vote. |
+| `arena timeout` / `arena timein` | Use a competition timeout or end the timeout called by your active side. |
+| `arena lock [password]` / `arena unlock` | In competition mode, let the captain control entry to the team. Passwords are a MuffMode extension. |
+| `arena name <name>` | In competition mode, rename your team when you are its captain. |
+| `arena captain [player]` / `arena kick [player]` | In competition mode, inspect/transfer captaincy or list/remove team members. |
+| `arena teammute` / `arena teamunmute` | In competition mode, restrict noncaptains to team chat or restore their arena/world chat. |
+| `arena invite <player>` / `arena revoke <player>` | In competition mode, manage access to a locked team; this is a MuffMode extension. |
+| `arena specinvite <player> [coach]` / `arena specrevoke <player>` | In competition mode, let any non-coach team member manage same-arena private spectator access. Coaching is a MuffMode extension. |
+| `arena coach <team\|player>` / `arena specwho` | In competition mode, accept a coach invitation or list team spectators/coaches. |
+| `arena say <message>` / `arena say_team <message>` / `arena say_world <message>` | Use the arena, team, or world chat channel through the dispatcher. |
+| `say_arena <message>` / `say_world <message>` | Direct portable arena-local or map-wide chat; use `arena say_team` for portable logical-team chat. |
+| `ready [0\|1]`, `notready`, `readyup` | Set or toggle ready status; Arena readiness is competition-only. |
 | `callvote <command> <arg>` or `cv <command> <arg>` | Start a vote. |
 | `vote yes` or `vote no` | Vote on an active proposal. |
 | `mymap <map>` | Add a valid map to the MyMap queue. |

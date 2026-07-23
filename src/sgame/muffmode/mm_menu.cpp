@@ -1,6 +1,7 @@
 // Copyright (c) ZeniMax Media Inc.
 // Licensed under the GNU General Public License 2.0.
 #include "g_local.h"
+#include "muffmode/mm_arena.h"
 #include "muffmode/mm_captain.h"
 #include "muffmode/mm_match.h"
 #include "muffmode/mm_menu.h"
@@ -363,6 +364,14 @@ void ApplyMatchAction(gentity_t *ent, menu_hnd_t *p)
 		return;
 
 	P_Menu_Close(ent);
+
+	if (MM_Arena_Active()) {
+		if (MM_Arena_SeriesActive(ent))
+			MM_Arena_AdminEnd(ent);
+		else
+			MM_Arena_AdminStart(ent);
+		return;
+	}
 
 	if (level.match_state <= matchst_t::MATCH_COUNTDOWN) {
 		gi.LocBroadcast_Print(PRINT_CHAT, "Match has been forced to start.\n");
@@ -866,16 +875,28 @@ namespace muffmode::menu::join {
 
 void JoinFree(gentity_t *ent, menu_hnd_t *)
 {
+	if (MM_Arena_Active()) {
+		MM_Arena_OpenRoomMenu(ent, nullptr);
+		return;
+	}
 	SetTeam(ent, TEAM_FREE, false, false, false);
 }
 
 void JoinRed(gentity_t *ent, menu_hnd_t *)
 {
+	if (MM_Arena_Active()) {
+		MM_Arena_OpenJoinMenu(ent, nullptr);
+		return;
+	}
 	SetTeam(ent, !muffmode::CvarEnabled(g_teamplay_allow_team_pick) ? PickTeam(-1) : TEAM_RED, false, false, false);
 }
 
 void JoinBlue(gentity_t *ent, menu_hnd_t *)
 {
+	if (MM_Arena_Active()) {
+		MM_Arena_OpenJoinMenu(ent, nullptr);
+		return;
+	}
 	if (!muffmode::CvarEnabled(g_teamplay_allow_team_pick))
 		return;
 
@@ -887,8 +908,32 @@ void JoinSpectator(gentity_t *ent, menu_hnd_t *)
 	SetTeam(ent, TEAM_SPECTATOR, false, false, false);
 }
 
+void ReturnArenaLobby(gentity_t *ent, menu_hnd_t *)
+{
+	if (!menu::HasClient(ent))
+		return;
+	P_Menu_Close(ent);
+	SetTeam(ent, TEAM_SPECTATOR, false, false, false);
+	muffmode::menu::join::Open(ent);
+}
+
+void OpenArenaRooms(gentity_t *ent, menu_hnd_t *)
+{
+	MM_Arena_OpenRoomMenu(ent, nullptr);
+}
+
+void OpenArenaTeams(gentity_t *ent, menu_hnd_t *)
+{
+	MM_Arena_OpenJoinMenu(ent, nullptr);
+}
+
 void ToggleReady(gentity_t *ent, menu_hnd_t *)
 {
+	if (MM_Arena_Active()) {
+		MM_Arena_ToggleReady(ent);
+		P_Menu_Dirty();
+		return;
+	}
 	MM_ToggleReadyUp(ent);
 }
 
@@ -906,6 +951,8 @@ constexpr int kTeamsPlayerStats = 13;
 constexpr int kTeamsAdmin = 16;
 
 constexpr int kFreeJoin = 4;
+constexpr int kFreeArenaLobby = 5;
+constexpr int kFreeSpectate = 6;
 constexpr int kFreeFollow = 8;
 constexpr int kFreeReadyUp = 9;
 constexpr int kFreePlayerSettings = 11;
@@ -1129,7 +1176,8 @@ void UpdateServer(gentity_t *ent)
 
 	int		i = 0;
 	bool	limits = false;
-	bool	infiniteammo = InfiniteAmmoOn(nullptr);
+	const bool global_modifiers = notGT(GT_ARENA);
+	bool	infiniteammo = InfiniteAmmoOn(nullptr) || MM_Arena_InfiniteAmmoEnabled(ent);
 	bool	items = ItemSpawnsEnabled();
 	int		scorelimit = GT_ScoreLimit();
 	
@@ -1182,7 +1230,7 @@ void UpdateServer(gentity_t *ent)
 		i++;
 	}
 
-	if (g_instagib->integer || GT(GT_INSTAGIB)) {
+	if (global_modifiers && (g_instagib->integer || GT(GT_INSTAGIB))) {
 		if (i >= content_limit) return;
 		if (g_instagib_splash->integer) {
 			menu::SetText(entries[i], "InstaGib + Rail Splash");
@@ -1191,22 +1239,22 @@ void UpdateServer(gentity_t *ent)
 		}
 		i++;
 	}
-	if (g_vampiric_damage->integer) {
+	if (global_modifiers && g_vampiric_damage->integer) {
 		if (i >= content_limit) return;
 		menu::SetText(entries[i], "Vampiric Damage");
 		i++;
 	}
-	if (g_frenzy->integer) {
+	if (global_modifiers && g_frenzy->integer) {
 		if (i >= content_limit) return;
 		menu::SetText(entries[i], "Weapons Frenzy");
 		i++;
 	}
-	if (g_nadefest->integer || GT(GT_NADEFEST)) {
+	if (global_modifiers && (g_nadefest->integer || GT(GT_NADEFEST))) {
 		if (i >= content_limit) return;
 		menu::SetText(entries[i], "Nade Fest");
 		i++;
 	}
-	if (g_quadhog->integer) {
+	if (global_modifiers && g_quadhog->integer) {
 		if (i >= content_limit) return;
 		menu::SetText(entries[i], "Quad Hog");
 		i++;
@@ -1230,7 +1278,15 @@ void UpdateServer(gentity_t *ent)
 		}
 	}
 
-	if (g_infinite_ammo->integer && !infiniteammo) {
+	if (GT(GT_ARENA) && MM_Arena_ExcessiveEnabled(ent)) {
+		if (i >= content_limit) return;
+		menu::SetText(entries[i], "Arena excessive");
+		i++;
+	} else if (GT(GT_ARENA) && infiniteammo) {
+		if (i >= content_limit) return;
+		menu::SetText(entries[i], "infinite ammo");
+		i++;
+	} else if (g_infinite_ammo->integer && !infiniteammo) {
 		if (i >= content_limit) return;
 		menu::SetText(entries[i], "infinite ammo");
 		i++;
@@ -1241,9 +1297,12 @@ void UpdateServer(gentity_t *ent)
 		i++;
 	}
 
-	if (g_allow_grapple->integer) {
+	if ((GT(GT_ARENA) && MM_Arena_GrappleEnabled(ent)) ||
+		(global_modifiers && g_allow_grapple->integer)) {
 		if (i >= content_limit) return;
-		menu::SetText(entries[i], G_Fmt("{}grapple enabled", g_grapple_offhand->integer ? "off-hand " : "").data());
+		menu::SetText(entries[i], G_Fmt("{}grapple enabled",
+			notGT(GT_ARENA) && g_grapple_offhand->integer ?
+				"off-hand " : "").data());
 		i++;
 	}
 
@@ -1289,13 +1348,14 @@ void UpdateServer(gentity_t *ent)
 		i++;
 	}
 
-	if (g_dm_no_self_damage->integer) {
+	if (global_modifiers && g_dm_no_self_damage->integer) {
 		if (i >= content_limit) return;
 		menu::SetText(entries[i], "no self-damage");
 		i++;
 	}
 
-	if (g_dm_no_fall_damage->integer) {
+	if ((GT(GT_ARENA) && !MM_Arena_FallingDamageEnabled(ent)) ||
+		(global_modifiers && g_dm_no_fall_damage->integer)) {
 		if (i >= content_limit) return;
 		menu::SetText(entries[i], "no falling damage");
 		i++;
@@ -1416,8 +1476,42 @@ void Update(gentity_t *ent)
 		}
 	}
 
-	const bool teams = Teams();
-	if (teams) {
+	const bool arena_active = MM_Arena_Active();
+	const bool teams = !arena_active && Teams();
+	if (arena_active) {
+		const int arena_id = MM_Arena_Id(ent);
+		if (arena_id > 0 && MM_Arena_ValidId(arena_id)) {
+			const bool roster_locked = MM_Arena_RosterLocked(ent);
+			const std::string room_label = muffmode::TruncateWithEllipsis(
+				G_Fmt("Arena {}: {}", arena_id, MM_Arena_Name(arena_id)), 26);
+			menu::SetText(entries[kMatch], room_label);
+
+			menu::SetText(entries[kFreeJoin], roster_locked
+				? "Change Arena (locked)" : "Change Arena");
+			entries[kFreeJoin].SelectFunc =
+				roster_locked ? nullptr : OpenArenaRooms;
+			if (MM_Arena_UsesTeams(ent)) {
+				menu::SetText(entries[kFreeArenaLobby], "Teams & Line");
+				entries[kFreeArenaLobby].SelectFunc = OpenArenaTeams;
+			} else {
+				menu::SetText(entries[kFreeArenaLobby], "");
+				entries[kFreeArenaLobby].SelectFunc = nullptr;
+			}
+			menu::SetText(entries[kFreeSpectate], roster_locked
+				? "Return Lobby (locked)" : "Return to Lobby");
+			entries[kFreeSpectate].SelectFunc =
+				roster_locked ? nullptr : ReturnArenaLobby;
+		} else {
+			menu::SetText(entries[kMatch], "Arena Lobby");
+			menu::SetText(entries[kFreeJoin],
+				G_Fmt("Choose Arena ({})", MM_Arena_Count()));
+			entries[kFreeJoin].SelectFunc = OpenArenaRooms;
+			menu::SetText(entries[kFreeArenaLobby], "");
+			entries[kFreeArenaLobby].SelectFunc = nullptr;
+			menu::SetText(entries[kFreeSpectate], "");
+			entries[kFreeSpectate].SelectFunc = nullptr;
+		}
+	} else if (teams) {
 		if (!muffmode::CvarEnabled(g_teamplay_allow_team_pick) && !level.locked[TEAM_RED] && !level.locked[TEAM_BLUE]) {
 			menu::SetText(entries[kTeamsJoinRed], G_Fmt("Join a Team ({}/{})", num_red + num_blue, max_players).data());
 			menu::SetText(entries[kTeamsJoinBlue], "");
@@ -1454,6 +1548,10 @@ void Update(gentity_t *ent)
 			menu::SetText(entries[kFreeJoin], G_Fmt("Join Match ({}/{})", num_free, GT(GT_DUEL) ? 2 : max_players).data());
 			entries[kFreeJoin].SelectFunc = JoinFree;
 		}
+		menu::SetText(entries[kFreeArenaLobby], "");
+		entries[kFreeArenaLobby].SelectFunc = nullptr;
+		menu::SetText(entries[kFreeSpectate], "Spectate");
+		entries[kFreeSpectate].SelectFunc = JoinSpectator;
 	}
 
 	if (!muffmode::CvarEnabled(g_matchstats)) {
@@ -1477,7 +1575,7 @@ void Update(gentity_t *ent)
 	}
 
 	const char *force_join = muffmode::CvarString(g_dm_force_join);
-	if (force_join[0]) {
+	if (force_join[0] && !arena_active) {
 		if (teams) {
 			if (muffmode::CStringEqualsI(force_join, "red")) {
 				menu::SetText(entries[kTeamsJoinBlue], "");
@@ -1496,7 +1594,12 @@ void Update(gentity_t *ent)
 		menu::SetText(entries[index], "Follow Player");
 
 	index = teams ? kTeamsReadyUp : kFreeReadyUp;
-	if (muffmode::CvarEnabled(g_dm_do_readyup) && level.match_state == matchst_t::MATCH_WARMUP_READYUP) {
+	if (arena_active && MM_Arena_CanToggleReady(ent)) {
+		menu::SetText(entries[index],
+			ent->client->resp.ready ? "Not Ready" : "Ready Up");
+		entries[index].SelectFunc = ToggleReady;
+	} else if (!arena_active && muffmode::CvarEnabled(g_dm_do_readyup) &&
+		level.match_state == matchst_t::MATCH_WARMUP_READYUP) {
 		menu::SetText(entries[index], ent->client->resp.ready ? "Not Ready" : "Ready Up");
 		entries[index].SelectFunc = ToggleReady;
 	} else {
@@ -1507,8 +1610,10 @@ void Update(gentity_t *ent)
 	menu::SetGametypeName(entries + kGametypeName);
 	menu::SetLevelName(entries + kLevel);
 
-	// Match status text removed from this menu -- crowded the join options below it.
-	menu::SetText(entries[kMatch], "");
+	// Match status text is normally omitted because it crowds the join options.
+	// Arena uses this otherwise empty row for the current room/lobby context.
+	if (!arena_active)
+		menu::SetText(entries[kMatch], "");
 
 	menu::SetGamemodName(entries + kGameMod);
 
@@ -1538,7 +1643,8 @@ void Open(gentity_t *ent)
 	if (Vote_Menu_Active(ent))
 		return;
 
-	if (Teams()) {
+	const bool arena_active = MM_Arena_Active();
+	if (!arena_active && Teams()) {
 		team_t team = TEAM_SPECTATOR;
 		int num_red = 0, num_blue = 0;
 
@@ -1562,7 +1668,8 @@ void Open(gentity_t *ent)
 
 		P_Menu_Open(ent, kTeamsMenuTemplate, team, muffmode::CountAsInt(kTeamsMenuTemplate), nullptr, Update);
 	} else {
-		P_Menu_Open(ent, kFreeMenuTemplate, TEAM_FREE, muffmode::CountAsInt(kFreeMenuTemplate), nullptr, Update);
+		P_Menu_Open(ent, kFreeMenuTemplate, arena_active ? kFreeJoin : TEAM_FREE,
+			muffmode::CountAsInt(kFreeMenuTemplate), nullptr, Update);
 	}
 }
 

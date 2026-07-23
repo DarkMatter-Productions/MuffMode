@@ -996,6 +996,7 @@ FIELD_AUTO(splash_damage),
 FIELD_AUTO(splash_radius),
 FIELD_AUTO(sounds),
 FIELD_AUTO(count),
+FIELD_AUTO(arena),
 
 FIELD_AUTO(chain),
 FIELD_AUTO(enemy),
@@ -2471,6 +2472,15 @@ void ReadLevelJson(const char *jsonString) {
 
 // [Paril-KEX]
 bool CanSave() {
+	// [MuffMode] Arena rooms, logical teams, queues, votes, and pause clocks
+	// are intentionally transient and are rebuilt from map metadata. Loading
+	// a mid-match save without serializing that graph would leave clients and
+	// entities referring to nonexistent room state.
+	if (GT(GT_ARENA)) {
+		gi.Com_Print("Can't savegame in Rocket Arena.\n");
+		return false;
+	}
+
 	if (game.maxclients == 1 && g_entities[1].health <= 0) {
 		gi.LocClient_Print(&g_entities[1], PRINT_CENTER, "$g_no_save_dead");
 		return false;

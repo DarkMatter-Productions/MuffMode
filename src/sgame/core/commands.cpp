@@ -3,7 +3,9 @@
 #include "g_local.h"
 #include "debug_log.h"
 #include "muffmode/mm_admin.h"
+#include "muffmode/mm_arena.h"
 #include "muffmode/mm_captain.h"
+#include "muffmode/mm_chat.h"
 #include "muffmode/mm_command_contracts.h"
 #include "muffmode/mm_duel.h"
 #include "muffmode/mm_freezetag.h"
@@ -579,11 +581,13 @@ static void Cmd_Teleport_f(gentity_t *ent) {
 
 // [MuffMode] Timeout bodies live in muffmode/mm_match
 static void Cmd_TimeIn_f(gentity_t *ent) {
-	MM_CmdTimeIn(ent);
+	if (!MM_Arena_CallTimein(ent))
+		MM_CmdTimeIn(ent);
 }
 
 static void Cmd_TimeOut_f(gentity_t *ent) {
-	MM_CmdTimeOut(ent);
+	if (!MM_Arena_CallTimeout(ent))
+		MM_CmdTimeOut(ent);
 }
 
 /*
@@ -696,7 +700,10 @@ static void Cmd_Use_f(gentity_t *ent) {
 	}
 	index = it->id;
 
-	if (IsCombatDisabled() && !(it->flags & IF_WEAPON))
+	const bool arena_ready_compass =
+		GT(GT_ARENA) && index == IT_COMPASS;
+	if ((GT(GT_ARENA) ? !MM_Arena_CombatEnabled(ent) : IsCombatDisabled()) &&
+		!(it->flags & IF_WEAPON) && !arena_ready_compass)
 		return;
 
 	// Paril: Use_Weapon handles weapon availability
@@ -724,6 +731,13 @@ static void Cmd_Drop_f(gentity_t *ent) {
 	item_id_t	index;
 	gitem_t		*it;
 	const char	*s;
+
+	// Arena loadouts are round-owned and cannot be transferred or discarded.
+	if (GT(GT_ARENA)) {
+		gi.Client_Print(ent, PRINT_HIGH,
+			"Arena loadouts and ammunition cannot be dropped.\n");
+		return;
+	}
 
 	// don't drop anything when combat is disabled
 	if (IsCombatDisabled())
@@ -1100,7 +1114,7 @@ static void Cmd_Kill_f(gentity_t *ent) {
 	if ((level.time - ent->client->respawn_time) < 5_sec)
 		return;
 
-	if (IsCombatDisabled())
+	if (GT(GT_ARENA) ? !MM_Arena_CombatEnabled(ent) : IsCombatDisabled())
 		return;
 
 	if (false) { // Race mode removed
@@ -1623,99 +1637,81 @@ static void Cmd_Wave_f(gentity_t *ent) {
 	ent->client->anim_time = 0_ms;
 }
 
-#ifndef KEX_Q2_GAME
 /*
 ==================
-Cmd_Say_f
+Cmd_SayScoped_f
 
-NB: only used for non-Playfab stuff
+Arena chat is routed by the Arena module so players in one RA2 arena cannot
+receive another arena's conversation.  KEX owns the built-in say/say_team
+commands, but this helper also backs the explicit say_world command.
 ==================
 */
-static void Cmd_Say_f(gentity_t *ent, bool arg0) {
-	gentity_t *other;
+static void Cmd_SayScoped_f(gentity_t *ent, bool arg0,
+	mm_arena_chat_scope_t scope, bool team_prefix) {
 	const char *p_in;
-	static std::string text;
+	std::string message;
 
 	if (gi.argc() < 2 && !arg0)
 		return;
-	else if (CheckFlood(ent))
-		return;
-
-	text.clear();
-	fmt::format_to(std::back_inserter(text), FMT_STRING("{}: "), ent->client->resp.netname);
 
 	if (arg0) {
-		text += gi.argv(0);
-		text += " ";
-		text += gi.args();
+		message += gi.argv(0);
+		message += " ";
+		message += gi.args();
 	} else {
 		p_in = gi.args();
 		size_t in_len = strlen(p_in);
 
 		if (in_len >= 2 && p_in[0] == '\"' && p_in[in_len - 1] == '\"')
-			text += std::string_view(p_in + 1, in_len - 2);
+			message += std::string_view(p_in + 1, in_len - 2);
 		else
-			text += p_in;
+			message += p_in;
 	}
 
-	// don't let text be too long for malicious reasons
-	if (text.length() > 150)
-		text.resize(150);
+	MM_SendScopedChat(ent, scope, message, team_prefix);
+}
 
-	if (text.back() != '\n')
-		text.push_back('\n');
+/*
+==================
+Cmd_Say_f
 
-	if (g_dedicated->integer)
-		gi.Client_Print(nullptr, PRINT_CHAT, text.c_str());
-
-	const size_t client_entity_count = CmdClientEntityCount();
-	for (size_t j = 1; j < client_entity_count; j++) {
-		other = &g_entities[j];
-		if (!other->inuse)
-			continue;
-		if (!other->client)
-			continue;
-		gi.Client_Print(other, PRINT_CHAT, text.c_str());
-	}
+Used directly by engines that forward console chat to ClientCommand. The
+official KEX lobby consumes these commands before the game DLL; Q2PRO-family
+KEX hosts intentionally forward them for game-side handling.
+==================
+*/
+static void Cmd_Say_f(gentity_t *ent, bool arg0) {
+	const mm_arena_chat_scope_t scope =
+		GT(GT_ARENA) && MM_Arena_Id(ent) > 0
+			? mm_arena_chat_scope_t::Arena
+			: mm_arena_chat_scope_t::World;
+	Cmd_SayScoped_f(ent, arg0, scope, false);
 }
 
 /*
 =================
 Cmd_Say_Team_f
 
-NB: only used for non-Playfab stuff
+See Cmd_Say_f.
 =================
 */
-static void Cmd_Say_Team_f(gentity_t *who, const char *msg_in) {
-	gentity_t *cl_ent;
-	char outmsg[256];
-
-	if (CheckFlood(who))
-		return;
-
-	Q_strlcpy(outmsg, msg_in, sizeof(outmsg));
-
-	char *msg = outmsg;
-
-	const size_t msg_len = strlen(msg);
-	if (msg_len >= 2 && msg[0] == '\"' && msg[msg_len - 1] == '\"') {
-		msg[msg_len - 1] = 0;
-		msg++;
-	}
-
-	const size_t client_entity_count = CmdClientEntityCount();
-	for (size_t i = 1; i < client_entity_count; i++) {
-		cl_ent = &g_entities[i];
-		if (!cl_ent->inuse)
-			continue;
-		if (!cl_ent->client)
-			continue;
-		if (cl_ent->client->sess.team == who->client->sess.team)
-			gi.LocClient_Print(cl_ent, PRINT_CHAT, "({}): {}\n",
-				who->client->resp.netname, msg);
-	}
+static void Cmd_Say_Team_f(gentity_t *who, const char *) {
+	Cmd_SayScoped_f(who, false,
+		GT(GT_ARENA) ? mm_arena_chat_scope_t::Team : mm_arena_chat_scope_t::World,
+		true);
 }
-#endif
+
+static void Cmd_SayArena_f(gentity_t *ent) {
+	const mm_arena_chat_scope_t scope =
+		GT(GT_ARENA) && MM_Arena_Id(ent) > 0
+			? mm_arena_chat_scope_t::Arena
+			: mm_arena_chat_scope_t::World;
+	Cmd_SayScoped_f(ent, false, scope, false);
+}
+
+static void Cmd_SayWorld_f(gentity_t *ent) {
+	Cmd_SayScoped_f(ent, false, mm_arena_chat_scope_t::World, false);
+}
 
 /*
 =================
@@ -2181,9 +2177,41 @@ static void Cmd_UnlockTeam_f(gentity_t *ent) {
 	MM_CmdUnlockTeam(ent);
 }
 
+static void Cmd_TeamName_f(gentity_t *ent) {
+	MM_Arena_TeamNameCommand(ent);
+}
+
+static void Cmd_TeamKick_f(gentity_t *ent) {
+	MM_Arena_TeamKickCommand(ent);
+}
+
+static void Cmd_TeamMute_f(gentity_t *ent) {
+	MM_Arena_TeamMuteCommand(ent, true);
+}
+
+static void Cmd_TeamUnmute_f(gentity_t *ent) {
+	MM_Arena_TeamMuteCommand(ent, false);
+}
+
+static void Cmd_SpecInvite_f(gentity_t *ent) {
+	MM_Arena_SpectatorInviteCommand(ent, true);
+}
+
+static void Cmd_SpecRevoke_f(gentity_t *ent) {
+	MM_Arena_SpectatorInviteCommand(ent, false);
+}
+
+static void Cmd_SpecWho_f(gentity_t *ent) {
+	MM_Arena_SpecWhoCommand(ent);
+}
+
 // [MuffMode] Admin team command bodies live in muffmode/mm_team
 static void Cmd_SetTeam_f(gentity_t *ent) {
 	MM_CmdSetTeam(ent);
+}
+
+static void Cmd_Arena_f(gentity_t *ent) {
+	MM_Arena_Cmd(ent);
 }
 
 static void Cmd_Shuffle_f(gentity_t *ent) {
@@ -2261,19 +2289,29 @@ static void Cmd_ReadyTeam_f(gentity_t *ent) {
 }
 
 static void Cmd_Ready_f(gentity_t *ent) {
-	MM_CmdReady(ent);
+	if (!MM_Arena_ReadyCommand(ent))
+		MM_CmdReady(ent);
 }
 
 static void Cmd_NotReady_f(gentity_t *ent) {
-	MM_CmdNotReady(ent);
+	if (!MM_Arena_SetReady(ent, false))
+		MM_CmdNotReady(ent);
 }
 
 static void Cmd_ReadyUp_f(gentity_t *ent) {
-	MM_CmdReadyUp(ent);
+	if (!MM_Arena_ToggleReady(ent))
+		MM_CmdReadyUp(ent);
 }
 
 static void Cmd_Hook_f(gentity_t *ent) {
-	if (!g_allow_grapple->integer || !g_grapple_offhand->integer)
+	const bool global_offhand =
+		g_allow_grapple->integer && g_grapple_offhand->integer;
+	const bool hook_allowed = GT(GT_ARENA)
+		? MM_Arena_GrappleEnabled(ent)
+		: global_offhand;
+	if (!hook_allowed)
+		return;
+	if (GT(GT_ARENA) && !MM_Arena_CombatEnabled(ent))
 		return;
 
 	Weapon_Hook(ent);
@@ -2310,8 +2348,6 @@ static void Cmd_LoadMotd_f(gentity_t *ent) {
 }
 
 static void Cmd_Loc_f(gentity_t *ent) {
-	if (CheckFlood(ent))
-		return;
 	MM_CmdLoc(ent);
 }
 
@@ -2327,10 +2363,11 @@ cmds_t client_cmds[] = {
 	{"admin",			Cmd_Admin_f,			CF_ALLOW_INT | CF_ALLOW_SPEC},
 	{"alertall",		Cmd_AlertAll_f,			CF_ALLOW_SPEC | CF_CHEAT_PROTECT},
 	{"announcer",		Cmd_Announcer_f,		CF_ALLOW_SPEC | CF_ALLOW_DEAD},
+	{"arena",			Cmd_Arena_f,			CF_ALLOW_DEAD | CF_ALLOW_INT | CF_ALLOW_SPEC},
 	{"balance",			Cmd_BalanceTeams_f,		CF_ADMIN_ONLY | CF_ALLOW_INT | CF_ALLOW_SPEC},
 	{"boot",			Cmd_Boot_f,				CF_ADMIN_ONLY | CF_ALLOW_INT | CF_ALLOW_SPEC},
 	{"callvote",		Cmd_CallVote_f,			CF_ALLOW_DEAD | CF_ALLOW_SPEC},
-	{"captain",			Cmd_Captain_f,			CF_ALLOW_DEAD},
+	{"captain",			Cmd_Captain_f,			CF_ALLOW_DEAD | CF_ALLOW_SPEC},
 	{"checkpoi",		Cmd_CheckPOI_f,			CF_ALLOW_SPEC | CF_CHEAT_PROTECT},
 	{"clear_ai_enemy",	Cmd_Clear_AI_Enemy_f,	CF_CHEAT_PROTECT},
 	{"cv",				Cmd_CallVote_f,			CF_ALLOW_DEAD | CF_ALLOW_SPEC},
@@ -2375,7 +2412,7 @@ cmds_t client_cmds[] = {
 	{"listmonsters",	Cmd_ListMonsters_f,		CF_ALLOW_DEAD | CF_ALLOW_INT | CF_ALLOW_SPEC | CF_CHEAT_PROTECT},
 	{"loadmotd",		Cmd_LoadMotd_f,			CF_ADMIN_ONLY | CF_ALLOW_INT | CF_ALLOW_SPEC},
 	{"loc",				Cmd_Loc_f,				CF_NONE},
-	{"lockteam",		Cmd_LockTeam_f,			CF_ALLOW_DEAD},
+	{"lockteam",		Cmd_LockTeam_f,			CF_ALLOW_DEAD | CF_ALLOW_SPEC},
 	{"map_restart",		Cmd_MapRestart_f,		CF_ADMIN_ONLY | CF_ALLOW_INT | CF_ALLOW_SPEC},
 	{"mapinfo",			Cmd_MapInfo_f,			CF_ALLOW_DEAD | CF_ALLOW_SPEC},
 	{"maplist",			Cmd_MapList_f,			CF_ALLOW_DEAD | CF_ALLOW_SPEC},
@@ -2384,43 +2421,57 @@ cmds_t client_cmds[] = {
 	{"nextmap",			Cmd_NextMap_f,			CF_ADMIN_ONLY | CF_ALLOW_INT | CF_ALLOW_SPEC},
 	{"noclip",			Cmd_NoClip_f,			CF_ALLOW_SPEC | CF_CHEAT_PROTECT},
 	{"notarget",		Cmd_NoTarget_f,			CF_ALLOW_SPEC | CF_CHEAT_PROTECT},
-	{"notready",		Cmd_NotReady_f,			CF_ALLOW_DEAD},
+	{"notready",		Cmd_NotReady_f,			CF_ALLOW_DEAD | CF_ALLOW_SPEC},
 	{"novisible",		Cmd_NoVisible_f,		CF_ALLOW_SPEC | CF_CHEAT_PROTECT},
 	{"players",			Cmd_Players_f,			CF_ALLOW_DEAD | CF_ALLOW_INT | CF_ALLOW_SPEC},
 	{"playtime",		Cmd_PlayersJoinTime_f,	CF_ALLOW_DEAD | CF_ALLOW_INT | CF_ALLOW_SPEC},
 	{"playrank",		Cmd_PlayersRanked_f,	CF_ALLOW_DEAD | CF_ALLOW_INT | CF_ALLOW_SPEC},
 	{"putaway",			Cmd_PutAway_f,			CF_ALLOW_SPEC},	//spec for menu close
-	{"ready",			Cmd_Ready_f,			CF_ALLOW_DEAD},
+	{"ready",			Cmd_Ready_f,			CF_ALLOW_DEAD | CF_ALLOW_SPEC},
 	{"readyall",		Cmd_ReadyAll_f,			CF_ADMIN_ONLY | CF_ALLOW_INT | CF_ALLOW_SPEC},
-	{"readyteam",		Cmd_ReadyTeam_f,		CF_ALLOW_DEAD},
-	{"readyup",			Cmd_ReadyUp_f,			CF_ALLOW_DEAD},
+	{"readyteam",		Cmd_ReadyTeam_f,		CF_ALLOW_DEAD | CF_ALLOW_SPEC},
+	{"readyup",			Cmd_ReadyUp_f,			CF_ALLOW_DEAD | CF_ALLOW_SPEC},
 	{"resetmatch",		Cmd_ResetMatch_f,		CF_ADMIN_ONLY | CF_ALLOW_INT | CF_ALLOW_SPEC},
 	{"ruleset",			Cmd_Ruleset_f,			CF_ADMIN_ONLY | CF_ALLOW_INT | CF_ALLOW_SPEC},
+	{"say_arena",		Cmd_SayArena_f,			CF_ALLOW_DEAD | CF_ALLOW_INT | CF_ALLOW_SPEC},
+	{"say_world",		Cmd_SayWorld_f,			CF_ALLOW_DEAD | CF_ALLOW_INT | CF_ALLOW_SPEC},
 	{"score",			Cmd_Score_f,			CF_ALLOW_DEAD | CF_ALLOW_INT | CF_ALLOW_SPEC},
 	{"setpoi",			Cmd_SetPOI_f,			CF_ALLOW_SPEC | CF_CHEAT_PROTECT},
 	{"setmap",			Cmd_SetMap_f,			CF_ADMIN_ONLY | CF_ALLOW_INT | CF_ALLOW_SPEC},
 	{"setteam",			Cmd_SetTeam_f,			CF_ADMIN_ONLY | CF_ALLOW_INT | CF_ALLOW_SPEC},
 	{"shuffle",			Cmd_Shuffle_f,			CF_ADMIN_ONLY | CF_ALLOW_INT | CF_ALLOW_SPEC},
 	{"spawn",			Cmd_Spawn_f,			CF_ADMIN_ONLY | CF_ALLOW_SPEC},
+	{"specinvite",		Cmd_SpecInvite_f,		CF_ALLOW_DEAD | CF_ALLOW_SPEC},
+	{"specrevoke",		Cmd_SpecRevoke_f,		CF_ALLOW_DEAD | CF_ALLOW_SPEC},
+	{"specwho",			Cmd_SpecWho_f,			CF_ALLOW_DEAD | CF_ALLOW_SPEC},
 	{"startmatch",		Cmd_StartMatch_f,		CF_ADMIN_ONLY | CF_ALLOW_INT | CF_ALLOW_SPEC},
 	{"stats",			Cmd_Stats_f,			CF_ALLOW_INT | CF_ALLOW_SPEC},
 	{"target",			Cmd_Target_f,			CF_ALLOW_DEAD | CF_ALLOW_SPEC | CF_CHEAT_PROTECT},
 	{"team",			Cmd_Team_f,				CF_ALLOW_DEAD | CF_ALLOW_SPEC},
+	{"teamcaptain",		Cmd_Captain_f,			CF_ALLOW_DEAD | CF_ALLOW_SPEC},
+	{"teamkick",		Cmd_TeamKick_f,			CF_ALLOW_DEAD | CF_ALLOW_SPEC},
+	{"teamlock",		Cmd_LockTeam_f,			CF_ALLOW_DEAD | CF_ALLOW_SPEC},
+	{"teammute",		Cmd_TeamMute_f,			CF_ALLOW_DEAD | CF_ALLOW_SPEC},
+	{"teamname",		Cmd_TeamName_f,			CF_ALLOW_DEAD | CF_ALLOW_SPEC},
 	{"teamskin",		Cmd_TeamSkin_f,			CF_ALLOW_SPEC | CF_ALLOW_DEAD},
+	{"teamunlock",		Cmd_UnlockTeam_f,		CF_ALLOW_DEAD | CF_ALLOW_SPEC},
+	{"teamunmute",		Cmd_TeamUnmute_f,		CF_ALLOW_DEAD | CF_ALLOW_SPEC},
 	{"tskin",			Cmd_TeamSkin_f,			CF_ALLOW_SPEC | CF_ALLOW_DEAD},
 	{"teleport",		Cmd_Teleport_f,			CF_ALLOW_SPEC | CF_CHEAT_PROTECT},
 	{"time-out",		Cmd_TimeOut_f,			CF_ALLOW_DEAD | CF_ALLOW_SPEC},
 	{"time-in",			Cmd_TimeIn_f,			CF_ALLOW_DEAD | CF_ALLOW_SPEC},
+	{"timein",			Cmd_TimeIn_f,			CF_ALLOW_DEAD | CF_ALLOW_SPEC},
+	{"timeout",			Cmd_TimeOut_f,			CF_ALLOW_DEAD | CF_ALLOW_SPEC},
 	{"timer",			Cmd_Timer_f,			CF_ALLOW_SPEC | CF_ALLOW_DEAD},
 	{"infohud",			Cmd_InfoHud_f,			CF_ALLOW_SPEC | CF_ALLOW_DEAD},
 	{"unhook",			Cmd_UnHook_f,			CF_NONE},
-	{"unlockteam",		Cmd_UnlockTeam_f,		CF_ALLOW_DEAD},
+	{"unlockteam",		Cmd_UnlockTeam_f,		CF_ALLOW_DEAD | CF_ALLOW_SPEC},
 	{"unreadyall",		Cmd_UnReadyAll_f,		CF_ADMIN_ONLY | CF_ALLOW_INT | CF_ALLOW_SPEC},
 	{"use",				Cmd_Use_f,				CF_NONE},
 	{"use_index",		Cmd_Use_f,				CF_NONE},
 	{"use_index_only",	Cmd_Use_f,				CF_NONE},
 	{"use_only",		Cmd_Use_f,				CF_NONE},
-	{"vote",			Cmd_Vote_f,				CF_ALLOW_DEAD},
+	{"vote",			Cmd_Vote_f,				CF_ALLOW_DEAD | CF_ALLOW_SPEC},
 	{"wave",			Cmd_Wave_f,				CF_NONE},
 	{"weaplast",		Cmd_WeapLast_f,			CF_NONE},
 	{"weapnext",		Cmd_WeapNext_f,			CF_NONE},
@@ -2469,20 +2520,22 @@ void ClientCommand(gentity_t *ent) {
 	cmd = gi.argv(0);
 	cc = FindClientCmdByName(cmd);
 
-	// [Paril-KEX] these have to go through the lobby system
-#ifndef KEX_Q2_GAME
-	if (!Q_strcasecmp(cmd, "say")) {
-		Cmd_Say_f(ent, false);
-		return;
-	}
-	if (!Q_strcasecmp(cmd, "say_team") || !Q_strcasecmp(cmd, "steam")) {
-		if (Teams())
-			Cmd_Say_Team_f(ent, gi.args());
-		else
+	// Official KEX consumes built-in chat in its lobby layer and never sends it
+	// here. Q2PRO-family KEX hosts expose their filesystem extension and forward
+	// chat to ClientCommand so mods can supply the recipient policy.
+	if (MM_ChatCommandsUseGameDispatch()) {
+		if (!Q_strcasecmp(cmd, "say")) {
 			Cmd_Say_f(ent, false);
-		return;
+			return;
+		}
+		if (!Q_strcasecmp(cmd, "say_team") || !Q_strcasecmp(cmd, "steam")) {
+			if (Teams() || GT(GT_ARENA))
+				Cmd_Say_Team_f(ent, gi.args());
+			else
+				Cmd_Say_f(ent, false);
+			return;
+		}
 	}
-#endif
 
 	if (!cc) {
 		// always allow replace_/disable_ item cvars

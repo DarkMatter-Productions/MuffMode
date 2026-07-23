@@ -170,7 +170,7 @@ void ApplyUserinfoChanged(gentity_t *ent, const char *userinfo)
 
 	const int playernum = static_cast<int>(ent - g_entities - 1);
 
-	if (Teams()) {
+	if (Teams() || GT(GT_ARENA)) {
 		G_AssignPlayerSkin(ent, ent->client->pers.skin);
 	} else {
 		gi.configstring(CS_PLAYERSKINS + playernum, G_Fmt("{}\\{}", ent->client->pers.netname, ent->client->pers.skin).data());

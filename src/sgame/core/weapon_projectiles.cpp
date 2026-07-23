@@ -1,14 +1,56 @@
 // Copyright (c) ZeniMax Media Inc.
 // Licensed under the GNU General Public License 2.0.
 #include "g_local.h"
+#include "muffmode/mm_arena.h"
 #include "muffmode/mm_ruleset_weapons.h"
 
 static size_t WeaponEntityCount() {
 	return min(static_cast<size_t>(globals.num_entities), static_cast<size_t>(game.maxentities));
 }
 
-static size_t WeaponClientEntityCount() {
-	return min(WeaponEntityCount(), static_cast<size_t>(game.maxclients) + 1);
+static bool WeaponArenaClientRecipient(const gentity_t *source, const gentity_t *recipient) {
+	if (notGT(GT_ARENA))
+		return true;
+
+	const int arena_id = MM_Arena_Id(source);
+	return arena_id <= 0 || MM_Arena_Id(recipient) == arena_id;
+}
+
+// Dynamic entities in another arena must not shorten an immediate weapon
+// trace. Temporarily unlink only those foreign blockers, then restore them
+// before returning the final trace.
+static trace_t WeaponArenaTraceline(const vec3_t &start, const vec3_t &end,
+	gentity_t *passent, contents_t mask, const gentity_t *source) {
+	if (notGT(GT_ARENA))
+		return gi.traceline(start, end, passent, mask);
+
+	constexpr size_t MAX_ARENA_TRACE_IGNORES = 64;
+	std::array<gentity_t *, MAX_ARENA_TRACE_IGNORES> ignored {};
+	std::array<solid_t, MAX_ARENA_TRACE_IGNORES> solidities {};
+	size_t ignored_count = 0;
+	trace_t tr;
+
+	for (;;) {
+		tr = gi.traceline(start, end, passent, mask);
+		if (!tr.ent || tr.fraction == 1.0f ||
+			MM_Arena_CanInteract(source, tr.ent) ||
+			ignored_count == ignored.size())
+			break;
+
+		ignored[ignored_count] = tr.ent;
+		solidities[ignored_count] = tr.ent->solid;
+		ignored_count++;
+		tr.ent->solid = SOLID_NOT;
+		gi.linkentity(tr.ent);
+	}
+
+	while (ignored_count > 0) {
+		ignored_count--;
+		ignored[ignored_count]->solid = solidities[ignored_count];
+		gi.linkentity(ignored[ignored_count]);
+	}
+
+	return tr;
 }
 
 /*
@@ -151,6 +193,9 @@ struct fire_lead_pierce_t : pierce_args_t {
 	// we hit an entity; return false to stop the piercing.
 	// you can adjust the mask for the re-trace (for water, etc).
 	bool hit(contents_t &mask, vec3_t &end) override {
+		if (GT(GT_ARENA) && !MM_Arena_CanInteract(self, tr.ent))
+			return mark(tr.ent);
+
 		// see if we hit water
 		if (tr.contents & MASK_WATER) {
 			int color;
@@ -426,7 +471,7 @@ void fire_blaster(gentity_t *self, const vec3_t &start, const vec3_t &dir, int d
 	bolt->classname = "bolt";
 	gi.linkentity(bolt);
 
-	tr = gi.traceline(self->s.origin, bolt->s.origin, bolt, bolt->clipmask);
+	tr = WeaponArenaTraceline(self->s.origin, bolt->s.origin, bolt, bolt->clipmask, self);
 	if (tr.fraction < 1.0f) {
 		bolt->s.origin = tr.endpos + (tr.plane.normal * 1.f);
 		bolt->touch(bolt, tr.ent, tr, false);
@@ -526,7 +571,7 @@ void fire_greenblaster(gentity_t *self, const vec3_t &start, const vec3_t &dir, 
 	bolt->classname = "bolt";
 	gi.linkentity(bolt);
 
-	tr = gi.traceline(self->s.origin, bolt->s.origin, bolt, bolt->clipmask);
+	tr = WeaponArenaTraceline(self->s.origin, bolt->s.origin, bolt, bolt->clipmask, self);
 	if (tr.fraction < 1.0f) {
 		bolt->s.origin = tr.endpos + (tr.plane.normal * 1.f);
 		bolt->touch(bolt, tr.ent, tr, false);
@@ -569,7 +614,7 @@ void fire_blueblaster(gentity_t *self, const vec3_t &start, const vec3_t &dir, i
 	bolt->classname = "bolt";
 	gi.linkentity(bolt);
 
-	tr = gi.traceline(self->s.origin, bolt->s.origin, bolt, bolt->clipmask);
+	tr = WeaponArenaTraceline(self->s.origin, bolt->s.origin, bolt, bolt->clipmask, self);
 	if (tr.fraction < 1.0f) {
 		bolt->s.origin = tr.endpos + (tr.plane.normal * 1.f);
 		bolt->touch(bolt, tr.ent, tr, false);
@@ -919,6 +964,9 @@ struct fire_rail_pierce_t : pierce_args_t {
 	// we hit an entity; return false to stop the piercing.
 	// you can adjust the mask for the re-trace (for water, etc).
 	bool hit(contents_t &mask, vec3_t &end) override {
+		if (GT(GT_ARENA) && !MM_Arena_CanInteract(self, tr.ent))
+			return mark(tr.ent);
+
 		if (tr.contents & (CONTENTS_SLIME | CONTENTS_LAVA)) {
 			mask &= ~(CONTENTS_SLIME | CONTENTS_LAVA);
 			water = true;
@@ -984,18 +1032,25 @@ void fire_rail(gentity_t *self, const vec3_t &start, const vec3_t &aimdir, int d
 	// [Paril-KEX] this often makes double noise, so trying
 	// a slightly different approach...
 	for (auto player : active_clients()) {
+		if (!WeaponArenaClientRecipient(self, player))
+			continue;
+
 		vec3_t org = player->s.origin + player->client->ps.viewoffset + vec3_t{ 0, 0, (float)player->client->ps.pmove.viewheight };
 
 		if (binary_positional_search(org, start, args.tr.endpos, gi.inPHS, 3)) {
 			gi.WriteByte(svc_temp_entity);
-			gi.WriteByte((deathmatch->integer && (g_instagib->integer || GT(GT_INSTAGIB))) ? TE_RAILTRAIL2 : TE_RAILTRAIL);
+			gi.WriteByte((notGT(GT_ARENA) && deathmatch->integer &&
+				(g_instagib->integer || GT(GT_INSTAGIB)))
+					? TE_RAILTRAIL2 : TE_RAILTRAIL);
 			gi.WritePosition(start);
 			gi.WritePosition(args.tr.endpos);
 			gi.unicast(player, false, unicast_key);
 		}
 	}
 
-	if ((g_instagib->integer || GT(GT_INSTAGIB)) && g_instagib_splash->integer) {
+	if (notGT(GT_ARENA) &&
+		(g_instagib->integer || GT(GT_INSTAGIB)) &&
+		g_instagib_splash->integer) {
 		gentity_t *exp;
 
 		exp = G_Spawn();
@@ -1204,6 +1259,9 @@ struct bfg_laser_pierce_t : pierce_args_t {
 	// we hit an entity; return false to stop the piercing.
 	// you can adjust the mask for the re-trace (for water, etc).
 	bool hit(contents_t &mask, vec3_t &end) override {
+		if (GT(GT_ARENA) && !MM_Arena_CanInteract(self, tr.ent))
+			return mark(tr.ent);
+
 		// hurt it if we can
 		if ((tr.ent->takedamage) && !(tr.ent->flags & FL_IMMUNE_LASER) && (tr.ent != self->owner))
 			T_Damage(tr.ent, self, self->owner, dir, tr.endpos, vec3_origin, damage, 1, DAMAGE_ENERGY, MOD_BFG_LASER);
@@ -1245,6 +1303,8 @@ static THINK(bfg_think) (gentity_t *self) -> void {
 		if (ent == self)
 			continue;
 		if (ent == self->owner)
+			continue;
+		if (GT(GT_ARENA) && !MM_Arena_CanInteract(self, ent))
 			continue;
 		if (ent->client && ent->client->eliminated)
 			continue;
@@ -1397,7 +1457,7 @@ static void fire_beams(gentity_t *self, const vec3_t &start, const vec3_t &aimdi
 		content_mask &= ~MASK_WATER;
 	}
 
-	tr = gi.traceline(start, end, self, content_mask);
+	tr = WeaponArenaTraceline(start, end, self, content_mask, self);
 
 	// see if we hit water
 	if (tr.contents & MASK_WATER) {
@@ -1412,7 +1472,7 @@ static void fire_beams(gentity_t *self, const vec3_t &start, const vec3_t &aimdi
 			gi.multicast(tr.endpos, MULTICAST_PVS, false);
 		}
 		// re-trace ignoring water this time
-		tr = gi.traceline(water_start, end, self, content_mask & ~MASK_WATER);
+		tr = WeaponArenaTraceline(water_start, end, self, content_mask & ~MASK_WATER, self);
 	}
 	endpoint = tr.endpos;
 
@@ -1463,12 +1523,27 @@ static void fire_beams(gentity_t *self, const vec3_t &start, const vec3_t &aimdi
 		gi.multicast(pos, MULTICAST_PVS, false);
 	}
 
-	gi.WriteByte(svc_temp_entity);
-	gi.WriteByte(te_beam);
-	gi.WriteEntity(self);
-	gi.WritePosition(start);
-	gi.WritePosition(!underwater && !water ? tr.endpos : endpoint);
-	gi.multicast(self->s.origin, MULTICAST_ALL, false);
+	const vec3_t beam_end = !underwater && !water ? tr.endpos : endpoint;
+	if (notGT(GT_ARENA)) {
+		gi.WriteByte(svc_temp_entity);
+		gi.WriteByte(te_beam);
+		gi.WriteEntity(self);
+		gi.WritePosition(start);
+		gi.WritePosition(beam_end);
+		gi.multicast(self->s.origin, MULTICAST_ALL, false);
+	} else {
+		const uint32_t unicast_key = GetUnicastKey();
+		for (gentity_t *player : active_clients()) {
+			if (!WeaponArenaClientRecipient(self, player))
+				continue;
+			gi.WriteByte(svc_temp_entity);
+			gi.WriteByte(te_beam);
+			gi.WriteEntity(self);
+			gi.WritePosition(start);
+			gi.WritePosition(beam_end);
+			gi.unicast(player, false, unicast_key);
+		}
+	}
 }
 
 /*
@@ -1680,7 +1755,7 @@ void fire_disruptor(gentity_t *self, const vec3_t &start, const vec3_t &dir, int
 		bolt->think = G_FreeEntity;
 	}
 
-	tr = gi.traceline(self->s.origin, bolt->s.origin, bolt, bolt->clipmask);
+	tr = WeaponArenaTraceline(self->s.origin, bolt->s.origin, bolt, bolt->clipmask, self);
 	if (tr.fraction < 1.0f) {
 		bolt->s.origin = tr.endpos + (tr.plane.normal * 1.f);
 		bolt->touch(bolt, tr.ent, tr, false);
@@ -1748,7 +1823,8 @@ void fire_flechette(gentity_t *self, const vec3_t &start, const vec3_t &dir, int
 
 	gi.linkentity(flechette);
 
-	trace_t tr = gi.traceline(self->s.origin, flechette->s.origin, flechette, flechette->clipmask);
+	trace_t tr = WeaponArenaTraceline(self->s.origin, flechette->s.origin,
+		flechette, flechette->clipmask, self);
 	if (tr.fraction < 1.0f) {
 		flechette->s.origin = tr.endpos + (tr.plane.normal * 1.f);
 		flechette->touch(flechette, tr.ent, tr, false);
@@ -1772,6 +1848,9 @@ static BoxEntitiesResult_t fire_player_melee_BoxFilter(gentity_t *check, void *d
 	const player_melee_data_t *data = (const player_melee_data_t *)data_v;
 
 	if (!check->inuse || !check->takedamage || check == data->self)
+		return BoxEntitiesResult_t::Skip;
+
+	if (GT(GT_ARENA) && !MM_Arena_CanInteract(data->self, check))
 		return BoxEntitiesResult_t::Skip;
 
 	// check distance
@@ -1854,28 +1933,80 @@ constexpr int32_t NUKE_DAMAGE = 400;
 constexpr gtime_t NUKE_QUAKE_TIME = 3_sec;
 constexpr float	  NUKE_QUAKE_STRENGTH = 100;
 
-static THINK(Nuke_Quake) (gentity_t *self) -> void {
-	size_t i;
-	gentity_t *e;
+static void NukeSound(gentity_t *source, soundchan_t channel, int sound_index,
+	float volume, float attenuation, bool positioned) {
+	if (notGT(GT_ARENA)) {
+		if (positioned)
+			gi.positioned_sound(source->s.origin, source, channel, sound_index,
+				volume, attenuation, 0);
+		else
+			gi.sound(source, channel, sound_index, volume, attenuation, 0);
+		return;
+	}
 
+	for (gentity_t *player : active_clients()) {
+		if (WeaponArenaClientRecipient(source, player))
+			gi.local_sound(player, source->s.origin, source, channel, sound_index,
+				volume, attenuation, 0);
+	}
+}
+
+static void NukeEffect(gentity_t *source, int effect, multicast_t destination) {
+	if (notGT(GT_ARENA)) {
+		gi.WriteByte(svc_temp_entity);
+		gi.WriteByte(effect);
+		gi.WritePosition(source->s.origin);
+		gi.multicast(source->s.origin, destination, false);
+		return;
+	}
+
+	const uint32_t unicast_key = GetUnicastKey();
+	for (gentity_t *player : active_clients()) {
+		if (!WeaponArenaClientRecipient(source, player))
+			continue;
+		gi.WriteByte(svc_temp_entity);
+		gi.WriteByte(effect);
+		gi.WritePosition(source->s.origin);
+		gi.unicast(player, false, unicast_key);
+	}
+}
+
+static void NukeMuzzleFlash(gentity_t *source, player_muzzle_t muzzleflash) {
+	if (notGT(GT_ARENA)) {
+		gi.WriteByte(svc_muzzleflash);
+		gi.WriteEntity(source);
+		gi.WriteByte(muzzleflash);
+		gi.multicast(source->s.origin, MULTICAST_PHS, false);
+		return;
+	}
+
+	const uint32_t unicast_key = GetUnicastKey();
+	for (gentity_t *player : active_clients()) {
+		if (!WeaponArenaClientRecipient(source, player))
+			continue;
+		gi.WriteByte(svc_muzzleflash);
+		gi.WriteEntity(source);
+		gi.WriteByte(muzzleflash);
+		gi.unicast(player, false, unicast_key);
+	}
+}
+
+static THINK(Nuke_Quake) (gentity_t *self) -> void {
 	if (self->last_move_time < level.time) {
-		gi.positioned_sound(self->s.origin, self, CHAN_AUTO, self->noise_index, 0.75, ATTN_NONE, 0);
+		NukeSound(self, CHAN_AUTO, self->noise_index, 0.75f, ATTN_NONE, true);
 		self->last_move_time = level.time + 500_ms;
 	}
 
-	const size_t client_entity_limit = WeaponClientEntityCount();
-	for (i = 1, e = g_entities + i; i < client_entity_limit; i++, e++) {
-		if (!e->inuse)
+	for (gentity_t *player : active_clients()) {
+		if (!WeaponArenaClientRecipient(self, player))
 			continue;
-		if (!e->client)
-			continue;
-		if (!e->groundentity)
+		if (!player->groundentity)
 			continue;
 
-		e->groundentity = nullptr;
-		e->velocity[0] += crandom() * 150;
-		e->velocity[1] += crandom() * 150;
-		e->velocity[2] = self->speed * (100.0f / e->mass);
+		player->groundentity = nullptr;
+		player->velocity[0] += crandom() * 150;
+		player->velocity[1] += crandom() * 150;
+		player->velocity[2] = self->speed * (100.0f / player->mass);
 	}
 
 	if (level.time < self->timestamp)
@@ -1900,19 +2031,13 @@ void Nuke_Explode(gentity_t *ent) {
 	T_RadiusNukeDamage(ent, ent->teammaster, dmg, ent, splash_radius, MOD_NUKE);
 
 	if (ent->dmg > NUKE_DAMAGE)
-		gi.sound(ent, CHAN_ITEM, gi.soundindex("items/damage3.wav"), 1, ATTN_NORM, 0);
+		NukeSound(ent, CHAN_ITEM, gi.soundindex("items/damage3.wav"), 1.0f, ATTN_NORM, false);
 
-	gi.sound(ent, CHAN_NO_PHS_ADD | CHAN_VOICE, gi.soundindex("weapons/grenlx1a.wav"), 1, ATTN_NONE, 0);
+	NukeSound(ent, CHAN_NO_PHS_ADD | CHAN_VOICE,
+		gi.soundindex("weapons/grenlx1a.wav"), 1.0f, ATTN_NONE, false);
 
-	gi.WriteByte(svc_temp_entity);
-	gi.WriteByte(TE_EXPLOSION1_BIG);
-	gi.WritePosition(ent->s.origin);
-	gi.multicast(ent->s.origin, MULTICAST_PHS, false);
-
-	gi.WriteByte(svc_temp_entity);
-	gi.WriteByte(TE_NUKEBLAST);
-	gi.WritePosition(ent->s.origin);
-	gi.multicast(ent->s.origin, MULTICAST_ALL, false);
+	NukeEffect(ent, TE_EXPLOSION1_BIG, MULTICAST_PHS);
+	NukeEffect(ent, TE_NUKEBLAST, MULTICAST_ALL);
 
 	// become a quake
 	ent->svflags |= SVF_NOCLIENT;
@@ -1980,23 +2105,23 @@ static THINK(Nuke_Think) (gentity_t *ent) -> void {
 		ent->health = 1;
 		ent->owner = nullptr;
 
-		gi.WriteByte(svc_muzzleflash);
-		gi.WriteEntity(ent);
-		gi.WriteByte(muzzleflash);
-		gi.multicast(ent->s.origin, MULTICAST_PHS, false);
+		NukeMuzzleFlash(ent, muzzleflash);
 
 		if (ent->timestamp <= level.time) {
 			if ((gtime_t::from_sec(ent->wait) - level.time) <= (NUKE_TIME_TO_LIVE / 2.0f)) {
-				gi.sound(ent, CHAN_NO_PHS_ADD | CHAN_VOICE, gi.soundindex("weapons/nukewarn2.wav"), 1, attenuation, 0);
+				NukeSound(ent, CHAN_NO_PHS_ADD | CHAN_VOICE,
+					gi.soundindex("weapons/nukewarn2.wav"), 1.0f, attenuation, false);
 				ent->timestamp = level.time + 300_ms;
 			} else {
-				gi.sound(ent, CHAN_NO_PHS_ADD | CHAN_VOICE, gi.soundindex("weapons/nukewarn2.wav"), 1, attenuation, 0);
+				NukeSound(ent, CHAN_NO_PHS_ADD | CHAN_VOICE,
+					gi.soundindex("weapons/nukewarn2.wav"), 1.0f, attenuation, false);
 				ent->timestamp = level.time + 500_ms;
 			}
 		}
 	} else {
 		if (ent->timestamp <= level.time) {
-			gi.sound(ent, CHAN_NO_PHS_ADD | CHAN_VOICE, gi.soundindex("weapons/nukewarn2.wav"), 1, attenuation, 0);
+			NukeSound(ent, CHAN_NO_PHS_ADD | CHAN_VOICE,
+				gi.soundindex("weapons/nukewarn2.wav"), 1.0f, attenuation, false);
 			ent->timestamp = level.time + 1_sec;
 		}
 		ent->nextthink = level.time + FRAME_TIME_S;
@@ -2006,9 +2131,9 @@ static THINK(Nuke_Think) (gentity_t *ent) -> void {
 static TOUCH(nuke_bounce) (gentity_t *ent, gentity_t *other, const trace_t &tr, bool other_touching_self) -> void {
 	if (tr.surface && tr.surface->id) {
 		if (frandom() > 0.5f)
-			gi.sound(ent, CHAN_BODY, gi.soundindex("weapons/hgrenb1a.wav"), 1, ATTN_NORM, 0);
+			NukeSound(ent, CHAN_BODY, gi.soundindex("weapons/hgrenb1a.wav"), 1.0f, ATTN_NORM, false);
 		else
-			gi.sound(ent, CHAN_BODY, gi.soundindex("weapons/hgrenb2a.wav"), 1, ATTN_NORM, 0);
+			NukeSound(ent, CHAN_BODY, gi.soundindex("weapons/hgrenb2a.wav"), 1.0f, ATTN_NORM, false);
 	}
 }
 
@@ -2128,7 +2253,7 @@ void fire_ionripper(gentity_t *self, const vec3_t &start, const vec3_t &dir, int
 	ion->splash_radius = RS(RS_Q3A) ? 0 : 100;
 	gi.linkentity(ion);
 
-	tr = gi.traceline(self->s.origin, ion->s.origin, ion, ion->clipmask);
+	tr = WeaponArenaTraceline(self->s.origin, ion->s.origin, ion, ion->clipmask, self);
 	if (tr.fraction < 1.0f) {
 		ion->s.origin = tr.endpos + (tr.plane.normal * 1.f);
 		ion->touch(ion, tr.ent, tr, false);
@@ -2155,6 +2280,8 @@ static THINK(heat_think) (gentity_t *self) -> void {
 	// acquire new target
 	while ((target = findradius(target, self->s.origin, 1024)) != nullptr) {
 		if (self->owner == target)
+			continue;
+		if (GT(GT_ARENA) && !MM_Arena_CanInteract(self, target))
 			continue;
 		if (!target->client)
 			continue;
@@ -2404,6 +2531,7 @@ static THINK(Trap_Think) (gentity_t *ent) -> void {
 			ent->s.effects &= ~EF_TRAP;
 
 			best = G_Spawn();
+			best->arena = ent->arena;
 			best->count = ent->mass;
 			best->s.scale = 1.f + ((ent->accel - 100.f) / 300.f) * 1.0f;
 			SP_item_foodcube(best);
@@ -2436,11 +2564,13 @@ static THINK(Trap_Think) (gentity_t *ent) -> void {
 		return;
 	}
 
-	if (deathmatch->integer && IsCombatDisabled())
+	if (deathmatch->integer && notGT(GT_ARENA) && IsCombatDisabled())
 		return;
 
 	while ((target = findradius(target, ent->s.origin, 256)) != nullptr) {
 		if (target == ent)
+			continue;
+		if (GT(GT_ARENA) && !MM_Arena_CanInteract(ent, target))
 			continue;
 
 		// [Paril-KEX] don't allow traps to be placed near flags or teleporters

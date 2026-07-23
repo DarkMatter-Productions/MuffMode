@@ -3,6 +3,7 @@
 
 #include "fake_game_import.h"
 #include "muffmode/mm_announcer_rules.h"
+#include "muffmode/mm_arena_rules.h"
 #include "muffmode/mm_command_contracts.h"
 #include "muffmode/mm_freezetag_rules.h"
 #include "muffmode/mm_hud_stat_contracts.h"
@@ -18,6 +19,7 @@
 #include "muffmode/mm_time_format.h"
 #include "muffmode/mm_util.h"
 
+#include <array>
 #include <cstdint>
 #include <cstdio>
 #include <exception>
@@ -373,6 +375,520 @@ MM_TEST(command_contract_helpers_enforce_exact_arity_and_timeout_bounds) {
 	MM_CHECK_EQ(MM_ClampTimeoutSeconds(120), 120);
 	MM_CHECK_EQ(MM_ClampTimeoutSeconds(3600), 3600);
 	MM_CHECK_EQ(MM_ClampTimeoutSeconds(3601), 3600);
+}
+
+MM_TEST(arena_players_per_team_is_bounded_by_half_the_server_capacity) {
+	MM_CHECK_EQ(MM_ArenaNormalizePlayersPerTeam(-1, -1), 1);
+	MM_CHECK_EQ(MM_ArenaNormalizePlayersPerTeam(0, 0), 1);
+	MM_CHECK_EQ(MM_ArenaNormalizePlayersPerTeam(2, 1), 1);
+	MM_CHECK_EQ(MM_ArenaNormalizePlayersPerTeam(2, 2), 1);
+	MM_CHECK_EQ(MM_ArenaNormalizePlayersPerTeam(2, 3), 1);
+	MM_CHECK_EQ(MM_ArenaNormalizePlayersPerTeam(1, 4), 1);
+	MM_CHECK_EQ(MM_ArenaNormalizePlayersPerTeam(2, 4), 2);
+	MM_CHECK_EQ(MM_ArenaNormalizePlayersPerTeam(3, 4), 2);
+	MM_CHECK_EQ(MM_ArenaNormalizePlayersPerTeam(99, 16), 8);
+	MM_CHECK_EQ(
+		MM_ArenaNormalizePlayersPerTeam(std::numeric_limits<int>::max(), std::numeric_limits<int>::max()),
+		std::numeric_limits<int>::max() / 2);
+}
+
+MM_TEST(arena_menu_pagination_clamps_pages_and_keeps_every_item_reachable) {
+	const auto empty = MM_ArenaPageRange(0, 20, 10);
+	MM_CHECK_EQ(empty.page, 0);
+	MM_CHECK_EQ(empty.page_count, 1);
+	MM_CHECK_EQ(empty.first, 0);
+	MM_CHECK_EQ(empty.last, 0);
+
+	const auto first = MM_ArenaPageRange(25, -4, 10);
+	MM_CHECK_EQ(first.page, 0);
+	MM_CHECK_EQ(first.page_count, 3);
+	MM_CHECK_EQ(first.first, 0);
+	MM_CHECK_EQ(first.last, 10);
+
+	const auto middle = MM_ArenaPageRange(25, 1, 10);
+	MM_CHECK_EQ(middle.page, 1);
+	MM_CHECK_EQ(middle.first, 10);
+	MM_CHECK_EQ(middle.last, 20);
+
+	const auto last = MM_ArenaPageRange(25, 99, 10);
+	MM_CHECK_EQ(last.page, 2);
+	MM_CHECK_EQ(last.first, 20);
+	MM_CHECK_EQ(last.last, 25);
+}
+
+MM_TEST(arena_map_contract_requires_explicit_complete_ra2_metadata) {
+	mm_arena_map_contract_t contract;
+	contract.syntax_valid = true;
+	contract.first_entity_is_worldspawn = true;
+	contract.world_arena_key_count = 1;
+	contract.world_arena_value_valid = true;
+	contract.declared_rooms = 2;
+	contract.has_lobby_point = true;
+	contract.fighter_starts[1] = 2;
+	contract.fighter_starts[2] = 4;
+	contract.named_intermissions[1] = true;
+	contract.named_intermissions[2] = true;
+
+	MM_CHECK(static_cast<bool>(MM_ArenaValidateMapContract(contract)));
+
+	auto invalid = contract;
+	invalid.syntax_valid = false;
+	MM_CHECK_EQ(MM_ArenaValidateMapContract(invalid).error,
+		mm_arena_map_error_t::MalformedEntityLump);
+
+	invalid = contract;
+	invalid.first_entity_is_worldspawn = false;
+	MM_CHECK_EQ(MM_ArenaValidateMapContract(invalid).error,
+		mm_arena_map_error_t::MissingWorldspawn);
+
+	invalid = contract;
+	invalid.world_arena_key_count = 0;
+	MM_CHECK_EQ(MM_ArenaValidateMapContract(invalid).error,
+		mm_arena_map_error_t::MissingArenaKey);
+
+	invalid = contract;
+	invalid.world_arena_key_count = 2;
+	MM_CHECK_EQ(MM_ArenaValidateMapContract(invalid).error,
+		mm_arena_map_error_t::DuplicateArenaKey);
+
+	invalid = contract;
+	invalid.declared_rooms = 0;
+	MM_CHECK_EQ(MM_ArenaValidateMapContract(invalid).error,
+		mm_arena_map_error_t::InvalidArenaCount);
+	invalid.declared_rooms = MM_ARENA_MAP_MAX_ROOMS + 1;
+	MM_CHECK_EQ(MM_ArenaValidateMapContract(invalid).error,
+		mm_arena_map_error_t::InvalidArenaCount);
+
+	invalid = contract;
+	invalid.has_lobby_point = false;
+	MM_CHECK_EQ(MM_ArenaValidateMapContract(invalid).error,
+		mm_arena_map_error_t::MissingLobbyPoint);
+
+	invalid = contract;
+	invalid.fighter_starts[2] = 1;
+	const auto missing_starts = MM_ArenaValidateMapContract(invalid);
+	MM_CHECK_EQ(missing_starts.error,
+		mm_arena_map_error_t::MissingFighterStarts);
+	MM_CHECK_EQ(missing_starts.room, 2);
+
+	invalid = contract;
+	invalid.named_intermissions[1] = false;
+	const auto missing_view = MM_ArenaValidateMapContract(invalid);
+	MM_CHECK_EQ(missing_view.error,
+		mm_arena_map_error_t::MissingNamedIntermission);
+	MM_CHECK_EQ(missing_view.room, 1);
+}
+
+MM_TEST(arena_effective_gametype_fails_closed_until_map_validation) {
+	constexpr int ffa = 1;
+	constexpr int duel = 2;
+	constexpr int arena = 14;
+
+	MM_CHECK_EQ(MM_ArenaEffectiveGametype(arena, arena, ffa, false), ffa);
+	MM_CHECK_EQ(MM_ArenaEffectiveGametype(arena, arena, ffa, true), arena);
+	MM_CHECK_EQ(MM_ArenaEffectiveGametype(duel, arena, ffa, false), duel);
+	MM_CHECK_EQ(MM_ArenaEffectiveGametype(duel, arena, ffa, true), duel);
+}
+
+MM_TEST(arena_map_contract_rejects_malformed_world_counts_without_clamping) {
+	mm_arena_map_contract_t contract;
+	contract.syntax_valid = true;
+	contract.first_entity_is_worldspawn = true;
+	contract.world_arena_key_count = 1;
+	contract.has_lobby_point = true;
+
+	for (const int invalid_count : {
+		std::numeric_limits<int>::min(), -1, 0,
+		MM_ARENA_MAP_MAX_ROOMS + 1, std::numeric_limits<int>::max()
+	}) {
+		contract.world_arena_value_valid = true;
+		contract.declared_rooms = invalid_count;
+		MM_CHECK_EQ(MM_ArenaValidateMapContract(contract).error,
+			mm_arena_map_error_t::InvalidArenaCount);
+	}
+
+	contract.world_arena_value_valid = false;
+	contract.declared_rooms = 1;
+	MM_CHECK_EQ(MM_ArenaValidateMapContract(contract).error,
+		mm_arena_map_error_t::InvalidArenaCount);
+}
+
+MM_TEST(arena_best_of_is_odd_bounded_and_has_a_majority_threshold) {
+	MM_CHECK_EQ(MM_ArenaNormalizeBestOf(std::numeric_limits<int>::min()), 1);
+	MM_CHECK_EQ(MM_ArenaNormalizeBestOf(0), 1);
+	MM_CHECK_EQ(MM_ArenaNormalizeBestOf(1), 1);
+	MM_CHECK_EQ(MM_ArenaNormalizeBestOf(2), 3);
+	MM_CHECK_EQ(MM_ArenaNormalizeBestOf(3), 3);
+	MM_CHECK_EQ(MM_ArenaNormalizeBestOf(10), 11);
+	MM_CHECK_EQ(MM_ArenaNormalizeBestOf(98), 99);
+	MM_CHECK_EQ(MM_ArenaNormalizeBestOf(99), 99);
+	MM_CHECK_EQ(MM_ArenaNormalizeBestOf(std::numeric_limits<int>::max()), 99);
+
+	MM_CHECK_EQ(MM_ArenaWinsNeeded(1), 1);
+	MM_CHECK_EQ(MM_ArenaWinsNeeded(2), 2);
+	MM_CHECK_EQ(MM_ArenaWinsNeeded(3), 2);
+	MM_CHECK_EQ(MM_ArenaWinsNeeded(5), 3);
+	MM_CHECK_EQ(MM_ArenaWinsNeeded(99), 50);
+	MM_CHECK_EQ(MM_ArenaWinsNeeded(100), 50);
+}
+
+MM_TEST(arena_round_resolution_preserves_mutual_wipes_as_replay_draws) {
+	MM_CHECK_EQ(MM_ArenaResolveRound(0, 0, false), mm_arena_round_result_t::Draw);
+	MM_CHECK_EQ(MM_ArenaResolveRound(0, 0, true), mm_arena_round_result_t::Draw);
+	MM_CHECK_EQ(MM_ArenaResolveRound(-1, -1, false), mm_arena_round_result_t::Draw);
+
+	MM_CHECK_EQ(MM_ArenaResolveRound(1, 0, false), mm_arena_round_result_t::Red);
+	MM_CHECK_EQ(MM_ArenaResolveRound(0, 1, false), mm_arena_round_result_t::Blue);
+	MM_CHECK_EQ(MM_ArenaResolveRound(4, -1, true), mm_arena_round_result_t::Red);
+	MM_CHECK_EQ(MM_ArenaResolveRound(-1, 4, true), mm_arena_round_result_t::Blue);
+
+	MM_CHECK_EQ(MM_ArenaResolveRound(1, 1, false), mm_arena_round_result_t::Ongoing);
+	MM_CHECK_EQ(MM_ArenaResolveRound(4, 2, false), mm_arena_round_result_t::Ongoing);
+	MM_CHECK_EQ(MM_ArenaResolveRound(1, 1, true), mm_arena_round_result_t::Draw);
+	MM_CHECK_EQ(MM_ArenaResolveRound(4, 2, true), mm_arena_round_result_t::Draw);
+}
+
+MM_TEST(arena_series_winner_requires_the_normalized_best_of_majority) {
+	MM_CHECK_EQ(MM_ArenaSeriesWinner(0, 0, 5), mm_arena_round_result_t::Ongoing);
+	MM_CHECK_EQ(MM_ArenaSeriesWinner(2, 2, 5), mm_arena_round_result_t::Ongoing);
+	MM_CHECK_EQ(MM_ArenaSeriesWinner(3, 2, 5), mm_arena_round_result_t::Red);
+	MM_CHECK_EQ(MM_ArenaSeriesWinner(2, 3, 5), mm_arena_round_result_t::Blue);
+	MM_CHECK_EQ(MM_ArenaSeriesWinner(2, 0, 2), mm_arena_round_result_t::Red);
+	MM_CHECK_EQ(MM_ArenaSeriesWinner(0, 50, 100), mm_arena_round_result_t::Blue);
+	MM_CHECK_EQ(MM_ArenaSeriesWinner(3, 3, 5), mm_arena_round_result_t::Draw);
+}
+
+MM_TEST(arena_team_eligibility_treats_players_per_team_as_a_cap) {
+	MM_CHECK(MM_ArenaTeamEligible(1, 1));
+	MM_CHECK(MM_ArenaTeamEligible(3, 3));
+	MM_CHECK(MM_ArenaTeamEligible(1, 3));
+	MM_CHECK(MM_ArenaTeamEligible(2, 3));
+	MM_CHECK_FALSE(MM_ArenaTeamEligible(0, 3));
+	MM_CHECK_FALSE(MM_ArenaTeamEligible(-1, 3));
+	MM_CHECK_FALSE(MM_ArenaTeamEligible(4, 3));
+	MM_CHECK_FALSE(MM_ArenaTeamEligible(1, 0));
+	MM_CHECK_FALSE(MM_ArenaTeamEligible(1, -1));
+}
+
+MM_TEST(arena_fixed_clan_and_rover_teams_have_unlimited_size) {
+	MM_CHECK(MM_ArenaTeamSizeIsUnlimited(mm_arena_type_t::ClanArena));
+	MM_CHECK(MM_ArenaTeamSizeIsUnlimited(mm_arena_type_t::RedRover));
+	MM_CHECK_FALSE(MM_ArenaTeamSizeIsUnlimited(
+		mm_arena_type_t::RocketArena));
+	MM_CHECK_FALSE(MM_ArenaTeamSizeIsUnlimited(mm_arena_type_t::Practice));
+
+	MM_CHECK(MM_ArenaTeamEligibleForType(
+		mm_arena_type_t::ClanArena, 32, 1));
+	MM_CHECK(MM_ArenaTeamEligibleForType(
+		mm_arena_type_t::RedRover, 32, 1));
+	MM_CHECK_FALSE(MM_ArenaTeamEligibleForType(
+		mm_arena_type_t::ClanArena, 0, 1));
+	MM_CHECK_FALSE(MM_ArenaTeamEligibleForType(
+		mm_arena_type_t::RocketArena, 2, 1));
+	MM_CHECK(MM_ArenaTeamEligibleForType(
+		mm_arena_type_t::RocketArena, 1, 1));
+}
+
+MM_TEST(arena_team_transfer_protects_the_empty_destination_from_cleanup) {
+	MM_CHECK(MM_ArenaShouldDestroyEmptyTeam(0, false));
+	MM_CHECK_FALSE(MM_ArenaShouldDestroyEmptyTeam(0, true));
+	MM_CHECK_FALSE(MM_ArenaShouldDestroyEmptyTeam(1, false));
+	MM_CHECK_FALSE(MM_ArenaShouldDestroyEmptyTeam(1, true));
+}
+
+MM_TEST(arena_protection_modes_keep_self_damage_separate_from_team_damage) {
+	MM_CHECK_FALSE(MM_ArenaProtectionBlocks(mm_arena_protection_t::None, true, true));
+	MM_CHECK_FALSE(MM_ArenaProtectionBlocks(mm_arena_protection_t::None, true, false));
+	MM_CHECK(MM_ArenaProtectionBlocks(mm_arena_protection_t::SelfAndTeam, true, true));
+	MM_CHECK(MM_ArenaProtectionBlocks(mm_arena_protection_t::SelfAndTeam, true, false));
+	MM_CHECK_FALSE(MM_ArenaProtectionBlocks(mm_arena_protection_t::Team, true, true));
+	MM_CHECK(MM_ArenaProtectionBlocks(mm_arena_protection_t::Team, true, false));
+	MM_CHECK_FALSE(MM_ArenaProtectionBlocks(mm_arena_protection_t::SelfAndTeam, false, false));
+}
+
+MM_TEST(arena_types_preserve_ra3_team_queue_and_practice_semantics) {
+	MM_CHECK(MM_ArenaWinnerStays(mm_arena_type_t::RocketArena));
+	MM_CHECK_FALSE(MM_ArenaWinnerStays(mm_arena_type_t::ClanArena));
+	MM_CHECK(MM_ArenaUsesFixedTeams(mm_arena_type_t::ClanArena));
+	MM_CHECK(MM_ArenaUsesFixedTeams(mm_arena_type_t::RedRover));
+	MM_CHECK_FALSE(MM_ArenaUsesFixedTeams(mm_arena_type_t::RocketArena));
+	MM_CHECK(MM_ArenaRoundEliminates(mm_arena_type_t::RocketArena));
+	MM_CHECK_FALSE(MM_ArenaRoundEliminates(mm_arena_type_t::Practice));
+	MM_CHECK_FALSE(MM_ArenaUsesLogicalTeams(mm_arena_type_t::Practice));
+	MM_CHECK(MM_ArenaUsesLogicalTeams(mm_arena_type_t::RocketArena));
+	MM_CHECK(MM_ArenaShouldAutoEnrollPractice(
+		mm_arena_type_t::Practice, mm_arena_role_t::Observer));
+	MM_CHECK(MM_ArenaShouldAutoEnrollPractice(
+		mm_arena_type_t::Practice, mm_arena_role_t::Fighter));
+	MM_CHECK_FALSE(MM_ArenaShouldAutoEnrollPractice(
+		mm_arena_type_t::Practice, mm_arena_role_t::Coach));
+	MM_CHECK_FALSE(MM_ArenaShouldAutoEnrollPractice(
+		mm_arena_type_t::RocketArena, mm_arena_role_t::Observer));
+}
+
+MM_TEST(arena_follow_and_freecam_restrictions_are_competition_only) {
+	MM_CHECK(MM_ArenaFollowAllowedByCompetition(
+		false, false, false, false));
+	MM_CHECK(MM_ArenaFollowAllowedByCompetition(
+		false, true, false, false));
+	MM_CHECK_FALSE(MM_ArenaFollowAllowedByCompetition(
+		true, false, false, false));
+	MM_CHECK(MM_ArenaFollowAllowedByCompetition(
+		true, false, false, true));
+	MM_CHECK(MM_ArenaFollowAllowedByCompetition(
+		true, true, true, false));
+	MM_CHECK_FALSE(MM_ArenaFollowAllowedByCompetition(
+		true, true, false, true));
+
+	MM_CHECK(MM_ArenaFreecamAllowedByCompetition(false, false));
+	MM_CHECK(MM_ArenaFreecamAllowedByCompetition(true, true));
+	MM_CHECK_FALSE(MM_ArenaFreecamAllowedByCompetition(true, false));
+}
+
+MM_TEST(arena_live_roster_lock_only_applies_during_fight_and_timeout) {
+	MM_CHECK(MM_ArenaFighterRosterLocked(mm_arena_type_t::RocketArena,
+		mm_arena_state_t::Running, true, true));
+	MM_CHECK(MM_ArenaFighterRosterLocked(mm_arena_type_t::ClanArena,
+		mm_arena_state_t::Paused, true, true));
+	MM_CHECK_FALSE(MM_ArenaFighterRosterLocked(mm_arena_type_t::RocketArena,
+		mm_arena_state_t::MatchCountdown, true, true));
+	MM_CHECK_FALSE(MM_ArenaFighterRosterLocked(mm_arena_type_t::RocketArena,
+		mm_arena_state_t::RoundOver, true, true));
+	MM_CHECK_FALSE(MM_ArenaFighterRosterLocked(mm_arena_type_t::RocketArena,
+		mm_arena_state_t::Running, true, false));
+	MM_CHECK_FALSE(MM_ArenaFighterRosterLocked(mm_arena_type_t::Practice,
+		mm_arena_state_t::Running, true, true));
+}
+
+MM_TEST(arena_competition_commands_allow_only_explicit_admin_overrides) {
+	MM_CHECK(MM_ArenaCompetitionCommandAllowed(true, false, false));
+	MM_CHECK(MM_ArenaCompetitionCommandAllowed(true, true, false));
+	MM_CHECK_FALSE(MM_ArenaCompetitionCommandAllowed(false, false, false));
+	MM_CHECK_FALSE(MM_ArenaCompetitionCommandAllowed(false, true, false));
+	MM_CHECK(MM_ArenaCompetitionCommandAllowed(false, true, true));
+
+	bool ready = false;
+	MM_CHECK(MM_ArenaReadyCommandValue({}, false, ready));
+	MM_CHECK(ready);
+	MM_CHECK(MM_ArenaReadyCommandValue({}, true, ready));
+	MM_CHECK_FALSE(ready);
+	MM_CHECK(MM_ArenaReadyCommandValue("1", false, ready));
+	MM_CHECK(ready);
+	MM_CHECK(MM_ArenaReadyCommandValue("0", true, ready));
+	MM_CHECK_FALSE(ready);
+	MM_CHECK_FALSE(MM_ArenaReadyCommandValue("yes", false, ready));
+}
+
+MM_TEST(arena_team_lock_command_arity_is_exact) {
+	MM_CHECK(MM_ArenaTeamLockArgumentsValid(true, 2));
+	MM_CHECK(MM_ArenaTeamLockArgumentsValid(true, 3));
+	MM_CHECK_FALSE(MM_ArenaTeamLockArgumentsValid(true, 1));
+	MM_CHECK_FALSE(MM_ArenaTeamLockArgumentsValid(true, 4));
+
+	MM_CHECK(MM_ArenaTeamLockArgumentsValid(false, 2));
+	MM_CHECK_FALSE(MM_ArenaTeamLockArgumentsValid(false, 1));
+	MM_CHECK_FALSE(MM_ArenaTeamLockArgumentsValid(false, 3));
+}
+
+MM_TEST(arena_timeout_owner_team_controls_timein_for_active_team_members) {
+	MM_CHECK(MM_ArenaCanCallTimeout(
+		mm_arena_state_t::Running, true, true));
+	MM_CHECK_FALSE(MM_ArenaCanCallTimeout(
+		mm_arena_state_t::MatchCountdown, true, true));
+	MM_CHECK_FALSE(MM_ArenaCanCallTimeout(
+		mm_arena_state_t::Running, false, true));
+	MM_CHECK_FALSE(MM_ArenaCanCallTimeout(
+		mm_arena_state_t::Running, true, false));
+
+	MM_CHECK(MM_ArenaCanCallTimein(mm_arena_state_t::Paused,
+		true, true, false, 7, 7));
+	MM_CHECK_FALSE(MM_ArenaCanCallTimein(mm_arena_state_t::Paused,
+		true, true, false, 8, 7));
+	MM_CHECK_FALSE(MM_ArenaCanCallTimein(mm_arena_state_t::Paused,
+		true, true, true, 7, 7));
+	MM_CHECK_FALSE(MM_ArenaCanCallTimein(mm_arena_state_t::Paused,
+		true, false, false, 7, 7));
+}
+
+MM_TEST(arena_deferred_proposals_layer_without_discarding_prior_changes) {
+	mm_arena_settings_t current;
+	current.health = 100;
+	current.rounds = 1;
+	mm_arena_settings_t pending = current;
+	pending.health = 200;
+
+	const mm_arena_settings_t layered =
+		MM_ArenaProposalBase(current, pending, true);
+	MM_CHECK_EQ(layered.health, 200);
+	MM_CHECK_EQ(layered.rounds, 1);
+	const mm_arena_settings_t immediate =
+		MM_ArenaProposalBase(current, pending, false);
+	MM_CHECK_EQ(immediate.health, 100);
+}
+
+MM_TEST(arena_spectator_invites_and_config_braces_follow_ra3_safety_rules) {
+	MM_CHECK_FALSE(MM_ArenaSpectatorInviteCommandAllowed(false));
+	MM_CHECK(MM_ArenaSpectatorInviteCommandAllowed(true));
+	MM_CHECK_EQ(MM_ArenaClearSpectatorInviteBits(0x07), 0x04);
+	MM_CHECK_EQ(MM_ArenaClearSpectatorInviteBits(0x03), 0x00);
+
+	const std::array<std::string_view, 6> balanced {
+		"map", "{", "arena", "{", "}", "}"
+	};
+	const std::array<std::string_view, 3> missing_close {
+		"map", "{", "health"
+	};
+	const std::array<std::string_view, 2> stray_close {
+		"}", "{"
+	};
+	MM_CHECK(MM_ArenaConfigBracesBalanced(balanced));
+	MM_CHECK_FALSE(MM_ArenaConfigBracesBalanced(missing_close));
+	MM_CHECK_FALSE(MM_ArenaConfigBracesBalanced(stray_close));
+}
+
+MM_TEST(arena_votes_use_ra3_expiry_and_unanimous_lock_thresholds) {
+	MM_CHECK_FALSE(MM_ArenaVotePassesAtExpiry(0, 0, 0));
+	MM_CHECK_FALSE(MM_ArenaVotePassesAtExpiry(2, 1, 3));
+	MM_CHECK(MM_ArenaVotePassesAtExpiry(2, 0, 3));
+	MM_CHECK_FALSE(MM_ArenaVotePassesAtExpiry(3, 1, 6));
+	MM_CHECK(MM_ArenaVotePassesAtExpiry(4, 1, 6));
+
+	MM_CHECK_FALSE(MM_ArenaLockVotePassesAtExpiry(5, 0, 5, 6));
+	MM_CHECK(MM_ArenaLockVotePassesAtExpiry(6, 0, 6, 6));
+	MM_CHECK_FALSE(MM_ArenaLockVotePassesAtExpiry(5, 1, 6, 6));
+	MM_CHECK_FALSE(MM_ArenaLockVotePassesAtExpiry(6, 0, 7, 6));
+	MM_CHECK(MM_ArenaLockVotePassesAtExpiry(6, 0, 6, 0));
+}
+
+MM_TEST(arena_successful_votes_restore_every_players_proposal_allowance) {
+	std::array<std::uint8_t, 4> tries { 2, 1, 0, 2 };
+	MM_ArenaResolveVoteTries(tries, false);
+	MM_CHECK_EQ(tries[0], 2);
+	MM_CHECK_EQ(tries[1], 1);
+	MM_CHECK_EQ(tries[2], 0);
+	MM_CHECK_EQ(tries[3], 2);
+
+	MM_ArenaResolveVoteTries(tries, true);
+	for (std::uint8_t used : tries)
+		MM_CHECK_EQ(used, 0);
+}
+
+MM_TEST(arena_flood_bypass_is_only_ca_competition_team_chat) {
+	MM_CHECK(MM_ArenaTeamChatBypassesFlood(
+		mm_arena_type_t::ClanArena, true, true));
+	MM_CHECK_FALSE(MM_ArenaTeamChatBypassesFlood(
+		mm_arena_type_t::ClanArena, false, true));
+	MM_CHECK_FALSE(MM_ArenaTeamChatBypassesFlood(
+		mm_arena_type_t::ClanArena, true, false));
+	MM_CHECK_FALSE(MM_ArenaTeamChatBypassesFlood(
+		mm_arena_type_t::RocketArena, true, true));
+	MM_CHECK_FALSE(MM_ArenaTeamChatBypassesFlood(
+		mm_arena_type_t::RedRover, true, true));
+	MM_CHECK_FALSE(MM_ArenaTeamChatBypassesFlood(
+		mm_arena_type_t::Practice, true, true));
+	MM_CHECK(MM_ArenaTeamChatUsesArenaScope(mm_arena_type_t::Practice));
+	MM_CHECK_FALSE(MM_ArenaTeamChatUsesArenaScope(
+		mm_arena_type_t::RocketArena));
+}
+
+MM_TEST(arena_team_chat_separates_live_and_observing_teammates) {
+	MM_CHECK(MM_ArenaTeamChatStatesMatch(true, true, false, false));
+	MM_CHECK(MM_ArenaTeamChatStatesMatch(false, false, false, false));
+	MM_CHECK_FALSE(MM_ArenaTeamChatStatesMatch(true, false, false, false));
+	MM_CHECK_FALSE(MM_ArenaTeamChatStatesMatch(false, true, false, false));
+	MM_CHECK(MM_ArenaTeamChatStatesMatch(true, false, true, false));
+	MM_CHECK(MM_ArenaTeamChatStatesMatch(false, true, false, true));
+}
+
+MM_TEST(arena_red_rover_transfers_and_scores_kills_and_world_deaths) {
+	const auto kill = MM_ArenaRedRoverScoreDelta(true);
+	MM_CHECK_EQ(kill.killer, 1);
+	MM_CHECK_EQ(kill.victim, -1);
+
+	const auto world = MM_ArenaRedRoverScoreDelta(false);
+	MM_CHECK_EQ(world.killer, 0);
+	MM_CHECK_EQ(world.victim, -1);
+
+	MM_CHECK(MM_ArenaRedRoverDestinationIsRed(false, true, true));
+	MM_CHECK_FALSE(MM_ArenaRedRoverDestinationIsRed(true, true, false));
+	MM_CHECK_FALSE(MM_ArenaRedRoverDestinationIsRed(true, false, false));
+	MM_CHECK(MM_ArenaRedRoverDestinationIsRed(false, false, true));
+}
+
+MM_TEST(arena_weapon_mask_keeps_only_supported_bits_and_allows_melee_only) {
+	constexpr std::uint32_t all_arena_weapons = 0x1ffu;
+
+	MM_CHECK_EQ(MM_ArenaSanitizeWeaponMask(0u), 0u);
+	MM_CHECK_EQ(MM_ArenaSanitizeWeaponMask(1u), 1u);
+	MM_CHECK_EQ(MM_ArenaSanitizeWeaponMask(1u << 8), 1u << 8);
+	MM_CHECK_EQ(MM_ArenaSanitizeWeaponMask(all_arena_weapons), all_arena_weapons);
+	MM_CHECK_EQ(MM_ArenaSanitizeWeaponMask(1u << 9), 0u);
+	MM_CHECK_EQ(MM_ArenaSanitizeWeaponMask(0xa5a5a5a5u), 0x1a5u);
+	MM_CHECK_EQ(MM_ArenaSanitizeWeaponMask(std::numeric_limits<std::uint32_t>::max()), all_arena_weapons);
+}
+
+MM_TEST(arena_ra3_weapon_digits_and_names_map_to_q2re_roles) {
+	MM_CHECK_EQ(MM_ArenaWeaponFlagForDigit('0'), 0u);
+	MM_CHECK_EQ(MM_ArenaWeaponFlagForDigit('1'), MM_ARENA_WEAPON_GAUNTLET);
+	MM_CHECK_EQ(MM_ArenaWeaponFlagForDigit('2'), MM_ARENA_WEAPON_MACHINEGUN);
+	MM_CHECK_EQ(MM_ArenaWeaponFlagForDigit('3'), MM_ARENA_WEAPON_SHOTGUN);
+	MM_CHECK_EQ(MM_ArenaWeaponFlagForDigit('4'), MM_ARENA_WEAPON_GRENADE_LAUNCHER);
+	MM_CHECK_EQ(MM_ArenaWeaponFlagForDigit('5'), MM_ARENA_WEAPON_ROCKET_LAUNCHER);
+	MM_CHECK_EQ(MM_ArenaWeaponFlagForDigit('6'), MM_ARENA_WEAPON_LIGHTNING);
+	MM_CHECK_EQ(MM_ArenaWeaponFlagForDigit('7'), MM_ARENA_WEAPON_RAILGUN);
+	MM_CHECK_EQ(MM_ArenaWeaponFlagForDigit('8'), MM_ARENA_WEAPON_PLASMA);
+	MM_CHECK_EQ(MM_ArenaWeaponFlagForDigit('9'), MM_ARENA_WEAPON_BFG);
+
+	MM_CHECK_EQ(MM_ArenaWeaponFlagForName("chainfist"), MM_ARENA_WEAPON_GAUNTLET);
+	MM_CHECK_EQ(MM_ArenaWeaponFlagForName("machinegun"), MM_ARENA_WEAPON_MACHINEGUN);
+	MM_CHECK_EQ(MM_ArenaWeaponFlagForName("shotgun"), MM_ARENA_WEAPON_SHOTGUN);
+	MM_CHECK_EQ(MM_ArenaWeaponFlagForName("grenadelauncher"), MM_ARENA_WEAPON_GRENADE_LAUNCHER);
+	MM_CHECK_EQ(MM_ArenaWeaponFlagForName("rocketlauncher"), MM_ARENA_WEAPON_ROCKET_LAUNCHER);
+	MM_CHECK_EQ(MM_ArenaWeaponFlagForName("lightninggun"), MM_ARENA_WEAPON_LIGHTNING);
+	MM_CHECK_EQ(MM_ArenaWeaponFlagForName("railgun"), MM_ARENA_WEAPON_RAILGUN);
+	MM_CHECK_EQ(MM_ArenaWeaponFlagForName("hyperblaster"), MM_ARENA_WEAPON_PLASMA);
+	MM_CHECK_EQ(MM_ArenaWeaponFlagForName("bfg"), MM_ARENA_WEAPON_BFG);
+}
+
+MM_TEST(arena_stock_plasma_ammo_is_not_misparsed_or_user_votable) {
+	mm_arena_settings_t settings;
+	settings.plasma_ammo = 0;
+	const std::uint32_t original_weapons = settings.weapon_mask;
+	MM_CHECK(MM_ArenaSettingIsAmmo("plasma"));
+	MM_CHECK(MM_ArenaApplyAmmoSetting(settings, "plasma", 100));
+	MM_CHECK_EQ(settings.plasma_ammo, 100);
+	MM_CHECK_EQ(settings.weapon_mask, original_weapons);
+	MM_CHECK_EQ(MM_ArenaVoteFlagForSetting("plasma"), 0u);
+	MM_CHECK_EQ(MM_ArenaVoteFlagForSetting("shells"), 0u);
+	MM_CHECK_EQ(MM_ArenaVoteFlagForSetting("plasmagun"),
+		static_cast<std::uint32_t>(MM_ARENA_VOTE_HYPERBLASTER));
+	MM_CHECK_EQ(MM_ArenaVoteFlagForSetting("weapons"),
+		static_cast<std::uint32_t>(MM_ARENA_VOTE_WEAPONS));
+}
+
+MM_TEST(arena_ra3_defaults_and_pickup_aliases_are_preserved) {
+	const mm_arena_settings_t defaults;
+	MM_CHECK_EQ(defaults.health, 100);
+	MM_CHECK_EQ(defaults.armor, 100);
+	MM_CHECK_EQ(defaults.grenades, 20);
+	MM_CHECK_EQ(defaults.plasma_ammo, 100);
+	MM_CHECK_EQ(defaults.bfg_ammo, 20);
+	MM_CHECK_EQ(defaults.rocket_speed, 900);
+	MM_CHECK_EQ(defaults.vote_tries, 2);
+	MM_CHECK_EQ(defaults.weapon_mask,
+		static_cast<std::uint32_t>(MM_ARENA_WEAPON_STANDARD));
+	MM_CHECK_EQ(defaults.vote_allow_mask & MM_ARENA_VOTE_EXCESSIVE, 0u);
+	MM_CHECK_EQ(defaults.vote_allow_mask & MM_ARENA_VOTE_GRAPPLE, 0u);
+	MM_CHECK(defaults.vote_allow_mask & MM_ARENA_VOTE_WEAPONS);
+
+	MM_CHECK_EQ(MM_ArenaParseType("practicearena",
+		mm_arena_type_t::RocketArena), mm_arena_type_t::Practice);
+	MM_CHECK_EQ(MM_ArenaResolvePickupType(true,
+		mm_arena_type_t::RocketArena, mm_arena_type_t::RedRover),
+		mm_arena_type_t::RedRover);
+	MM_CHECK_EQ(MM_ArenaResolvePickupType(false,
+		mm_arena_type_t::RocketArena, mm_arena_type_t::RedRover),
+		mm_arena_type_t::RocketArena);
 }
 
 MM_TEST(red_rover_frag_warning_never_indexes_below_zero) {

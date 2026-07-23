@@ -1156,7 +1156,8 @@ function New-DeterministicHtmlReadme {
         </article>
         <article class="card">
           <h3>Choose A Preset</h3>
-          <p>Run a mode config such as <code>exec gt-FFA.cfg</code>, <code>exec gt-DUEL.cfg</code>, <code>exec gt-HORDE.cfg</code>, or another packaged <code>gt-*.cfg</code>.</p>
+          <p>Run a mode config such as <code>exec gt-FFA.cfg</code>, <code>exec gt-DUEL.cfg</code>, <code>exec gt-ARENA.cfg</code>, or another packaged <code>gt-*.cfg</code>.</p>
+          <p><code>gt-ARENA.cfg</code> requires separately installed RA2-compatible maps and an RA2-only map list; RA2 assets are not bundled.</p>
         </article>
         <article class="card">
           <h3>Check Your Setup</h3>
@@ -1168,7 +1169,7 @@ function New-DeterministicHtmlReadme {
       <h2>Gametype Overview</h2>
       <div class="grid">
         <article class="card"><strong>Quick public games:</strong> FFA, Instagib, NadeFest, and Horde are easy drop-in choices.</article>
-        <article class="card"><strong>Competitive matches:</strong> Duel, TDM, CTF, Clan Arena, and Capture Strike benefit most from a locked map pool and a known ruleset.</article>
+        <article class="card"><strong>Competitive matches:</strong> Duel, Rocket Arena, TDM, CTF, Clan Arena, and Capture Strike benefit most from a locked map pool and a known ruleset.</article>
         <article class="card"><strong>Community nights:</strong> Red Rover, Capture Strike, Vampiric Damage, Weapons Frenzy, and Quad Hog change the rhythm without requiring a different install.</article>
       </div>
     </section>
@@ -1964,6 +1965,7 @@ function Assert-TranslatedHtmlReadme {
         "gt-*.cfg",
         "gt-FFA.cfg",
         "gt-DUEL.cfg",
+        "gt-ARENA.cfg",
         "gt-HORDE.cfg",
         "g_gametype_cfg",
         "g_muffmode_debug",
@@ -2030,7 +2032,7 @@ Critical preservation rules:
 - Set the root <html> lang attribute to "$($language.HtmlLang)".
 - Translate visible human prose and human-readable title/alt/aria text.
 - Do not translate or alter text inside <code>, <pre>, <kbd>, <samp>, <style>, or <script>.
-- Do not translate command names, cvar names, config names, ruleset tokens, gametype tokens, map filenames, DLL/EXE names, path fragments, aliases, binds, URLs, or file extensions. Examples include server-base.cfg, gt-*.cfg, gt-FFA.cfg, gt-DUEL.cfg, gt-HORDE.cfg, g_gametype_cfg, g_muffmode_debug, team auto, readyup, callvote, vote yes, vote no, alias +hook hook, alias -hook unhook, bind mouse2 +hook, doctor, q2re, mm, q3a, q2reb, q, qc, game_x64.dll, and MuffModeUpdater.exe.
+- Do not translate command names, cvar names, config names, ruleset tokens, gametype tokens, map filenames, DLL/EXE names, path fragments, aliases, binds, URLs, or file extensions. Examples include server-base.cfg, gt-*.cfg, gt-FFA.cfg, gt-DUEL.cfg, gt-ARENA.cfg, g_gametype_cfg, g_muffmode_debug, team auto, arena create, readyup, callvote, vote yes, vote no, alias +hook hook, alias -hook unhook, bind mouse2 +hook, doctor, q2re, mm, q3a, q2reb, q, qc, game_x64.dll, and MuffModeUpdater.exe.
 - Preserve product and project names such as MuffMode, Muff Mode, Quake II, Quake II Rerelease, GitHub, Ko-fi, Steam, Epic Games Store, GOG, Xbox app, and Microsoft Store.
 - Keep the tone practical, concise, and friendly.
 
@@ -2084,7 +2086,8 @@ Audience and scope:
 - Primary audience: Quake II Rerelease players and server hosts installing this release.
 - This project is currently in $Channel channel. Make that release state visible but not alarming.
 - Include installation, first-use guidance, player usage, voting, common host setup, packaged server config usage, gametype overview, a player-focused ruleset guide, offhand hook bind, debugging pointer, package contents, and the changelog.
-- Explain that hosts should load server-base.cfg first, then a packaged gt-*.cfg preset such as gt-FFA.cfg, gt-DUEL.cfg, or gt-HORDE.cfg; g_gametype_cfg then auto-executes matching gametype configs on later mode changes.
+- Explain that hosts should load server-base.cfg first, then a packaged gt-*.cfg preset such as gt-FFA.cfg, gt-DUEL.cfg, or gt-ARENA.cfg; g_gametype_cfg then auto-executes matching gametype configs on later mode changes.
+- Explain that gt-ARENA.cfg requires separately installed RA2-compatible maps and an RA2-only map rotation, and that RA2 assets are not bundled.
 - Use docs/rulesets.md as the authoritative ruleset source. Make every ruleset's unique feel and tradeoffs clear, including Q3A's existing-asset weapon mappings, preserved double jumps, Super Shotgun removal, regular Shotgun Q3 specs, and shared-cell BFG ammo cost.
 - Include a compact "Included Custom Maps" section using the source map guide. Show map title, filename, release status, and good gametype fits, and link to the full Muff Mode Map Guide for history, original release dates, preserved original readmes/BSPs, separate remaster source-map links, and item registers.
 - Explain that original map readmes are included in the main installer/manual zip under rerelease/baseq2/docs/muffmode/maps/original-readmes, while source maps and original BSPs are published as separate supplemental release archives.
@@ -2210,6 +2213,8 @@ function Assert-ReleasePackageContents {
         "LICENSE",
         "THIRD_PARTY_NOTICES.md",
         "MuffModeUpdater.exe",
+        "MuffMode.version",
+        "VERSION",
         "rerelease\baseq2\game_x64.dll",
         "rerelease\baseq2\muffmode-version.json",
         "rerelease\baseq2\muffmode.version",
@@ -2220,6 +2225,7 @@ function Assert-ReleasePackageContents {
         "rerelease\baseq2\gt-TDM.cfg",
         "rerelease\baseq2\gt-CTF.cfg",
         "rerelease\baseq2\gt-CA.cfg",
+        "rerelease\baseq2\gt-ARENA.cfg",
         "rerelease\baseq2\gt-REDROVER.cfg",
         "rerelease\baseq2\gt-HORDE.cfg",
         "rerelease\baseq2\gt-INSTAGIB.cfg",
@@ -2495,6 +2501,8 @@ function New-ReleasePackage {
     }
     Set-Content -LiteralPath (Join-Path $baseq2 "muffmode-version.json") -Value ($versionManifest | ConvertTo-Json) -Encoding utf8
     Set-Content -LiteralPath (Join-Path $baseq2 "muffmode.version") -Value $TargetVersion -Encoding utf8
+    Set-Content -LiteralPath (Join-Path $packageRoot "MuffMode.version") -Value $TargetVersion -Encoding utf8
+    Set-Content -LiteralPath (Join-Path $packageRoot "VERSION") -Value $TargetVersion -Encoding utf8
 
     Assert-ReleasePackageContents -PackageRoot $packageRoot
 

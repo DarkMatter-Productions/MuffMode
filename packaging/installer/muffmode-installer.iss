@@ -120,6 +120,9 @@
 #if FileExists(PackageRoot + "\rerelease\baseq2\gt-CA.cfg") == 0
   #error PackageRoot is missing rerelease\baseq2\gt-CA.cfg.
 #endif
+#if FileExists(PackageRoot + "\rerelease\baseq2\gt-ARENA.cfg") == 0
+  #error PackageRoot is missing rerelease\baseq2\gt-ARENA.cfg.
+#endif
 #if FileExists(PackageRoot + "\rerelease\baseq2\gt-FT.cfg") == 0
   #error PackageRoot is missing rerelease\baseq2\gt-FT.cfg.
 #endif
@@ -228,6 +231,7 @@
 #define PackageGtTdmHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\gt-TDM.cfg")
 #define PackageGtCtfHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\gt-CTF.cfg")
 #define PackageGtCaHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\gt-CA.cfg")
+#define PackageGtArenaHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\gt-ARENA.cfg")
 #define PackageGtFtHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\gt-FT.cfg")
 #define PackageGtRedRoverHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\gt-REDROVER.cfg")
 #define PackageGtHordeHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\gt-HORDE.cfg")
@@ -1486,6 +1490,8 @@ begin
   if Result <> '' then Exit;
   Result := VerifyInstalledFileHash(Baseq2Dir + 'gt-CA.cfg', '{#PackageGtCaHash}', 'Clan Arena gametype config');
   if Result <> '' then Exit;
+  Result := VerifyInstalledFileHash(Baseq2Dir + 'gt-ARENA.cfg', '{#PackageGtArenaHash}', 'Rocket Arena gametype config');
+  if Result <> '' then Exit;
   Result := VerifyInstalledFileHash(Baseq2Dir + 'gt-FT.cfg', '{#PackageGtFtHash}', 'Freeze Tag gametype config');
   if Result <> '' then Exit;
   Result := VerifyInstalledFileHash(Baseq2Dir + 'gt-REDROVER.cfg', '{#PackageGtRedRoverHash}', 'Red Rover gametype config');
@@ -1834,6 +1840,7 @@ begin
     'GtTdmConfigSHA256: {#PackageGtTdmHash}' + #13#10 +
     'GtCtfConfigSHA256: {#PackageGtCtfHash}' + #13#10 +
     'GtCaConfigSHA256: {#PackageGtCaHash}' + #13#10 +
+    'GtArenaConfigSHA256: {#PackageGtArenaHash}' + #13#10 +
     'GtRedRoverConfigSHA256: {#PackageGtRedRoverHash}' + #13#10 +
     'GtHordeConfigSHA256: {#PackageGtHordeHash}' + #13#10 +
     'GtInstagibConfigSHA256: {#PackageGtInstagibHash}' + #13#10 +

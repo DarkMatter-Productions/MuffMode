@@ -2,6 +2,7 @@
 // Licensed under the GNU General Public License 2.0.
 
 #include "g_local.h"
+#include "muffmode/mm_arena.h"
 #include "muffmode/mm_captain.h"
 #include "muffmode/mm_command_contracts.h"
 #include "muffmode/mm_ghost.h"
@@ -315,6 +316,9 @@ Switch last joined player(s) from stacked team.
 ================
 */
 int TeamBalance(bool force) {
+	if (GT(GT_ARENA))
+		return 0;
+
 	if (!Teams())
 		return 0;
 
@@ -386,6 +390,9 @@ Randomly shuffles all players in teamplay
 ================
 */
 bool TeamShuffle() {
+	if (GT(GT_ARENA))
+		return false;
+
 	if (!Teams())
 		return false;
 	/*
@@ -449,6 +456,10 @@ SetTeam
 bool SetTeam(gentity_t *ent, team_t desired_team, bool inactive, bool force, bool silent) {
 	if (!ent || !ent->client)
 		return false;
+
+	bool arena_result = false;
+	if (MM_Arena_HandleTeamRequest(ent, desired_team, inactive, force, silent, arena_result))
+		return arena_result;
 
 	if (!muffmode::team::IsTeamInRange(desired_team))
 		return false;
@@ -522,7 +533,8 @@ bool SetTeam(gentity_t *ent, team_t desired_team, bool inactive, bool force, boo
 		MM_Ghost_CaptureInactive(ent);
 
 	// vacate captain if leaving a team
-	if (muffmode::team::IsPlayingTeam(old_team) && old_team != desired_team) {
+	if (notGT(GT_ARENA) &&
+		muffmode::team::IsPlayingTeam(old_team) && old_team != desired_team) {
 		if (level.captain[old_team] == ent)
 			VacateCaptain(old_team, ent);
 	}
@@ -537,11 +549,9 @@ bool SetTeam(gentity_t *ent, team_t desired_team, bool inactive, bool force, boo
 	FreeFollower(ent);
 
 	ent->svflags &= ~SVF_NOCLIENT;
-	// Red Rover scores individual frags that persist for the whole match, but players
-	// change team constantly (defect on death, reshuffle each round). Zeroing on a team
-	// change here would wipe their running total every round, so skip it for RR - a fresh
-	// joiner already starts at 0 from client init.
-	if (notGT(GT_RR))
+	// Red Rover and multi-arena role projection change engine teams during play.
+	// Their own match controllers reset scores at real series boundaries.
+	if (notGT(GT_RR) && notGT(GT_ARENA))
 		ent->client->resp.score = 0;
 	ent->client->sess.team = desired_team;
 	P_PublishEngineTeam(ent);
@@ -563,21 +573,24 @@ bool SetTeam(gentity_t *ent, team_t desired_team, bool inactive, bool force, boo
 	ent->client->sess.duel_queued = queue;
 
 	if (desired_team != TEAM_SPECTATOR) {
-		if (Teams())
+		if (Teams() || GT(GT_ARENA))
 			G_AssignPlayerSkin(ent, ent->client->pers.skin);
 
-		MM_RevertVote(ent->client);
+		if (notGT(GT_ARENA)) {
+			MM_RevertVote(ent->client);
 
-		// assign a ghost code
-		MM_Ghost_DoAssign(ent);
+			// assign a ghost code
+			MM_Ghost_DoAssign(ent);
+		}
 
 		// free any followers
 		FreeClientFollowers(ent);
 
 		// auto-assign captain if team has none
-		if (muffmode::team::IsPlayingTeam(desired_team) && !level.captain[desired_team])
+		if (notGT(GT_ARENA) &&
+			muffmode::team::IsPlayingTeam(desired_team) && !level.captain[desired_team])
 			SetCaptain(desired_team, ent);
-	} else if (!inactive) {
+	} else if (!inactive && notGT(GT_ARENA)) {
 		MM_Ghost_ClearClient(ent);
 	}
 
@@ -607,6 +620,9 @@ MM_CmdTeam
 */
 void MM_CmdTeam(gentity_t *ent) {
 	if (!ent || !ent->client)
+		return;
+
+	if (MM_Arena_TeamCommand(ent))
 		return;
 
 	if (!MM_IsArgcInRangeValid(gi.argc(), 1, 2)) {
@@ -649,6 +665,9 @@ MM_CmdSetTeam
 */
 void MM_CmdSetTeam(gentity_t *ent) {
 	if (!ent || !ent->client)
+		return;
+
+	if (MM_Arena_SetTeamCommand(ent))
 		return;
 
 	if (!MM_IsArgcInRangeValid(gi.argc(), 2, 3)) {

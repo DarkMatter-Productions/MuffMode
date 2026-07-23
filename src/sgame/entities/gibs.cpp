@@ -2,6 +2,7 @@
 // Licensed under the GNU General Public License 2.0.
 // Shared gib, debris and simple explosion helpers.
 #include "g_local.h"
+#include "muffmode/mm_arena.h"
 
 namespace {
 
@@ -42,14 +43,14 @@ void EmitExplosion(gentity_t *self, temp_event_t event) {
 }
 
 gtime_t GibLifetime() {
-	if (g_instagib->integer || GT(GT_INSTAGIB))
+	if (notGT(GT_ARENA) && (g_instagib->integer || GT(GT_INSTAGIB)))
 		return random_time(1_sec, 5_sec);
 
 	return random_time(10_sec, 20_sec);
 }
 
 gtime_t ClientHeadLifetime() {
-	if (g_instagib->integer)
+	if (notGT(GT_ARENA) && g_instagib->integer)
 		return random_time(1_sec, 5_sec);
 
 	return random_time(10_sec, 20_sec);
@@ -90,6 +91,8 @@ gentity_t *ThrowGib(gentity_t *self, const char *gibname, int damage, gib_type_t
 	} else {
 		gib = G_Spawn();
 	}
+	if (GT(GT_ARENA))
+		gib->arena = MM_Arena_Id(self);
 
 	const vec3_t size = self->size * 0.5f;
 	const vec3_t origin = (self->absmin + vec3_t{ 1, 1, 1 }) + size;

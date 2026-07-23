@@ -4,6 +4,7 @@
 #include "userinfo.h"
 #include "monsters/m_player.h"
 #include "bots/bot_includes.h"
+#include "muffmode/mm_arena.h"
 #include "muffmode/mm_captain.h"
 #include "muffmode/mm_freezetag.h"
 #include "muffmode/mm_ghost.h"
@@ -114,10 +115,15 @@ void InitClientPersistant(gentity_t *ent, gclient_t *client) {
 		MM_ApplySpawnLoadout(ent, client, taken_loadout);
 
 		if (!taken_loadout) {
-			if (*g_start_items->string)
-				Player_GiveStartItems(ent, g_start_items->string);
-			if (level.start_items && *level.start_items)
-				Player_GiveStartItems(ent, level.start_items);
+			// [MuffMode] A multi-arena room's resolved loadout is authoritative.
+			// Global/world start items and the selectable global grapple must not
+			// add equipment that this arena disabled.
+			if (notGT(GT_ARENA)) {
+				if (*g_start_items->string)
+					Player_GiveStartItems(ent, g_start_items->string);
+				if (level.start_items && *level.start_items)
+					Player_GiveStartItems(ent, level.start_items);
+			}
 
 			if (false) // Race mode removed
 				client->pers.inventory[IT_COMPASS] = 1;
@@ -125,11 +131,13 @@ void InitClientPersistant(gentity_t *ent, gclient_t *client) {
 				// compass also used for ready status toggling in deathmatch
 				client->pers.inventory[IT_COMPASS] = 1;
 
-			bool give_grapple = (!strcmp(g_allow_grapple->string, "auto")) ?
-				(GTF(GTF_CTF) ? !level.no_grapple : 0) :
-				(g_allow_grapple->integer && !g_grapple_offhand->integer);
-			if (give_grapple)
-				client->pers.inventory[IT_WEAPON_GRAPPLE] = 1;
+			if (notGT(GT_ARENA)) {
+				bool give_grapple = (!strcmp(g_allow_grapple->string, "auto")) ?
+					(GTF(GTF_CTF) ? !level.no_grapple : 0) :
+					(g_allow_grapple->integer && !g_grapple_offhand->integer);
+				if (give_grapple)
+					client->pers.inventory[IT_WEAPON_GRAPPLE] = 1;
+			}
 		}
 
 		MM_ClampClientPersistHealthArmor(client);
@@ -313,6 +321,9 @@ void CopyToBodyQue(gentity_t *ent) {
 	body->avelocity = ent->avelocity;
 	body->groundentity = ent->groundentity;
 	body->groundentity_linkcount = ent->groundentity_linkcount;
+	// Body-queue entities are reused. Always replace their spatial room so a
+	// corpse cannot block, receive damage from, or pause with another arena.
+	body->arena = GT(GT_ARENA) ? MM_Arena_Id(ent) : ent->arena;
 
 	if (ent->takedamage) {
 		body->mins = ent->mins;
@@ -358,8 +369,11 @@ void G_PostRespawn(gentity_t *self) {
 }
 
 static bool ClientArenaEliminationRound(const gclient_t *client) {
-	return client && client->eliminated &&
-		GTF(GTF_ARENA) && GTF(GTF_ELIMINATION) && GTF(GTF_ROUNDS) &&
+	if (!client || !client->eliminated)
+		return false;
+	if (GT(GT_ARENA))
+		return MM_Arena_IsEliminated(client);
+	return GTF(GTF_ARENA) && GTF(GTF_ELIMINATION) && GTF(GTF_ROUNDS) &&
 		level.match_state == matchst_t::MATCH_IN_PROGRESS &&
 		level.round_state == roundst_t::ROUND_IN_PROGRESS;
 }
@@ -439,10 +453,21 @@ static uint8_t P_CurrentEngineTeamIndex(gentity_t *ent) {
 
 	if (InCoopStyle())
 		return 1; // all players are teamed in coop
+	if (GT(GT_ARENA))
+		// KEX team IDs are a red/blue/none presentation contract. Arena's
+		// persistent logical-team identity remains in resp.arena_team_id.
+		return P_EngineTeamIndex(ent->client->resp.arena_side);
 	if (Teams())
 		return P_EngineTeamIndex(ent->client->sess.team);
 
 	return 0;
+}
+
+static uint8_t P_CurrentPackedTeamIndex(gentity_t *ent) {
+	const uint8_t team_index = P_CurrentEngineTeamIndex(ent);
+	// player_skinnum_t has only four team bits. Keep the bounded projection
+	// explicit so future engine-side team identifiers cannot wrap.
+	return team_index <= 0x0f ? team_index : 0;
 }
 
 void P_PublishEngineTeam(gentity_t *ent) {
@@ -457,7 +482,7 @@ void P_PublishEngineTeam(gentity_t *ent) {
 	if (ent->s.modelindex == MODELINDEX_PLAYER) {
 		player_skinnum_t packed;
 		packed.skinnum = ent->s.skinnum;
-		packed.team_index = team_index;
+		packed.team_index = P_CurrentPackedTeamIndex(ent);
 		ent->s.skinnum = packed.skinnum;
 	}
 }
@@ -477,7 +502,7 @@ void P_AssignClientSkinnum(gentity_t *ent) {
 		packed.vwep_index = 0;
 	packed.viewheight = ent->client->ps.viewoffset.z + ent->client->ps.pmove.viewheight;
 
-	packed.team_index = P_CurrentEngineTeamIndex(ent);
+	packed.team_index = P_CurrentPackedTeamIndex(ent);
 
 	if (ent->deadflag)
 		packed.poi_icon = 1;
@@ -835,6 +860,8 @@ void ClientSpawn(gentity_t *ent) {
 		ent->deadflag = false;
 
 		MoveClientToFreeCam(ent);
+		if (GT(GT_ARENA) && MM_Arena_Id(ent) > 0)
+			client->ps.rdflags = RDF_NOWORLDMODEL;
 		gi.linkentity(ent);
 
 		return;
@@ -1023,7 +1050,8 @@ void ClientSpawn(gentity_t *ent) {
 		if (!ent->client->initial_menu_shown)
 			ent->client->initial_menu_delay = level.time + 10_hz;
 		ent->client->eliminated = eliminated;
-		if (eliminated && GTF(GTF_ARENA) && GTF(GTF_ELIMINATION))
+		if (eliminated &&
+			(GT(GT_ARENA) || (GTF(GTF_ARENA) && GTF(GTF_ELIMINATION))))
 			GetFollowTarget(ent);
 		else if (eliminated && GT(GT_HORDE)) {
 			GetFollowTarget(ent);
@@ -1113,6 +1141,7 @@ static void ClientBeginDeathmatch(gentity_t *ent) {
 	ent->svflags |= SVF_PLAYER;
 
 	InitClientResp(ent->client);
+	MM_Arena_OnClientBegin(ent);
 
 	// locate ent at a spawn point
 	ClientSpawn(ent);
@@ -1238,6 +1267,8 @@ bool ClientIsPlaying(gclient_t *cl) {
 
 	if (!deathmatch->integer)
 		return true;
+	if (GT(GT_ARENA))
+		return MM_Arena_IsFighter(cl);
 
 	return !(cl->sess.team == TEAM_NONE || cl->sess.team == TEAM_SPECTATOR);
 }
@@ -1259,6 +1290,8 @@ bool ClientCanVote(gclient_t *cl) {
 
 	// Duel-queued players should always be able to vote
 	if (GT(GT_DUEL) && cl->sess.duel_queued)
+		return true;
+	if (MM_Arena_ClientCanVote(cl))
 		return true;
 
 	// Spectators can vote if g_allow_spec_vote is enabled
@@ -1314,7 +1347,9 @@ void ClientBegin(gentity_t *ent) {
 	if (!(ent->svflags & SVF_BOT))
 		MM_ClientInitPConfig(ent);
 
-	if (deathmatch->integer && MM_Ghost_TryRestore(ent))
+	// [MuffMode] Arena membership, logical teams and queue positions are
+	// map-local. Never restore those through the cross-map ghost path.
+	if (deathmatch->integer && notGT(GT_ARENA) && MM_Ghost_TryRestore(ent))
 		return;
 
 	if (deathmatch->integer) {
@@ -1650,9 +1685,11 @@ void ClientDisconnect(gentity_t *ent) {
 
 	G_ClearLagCompensationHistory(ent);
 
-	const bool auto_ghosted = MM_Ghost_CaptureDisconnect(ent);
-	if (!auto_ghosted)
+	const bool auto_ghosted = notGT(GT_ARENA) && MM_Ghost_CaptureDisconnect(ent);
+	MM_Arena_OnClientDisconnect(ent);
+	if (!auto_ghosted) {
 		TossClientItems(ent);
+	}
 	PlayerTrail_Destroy(ent);
 
 	// make sure no trackers are still hurting us.
@@ -1724,6 +1761,44 @@ void ClientDisconnect(gentity_t *ent) {
 
 static trace_t G_PM_Clip(const vec3_t &start, const vec3_t *mins, const vec3_t *maxs, const vec3_t &end, contents_t mask) {
 	return gi.game_import_t::clip(world, start, mins, maxs, end, mask);
+}
+
+static trace_t G_PM_Trace(const vec3_t &start, const vec3_t *mins,
+	const vec3_t *maxs, const vec3_t &end, const gentity_t *passent,
+	contents_t mask) {
+	trace_t trace = gi.game_import_t::trace(
+		start, mins, maxs, end, passent, mask);
+	if (notGT(GT_ARENA) || !passent || !passent->client)
+		return trace;
+
+	struct skipped_entity_t {
+		gentity_t *ent;
+		int32_t spawn_count;
+	};
+	constexpr size_t MAX_ARENA_TRACE_SKIPS = 64;
+	std::array<skipped_entity_t, MAX_ARENA_TRACE_SKIPS> skipped {};
+	size_t skipped_count = 0;
+
+	// Room tags remain authoritative when dynamic bounds meet near shared map
+	// geometry. Preserve same-room collision while allowing Pmove traces to
+	// pass through dynamic entities that belong to another room.
+	while (trace.ent && trace.ent != world &&
+		!MM_Arena_CanInteract(passent, trace.ent) &&
+		skipped_count < skipped.size()) {
+		skipped[skipped_count++] = {
+			trace.ent, trace.ent->spawn_count
+		};
+		gi.unlinkentity(trace.ent);
+		trace = gi.game_import_t::trace(
+			start, mins, maxs, end, passent, mask);
+	}
+
+	while (skipped_count > 0) {
+		const skipped_entity_t entry = skipped[--skipped_count];
+		if (entry.ent->inuse && entry.ent->spawn_count == entry.spawn_count)
+			gi.linkentity(entry.ent);
+	}
+	return trace;
 }
 
 bool G_ShouldPlayersCollide(bool weaponry) {
@@ -1843,7 +1918,10 @@ static void P_FallingDamage(gentity_t *ent, const pmove_t &pm) {
 				gi.positioned_sound(ent->s.origin, ent, CHAN_VOICE, gi.soundindex("player/land1.wav"), 1, ATTN_NORM, 0);
 			}
 		}
-		if (!deathmatch->integer || !(g_dm_no_fall_damage->integer || GTF(GTF_ARENA))) {
+		const bool suppresses_falling = GT(GT_ARENA)
+			? !MM_Arena_FallingDamageEnabled(ent)
+			: (g_dm_no_fall_damage->integer || GTF(GTF_ARENA));
+		if (!deathmatch->integer || !suppresses_falling) {
 			ent->pain_debounce_time = level.time + FRAME_TIME_S; // no normal pain sound
 			damage = MM_RulesetFallDamage(ent->s.event == EV_FALL_FAR, delta);
 			dir = { 0, 0, 1 };
@@ -1904,6 +1982,15 @@ static bool ClientInactivityTimer(gentity_t *ent) {
 		return true;
 	
 	if (cv && cv < 15_sec) cv = 15_sec;
+	if (GT(GT_ARENA) && MM_Arena_IsFighter(ent->client) &&
+		MM_Arena_IsPaused(MM_Arena_Id(ent))) {
+		// A room-local timeout is deliberate inactivity. Give the fighter a
+		// fresh window after time-in instead of warning or removing them.
+		ent->client->sess.inactivity_time =
+			level.time + (cv ? cv : 1_min);
+		ent->client->sess.inactivity_warning = false;
+		return true;
+	}
 	if (!ent->client->sess.inactivity_time) {
 		ent->client->sess.inactivity_time = level.time + cv;
 		ent->client->sess.inactivity_warning = false;
@@ -2074,7 +2161,7 @@ void ClientThink(gentity_t *ent, usercmd_t *ucmd) {
 	if (!ClientInactivityTimer(ent))
 		return;
 
-	if (g_quadhog->integer)
+	if (notGT(GT_ARENA) && g_quadhog->integer)
 		if (ent->client->pu_time_quad > 0_sec && level.time >= ent->client->pu_time_quad)
 			QuadHog_SetupSpawn(0_ms);
 
@@ -2101,7 +2188,8 @@ void ClientThink(gentity_t *ent, usercmd_t *ucmd) {
 				}
 			}
 		}
-		if (!ent->client->resp.showed_help && g_showhelp->integer) {
+		if (!ent->client->resp.showed_help && g_showhelp->integer &&
+			notGT(GT_ARENA)) {
 			if (level.time >= ent->client->sess.team_join_time + delay) {
 				if (g_quadhog->integer) {
 					gi.LocClient_Print(ent, PRINT_CENTER, "QUAD HOG\nFind the Quad Damage to become the Quad Hog!\nScore by fragging the Quad Hog or fragging while Quad Hog.");
@@ -2172,6 +2260,8 @@ void ClientThink(gentity_t *ent, usercmd_t *ucmd) {
 				HandleMenuMovement(ent, ucmd);
 			} else if (ent->client->awaiting_respawn)
 				client->ps.pmove.pm_type = PM_FREEZE;
+			else if (!MM_Arena_FreecamAllowed(ent))
+				client->ps.pmove.pm_type = PM_FREEZE;
 			else if (!ClientIsPlaying(ent->client) || client->eliminated)
 				client->ps.pmove.pm_type = PM_SPECTATOR;
 			else
@@ -2182,6 +2272,9 @@ void ClientThink(gentity_t *ent, usercmd_t *ucmd) {
 			client->ps.pmove.pm_type = PM_GIB;
 		else if (ent->deadflag)
 			client->ps.pmove.pm_type = PM_DEAD;
+		else if (GT(GT_ARENA) && MM_Arena_IsFighter(client) &&
+			!MM_Arena_IsEliminated(client) && !MM_Arena_CombatEnabled(ent))
+			client->ps.pmove.pm_type = PM_FREEZE;
 		else if (ent->client->grapple_state >= GRAPPLE_STATE_PULL)
 			client->ps.pmove.pm_type = PM_GRAPPLE;
 		else
@@ -2189,7 +2282,7 @@ void ClientThink(gentity_t *ent, usercmd_t *ucmd) {
 
 		// [Paril-KEX]
 		if (!G_ShouldPlayersCollide(false) ||
-			(InCoopStyle() && !(ent->clipmask & CONTENTS_PLAYER)) // if player collision is on and we're temporarily ghostly...
+			((InCoopStyle() || GT(GT_ARENA)) && !(ent->clipmask & CONTENTS_PLAYER)) // if player collision is on and we're temporarily ghostly...
 			)
 			client->ps.pmove.pm_flags |= PMF_IGNORE_PLAYER_COLLISION;
 		else
@@ -2214,7 +2307,7 @@ void ClientThink(gentity_t *ent, usercmd_t *ucmd) {
 
 		pm.cmd = *ucmd;
 		pm.player = ent;
-		pm.trace = gi.game_import_t::trace;
+		pm.trace = G_PM_Trace;
 		pm.clip = G_PM_Clip;
 		pm.pointcontents = gi.pointcontents;
 		pm.viewoffset = ent->client->ps.viewoffset;
@@ -2301,7 +2394,8 @@ void ClientThink(gentity_t *ent, usercmd_t *ucmd) {
 			AngleVectors(client->v_angle, client->v_forward, nullptr, nullptr);
 		}
 
-		if (client->grapple_ent)
+		if (client->grapple_ent &&
+			(notGT(GT_ARENA) || MM_Arena_CombatEnabled(ent)))
 			Weapon_Grapple_Pull(client->grapple_ent);
 
 		gi.linkentity(ent);
@@ -2319,6 +2413,10 @@ void ClientThink(gentity_t *ent, usercmd_t *ucmd) {
 			trace_t &tr = pm.touch.traces[i];
 			other = tr.ent;
 
+			if (GT(GT_ARENA) &&
+				(!MM_Arena_CanInteract(ent, other) ||
+				 !MM_Arena_CanUseEntity(ent, other)))
+				continue;
 			if (other->touch)
 				other->touch(other, ent, tr, true);
 		}
@@ -2352,7 +2450,8 @@ void ClientThink(gentity_t *ent, usercmd_t *ucmd) {
 		} else if (!ent->client->weapon_thunk) {
 			// we can only do this during a ready state and
 			// if enough time has passed from last fire
-			if (ent->client->weaponstate == WEAPON_READY && !IsCombatDisabled()) {
+			if (ent->client->weaponstate == WEAPON_READY &&
+				(GT(GT_ARENA) ? MM_Arena_CombatEnabled(ent) : !IsCombatDisabled())) {
 				ent->client->weapon_fire_buffered = true;
 
 				if (ent->client->weapon_fire_finished <= level.time) {
@@ -2383,8 +2482,11 @@ void ClientThink(gentity_t *ent, usercmd_t *ucmd) {
 		if (ec->client->follow_target == ent)
 			UpdateFollowCamera(ec);
 
-	// perform once-a-second actions
-	ClientTimerActions(ent);
+	// perform once-a-second actions. A room-local timeout freezes health/armor
+	// decay and match-stat sampling along with the rest of that arena.
+	if (notGT(GT_ARENA) || !MM_Arena_IsFighter(ent->client) ||
+		!MM_Arena_IsPaused(MM_Arena_Id(ent)))
+		ClientTimerActions(ent);
 }
 
 // active monsters
@@ -2675,6 +2777,56 @@ This will be called once for each server frame, before running
 any other entities in the world.
 ==============
 */
+static void PauseArenaClientClock(gtime_t &clock) {
+	if (!clock || clock == HOLD_FOREVER)
+		return;
+	const int64_t frame_ms = static_cast<int64_t>(gi.frame_time_ms);
+	if (frame_ms <= 0)
+		return;
+	const int64_t clock_ms = clock.milliseconds();
+	if (clock_ms > std::numeric_limits<int64_t>::max() - frame_ms)
+		clock = HOLD_FOREVER;
+	else
+		clock += gtime_t::from_ms(frame_ms);
+}
+
+static bool PauseArenaClientFrame(gentity_t *ent) {
+	if (!ent || !ent->client || notGT(GT_ARENA) ||
+		!MM_Arena_IsFighter(ent->client) ||
+		!MM_Arena_IsPaused(MM_Arena_Id(ent)))
+		return false;
+
+	gclient_t *client = ent->client;
+	PauseArenaClientClock(client->weapon_fire_finished);
+	PauseArenaClientClock(client->weapon_think_time);
+	PauseArenaClientClock(client->grenade_time);
+	PauseArenaClientClock(client->grenade_finished_time);
+	PauseArenaClientClock(client->next_drown_time);
+	PauseArenaClientClock(client->pu_time_quad);
+	PauseArenaClientClock(client->pu_time_haste);
+	PauseArenaClientClock(client->pu_time_double);
+	PauseArenaClientClock(client->pu_time_protection);
+	PauseArenaClientClock(client->pu_time_invisibility);
+	PauseArenaClientClock(client->pu_time_regeneration);
+	PauseArenaClientClock(client->pu_time_rebreather);
+	PauseArenaClientClock(client->pu_time_enviro);
+	PauseArenaClientClock(client->pu_regen_time_regen);
+	PauseArenaClientClock(client->pu_regen_time_blip);
+	PauseArenaClientClock(client->grapple_release_time);
+	PauseArenaClientClock(client->ir_time);
+	PauseArenaClientClock(client->tracker_pain_time);
+	PauseArenaClientClock(client->tech_regen_time);
+	PauseArenaClientClock(client->tech_sound_time);
+	PauseArenaClientClock(client->tech_expire_time);
+	PauseArenaClientClock(client->frenzy_ammoregentime);
+	PauseArenaClientClock(client->vampire_expiretime);
+	PauseArenaClientClock(ent->air_finished);
+	PauseArenaClientClock(ent->touch_debounce_time);
+	PauseArenaClientClock(ent->pain_debounce_time);
+	PauseArenaClientClock(ent->damage_debounce_time);
+	return true;
+}
+
 void ClientBeginServerFrame(gentity_t *ent) {
 	gclient_t *client;
 	int		   buttonMask;
@@ -2689,6 +2841,8 @@ void ClientBeginServerFrame(gentity_t *ent) {
 		return;
 
 	client = ent->client;
+	if (PauseArenaClientFrame(ent))
+		return;
 	MM_Horde_PauseClientPowerups(ent);
 
 	if (client->awaiting_respawn) {

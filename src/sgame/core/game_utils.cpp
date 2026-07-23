@@ -5,6 +5,7 @@
 #include "g_local.h"
 #include "debug_log.h"
 // [MuffMode] Team management lives in muffmode/mm_team
+#include "muffmode/mm_arena.h"
 #include "muffmode/mm_profile.h"
 #include "muffmode/mm_parse.h"
 #include "muffmode/mm_skin.h"
@@ -242,7 +243,7 @@ void G_UseTargets(gentity_t *ent, gentity_t *activator) {
 	if (!ent)
 		return;
 
-	if (IsCombatDisabled())
+	if (notGT(GT_ARENA) && IsCombatDisabled())
 		return;
 
 	//
@@ -260,6 +261,16 @@ void G_UseTargets(gentity_t *ent, gentity_t *activator) {
 		t->message = ent->message;
 		t->target = ent->target;
 		t->killtarget = ent->killtarget;
+		if (GT(GT_ARENA)) {
+			int source_arena = MM_Arena_Id(ent);
+			if (source_arena <= 0 && activator && activator->client)
+				source_arena = MM_Arena_Id(activator);
+			// Snapshot the room at scheduling time.  The activator may leave,
+			// disconnect, or enter another arena before this entity fires.
+			t->arena = source_arena > 0 ? source_arena : 0;
+		} else {
+			t->arena = ent->arena;
+		}
 		return;
 	}
 
@@ -274,6 +285,13 @@ void G_UseTargets(gentity_t *ent, gentity_t *activator) {
 	if (ent->killtarget) {
 		t = nullptr;
 		while ((t = G_FindByString<&gentity_t::targetname>(t, ent->killtarget))) {
+			const gentity_t *arena_source =
+				(ent->classname && !std::strcmp(ent->classname, "DelayedUse")) ||
+					MM_Arena_Id(ent) > 0 ? ent :
+				(activator && activator->client ? activator : ent);
+			if (GT(GT_ARENA) && !MM_Arena_CanUseEntity(arena_source, t))
+				continue;
+
 			if (t->teammaster) {
 				// if this entity is part of a chain, cleanly remove it
 				if (t->flags & FL_TEAMSLAVE) {
@@ -321,6 +339,13 @@ void G_UseTargets(gentity_t *ent, gentity_t *activator) {
 	if (ent->target) {
 		t = nullptr;
 		while ((t = G_FindByString<&gentity_t::targetname>(t, ent->target))) {
+			const gentity_t *arena_source =
+				(ent->classname && !std::strcmp(ent->classname, "DelayedUse")) ||
+					MM_Arena_Id(ent) > 0 ? ent :
+				(activator && activator->client ? activator : ent);
+			if (GT(GT_ARENA) && !MM_Arena_CanUseEntity(arena_source, t))
+				continue;
+
 			// doors fire area portals in a specific way
 			if (!Q_strcasecmp(t->classname, "func_areaportal") &&
 				(!Q_strcasecmp(ent->classname, "func_door") || !Q_strcasecmp(ent->classname, "func_door_rotating")
@@ -482,9 +507,16 @@ void G_TouchTriggers(gentity_t *ent) {
 	static gentity_t	*touch[MAX_ENTITIES];
 	gentity_t			*hit;
 
-	// Dead or eliminated things don't activate triggers.
-	if ((ent->client && ent->client->eliminated) ||
-			((ent->client || (ent->svflags & SVF_MONSTER)) && ent->health <= 0))
+	// Dead or eliminated things don't activate triggers. Arena lobby/observer
+	// freecams are the exception: RA2/RA3 selector pads are teleport triggers,
+	// and the dispatch loop below already restricts freecams to teleport
+	// classnames. Fighter roles stay on the normal dead/eliminated gate.
+	const bool arena_selector_observer = GT(GT_ARENA) && ent->client &&
+		ent->movetype == MOVETYPE_FREECAM &&
+		!MM_Arena_IsFighter(ent->client);
+	if (!arena_selector_observer &&
+		((ent->client && ent->client->eliminated) ||
+		 ((ent->client || (ent->svflags & SVF_MONSTER)) && ent->health <= 0)))
 		return;
 
 	num = gi.BoxEntities(ent->absmin, ent->absmax, touch, MAX_ENTITIES, AREA_TRIGGERS, G_TouchTriggers_BoxFilter, nullptr);
@@ -497,6 +529,8 @@ void G_TouchTriggers(gentity_t *ent) {
 		if (!hit->inuse)
 			continue;
 		if (!hit->touch)
+			continue;
+		if (GT(GT_ARENA) && !MM_Arena_CanUseEntity(ent, hit))
 			continue;
 		if (ent->movetype == MOVETYPE_FREECAM)
 			if (!strstr(hit->classname, "teleport"))
@@ -539,6 +573,9 @@ void G_TouchProjectiles(gentity_t *ent, vec3_t previous_origin) {
 		tr.ent->svflags &= ~SVF_PROJECTILE;
 		skipped[skipped_count++] = { tr.ent, tr.ent->spawn_count };
 		MM_PROFILE_INC(projectile_skipped);
+
+		if (GT(GT_ARENA) && !MM_Arena_CanInteract(ent, tr.ent))
+			continue;
 
 		// if we're both players and it's coop, allow the projectile to "pass" through
 		if (ent->client && tr.ent->owner && tr.ent->owner->client && !G_ShouldPlayersCollide(true))
@@ -615,6 +652,8 @@ bool KillBox(gentity_t *ent, bool from_spawning, mod_id_t mod, bool bsp_clipping
 			continue;
 		else if (hit->client && !(mask & CONTENTS_PLAYER))
 			continue;
+		else if (GT(GT_ARENA) && !MM_Arena_CanInteract(ent, hit))
+			continue;
 
 		if ((ent->solid == SOLID_BSP || (ent->svflags & SVF_HULL)) && bsp_clipping) {
 			trace_t clip = gi.clip(ent, hit->s.origin, hit->mins, hit->maxs, hit->s.origin, G_GetClipMask(hit));
@@ -626,7 +665,10 @@ bool KillBox(gentity_t *ent, bool from_spawning, mod_id_t mod, bool bsp_clipping
 		// [Paril-KEX] don't allow telefragging of friends in coop.
 		// the player that is about to be telefragged will have collision
 		// disabled until another time.
-		if (ent->client && hit->client && InCoopStyle()) {
+		if (ent->client && hit->client &&
+			(InCoopStyle() ||
+				(from_spawning && GT(GT_ARENA) &&
+				 mod == MOD_TELEFRAG_SPAWN))) {
 			hit->clipmask &= ~CONTENTS_PLAYER;
 			ent->clipmask &= ~CONTENTS_PLAYER;
 			continue;
@@ -736,8 +778,21 @@ G_AdjustPlayerScore
 void G_AdjustPlayerScore(gclient_t *cl, int32_t offset, bool adjust_team, int32_t team_offset) {
 	if (!cl) return;
 
-	if (IsScoringDisabled())
+	// [MuffMode] Multi-arena rounds own their match/combat state independently;
+	// the singleton level match state deliberately never enters MATCH_IN_PROGRESS.
+	if (GT(GT_ARENA)) {
+		const ptrdiff_t client_num = game.clients ? cl - game.clients : -1;
+		if (client_num < 0 ||
+			client_num >= static_cast<ptrdiff_t>(game.maxclients))
+			return;
+		const gentity_t *ent = &g_entities[client_num + 1];
+		const int arena_id = MM_Arena_Id(ent);
+		if (!MM_Arena_IsFighter(cl) || arena_id <= 0 ||
+			!MM_Arena_IsRunning(arena_id))
+			return;
+	} else if (IsScoringDisabled()) {
 		return;
+	}
 
 	if (level.intermission_queued)
 		return;
@@ -749,6 +804,7 @@ void G_AdjustPlayerScore(gclient_t *cl, int32_t offset, bool adjust_team, int32_
 		cl->resp.score = static_cast<int32_t>(std::clamp(score,
 			static_cast<int64_t>(std::numeric_limits<int32_t>::min()),
 			static_cast<int64_t>(std::numeric_limits<int32_t>::max())));
+		// CalculateRanks has a room-filtered branch for multi-arena play.
 		CalculateRanks();
 	}
 
@@ -927,8 +983,9 @@ bool Teams() {
 =============
 P_EngineTeamIndex
 
-Map internal sess.team to engine team identifiers used by skinnum team_index,
-player_state.team_id, and sv.team: 1 = red, 2 = blue, 0 = none.
+Map internal sess.team to full engine team identifiers used by
+player_state.team_id and sv.team: 1 = red, 2 = blue, 0 = none. The legacy
+four-bit skinnum projection is bounded separately at publication time.
 =============
 */
 uint8_t P_EngineTeamIndex(team_t team) {
@@ -1137,7 +1194,7 @@ void TeleporterVelocity(gentity_t *ent, gvec3_t angles) {
 	}
 }
 
-static bool MS_Validation(gclient_t *cl, mstats_t index) {
+static bool MS_Validation(gclient_t *cl, mstats_t index, bool write) {
 	if (!cl)
 		return false;
 
@@ -1146,7 +1203,20 @@ static bool MS_Validation(gclient_t *cl, mstats_t index) {
 		return false;
 	}
 
-	if (!g_matchstats->integer || level.match_state != matchst_t::MATCH_IN_PROGRESS)
+	bool active_match = level.match_state == matchst_t::MATCH_IN_PROGRESS;
+	if (GT(GT_ARENA)) {
+		const ptrdiff_t client_num = cl - game.clients;
+		if (client_num < 0 ||
+			client_num >= static_cast<ptrdiff_t>(game.maxclients))
+			return false;
+		const gentity_t *ent = &g_entities[client_num + 1];
+		const int arena_id = MM_Arena_Id(ent);
+		active_match = MM_Arena_IsFighter(cl) && arena_id > 0 &&
+			(write ? MM_Arena_IsRunning(arena_id)
+				: MM_Arena_SeriesActive(ent));
+	}
+
+	if (!g_matchstats->integer || !active_match)
 		return false;
 
 	if (cl->sess.is_a_bot)
@@ -1156,21 +1226,21 @@ static bool MS_Validation(gclient_t *cl, mstats_t index) {
 }
 
 int MS_Value(gclient_t *cl, mstats_t index) {
-	if (!MS_Validation(cl, index))
+	if (!MS_Validation(cl, index, false))
 		return 0;
 
 	return cl->resp.mstats[index];
 }
 
 void MS_Adjust(gclient_t *cl, mstats_t index, int count) {
-	if (!MS_Validation(cl, index))
+	if (!MS_Validation(cl, index, true))
 		return;
 
 	cl->resp.mstats[index] += count;
 }
 
 void MS_AdjustDuo(gclient_t *cl, mstats_t index1, mstats_t index2, int count) {
-	if (!MS_Validation(cl, index1))
+	if (!MS_Validation(cl, index1, true))
 		return;
 
 	cl->resp.mstats[index1] += count;
@@ -1178,7 +1248,7 @@ void MS_AdjustDuo(gclient_t *cl, mstats_t index1, mstats_t index2, int count) {
 }
 
 void MS_Set(gclient_t *cl, mstats_t index, int value) {
-	if (!MS_Validation(cl, index))
+	if (!MS_Validation(cl, index, true))
 		return;
 
 	cl->resp.mstats[index] = value;

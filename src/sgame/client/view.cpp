@@ -5,6 +5,7 @@
 #include "monsters/m_player.h"
 #include "bots/bot_includes.h"
 // [MuffMode] AutoDoc regen lives in muffmode/mm_items_rules
+#include "muffmode/mm_arena.h"
 #include "muffmode/mm_freezetag.h"
 #include "muffmode/mm_ghost.h"
 #include "muffmode/mm_items_rules.h"
@@ -1291,6 +1292,9 @@ static bool G_LagCompensateLegacy(gentity_t *from_player, const vec3_t &start, c
 		if (player == from_player)
 			continue;
 
+		if (GT(GT_ARENA) && !MM_Arena_SameArena(from_player, player))
+			continue;
+
 		if (!G_IsLagCompensationTarget(player))
 			continue;
 
@@ -1337,6 +1341,9 @@ bool G_LagCompensate(gentity_t *from_player, const vec3_t &start, const vec3_t &
 	for (auto player : active_clients()) {
 		// we aren't gonna hit ourselves
 		if (player == from_player)
+			continue;
+
+		if (GT(GT_ARENA) && !MM_Arena_SameArena(from_player, player))
 			continue;
 
 		if (!G_IsLagCompensationTarget(player))
@@ -1477,10 +1484,15 @@ static void G_SaveLagCompensation(gentity_t *ent) {
 void Frenzy_ApplyAmmoRegen(gentity_t *ent) {
 	gclient_t *client;
 
-	if (!g_frenzy->integer)
+	const bool excessive = GT(GT_ARENA)
+		? MM_Arena_ExcessiveEnabled(ent)
+		: g_frenzy->integer != 0;
+	if (!excessive)
 		return;
 
-	if (InfiniteAmmoOn(nullptr))
+	if (GT(GT_ARENA)
+			? MM_Arena_InfiniteAmmoEnabled(ent)
+			: InfiniteAmmoOn(nullptr))
 		return;
 
 	client = ent->client;
@@ -1623,7 +1635,9 @@ void ClientEndServerFrame(gentity_t *ent) {
 
 	// vampiric damage expiration
 	// don't expire if only 1 player in the match
-	if (g_vampiric_damage->integer && ClientIsPlaying(ent->client) && !IsCombatDisabled() && (ent->health > g_vampiric_exp_min->integer)) {
+	if (notGT(GT_ARENA) && g_vampiric_damage->integer &&
+		ClientIsPlaying(ent->client) && !IsCombatDisabled() &&
+		(ent->health > g_vampiric_exp_min->integer)) {
 		if (level.num_playing_clients > 1 && level.time > ent->client->vampire_expiretime) {
 			int quantity = floor((ent->health - 1) / ent->max_health) + 1;
 			ent->health -= quantity;
@@ -1664,7 +1678,9 @@ void ClientEndServerFrame(gentity_t *ent) {
 
 		// if the scoreboard is up, update it if a client leaves
 		if (deathmatch->integer && ent->client->showscores && ent->client->menutime) {
-			DeathmatchScoreboardMessage(e, e->enemy);
+			// [MuffMode] Arena boards are scoped to the viewer's selected
+			// arena, even while that viewer is using a follow camera.
+			DeathmatchScoreboardMessage(GT(GT_ARENA) ? ent : e, e->enemy);
 			gi.unicast(ent, false);
 			ent->client->menutime = 0_ms;
 		}
@@ -1687,7 +1703,9 @@ void ClientEndServerFrame(gentity_t *ent) {
 	AngleVectors(ent->client->v_angle, forward, right, up);
 
 	// burn from lava, etc
-	P_WorldEffects();
+	if (notGT(GT_ARENA) || !MM_Arena_IsFighter(ent->client) ||
+		!MM_Arena_IsPaused(MM_Arena_Id(ent)))
+		P_WorldEffects();
 
 	//
 	// set model angles from view angles so other things in
@@ -1786,7 +1804,7 @@ void ClientEndServerFrame(gentity_t *ent) {
 			P_Menu_Do_Update(ent);
 			ent->client->menudirty = false;
 		} else {
-			DeathmatchScoreboardMessage(e, e->enemy);
+			DeathmatchScoreboardMessage(GT(GT_ARENA) ? ent : e, e->enemy);
 		}
 		gi.unicast(ent, false);
 		ent->client->menutime = level.time + 3_sec;
@@ -1806,11 +1824,14 @@ void ClientEndServerFrame(gentity_t *ent) {
 	// [Paril-KEX] in coop, if player collision is enabled and
 	// we are currently in no-player-collision mode, check if
 	// it's safe.
-	if (InCoopStyle() && G_ShouldPlayersCollide(false) && !(ent->clipmask & CONTENTS_PLAYER) && ent->takedamage) {
+	if ((InCoopStyle() || GT(GT_ARENA)) && G_ShouldPlayersCollide(false) &&
+		!(ent->clipmask & CONTENTS_PLAYER) && ent->takedamage) {
 		bool clipped_player = false;
 
 		for (auto player : active_clients()) {
 			if (player == ent)
+				continue;
+			if (GT(GT_ARENA) && !MM_Arena_CanInteract(ent, player))
 				continue;
 
 			trace_t clip = gi.clip(player, ent->s.origin, ent->mins, ent->maxs, ent->s.origin, CONTENTS_MONSTER | CONTENTS_PLAYER);

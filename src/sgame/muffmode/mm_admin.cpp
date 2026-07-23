@@ -3,6 +3,7 @@
 
 #include "g_local.h"
 #include "muffmode/mm_admin.h"
+#include "muffmode/mm_arena.h"
 #include "muffmode/mm_command_contracts.h"
 #include "muffmode/mm_gametype.h"
 #include "muffmode/mm_maps.h"
@@ -395,6 +396,9 @@ void MM_CmdStartMatch(gentity_t *ent) {
 	if (!admin::MM_RequireNoCommandArgs(ent))
 		return;
 
+	if (MM_Arena_AdminStart(ent))
+		return;
+
 	if (level.match_state > matchst_t::MATCH_WARMUP_READYUP) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "Match has already started.\n");
 		return;
@@ -414,6 +418,9 @@ void MM_CmdEndMatch(gentity_t *ent) {
 		return;
 
 	if (!admin::MM_RequireNoCommandArgs(ent))
+		return;
+
+	if (MM_Arena_AdminEnd(ent))
 		return;
 
 	if (level.match_state < matchst_t::MATCH_IN_PROGRESS) {
@@ -437,6 +444,9 @@ void MM_CmdResetMatch(gentity_t *ent) {
 		return;
 
 	if (!admin::MM_RequireNoCommandArgs(ent))
+		return;
+
+	if (MM_Arena_AdminReset(ent))
 		return;
 
 	if (level.match_state < matchst_t::MATCH_IN_PROGRESS) {

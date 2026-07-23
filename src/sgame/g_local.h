@@ -5,6 +5,7 @@
 #pragma once
 
 #include "shared/gameplay.h"
+#include "muffmode/mm_arena_rules.h"
 #include "muffmode/mm_vote_types.h"
 
 // the "gameversion" client command will print this plus compile date
@@ -213,10 +214,11 @@ enum gametype_t {
 	GT_BALL,
 	GT_INSTAGIB,
 	GT_NADEFEST,
+	GT_ARENA,
 	GT_NUM_GAMETYPES
 };
 constexpr gametype_t GT_FIRST = GT_FFA;
-constexpr gametype_t GT_LAST = GT_NADEFEST;
+constexpr gametype_t GT_LAST = GT_ARENA;
 
 enum gtf_t {
 	GTF_TEAMS	= 0x01,
@@ -224,14 +226,26 @@ enum gtf_t {
 	GTF_ARENA	= 0x04,
 	GTF_ROUNDS	= 0x08,
 	GTF_ELIMINATION	= 0x10,
-	GTF_FRAGS	= 0x20
+	GTF_FRAGS	= 0x20,
+	// [MuffMode] Independent RA2/RA3 arenas. Unlike GTF_ROUNDS and
+	// GTF_ELIMINATION, this never opts into the singleton match state.
+	GTF_MULTI_ARENA = 0x40
 };
 
 extern int _gt[GT_NUM_GAMETYPES];
 
-#define GTF( x ) (_gt[g_gametype->integer] & (x))
-#define GT( x ) (g_gametype->integer == (int)(x))
-#define notGT( x ) (g_gametype->integer != (int)(x))
+// [MuffMode] Selecting Rocket Arena is not enough to activate its gameplay.
+// Until the current entity lump passes the RA2 map contract, all normal
+// gameplay queries see FFA while registration/configuration code can use
+// GT_RAW to inspect the requested cvar value.
+bool MM_Arena_Active();
+#define GT_RAW( x ) (g_gametype->integer == (int)(x))
+#define MM_EFFECTIVE_GT \
+	MM_ArenaEffectiveGametype(g_gametype->integer, (int)GT_ARENA, \
+		(int)GT_FFA, MM_Arena_Active())
+#define GTF( x ) (_gt[MM_EFFECTIVE_GT] & (x))
+#define GT( x ) (MM_EFFECTIVE_GT == (int)(x))
+#define notGT( x ) (!GT(x))
 
 constexpr const char *gt_short_name[GT_NUM_GAMETYPES] = {
 	"cmp",
@@ -247,7 +261,8 @@ constexpr const char *gt_short_name[GT_NUM_GAMETYPES] = {
 	"horde",
 	"ball",
 	"instagib",
-	"nadefest"
+	"nadefest",
+	"arena"
 };
 constexpr const char *gt_short_name_upper[GT_NUM_GAMETYPES] = {
 	"CMP",
@@ -264,6 +279,7 @@ constexpr const char *gt_short_name_upper[GT_NUM_GAMETYPES] = {
 	"BALL",
 	"INSTAGIB",
 	"NADEFEST",
+	"ARENA",
 };
 constexpr const char *gt_long_name[GT_NUM_GAMETYPES] = {
 	"Campaign",
@@ -279,7 +295,8 @@ constexpr const char *gt_long_name[GT_NUM_GAMETYPES] = {
 	"Horde",
 	"ProBall",
 	"Instagib",
-	"NadeFest"
+	"NadeFest",
+	"Rocket Arena"
 };
 
 typedef enum {
@@ -2415,6 +2432,31 @@ extern cvar_t *g_allow_voting;
 extern cvar_t *g_arena_dmg_armor;
 extern cvar_t *g_arena_start_armor;
 extern cvar_t *g_arena_start_health;
+extern cvar_t *g_arena_players_per_team;
+extern cvar_t *g_arena_rounds;
+extern cvar_t *g_arena_falling_damage;
+extern cvar_t *g_arena_weapon_mask;
+extern cvar_t *g_arena_ammo_shells;
+extern cvar_t *g_arena_ammo_bullets;
+extern cvar_t *g_arena_ammo_grenades;
+extern cvar_t *g_arena_ammo_rockets;
+extern cvar_t *g_arena_ammo_cells;
+extern cvar_t *g_arena_ammo_slugs;
+extern cvar_t *g_arena_config;
+extern cvar_t *g_arena_default_type;
+extern cvar_t *g_arena_health_protect;
+extern cvar_t *g_arena_armor_protect;
+extern cvar_t *g_arena_fast_switch;
+extern cvar_t *g_arena_grapple;
+extern cvar_t *g_arena_excessive;
+extern cvar_t *g_arena_competition;
+extern cvar_t *g_arena_unbalanced;
+extern cvar_t *g_arena_lock;
+extern cvar_t *g_arena_lock_count;
+extern cvar_t *g_arena_max_players;
+extern cvar_t *g_arena_vote_time;
+extern cvar_t *g_arena_timeouts;
+extern cvar_t *g_arena_rocket_speed;
 extern cvar_t *g_auto_ghost_max;
 extern cvar_t *g_auto_ghost_time;
 extern cvar_t *g_auto_ghost_timeout;
@@ -2688,6 +2730,7 @@ gitem_t		*FindItemByClassname(const char *classname);
 gentity_t		*Drop_Item(gentity_t *ent, gitem_t *item);
 void		SetRespawn(gentity_t *ent, gtime_t delay, bool hide_self = true);
 void		Change_Weapon(gentity_t *ent);
+void		Weapon_CancelFiring(gentity_t *ent);
 bool		SpawnItem(gentity_t *ent, gitem_t *item);
 void		Think_Weapon(gentity_t *ent);
 item_id_t	ArmorIndex(gentity_t *ent);
@@ -3590,6 +3633,14 @@ struct client_respawn_t {
 	int32_t				old_score;		// track changes in score
 	int32_t				round_start_score;	// Red Rover: snapshot of score at round start, to find that round's top fragger
 	int32_t				round_dmg;			// Red Rover: enemy damage dealt this round (reset each round); tie-breaks the round winner. Tracked directly (not match-stats) so it counts bots.
+	// [MuffMode] Map-scoped RA2/RA3 multi-arena identity. Primitive storage
+	// keeps the core arena types out of the engine-facing client structure.
+	int16_t				arena_id;			// 0 = lobby, 1..N = playable arena.
+	uint16_t			arena_team_id;		// Logical team ID; 0 = no team.
+	uint8_t				arena_role;			// mm_arena_role_t encoded by mm_arena.
+	team_t				arena_side;			// Active red/blue projection, or spectator/free.
+	bool				arena_line_enabled;
+	bool				arena_late_join;
 	vec3_t				cmd_angles;	  // angles sent over in the last command
 
 	bool				spectator; // client is a spectator
@@ -3983,6 +4034,9 @@ struct gentity_t {
 	float	splash_radius;
 	int32_t sounds; // make this a spawntemp var?
 	int32_t count;
+	// [MuffMode] RA2/RA3 map ownership. Worldspawn stores the declared arena
+	// count; 0 is lobby/untagged, and negative values are legacy shared markers.
+	int32_t arena;
 
 	gentity_t *chain;
 	gentity_t *enemy;

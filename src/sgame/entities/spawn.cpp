@@ -10,6 +10,7 @@
 #include "core/debug_log.h"
 #include "shadow_lights.h"
 // [MuffMode] Spawn filtering, statusbar and gametype hooks
+#include "muffmode/mm_arena.h"
 #include "muffmode/mm_combat_heatmap.h"
 #include "muffmode/mm_gametype.h"
 #include "muffmode/mm_ghost.h"
@@ -310,6 +311,7 @@ static const std::initializer_list<field_t> entity_fields = {
 	FIELD_AUTO(style_off),
 	FIELD_AUTO(crosslevel_flags),
 	FIELD_AUTO(count),
+	FIELD_AUTO(arena),
 	FIELD_AUTO(health),
 	FIELD_AUTO(sounds),
 	{ "light" },
@@ -328,7 +330,12 @@ static const std::initializer_list<field_t> entity_fields = {
 	FIELD_AUTO(hackflags), // [Paril-KEX] n64
 	FIELD_AUTO_NAMED("alpha", s.alpha), // [Paril-KEX]
 	FIELD_AUTO_NAMED("scale", s.scale), // [Paril-KEX]
-	{ "mangle" }, // editor field
+	// [MuffMode] RA2 uses mangle on info_player_intermission for its
+	// spectator view. Keep the legacy alias scoped to validated RA2 maps.
+	{ "mangle", [](gentity_t *e, const char *value) {
+		if (MM_Arena_Active())
+			e->s.angles = type_loaders_t::load<vec3_t>(value);
+	} },
 	FIELD_AUTO_NAMED("dead_frame", monsterinfo.start_frame), // [Paril-KEX]
 	FIELD_AUTO_NAMED("frame", s.frame),
 	FIELD_AUTO_NAMED("effects", s.effects),
@@ -657,6 +664,18 @@ static uint32_t G_SpawnEntityLimit() {
 	return min(globals.num_entities, game.maxentities);
 }
 
+static bool G_CanJoinEntityTeam(const gentity_t *first, const gentity_t *second) {
+	if (notGT(GT_ARENA))
+		return true;
+
+	// Positive arena ids are map-owned namespaces. Keep identically named
+	// mover/item teams from separate RA2 rooms independent during spawn setup.
+	if (first->arena > 0 || second->arena > 0)
+		return first->arena > 0 && first->arena == second->arena;
+
+	return true;
+}
+
 static void G_FixTeams() {
 	gentity_t *e, *e2, *chain;
 	uint32_t i, j;
@@ -683,6 +702,8 @@ static void G_FixTeams() {
 					if (!e2->inuse)
 						continue;
 					if (!e2->team)
+						continue;
+					if (!G_CanJoinEntityTeam(e, e2))
 						continue;
 					if (!strcmp(e->team, e2->team)) {
 						chain->teamchain = e2;
@@ -729,6 +750,8 @@ static void G_FindTeams() {
 			if (!e2->team)
 				continue;
 			if (e2->flags & FL_TEAMSLAVE)
+				continue;
+			if (!G_CanJoinEntityTeam(e1, e2))
 				continue;
 			if (!strcmp(e1->team, e2->team)) {
 				c2++;
@@ -1354,6 +1377,11 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
 
 	SaveClientData();
 
+	// [MuffMode] Validate the final (possibly overridden) entity lump before
+	// freeing the previous level or spawning anything. Arena remains an
+	// ordinary effective FFA unless the complete RA2 map contract passes.
+	MM_Arena_PreflightMap(mapname, saved_entstring.c_str());
+
 	// Dump client menu pointers BEFORE FreeTags to detect what will become stale
 	for (size_t dbg_i = 0; dbg_i < game.maxclients; dbg_i++) {
 		if (game.clients[dbg_i].menu)
@@ -1501,6 +1529,9 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
 		"SpawnEntities: phase=parse-complete entities=%d inhibited=%d horde_anchors=%d num_entities=%u",
 		ent_count, inhibit, horde_anchors_converted,
 		static_cast<unsigned>(globals.num_entities));
+
+	// [MuffMode] Build the live room state only after post-spawn validation.
+	MM_Arena_Init();
 
 	// precache start_items
 	PrecacheStartItems();
@@ -1710,16 +1741,19 @@ void SP_worldspawn(gentity_t *ent) {
 
 	PrecacheItem(GetItemByIndex(IT_COMPASS));
 
-	if (!(g_instagib->integer || GT(GT_INSTAGIB)) && !(g_nadefest->integer || GT(GT_NADEFEST)))
+	if (GT(GT_ARENA) ||
+		(!(g_instagib->integer || GT(GT_INSTAGIB)) &&
+		 !(g_nadefest->integer || GT(GT_NADEFEST))))
 		PrecacheItem(GetItemByIndex(IT_WEAPON_BLASTER));
 
 	// Horde can start players on the chainfist; precache it so the vwep model/sounds exist.
 	if (GT(GT_HORDE) && g_horde_start_chainsaw->integer)
 		PrecacheItem(GetItemByIndex(IT_WEAPON_CHAINFIST));
 
-	if ((!strcmp(g_allow_grapple->string, "auto")) ?
+	// [MuffMode] Arena rooms can enable the grapple independently of the global cvar.
+	if (GT(GT_ARENA) || ((!strcmp(g_allow_grapple->string, "auto")) ?
 		(GTF(GTF_CTF) ? !level.no_grapple : 0) :
-		g_allow_grapple->integer) {
+		g_allow_grapple->integer)) {
 		PrecacheItem(GetItemByIndex(IT_WEAPON_GRAPPLE));
 	}
 

@@ -54,13 +54,13 @@ Use `ifstat` + configstrings instead (same pattern as `STAT_WARMUP_NOTICE` / `ST
 | `STAT_WARMUP_NOTICE` | unused | `xv 0 yb -90` | Reserved; warmup/ready guidance is centerprint (menu-bind band) |
 | `STAT_GAMETYPE_HUD` | `hud.cpp` | top-right `loc_stat_rstring` | Gametype / limit / round label |
 | `STAT_RULESET_HUD` | `hud.cpp` | top-right | Ruleset or capturelimit |
-| `STAT_ROUND_NUMBER` | `hud.cpp` | top-right / arena alive slot | Round progress via `CONFIG_ROUND_PROGRESS`; CA/RR use the secondary POV configstring lane for compact live counts |
+| `STAT_ROUND_NUMBER` | `hud.cpp` | top-right / arena progress slot | Round progress via `CONFIG_ROUND_PROGRESS`; round-based modes may reuse it for compact series context |
 | `STAT_CENTER_LINE` | `hud.cpp` | `xv 0 yt 26` | Duel pic; LMS primary-lane POV text |
 | `STAT_COUNTDOWN` | match | `yb -256 num` | Layout position (same on all clients) |
 | `STAT_HORDE_REMAINING` | `hud.cpp` | Horde right stack `num` | Horde only |
 | `STAT_SCORELIMIT` | `hud.cpp` | Horde: Wave between Lives and Monsters; coop: score limit | Horde reuses this slot (stats enum at `MAX_STATS`); DM match limit stays on `STAT_ROUND_NUMBER` |
-| `STAT_ARENA_ROLE` | `hud.cpp` | Strike top-right or CA/Freeze centre yt 48 | Per-client via the primary POV configstring lane |
-| `STAT_MINISCORE_*` | `hud.cpp` | bottom corners | Team / FFA miniscore |
+| `STAT_ARENA_ROLE` | `hud.cpp` / `MM_Arena_SetHudStats` | Strike/Rocket Arena top-right or CA/Freeze centre yt 48 | Per-client arena number/name, role, elimination, team, or line status via the primary POV configstring lane |
+| `STAT_MINISCORE_*` | `hud.cpp` | bottom corners | Team / FFA miniscore; Rocket Arena publishes the selected arena's red/blue series scores |
 
 Full contract comments: `src/sgame/muffmode/mm_hud_stat_contracts.h`.
 
@@ -69,6 +69,12 @@ Full contract comments: `src/sgame/muffmode/mm_hud_stat_contracts.h`.
 Hook after notify; **currently empty**. Timer, warmup, centre line, and countdown are drawn only via `CG_ExecuteLayoutString` so stock and MM clients match pixel-for-pixel.
 
 Future MM-only polish (team border, etc.) belongs here and must not replace layout tokens.
+
+## Rocket Arena presentation
+
+Rocket Arena keeps its essential presentation in the vanilla-safe server layer. The server publishes each viewer's selected arena, role, team/elimination state, and line position through the existing arena-role stat/configstring contract, uses the normal red/blue miniscore fields for that arena's series, and emits an arena-local `svc_layout` scoreboard. A remote stock Q2RE client can therefore understand which room it is watching, who is fighting, the score, and who is next without `CG_DrawMuffModeHudEnhancements` or an Arena-specific cgame signal. Arena identity and room-local clock/countdown tokens sit outside the fighter-vitals `STAT_SHOW_STATUSBAR` gate, so lobby users, queued teams, coaches, and free observers retain that context without receiving combat HUD data.
+
+Arena role and score data must be generated for the actual viewer after any followed-player HUD stats are copied. The scoreboard, crosshair ID, and follow target must use the viewer's arena rather than global player lists; otherwise a spectator could expose another room's participants or state.
 
 ## Validation
 
@@ -80,4 +86,4 @@ Future MM-only polish (team border, etc.) belongs here and must not replace layo
 1. Restore vanilla Q2RE `game_x64.dll`.
 2. Connect to a MuffMode server.
 3. Confirm no `Com_Error` / client drop on HUD draw.
-4. Spot-check FFA, CA, Strike, Horde, LMS, RR — vitals, miniscore, timer (bottom-left), gametype stack, arena labels.
+4. Spot-check FFA, CA, Rocket Arena, Strike, Horde, LMS, RR — vitals, miniscore, timer (bottom-left), gametype stack, arena labels, and Rocket Arena queue/series scoreboard.

@@ -2,6 +2,7 @@
 // Licensed under the GNU General Public License 2.0.
 // Tesla mine projectile behavior.
 #include "g_local.h"
+#include "muffmode/mm_arena.h"
 
 namespace {
 
@@ -22,6 +23,8 @@ bool IsTeslaTargetCandidate(gentity_t *candidate, gentity_t *self, gentity_t *te
 	if (!candidate->inuse)
 		return false;
 	if (candidate == self)
+		return false;
+	if (GT(GT_ARENA) && !MM_Arena_CanInteract(self, candidate))
 		return false;
 	if (candidate->health < 1)
 		return false;
@@ -104,7 +107,7 @@ static THINK(tesla_think_active) (gentity_t *self) -> void {
 		return;
 	}
 
-	if (deathmatch->integer && IsCombatDisabled())
+	if (deathmatch->integer && notGT(GT_ARENA) && IsCombatDisabled())
 		return;
 
 	vec3_t start = self->s.origin;
@@ -169,6 +172,9 @@ static THINK(tesla_activate) (gentity_t *self) -> void {
 		for (auto *search = findradius(nullptr, self->s.origin, 1.5f * TESLA_DAMAGE_RADIUS);
 			search;
 			search = findradius(search, self->s.origin, 1.5f * TESLA_DAMAGE_RADIUS)) {
+			if (GT(GT_ARENA) && !MM_Arena_CanInteract(self, search))
+				continue;
+
 			// [Paril-KEX] don't allow traps to be placed near flags or teleporters
 			// if it's a monster or player with health > 0
 			// or it's a player start point

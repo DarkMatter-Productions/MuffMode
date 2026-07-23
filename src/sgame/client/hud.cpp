@@ -2,6 +2,7 @@
 // Licensed under the GNU General Public License 2.0.
 #include "g_local.h"
 #include "core/statusbar.h"
+#include "muffmode/mm_arena.h"
 #include "muffmode/mm_duel.h"
 #include "muffmode/mm_freezetag.h"
 #include "muffmode/mm_hud_stat_contracts.h"
@@ -251,6 +252,12 @@ void G_EndOfUnitMessage() {
 //     u8 team
 // ]
 void G_ReportMatchDetails(bool is_end) {
+	// The engine report format describes one global ranking and has no arena
+	// identifier. Sending it for multi-arena play would merge independent
+	// room scores, so room HUDs/scoreboards remain the authoritative report.
+	if (GT(GT_ARENA))
+		return;
+
 	static std::array<uint32_t, MAX_CLIENTS> player_ranks;
 
 	player_ranks = {};
@@ -577,6 +584,10 @@ DeathmatchScoreboardMessage
 ==================
 */
 void DeathmatchScoreboardMessage(gentity_t *ent, gentity_t *killer) {
+	if (GT(GT_ARENA)) {
+		MM_Arena_ScoreboardMessage(ent, killer);
+		return;
+	}
 	if (Teams() && notGT(GT_RR)) {
 		TeamsScoreboardMessage(ent, ent->enemy);
 		return;
@@ -671,6 +682,13 @@ Note that it isn't that hard to overflow the 1400 byte message limit!
 ==================
 */
 void MultiplayerScoreboard(gentity_t *ent) {
+	if (GT(GT_ARENA)) {
+		MM_Arena_ScoreboardMessage(ent, ent->enemy);
+		gi.unicast(ent, true);
+		ent->client->menutime = level.time + 3_sec;
+		return;
+	}
+
 	gentity_t *e = ent->client->follow_target ? ent->client->follow_target : ent;
 	DeathmatchScoreboardMessage(e, e->enemy);
 	gi.unicast(ent, true);
@@ -843,7 +861,7 @@ static void ApplyMatchInfoHudPreference(gentity_t *ent)
 	ent->client->ps.stats[STAT_GAMETYPE_HUD] = 0;
 	ent->client->ps.stats[STAT_RULESET_HUD] = 0;
 
-	if (GT(GT_STRIKE))
+	if (GT(GT_STRIKE) || GT(GT_ARENA))
 		ent->client->ps.stats[STAT_ARENA_ROLE] = 0;
 	else if (GT(GT_RR))
 		ent->client->ps.stats[STAT_CTF_FLAG_PIC] = 0;
@@ -977,6 +995,15 @@ static void G_SetGametypeStats(gentity_t *ent) {
 		ent->client->ps.stats[STAT_CENTER_LINE] = 0;
 	}
 
+	if (GT(GT_ARENA)) {
+		ent->client->ps.stats[STAT_MINISCORE_FIRST_SCORE] = 0;
+		ent->client->ps.stats[STAT_MINISCORE_SECOND_SCORE] = 0;
+		ent->client->ps.stats[STAT_MINISCORE_FIRST_PIC] = 0;
+		ent->client->ps.stats[STAT_MINISCORE_SECOND_PIC] = 0;
+		ent->client->ps.stats[STAT_MINISCORE_FIRST_POS] = 0;
+		ent->client->ps.stats[STAT_MINISCORE_SECOND_POS] = 0;
+	}
+	MM_Arena_SetHudStats(ent);
 	ApplyMatchInfoHudPreference(ent);
 }
 
@@ -1025,6 +1052,9 @@ static void SetCrosshairIDView(gentity_t *ent) {
 	tr = gi.traceline(ent->s.origin, forward, ent, CONTENTS_MIST | MASK_WATER | MASK_SOLID);
 	//gi.Draw_Line(ent->s.origin, tr.endpos, rgba_red, 5, false);
 	if (tr.fraction < 1 && tr.ent && tr.ent->client && tr.ent->health > 0) {
+		if (GT(GT_ARENA) && !MM_Arena_SameArena(ent, tr.ent))
+			return;
+
 		// don't show if traced client is spectating
 		if (!ClientIsPlaying(tr.ent->client))
 			return;
@@ -1048,6 +1078,8 @@ static void SetCrosshairIDView(gentity_t *ent) {
 	for (uint32_t i = 1; i <= game.maxclients; i++) {
 		who = g_entities + i;
 		if (!who->inuse || who->solid == SOLID_NOT)
+			continue;
+		if (GT(GT_ARENA) && !MM_Arena_SameArena(ent, who))
 			continue;
 		dir = who->s.origin - ent->s.origin;
 		dir.normalize();
@@ -1359,7 +1391,9 @@ void G_SetStats(gentity_t *ent) {
 	int				cells = 0;
 	item_id_t		power_armor_type;
 	unsigned int	invIndex;
-	bool			minhud = (g_instagib->integer || GT(GT_INSTAGIB)) || (g_nadefest->integer || GT(GT_NADEFEST));
+	bool			minhud = notGT(GT_ARENA) &&
+		((g_instagib->integer || GT(GT_INSTAGIB)) ||
+		 (g_nadefest->integer || GT(GT_NADEFEST)));
 	int32_t			img_index = ent->client->pers.skin_icon_index;
 
 	//
@@ -1411,11 +1445,12 @@ void G_SetStats(gentity_t *ent) {
 		//
 		ent->client->ps.stats[STAT_AMMO_ICON] = 0;
 		ent->client->ps.stats[STAT_AMMO] = 0;
+		const bool arena_infinite_ammo = MM_Arena_InfiniteAmmoEnabled(ent);
 
 		if (ent->client->pers.weapon && ent->client->pers.weapon->ammo) {
 			item = GetItemByIndex(ent->client->pers.weapon->ammo);
 
-			if (!InfiniteAmmoOn(item)) {
+			if (!InfiniteAmmoOn(item) && !arena_infinite_ammo) {
 				ent->client->ps.stats[STAT_AMMO_ICON] = gi.imageindex(item->icon);
 				ent->client->ps.stats[STAT_AMMO] = ent->client->pers.inventory[ent->client->pers.weapon->ammo];
 			}
@@ -1424,7 +1459,9 @@ void G_SetStats(gentity_t *ent) {
 		memset(&ent->client->ps.stats[STAT_AMMO_INFO_START], 0, sizeof(uint16_t) * NUM_AMMO_STATS);
 		for (unsigned int ammoIndex = AMMO_BULLETS; ammoIndex < AMMO_MAX; ++ammoIndex) {
 			gitem_t *ammo = GetItemByAmmo((ammo_t)ammoIndex);
-			uint16_t val = InfiniteAmmoOn(ammo) ? AMMO_VALUE_INFINITE : clamp(ent->client->pers.inventory[ammo->id], 0, AMMO_VALUE_INFINITE - 1);
+			uint16_t val = InfiniteAmmoOn(ammo) || arena_infinite_ammo
+				? AMMO_VALUE_INFINITE
+				: clamp(ent->client->pers.inventory[ammo->id], 0, AMMO_VALUE_INFINITE - 1);
 			G_SetAmmoStat((uint16_t *)&ent->client->ps.stats[STAT_AMMO_INFO_START], ammo->ammo_wheel_index, val);
 		}
 
@@ -1732,14 +1769,18 @@ void G_SetStats(gentity_t *ent) {
 		//ent->client->ps.stats[STAT_TEAMPLAY_INFO] = level.warnactive ? CONFIG_TEAMINFO : 0;
 	}
 
-	// match countdown
-	UpdateCountdownHud(ent);
-	//
-	// match timer
-	//
+	if (GT(GT_ARENA)) {
+		// Multi-arena sessions cannot use the singleton match clock/configstring.
+		MM_Arena_SetTimerHudStats(ent);
+	} else {
+		// match countdown
+		UpdateCountdownHud(ent);
+		//
+		// match timer
+		//
 
-	// Q2Eaks game timer
-	if (ent->client->sess.pc.show_timer) {
+		// Q2Eaks game timer
+		if (ent->client->sess.pc.show_timer) {
 		// Don't update any more than once/second
 		static int lasttime = 0;
 		//int	t = timelimit->value ? (gtime_t::from_min(timelimit->value) + level.overtime - level.time).seconds<int>() : level.time.seconds<int>();
@@ -1798,8 +1839,9 @@ void G_SetStats(gentity_t *ent) {
 			ent->client->ps.stats[STAT_MATCH_STATE] = CONFIG_MATCH_STATE;
 			gi.configstring(CONFIG_MATCH_STATE, s);
 		}
-	} else {
-		ent->client->ps.stats[STAT_MATCH_STATE] = 0;
+		} else {
+			ent->client->ps.stats[STAT_MATCH_STATE] = 0;
+		}
 	}
 	
 	if (ent->client->pers.medal_time + 3_sec > level.time) {
@@ -1834,9 +1876,16 @@ void G_SetSpectatorStats(gentity_t *ent) {
 
 	if (!cl->follow_target)
 		G_SetStats(ent);
-	else
+	else {
 		// Still publish team identity even when following (in case we follow someone on a team).
 		P_PublishEngineTeam(ent);
+		// Arena spectators keep their own role/queue and per-arena status
+		// configstrings instead of inheriting the followed player's POV lane.
+		if (GT(GT_ARENA)) {
+			MM_Arena_SetHudStats(ent);
+			MM_Arena_SetTimerHudStats(ent);
+		}
+	}
 
 	// layouts are independant in spectator
 	cl->ps.stats[STAT_LAYOUTS] = 0;

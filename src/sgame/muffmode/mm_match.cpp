@@ -3,6 +3,7 @@
 
 #include "g_local.h"
 #include "muffmode/mm_announcer.h"
+#include "muffmode/mm_arena.h"
 #include "muffmode/mm_captain.h"
 #include "muffmode/mm_command_contracts.h"
 #include "muffmode/mm_duel.h"
@@ -464,6 +465,12 @@ void Match_Start() {
 	MM_Announcer_OnMatchReset();
 	if (!deathmatch->integer)
 		return;
+	if (GT(GT_ARENA)) {
+		// [MuffMode] Each room owns its own match state. Console/admin start
+		// requests must not run the singleton reset and team-lock path.
+		MM_Arena_OnMatchStart();
+		return;
+	}
 
 	level.match_time = level.time;
 	level.match_start_time = level.time;
@@ -538,6 +545,12 @@ Match_Reset
 */
 void Match_Reset() {
 	MM_Announcer_OnMatchReset();
+	if (GT(GT_ARENA)) {
+		// [MuffMode] Reset all independent room series without projecting
+		// them through the legacy singleton match state.
+		MM_Arena_OnMatchReset();
+		return;
+	}
 	//if (!g_dm_do_warmup->integer) {
 	//	Match_Start();
 	//	return;
@@ -1314,7 +1327,7 @@ void TickWarmupState() {
 		not_enough = true;
 	}
 
-	if (notGT(GT_DUEL)) {
+	if (notGT(GT_DUEL) && notGT(GT_ARENA)) {
 		// pull in any spectating bots
 		for (auto ec : active_clients())
 			if (!ClientIsPlaying(ec->client) && (ec->client->sess.is_a_bot || ec->svflags & SVF_BOT))
@@ -1487,6 +1500,13 @@ match-end warning.
 ================
 */
 void MM_Match_RunFrame() {
+	if (GT(GT_ARENA)) {
+		// [MuffMode] RA2/RA3 arenas own independent state machines. Never
+		// enter the singleton warmup/round/countdown state below.
+		MM_Arena_RunFrame();
+		return;
+	}
+
 	match::TickWarmupState();
 	match::TickWarmupWaitNudges();
 	match::TickWarmupReadyNudges();

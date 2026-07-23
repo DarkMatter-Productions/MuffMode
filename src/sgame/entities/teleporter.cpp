@@ -2,6 +2,7 @@
 // Licensed under the GNU General Public License 2.0.
 
 #include "teleporter.h"
+#include "muffmode/mm_arena.h"
 
 namespace {
 
@@ -59,6 +60,13 @@ static TOUCH(teleporter_touch) (gentity_t *self, gentity_t *other, const trace_t
 	if (!other->client)
 		return;
 
+	// [MuffMode] Positive RA2 arena teleporters are selectors, not spatial
+	// teleporters. Enter the arena as an observer; its menu owns joining.
+	if (GT(GT_ARENA) && self->arena > 0) {
+		MM_Arena_MoveTo(other, self->arena, true);
+		return;
+	}
+
 	gentity_t *dest = G_FindByString<&gentity_t::targetname>(nullptr, self->target);
 	if (!dest) {
 		gi.Com_PrintFmt("{}: Couldn't find destination, removing.\n", *self);
@@ -81,6 +89,7 @@ void SpawnTeleporterTrigger(gentity_t *ent, const TeleporterTriggerBounds &bound
 	trigger->solid = SOLID_TRIGGER;
 	trigger->target = ent->target;
 	trigger->owner = ent;
+	trigger->arena = ent->arena;
 	trigger->s.origin = ent->s.origin;
 	trigger->mins = bounds.mins;
 	trigger->maxs = bounds.maxs;
@@ -132,8 +141,9 @@ void SP_misc_teleporter(gentity_t *ent)
 	if (bounds.show_spawnpad)
 		SetupTeleporterSpawnPad(ent);
 
-	// N64 has some of these for visual effects only.
-	if (!ent->target)
+	// N64 has some of these for visual effects only. RA2 selector pads often
+	// omit target entirely; their positive arena key is the destination.
+	if (!ent->target && !(GT(GT_ARENA) && ent->arena > 0))
 		return;
 
 	SpawnTeleporterTrigger(ent, bounds);

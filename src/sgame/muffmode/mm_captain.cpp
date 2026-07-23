@@ -2,6 +2,7 @@
 // Licensed under the GNU General Public License 2.0.
 
 #include "g_local.h"
+#include "muffmode/mm_arena.h"
 #include "muffmode/mm_captain.h"
 #include "muffmode/mm_command_contracts.h"
 #include "muffmode/mm_match.h"
@@ -35,20 +36,22 @@ bool IsCaptainTeam(team_t team)
 	return team == TEAM_RED || team == TEAM_BLUE;
 }
 
-bool IsBotClient(gentity_t *ent)
-{
-	return ent && ((ent->svflags & SVF_BOT) || (ent->client && ent->client->sess.is_a_bot));
-}
-
 bool IsValidCaptain(team_t team, gentity_t *ent)
 {
 	return IsCaptainTeam(team) && ent && ent->inuse && ent->client &&
-		ent->client->pers.connected && ent->client->sess.team == team && !IsBotClient(ent);
+		ent->client->pers.connected && ent->client->sess.team == team &&
+		MM_CaptainEligible(ent);
 }
 
 } // namespace muffmode::captain
 
 namespace captain = muffmode::captain;
+
+bool MM_CaptainEligible(const gentity_t *ent)
+{
+	return ent && ent->inuse && ent->client && ent->client->pers.connected &&
+		!(ent->svflags & SVF_BOT) && !ent->client->sess.is_a_bot;
+}
 
 /*----------------------------------------------------------------*/
 /* CAPTAINS AND TEAM LOCKS                                        */
@@ -100,7 +103,7 @@ gentity_t *FindNewCaptain(team_t team, gentity_t *exclude = nullptr) {
 			continue;
 		if (ec->client->sess.team != team)
 			continue;
-		if (IsBotClient(ec))
+		if (!MM_CaptainEligible(ec))
 			continue;
 		if (!best || ec->client->sess.team_join_time < earliest) {
 			best = ec;
@@ -191,6 +194,9 @@ void MM_CmdCaptain(gentity_t *ent) {
 	if (!ent || !ent->client)
 		return;
 
+	if (MM_Arena_CaptainCommand(ent))
+		return;
+
 	if (!Teams()) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "Captain is only available in team modes.\n");
 		return;
@@ -246,7 +252,7 @@ void MM_CmdCaptain(gentity_t *ent) {
 		return;
 	}
 
-	if (captain::IsBotClient(target)) {
+	if (!MM_CaptainEligible(target)) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "Bots cannot be team captain.\n");
 		return;
 	}
@@ -275,6 +281,9 @@ Locks a team. Captains lock their own team; admins can specify a team.
 */
 void MM_CmdLockTeam(gentity_t *ent) {
 	if (!ent || !ent->client)
+		return;
+
+	if (MM_Arena_LockTeamCommand(ent, true))
 		return;
 
 	if (!Teams()) {
@@ -322,6 +331,9 @@ Unlocks a team. Captains unlock their own team; admins can specify a team.
 */
 void MM_CmdUnlockTeam(gentity_t *ent) {
 	if (!ent || !ent->client)
+		return;
+
+	if (MM_Arena_LockTeamCommand(ent, false))
 		return;
 
 	if (!Teams()) {
@@ -453,6 +465,9 @@ void MM_CmdReadyAll(gentity_t *ent) {
 	if (!ent || !ent->client)
 		return;
 
+	if (MM_Arena_ReadyAllCommand(ent, true))
+		return;
+
 	if (!captain::RequireNoCommandArgs(ent))
 		return;
 
@@ -466,6 +481,9 @@ void MM_CmdReadyAll(gentity_t *ent) {
 
 void MM_CmdUnReadyAll(gentity_t *ent) {
 	if (!ent || !ent->client)
+		return;
+
+	if (MM_Arena_ReadyAllCommand(ent, false))
 		return;
 
 	if (!captain::RequireNoCommandArgs(ent))
@@ -488,6 +506,9 @@ Captain readies up all players on their team.
 */
 void MM_CmdReadyTeam(gentity_t *ent) {
 	if (!ent || !ent->client)
+		return;
+
+	if (MM_Arena_ReadyTeamCommand(ent))
 		return;
 
 	if (!captain::RequireNoCommandArgs(ent))

@@ -34,7 +34,7 @@
 | Audience | What Muff Mode gives you |
 | --- | --- |
 | Casual players | **Clearer HUD information**, **menu-driven voting**, approachable team joining, and extra modes such as **Horde**, **Instagib**, and **NadeFest**. |
-| Competitive players | **Ready-up flow**, **countdowns**, **timeouts**, **overtime**, support for **Duel / TDM / CA / CTF**, flexible rulesets, and captain-led team control. |
+| Competitive players | **Ready-up flow**, **countdowns**, **timeouts**, **overtime**, support for **Duel / Rocket Arena / TDM / CA / CTF**, flexible rulesets, and captain-led team control. |
 | Server hosts | **Packaged server configs**, per-gametype presets, curated map rotations, voting limits, admin tools, team management, **debug logging**, and built-in diagnostics like `doctor`. |
 
 <h2 align="center">Start Here</h2>
@@ -60,16 +60,17 @@
 1. Download the [latest Muff Mode release](https://github.com/DarkMatter-Productions/MuffMode/releases/latest).
 2. Use the **Windows installer** when available. It detects **Steam**, **Epic Games Store**, **GOG**, and **Xbox app / Microsoft Store** installs, and also offers an **Other location** option for custom library folders.
 3. If you use the zip instead, extract it into the outer **`Quake 2`** folder and allow file replacements.
-4. Launch the game normally. Server hosts can load the bundled baseline config with **`exec server-base.cfg`**, then execute a gametype preset such as **`exec gt-FFA.cfg`**.
+4. Launch the game normally. Server hosts can load the bundled baseline config with **`exec server-base.cfg`**, then execute a gametype preset such as **`exec gt-FFA.cfg`** or **`exec gt-ARENA.cfg`**. Arena requires separately installed RA2-compatible maps and an RA2-only rotation; those map assets are not bundled.
 
 For a more careful walkthrough, use the [Player Guide](docs/player-guide.md) or [Server Host Guide](docs/server-host-guide.md).
 
 <h2 align="center">Highlights</h2>
 
  - **Built for every lobby style** — supports **casual public servers**, **private friend sessions**, **pickups**, **scrims**, and more organized competitive events.
- - **A fuller mode lineup** — includes **Deathmatch**, **Duel**, **TDM**, **CTF**, **Clan Arena**, **Freeze Tag**, **Capture Strike**, **Red Rover**, **Horde**, **Instagib**, and **NadeFest**.
+ - **A fuller mode lineup** — includes **Deathmatch**, **Duel**, **TDM**, **CTF**, **Clan Arena**, **Rocket Arena**, **Freeze Tag**, **Capture Strike**, **Red Rover**, **Horde**, **Instagib**, and **NadeFest**.
  - **Flexible rulesets** — switch between [**Quake II Rerelease**, **Muff Mode**, **Q2RE Balanced**, **Quake III Arena style**, **Quake style**, and **Quake Champions style**](docs/rulesets.md) depending on the feel you want.
- - **Better match flow** — warmups, ready checks, countdowns, post-match delays, sudden death, overtime, round handling, and timeouts help games start cleanly and stay organized.
+ - **Better match flow** — warmups, ready checks, countdowns, post-match delays, sudden death, overtime, round handling, and per-arena timeouts help games start cleanly and stay organized.
+ - **MuffMode-native Arena requires RA2 maps** — Rocket Arena validates every encoded lobby and room before activation, then runs independent Rocket Arena, Clan Arena, Red Rover, and Practice sessions through MuffMode's teams, votes, ready-up, competition controls, HUD, and server policies. Ordinary maps never receive synthetic Arena behavior.
  - **Player-friendly interface improvements** — a purpose-built HUD, compact scoreboard, frag messages, timer support, help text, MOTD access, and match-state feedback keep important information visible without overwhelming the screen.
  - **Fast, accessible voting** — use **GUI or console voting** for maps, gametypes, rulesets, server settings, and administrative actions, with host-side controls to keep votes focused.
  - **Stronger teamplay tools** — captains, captain transfer, team locking, auto-balance, forced balance, and team item-drop notices make coordinated play easier to run.

@@ -264,6 +264,7 @@ static const std::initializer_list<spawn_t> spawns = {
 	{ "func_areaportal", SP_func_areaportal },
 	{ "func_clock", SP_func_clock },
 	{ "func_wall", SP_func_wall },
+	{ "func_illusionary", SP_func_illusionary },
 	{ "func_force_wall", SP_func_force_wall },
 	{ "func_object", SP_func_object },
 	{ "func_timer", SP_func_timer },

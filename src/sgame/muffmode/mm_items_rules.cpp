@@ -435,9 +435,15 @@ void Tech_ApplyAutoDoc(gentity_t *ent)
 	if (MM_Horde_PowerupsPaused())
 		return;
 
-	const bool mod_regen = (g_instagib->integer || GT(GT_INSTAGIB)) || (g_nadefest->integer || GT(GT_NADEFEST));
+	const bool global_modifiers = notGT(GT_ARENA);
+	const bool mod_regen = global_modifiers &&
+		((g_instagib->integer || GT(GT_INSTAGIB)) ||
+		 (g_nadefest->integer || GT(GT_NADEFEST)));
 	const bool no_health = mod_regen || MM_GametypeHasFlag(GTF_ARENA) || g_no_health->integer;
-	const int max_value = g_vampiric_damage->integer ? (g_vampiric_health_max->integer + 1) / 2 : (mod_regen ? 100 : 150);
+	const bool vampiric = global_modifiers && g_vampiric_damage->integer;
+	const int max_value = vampiric
+		? (g_vampiric_health_max->integer + 1) / 2
+		: (mod_regen ? 100 : 150);
 	const float volume = client->silencer_shots ? 0.2f : 1.0f;
 
 	if (mod_regen && !client->tech_regen_time) {
@@ -457,7 +463,7 @@ void Tech_ApplyAutoDoc(gentity_t *ent)
 
 	client->tech_regen_time = level.time;
 
-	if (!g_vampiric_damage->integer && ent->health < max_value) {
+	if (!vampiric && ent->health < max_value) {
 		ent->health = std::min(ent->health + 5, max_value);
 		client->tech_regen_time += delay;
 		played_noise = true;
@@ -467,7 +473,7 @@ void Tech_ApplyAutoDoc(gentity_t *ent)
 	if (!no_health && (!mm_ruleset || !played_noise)) {
 		const int armor_index = ArmorIndex(ent);
 		if (armor_index && client->pers.inventory[armor_index] < max_value) {
-			const int armor_step = g_vampiric_damage->integer ? 10 : 5;
+			const int armor_step = vampiric ? 10 : 5;
 			client->pers.inventory[armor_index] = std::min(client->pers.inventory[armor_index] + armor_step, max_value);
 			client->tech_regen_time += delay;
 			played_noise = true;
@@ -486,6 +492,7 @@ bool Tech_HasRegeneration(gentity_t *ent)
 		return false;
 
 	return ent->client->pers.inventory[IT_TECH_AUTODOC] ||
-		g_instagib->integer || GT(GT_INSTAGIB) ||
-		g_nadefest->integer || GT(GT_NADEFEST);
+		(notGT(GT_ARENA) &&
+			(g_instagib->integer || GT(GT_INSTAGIB) ||
+			 g_nadefest->integer || GT(GT_NADEFEST)));
 }
