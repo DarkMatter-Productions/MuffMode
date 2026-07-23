@@ -12,6 +12,8 @@
 #include <array>
 #include <climits>
 #include <cmath>
+#include <limits>
+#include <vector>
 
 // Late-wave tuning cvars are referenced by helpers defined before the main extern block below.
 extern cvar_t *g_horde_content_peak_wave;
@@ -100,11 +102,27 @@ extern cvar_t *g_horde_wave_survival_bonus;
 extern cvar_t *g_horde_reinforcement_kills;
 extern cvar_t *g_horde_reinforcements_per_wave;
 extern cvar_t *g_horde_reinforcement_protection;
+extern cvar_t *g_horde_stall_timeout;
+extern cvar_t *g_horde_monster_edge_drops;
+extern cvar_t *g_horde_preset_allow_boss_waves;
+extern cvar_t *g_horde_preset_chance;
+extern cvar_t *g_horde_preset_weight_clone_army;
+extern cvar_t *g_horde_preset_weight_funhouse_horde;
+extern cvar_t *g_horde_preset_weight_get_over_here;
+extern cvar_t *g_horde_preset_weight_giant_horde;
+extern cvar_t *g_horde_preset_weight_glass_cannon;
+extern cvar_t *g_horde_preset_weight_low_gravity;
+extern cvar_t *g_horde_preset_weight_tiny_shamblers;
+extern cvar_t *g_horde_preset_weight_tiny_terror;
+extern cvar_t *g_horde_preset_weight_pinball_night;
+extern cvar_t *g_horde_preset_weight_sawstorm;
 
 namespace muffmode::horde {
 
 constexpr int kMaxMonsterMarkerSlots = POI_HORDE_MONSTER_END - POI_HORDE_MONSTER_0 + 1;
 static_assert(kMaxMonsterMarkerSlots > 0, "Horde monster marker POI range must not be empty");
+constexpr float kMaxSpawnAnchorWeight = 1'000'000.f;
+constexpr gtime_t kEliminatedReminderInterval = 20_sec;
 
 enum class SpawnAnchorKind : int32_t {
 	Ground = 1,
@@ -118,6 +136,88 @@ constexpr uint8_t kHordeRewardRegular = 1;
 constexpr uint8_t kHordeRewardChampion = 2;
 constexpr uint8_t kHordeRewardBoss = 3;
 constexpr size_t  kBossHistorySize = 8;
+constexpr int     kHordeMaxSummonSlots = 64;
+constexpr int     kHordeMaxPowerArmor = 10'000'000;
+constexpr int     kHordeMaxMonsterHealth = 10'000'000;
+
+// Wildcard Waves deliberately omit mechanics that can recursively create entities,
+// revive without a bounded cost, or leave persistent global state behind.
+enum class WildcardPreset : uint8_t {
+	None,
+	CloneArmy,
+	FunhouseHorde,
+	GetOverHere,
+	GiantHorde,
+	GlassCannon,
+	LowGravity,
+	TinyShamblers,
+	TinyTerror,
+	PinballNight,
+	Sawstorm,
+};
+
+constexpr std::array<WildcardPreset, 10> kWildcardPresets = {
+	WildcardPreset::CloneArmy,
+	WildcardPreset::FunhouseHorde,
+	WildcardPreset::GetOverHere,
+	WildcardPreset::GiantHorde,
+	WildcardPreset::GlassCannon,
+	WildcardPreset::LowGravity,
+	WildcardPreset::TinyShamblers,
+	WildcardPreset::TinyTerror,
+	WildcardPreset::PinballNight,
+	WildcardPreset::Sawstorm,
+};
+
+const char *PresetName(WildcardPreset preset)
+{
+	switch (preset) {
+	case WildcardPreset::CloneArmy:       return "CLONE ARMY";
+	case WildcardPreset::FunhouseHorde:   return "FUNHOUSE HORDE";
+	case WildcardPreset::GetOverHere:     return "GET OVER HERE!";
+	case WildcardPreset::GiantHorde:      return "GIANT HORDE";
+	case WildcardPreset::GlassCannon:     return "GLASS CANNON";
+	case WildcardPreset::LowGravity:      return "LOW GRAVITY";
+	case WildcardPreset::TinyShamblers:   return "TINY SHAMBLERS";
+	case WildcardPreset::TinyTerror:      return "TINY TERROR";
+	case WildcardPreset::PinballNight:    return "PINBALL NIGHT";
+	case WildcardPreset::Sawstorm:        return "SAWSTORM";
+	default:                              return "";
+	}
+}
+
+cvar_t *PresetWeightCvar(WildcardPreset preset)
+{
+	switch (preset) {
+	case WildcardPreset::CloneArmy:       return g_horde_preset_weight_clone_army;
+	case WildcardPreset::FunhouseHorde:   return g_horde_preset_weight_funhouse_horde;
+	case WildcardPreset::GetOverHere:     return g_horde_preset_weight_get_over_here;
+	case WildcardPreset::GiantHorde:      return g_horde_preset_weight_giant_horde;
+	case WildcardPreset::GlassCannon:     return g_horde_preset_weight_glass_cannon;
+	case WildcardPreset::LowGravity:      return g_horde_preset_weight_low_gravity;
+	case WildcardPreset::TinyShamblers:   return g_horde_preset_weight_tiny_shamblers;
+	case WildcardPreset::TinyTerror:      return g_horde_preset_weight_tiny_terror;
+	case WildcardPreset::PinballNight:    return g_horde_preset_weight_pinball_night;
+	case WildcardPreset::Sawstorm:        return g_horde_preset_weight_sawstorm;
+	default:                              return nullptr;
+	}
+}
+
+bool PresetEligible(WildcardPreset preset, int wave)
+{
+	if (preset == WildcardPreset::TinyShamblers)
+		return wave >= 10 && FindMonsterRow("monster_shambler");
+
+	return preset != WildcardPreset::None;
+}
+
+struct PresetSpawnTuning {
+	float scale = 1.f;
+	float health = 1.f;
+	float damage = 1.f;
+	float movement = 1.f;
+	float gravity = 1.f;
+};
 
 // Shared by MapMonsterAnchorKind (converted campaign placements) and MonsterHabitat (director
 // roster spawns) so the two classifiers can't drift apart. monster_boss2/monster_carrier are
@@ -144,13 +244,149 @@ struct DirectorState {
 	int                     featuredCount = 0;
 	int                     featuredCursor = 0;
 	int                     featuredRemaining = 0;
+	WildcardPreset          preset = WildcardPreset::None;
+	const WeightedItem     *presetMonster = nullptr;
 	bool                    powerupsPaused = false;
+	gtime_t                 lastCombatProgressTime = 0_ms;
+	int                     stallRecoveryAttempts = 0;
+};
+
+struct BossMapPlacement {
+	size_t                   authoredSpots = 0;
+	std::vector<gentity_t *> fallbackSpots;
 };
 
 DirectorState director;
 int           reinforcementCursor = 0;
 std::array<const BossDefinition *, kBossHistorySize> bossHistory = {};
 size_t        bossHistoryCount = 0;
+std::array<BossMapPlacement, kHordeBossCount + 1> bossMapPlacements = {};
+std::array<bool, kHordeBossCount> bossMapEligible = {};
+bool          mapBossesAvailable = false;
+gtime_t       livingCountCacheTime = gtime_t::from_ms(-1);
+int           livingThreatCacheCount = 0;
+int           livingPressureCacheCount = 0;
+bool          livingCountCacheValid = false;
+
+const WeightedItem *PickPresetMonster(WildcardPreset preset)
+{
+	if (preset == WildcardPreset::TinyShamblers)
+		return FindMonsterRow("monster_shambler");
+	if (preset != WildcardPreset::CloneArmy)
+		return nullptr;
+
+	std::array<const WeightedItem *, kHordeMonsterCount> eligible = {};
+	size_t count = 0;
+	const int budget = MM_Horde_WavePointBudget();
+
+	for (const WeightedItem &monster : kMonsters) {
+		if (monster.min_level != -1 && level.round_number < monster.min_level)
+			continue;
+		if (monster.max_level != -1 && level.round_number > monster.max_level)
+			continue;
+		if (monster.spawn_points > budget)
+			continue;
+
+		// An all-medic wave can recursively extend itself through corpse revival.
+		// Keep Clone Army deterministic in size by excluding both medic roles.
+		if (!strcmp(monster.classname, "monster_medic") ||
+			!strcmp(monster.classname, "monster_medic_commander"))
+			continue;
+
+		eligible[count++] = &monster;
+	}
+
+	return count ? eligible[irandom(static_cast<int32_t>(count))] : nullptr;
+}
+
+WildcardPreset SelectPreset(bool boss_wave)
+{
+	if (!MM_Horde_ShouldSelectPreset(boss_wave,
+			g_horde_preset_allow_boss_waves->integer != 0,
+			g_horde_preset_chance->value, frandom()))
+		return WildcardPreset::None;
+
+	std::array<int, kWildcardPresets.size()> cumulative = {};
+	int total = 0;
+	for (size_t index = 0; index < kWildcardPresets.size(); index++) {
+		const WildcardPreset preset = kWildcardPresets[index];
+		cvar_t *weight_cvar = PresetWeightCvar(preset);
+		const int weight = PresetEligible(preset, level.round_number) && weight_cvar
+			? MM_Horde_PresetWeight(weight_cvar->integer)
+			: 0;
+		total += weight;
+		cumulative[index] = total;
+	}
+
+	if (total <= 0)
+		return WildcardPreset::None;
+
+	const int pick = irandom(total);
+	for (size_t index = 0; index < kWildcardPresets.size(); index++)
+		if (pick < cumulative[index])
+			return kWildcardPresets[index];
+
+	return WildcardPreset::None;
+}
+
+PresetSpawnTuning SpawnTuning(WildcardPreset preset)
+{
+	PresetSpawnTuning tuning;
+
+	switch (preset) {
+	case WildcardPreset::FunhouseHorde:
+		if (brandom()) {
+			tuning.scale = 0.6f;
+			tuning.health = 0.55f;
+			tuning.damage = 0.75f;
+			tuning.movement = 1.2f;
+		} else {
+			tuning.scale = 1.45f;
+			tuning.health = 1.5f;
+			tuning.damage = 1.2f;
+			tuning.movement = 0.8f;
+		}
+		break;
+	case WildcardPreset::GiantHorde:
+		tuning.scale = 1.35f;
+		tuning.health = 1.6f;
+		tuning.damage = 1.1f;
+		tuning.movement = 0.75f;
+		break;
+	case WildcardPreset::GlassCannon:
+		tuning.health = 0.4f;
+		tuning.damage = 1.8f;
+		break;
+	case WildcardPreset::LowGravity:
+		tuning.gravity = 0.55f;
+		break;
+	case WildcardPreset::TinyShamblers:
+		tuning.scale = 0.55f;
+		tuning.health = 0.4f;
+		tuning.damage = 0.65f;
+		tuning.movement = 1.25f;
+		break;
+	case WildcardPreset::TinyTerror:
+		tuning.scale = 0.6f;
+		tuning.health = 0.35f;
+		tuning.damage = 0.7f;
+		tuning.movement = 1.5f;
+		break;
+	case WildcardPreset::PinballNight:
+		tuning.gravity = 0.65f;
+		break;
+	default:
+		break;
+	}
+
+	tuning.scale = MM_Horde_PresetEntityScale(tuning.scale);
+	return tuning;
+}
+
+float FiniteSeconds(float value, float fallback, float maximum)
+{
+	return MM_Horde_ClampFiniteFloat(value, fallback, 0.f, maximum);
+}
 
 bool Active()
 {
@@ -158,6 +394,16 @@ bool Active()
 }
 
 const BossDefinition *SelectBossForWave(int wave);
+void BuildBossPlacementCatalog();
+bool BossHasMapPlacement(const BossDefinition *boss);
+const std::vector<gentity_t *> &BossFallbackSpots(const BossDefinition *boss);
+void RecoverStalledCombat();
+
+void RecordCombatProgress()
+{
+	director.lastCombatProgressTime = level.time;
+	director.stallRecoveryAttempts = 0;
+}
 
 bool BossAlive()
 {
@@ -249,6 +495,21 @@ void AttachBossHealthBar(gentity_t *boss, int slot)
 	director.bossHealthBars[slot] = bar;
 	level.health_bar_entities[global_slot] = bar;
 	gi.configstring(CONFIG_HEALTH_BAR_NAME, bar->message);
+}
+
+void RetireBossHealthBar(int slot)
+{
+	if (slot < 0 || slot >= static_cast<int>(director.bossHealthBars.size()))
+		return;
+
+	gentity_t *bar = director.bossHealthBars[slot];
+	if (!bar || !bar->inuse)
+		return;
+
+	// The HUD keeps a defeated bar visible briefly. Stop it from following the raw
+	// boss pointer immediately so a freed/reused entity slot cannot become its target.
+	bar->enemy = nullptr;
+	bar->timestamp = level.time + 2_sec;
 }
 
 void RecordBossHistory(const BossDefinition *boss)
@@ -413,37 +674,65 @@ bool ClientWantsMonsterMarkers(gclient_t *cl)
 	return cl->eliminated && cl->sess.team != TEAM_SPECTATOR;
 }
 
-bool IsLivingThreat(const gentity_t *ent)
+bool IsLivingHostileMonster(const gentity_t *ent)
 {
 	if (!ent->inuse || !(ent->svflags & SVF_MONSTER))
 		return false;
 	if (ent->health <= 0 || ent->deadflag || (ent->svflags & SVF_DEADMONSTER))
 		return false;
-	if (ent->monsterinfo.aiflags & (AI_GOOD_GUY | AI_DO_NOT_COUNT))
+	if (ent->monsterinfo.aiflags & AI_GOOD_GUY)
 		return false;
 
 	return true;
 }
 
-int LivingThreatCount()
+bool IsLivingThreat(const gentity_t *ent)
+{
+	return IsLivingHostileMonster(ent) && !(ent->monsterinfo.aiflags & AI_DO_NOT_COUNT);
+}
+
+void InvalidateLivingCounts()
+{
+	livingCountCacheValid = false;
+}
+
+void RefreshLivingCounts()
 {
 	// Memoized per server frame: this is a full entity-list scan, and it is legitimately
 	// queried from several independent places within the same frame (spawning, monster
-	// markers, wave-clear check, and once per connected player for the HUD stat).
-	static gtime_t cached_time = gtime_t::from_ms(-1);
-	static int cached_count = 0;
+	// markers, wave-clear check, and once per connected player for the HUD stat). Spawn,
+	// death, and cleanup paths explicitly invalidate it so same-frame mutations are visible.
+	if (livingCountCacheValid && livingCountCacheTime == level.time)
+		return;
 
-	if (cached_time == level.time)
-		return cached_count;
+	int threats = 0;
+	int pressure = 0;
+	for (size_t i = 1; i < globals.num_entities; i++) {
+		const gentity_t *ent = &g_entities[i];
+		if (!IsLivingHostileMonster(ent))
+			continue;
 
-	int count = 0;
-	for (size_t i = 1; i < globals.num_entities; i++)
-		if (IsLivingThreat(&g_entities[i]))
-			count++;
+		pressure++;
+		if (!(ent->monsterinfo.aiflags & AI_DO_NOT_COUNT))
+			threats++;
+	}
 
-	cached_time = level.time;
-	cached_count = count;
-	return count;
+	livingCountCacheTime = level.time;
+	livingThreatCacheCount = threats;
+	livingPressureCacheCount = pressure;
+	livingCountCacheValid = true;
+}
+
+int LivingThreatCount()
+{
+	RefreshLivingCounts();
+	return livingThreatCacheCount;
+}
+
+int LivingPressureCount()
+{
+	RefreshLivingCounts();
+	return livingPressureCacheCount;
 }
 
 void SendMonsterPoi(gentity_t *player, int slot, const vec3_t &pos)
@@ -616,6 +905,7 @@ void GrantWaveLives()
 
 		ec->client->pers.lives = lives;
 		ec->client->eliminated = false;
+		ec->client->horde_elim_msg_next = 0_sec;
 
 		// Eliminated fighters spectate in freecam with deadflag cleared and health restored.
 		if (was_eliminated || ec->deadflag || ec->health <= 0)
@@ -661,13 +951,14 @@ void ProcessReinforcement()
 
 	fighter->client->pers.lives = 1;
 	fighter->client->eliminated = false;
+	fighter->client->horde_elim_msg_next = 0_sec;
 	fighter->client->respawn_time = level.time;
 
-	const float protection_sec = max(0.0f, g_horde_reinforcement_protection->value);
+	const float protection_sec = FiniteSeconds(g_horde_reinforcement_protection->value, 2.f, 60.f);
 	fighter->client->pers.horde_reinforcement_protection = gtime_t::from_sec(protection_sec);
 	ClientRespawn(fighter);
 
-	director.reinforcementsUsed++;
+	director.reinforcementsUsed = MM_Horde_SaturatingIncrement(director.reinforcementsUsed);
 	director.reinforcementKills = 0;
 	gi.LocBroadcast_Print(PRINT_CENTER, "{} has rallied back into the fight!", fighter->client->resp.netname);
 	gi.positioned_sound(fighter->s.origin, fighter, CHAN_AUTO | CHAN_RELIABLE,
@@ -679,9 +970,8 @@ float MultiplierFromFighters(int fighters)
 	if (!g_horde_player_scale->integer)
 		return 1.f;
 
-	float factor = g_horde_player_scale_factor->value;
-	if (factor < 0.f)
-		factor = 0.f;
+	const float factor = MM_Horde_ClampFiniteFloat(g_horde_player_scale_factor->value,
+		0.4f, 0.f, 10.f);
 
 	return 1.f + (fighters - 1) * factor;
 }
@@ -714,12 +1004,12 @@ float MapScaleMultiplier()
 	}
 
 	const float diagonal = (bmax - bmin).length();
-	const float ref      = max(1.f, g_horde_map_scale_ref->value);
-	const float factor   = clamp(g_horde_map_scale_factor->value, 0.f, 10.f);
+	const float ref      = MM_Horde_ClampFiniteFloat(g_horde_map_scale_ref->value, 4000.f, 1.f, 1'000'000.f);
+	const float factor   = MM_Horde_ClampFiniteFloat(g_horde_map_scale_factor->value, 0.5f, 0.f, 10.f);
 	const float ratio    = diagonal / ref;
 	const float mult     = 1.f + (ratio - 1.f) * factor;
 
-	level.horde_map_scale_mult = max(0.1f, mult);
+	level.horde_map_scale_mult = MM_Horde_ClampFiniteFloat(mult, 1.f, 0.1f, 100.f);
 	return level.horde_map_scale_mult;
 }
 
@@ -844,11 +1134,7 @@ void SpawnAnchor(gentity_t *ent, SpawnAnchorKind kind)
 	const bool converted = ent->mass == kConvertedAnchorMarker;
 	ent->mass = 0;
 	if (converted && kind == SpawnAnchorKind::Boss) {
-		ent->sounds = static_cast<uint32_t>(ent->spawnflags) & ~7u;
-		// Shambler flag 1 doubles as the class's precise-lightning behavior.
-		if (ClassnameMatches(ent->map, "monster_shambler") &&
-			ent->spawnflags.has(SPAWNFLAG_MONSTER_AMBUSH))
-			ent->sounds |= 1;
+		ent->sounds = static_cast<uint32_t>(ent->spawnflags);
 		ent->noise_index2 = 1;
 	}
 	// Difficulty/gametype editor flags have already been consumed by G_InhibitEntity.
@@ -859,9 +1145,9 @@ void SpawnAnchor(gentity_t *ent, SpawnAnchorKind kind)
 	ent->health = max(0, ent->health);
 	if (ent->health > 0 && ent->count > ent->health)
 		std::swap(ent->count, ent->health);
-	if (ent->random <= 0.f)
-		ent->random = 1.f;
-	if (ent->wait < 0.f)
+	ent->random = MM_Horde_ClampFiniteFloat(ent->random, 1.f, 0.01f,
+		kMaxSpawnAnchorWeight);
+	if (!std::isfinite(ent->wait) || ent->wait < 0.f)
 		ent->wait = 0.f;
 
 	if (ent->map && strncmp(ent->map, "monster_", 8)) {
@@ -885,6 +1171,16 @@ void SpawnAnchor(gentity_t *ent, SpawnAnchorKind kind)
 		}
 		if (!ent->map)
 			ent->map = boss->classname;
+	}
+
+	if (kind == SpawnAnchorKind::Boss && ent->noise_index2 > 0) {
+		const uint32_t raw_flags = ent->sounds &
+			~static_cast<uint32_t>(SPAWNFLAG_EDITOR_MASK);
+		ent->sounds = raw_flags & ~7u;
+		// Common monster bits 1/2/4 can leave a director boss dormant. Shambler
+		// bit 1 is the sole class-specific overlap and retains its precise attack.
+		if (ClassnameMatches(ent->map, "monster_shambler") && (raw_flags & 1u))
+			ent->sounds |= 1u;
 	}
 
 	// Converted campaign placements express affinity; explicit horde_monster
@@ -944,8 +1240,16 @@ bool MM_Horde_ConvertMapMonsterSpawn(gentity_t *ent)
 	ent->mass = horde::kConvertedAnchorMarker;
 	// Horde always runs with deathmatch 1, so G_InhibitEntity (called right after this by the
 	// SpawnEntities loop) would otherwise free every converted anchor whose source monster was
-	// authored NOT_DEATHMATCH -- true of virtually all campaign monster_* placements.
-	ent->spawnflags &= ~SPAWNFLAG_NOT_DEATHMATCH;
+	// authored NOT_DEATHMATCH -- true of virtually all campaign monster_* placements. Preserve
+	// the source monster's skill inhibition by translating a mismatch into that DM filter.
+	const bool skill_inhibited = MM_Horde_SourceMonsterInhibitedBySkill(skill->integer,
+		ent->spawnflags.has(SPAWNFLAG_NOT_EASY),
+		ent->spawnflags.has(SPAWNFLAG_NOT_MEDIUM),
+		ent->spawnflags.has(SPAWNFLAG_NOT_HARD));
+	if (skill_inhibited)
+		ent->spawnflags |= SPAWNFLAG_NOT_DEATHMATCH;
+	else
+		ent->spawnflags &= ~SPAWNFLAG_NOT_DEATHMATCH;
 	return true;
 }
 
@@ -1018,23 +1322,10 @@ int MM_Horde_WavePointBudget()
 	const int   max_pts  = g_horde_points_max->integer;
 	const int   peak     = g_horde_content_peak_wave->integer;
 
-	// Linear up to the tuned content peak (wave 12). Beyond it - reached via endless (roundlimit 0)
-	// or a high finite roundlimit - growth tapers by the effective late factor (escalation on:
-	// g_horde_late_budget_factor; off: g_horde_late_wave_factor) so late waves stay playable
-	// instead of piling up 190+ points of commanders. Continuous at the peak.
-	int budget;
-	if (level.round_number <= peak)
-		budget = base + level.round_number * per_wave;
-	else
-		budget = base + peak * per_wave +
-			static_cast<int>((level.round_number - peak) * per_wave * EffectiveLateWaveFactor());
-
-	if (min_pts > 0)
-		budget = max(budget, min_pts);
-	if (max_pts > 0)
-		budget = min(budget, max_pts);
-
-	return max(1, static_cast<int>(budget * pmult * msmult));
+	// Linear up to the tuned content peak, then tapered. The host-tested helper keeps
+	// extreme cvar/round values from overflowing or invoking undefined float-to-int casts.
+	return MM_Horde_ComputeWaveBudget(level.round_number, base, per_wave, min_pts, max_pts,
+		peak, EffectiveLateWaveFactor(), pmult, msmult);
 }
 
 namespace muffmode::horde {
@@ -1044,8 +1335,10 @@ gtime_t SpawnInterval(bool warmup, float adaptive_mult)
 	if (warmup)
 		return 5_sec;
 
-	const float min_sec = max(0.05f, g_horde_spawn_interval_min->value);
-	const float max_sec = max(min_sec, g_horde_spawn_interval_max->value);
+	const float min_sec = MM_Horde_ClampFiniteFloat(g_horde_spawn_interval_min->value,
+		0.3f, 0.05f, 60.f);
+	const float max_sec = MM_Horde_ClampFiniteFloat(g_horde_spawn_interval_max->value,
+		0.5f, min_sec, 60.f);
 	gtime_t interval = random_time(gtime_t::from_sec(min_sec), gtime_t::from_sec(max_sec));
 
 	if (!warmup && g_horde_enhanced_ai->integer && adaptive_mult != 1.f) {
@@ -1066,12 +1359,12 @@ gtime_t SpawnDelayAfterSuccess(bool warmup, float adaptive_mult, bool boss)
 	}
 
 	gtime_t delay = SpawnInterval(false, adaptive_mult);
-	director.spawnsInBurst++;
+	director.spawnsInBurst = MM_Horde_SaturatingIncrement(director.spawnsInBurst);
 
 	const int burst_size = max(0, g_horde_spawn_burst_count->integer);
 	if (MM_Horde_ShouldRestAfterSpawn(director.spawnsInBurst, burst_size)) {
 		director.spawnsInBurst = 0;
-		delay += gtime_t::from_sec(max(0.0f, g_horde_spawn_burst_rest->value));
+		delay += gtime_t::from_sec(FiniteSeconds(g_horde_spawn_burst_rest->value, 2.f, 300.f));
 	}
 
 	return delay;
@@ -1087,12 +1380,12 @@ bool MM_Horde_ShouldSkipEntitiesReset()
 int MM_Horde_CountdownWaveNumber()
 {
 	if (notGT(GT_HORDE))
-		return level.round_number + 1;
+		return MM_Horde_SaturatingIncrement(level.round_number);
 
 	if (!level.round_number && g_horde_starting_wave->integer > 0)
 		return g_horde_starting_wave->integer;
 
-	return level.round_number + 1;
+	return MM_Horde_SaturatingIncrement(level.round_number);
 }
 
 void MM_Horde_AdvanceRoundNumber()
@@ -1103,7 +1396,7 @@ void MM_Horde_AdvanceRoundNumber()
 	if (!level.round_number && g_horde_starting_wave->integer > 0)
 		level.round_number = g_horde_starting_wave->integer;
 	else
-		level.round_number++;
+		level.round_number = MM_Horde_SaturatingIncrement(level.round_number);
 }
 
 void MM_Horde_OnRoundCountdown()
@@ -1128,8 +1421,14 @@ void MM_Horde_OnRoundStarted()
 	MM_Horde_BeginWave();
 
 	gi.LocBroadcast_Print(PRINT_CHAT, "Wave {} has begun!\n", level.round_number);
-	if (horde::director.boss)
+	if (horde::director.boss && horde::director.preset != horde::WildcardPreset::None)
+		gi.LocBroadcast_Print(PRINT_CENTER, "BOSS WAVE\n{}\nWILDCARD: {}",
+			horde::director.boss->display_name, horde::PresetName(horde::director.preset));
+	else if (horde::director.boss)
 		gi.LocBroadcast_Print(PRINT_CENTER, "BOSS WAVE\n{}", horde::director.boss->display_name);
+	else if (horde::director.preset != horde::WildcardPreset::None)
+		gi.LocBroadcast_Print(PRINT_CENTER, "WILDCARD WAVE\n{}",
+			horde::PresetName(horde::director.preset));
 	else if (const horde::ThemeDefinition *theme = horde::FindTheme(static_cast<horde::Theme>(level.horde_wave_theme)))
 		gi.LocBroadcast_Print(PRINT_CENTER, "{}", theme->announce);
 	else
@@ -1147,7 +1446,10 @@ void MM_Horde_NotifyEliminatedSpectator(gentity_t *ent)
 		return;
 	if (ent->client->sess.team == TEAM_SPECTATOR)
 		return;
+	if (level.time < ent->client->horde_elim_msg_next)
+		return;
 
+	ent->client->horde_elim_msg_next = level.time + horde::kEliminatedReminderInterval;
 	if (horde::ReinforcementAvailable()) {
 		const int needed = max(1, g_horde_reinforcement_kills->integer) -
 			horde::director.reinforcementKills;
@@ -1170,7 +1472,8 @@ void MM_Horde_OnPlayerDeath(gentity_t *ent)
 
 	const bool had_eliminated_fighter = horde::HasEliminatedFighter();
 
-	ent->client->pers.horde_wave_deaths++;
+	ent->client->pers.horde_wave_deaths =
+		MM_Horde_SaturatingIncrement(ent->client->pers.horde_wave_deaths);
 	ent->client->pers.horde_kill_streak = 0;
 
 	if (ent->client->pers.lives > 0)
@@ -1192,6 +1495,10 @@ void MM_Horde_OnMonsterKilled(gentity_t *ent)
 	if (!horde::Active() || level.round_state != roundst_t::ROUND_IN_PROGRESS || !ent)
 		return;
 
+	horde::InvalidateLivingCounts();
+	if (!(ent->monsterinfo.aiflags & AI_DO_NOT_COUNT))
+		horde::RecordCombatProgress();
+
 	const bool counted_reward = ent->monsterinfo.horde_reward_class != 0 &&
 		!(ent->monsterinfo.aiflags & AI_DO_NOT_COUNT);
 	if (!counted_reward)
@@ -1204,8 +1511,10 @@ void MM_Horde_OnMonsterKilled(gentity_t *ent)
 
 	if (counted_reward && killer_client) {
 		const int old_tier = horde::PerformanceTier(killer_client);
-		killer_client->pers.horde_wave_kills++;
-		killer_client->pers.horde_kill_streak++;
+		killer_client->pers.horde_wave_kills =
+			MM_Horde_SaturatingIncrement(killer_client->pers.horde_wave_kills);
+		killer_client->pers.horde_kill_streak =
+			MM_Horde_SaturatingIncrement(killer_client->pers.horde_kill_streak);
 		performance_tier = horde::PerformanceTier(killer_client);
 
 		if (performance_tier > old_tier)
@@ -1229,8 +1538,8 @@ void MM_Horde_OnMonsterKilled(gentity_t *ent)
 					? GetItemByIndex(tech_ids[irandom(static_cast<int32_t>(q_countof(tech_ids)))])
 					: horde::PickChampionDrop();
 
-				const float upgrade_chance = clamp(
-					performance_tier * max(0.f, g_horde_streak_upgrade_chance->value), 0.f, 1.f);
+				const float upgrade_chance = MM_Horde_DropChance(0.f,
+					g_horde_streak_upgrade_chance->value, performance_tier);
 				if (drop && frandom() < upgrade_chance)
 					drop = horde::UpgradeDrop(drop);
 			}
@@ -1247,8 +1556,8 @@ void MM_Horde_OnMonsterKilled(gentity_t *ent)
 				}
 				drop = horde::PickDropItem(drops);
 
-				const float upgrade_chance = clamp(
-					performance_tier * max(0.f, g_horde_streak_upgrade_chance->value), 0.f, 1.f);
+				const float upgrade_chance = MM_Horde_DropChance(0.f,
+					g_horde_streak_upgrade_chance->value, performance_tier);
 				if (drop && frandom() < upgrade_chance)
 					drop = horde::UpgradeDrop(drop);
 			}
@@ -1262,6 +1571,7 @@ void MM_Horde_OnMonsterKilled(gentity_t *ent)
 	bool boss_defeated = false;
 	if (boss_unit_killed) {
 		horde::director.bossEntities[boss_slot] = nullptr;
+		horde::RetireBossHealthBar(boss_slot);
 		boss_defeated = horde::BossEncounterDefeated();
 		horde::ClearMonsterPoisForAll();
 
@@ -1284,11 +1594,22 @@ void MM_Horde_OnMonsterKilled(gentity_t *ent)
 		return;
 	}
 
-	horde::director.reinforcementKills++;
+	horde::director.reinforcementKills =
+		MM_Horde_SaturatingIncrement(horde::director.reinforcementKills);
 	if (MM_Horde_ReinforcementReady(horde::director.reinforcementKills,
 			g_horde_reinforcement_kills->integer, horde::director.reinforcementsUsed,
 			g_horde_reinforcements_per_wave->integer))
 		horde::director.reinforcementPending = true;
+}
+
+void MM_Horde_OnMonsterDamaged(gentity_t *ent, int damage)
+{
+	if (!horde::Active() || level.round_state != roundst_t::ROUND_IN_PROGRESS ||
+		!ent || damage <= 0 || !(ent->svflags & SVF_MONSTER) ||
+		(ent->monsterinfo.aiflags & (AI_GOOD_GUY | AI_DO_NOT_COUNT)))
+		return;
+
+	horde::RecordCombatProgress();
 }
 
 bool MM_Horde_CheckAllFightersLost()
@@ -1351,6 +1672,8 @@ void MM_Horde_CleanWaveTransition()
 	if (g_debug_monster_kills->integer)
 		level.monsters_registered.fill(nullptr);
 
+	horde::InvalidateLivingCounts();
+
 	horde::ClearMonsterPoisForAll();
 	level.horde_mark_time = 0_ms;
 }
@@ -1383,7 +1706,14 @@ void MM_Horde_PauseClientPowerups(gentity_t *ent)
 	const gtime_t frame = gtime_t::from_ms(frame_ms);
 
 	auto pause_deadline = [frame](gtime_t &deadline) {
-		if (deadline > level.time)
+		if (deadline <= level.time)
+			return;
+
+		const int64_t deadline_ms = deadline.milliseconds();
+		const int64_t frame_ms = frame.milliseconds();
+		if (deadline_ms > std::numeric_limits<int64_t>::max() - frame_ms)
+			deadline = gtime_t::from_ms(std::numeric_limits<int64_t>::max());
+		else
 			deadline += frame;
 	};
 
@@ -1413,6 +1743,7 @@ bool MM_Horde_UpdateRoundInProgress()
 
 	MM_Horde_RunSpawning();
 	horde::UpdateMonsterMarkers();
+	horde::RecoverStalledCombat();
 
 	if (MM_Horde_WaveCleared(level.horde_all_spawned, horde::LivingThreatCount())) {
 		gi.LocBroadcast_Print(PRINT_CENTER, "Monsters eliminated!\n");
@@ -1460,6 +1791,8 @@ void MM_Horde_Init()
 	horde::reinforcementCursor = 0;
 	horde::bossHistory = {};
 	horde::bossHistoryCount = 0;
+	horde::InvalidateLivingCounts();
+	horde::ResetRuntimeState();
 
 	// The monster table's content curve peaks at waves 11-12; the global default
 	// roundlimit of 8 would end the match before heavies and commanders appear.
@@ -1484,6 +1817,12 @@ void MM_Horde_Init()
 	gi.modelindex("models/items/spawngro3/tris.md2");
 }
 
+void MM_Horde_FinalizeLevelSpawns()
+{
+	if (GT(GT_HORDE))
+		horde::BuildBossPlacementCatalog();
+}
+
 void MM_Horde_BeginWave()
 {
 	if (notGT(GT_HORDE))
@@ -1497,8 +1836,11 @@ void MM_Horde_BeginWave()
 		Tech_HordeSpawnWave();
 
 	horde::director = {};
+	horde::RecordCombatProgress();
 	horde::ResetWavePerformance();
-	if (g_horde_boss_waves->integer &&
+	const bool forced_boss_fits = g_horde_boss_force->string && *g_horde_boss_force->string &&
+		horde::BossHasMapPlacement(horde::FindBossDefinition(g_horde_boss_force->string));
+	if (g_horde_boss_waves->integer && (horde::mapBossesAvailable || forced_boss_fits) &&
 		MM_Horde_IsBossWave(level.round_number, g_horde_boss_min_wave->integer,
 			g_horde_boss_interval->integer)) {
 		horde::director.boss = horde::SelectBossForWave(level.round_number);
@@ -1510,15 +1852,24 @@ void MM_Horde_BeginWave()
 		}
 	}
 
+	horde::director.preset = horde::SelectPreset(horde::director.bossPending);
+	horde::director.presetMonster = horde::PickPresetMonster(horde::director.preset);
+	if ((horde::director.preset == horde::WildcardPreset::CloneArmy ||
+			horde::director.preset == horde::WildcardPreset::TinyShamblers) &&
+		!horde::director.presetMonster)
+		horde::director.preset = horde::WildcardPreset::None;
+
 	// Pick this wave's theme. Rare (g_horde_theme_chance), never the same as the previous
 	// themed wave, and only themes whose monsters exist by this wave are eligible.
 	{
 		const horde::Theme prev = static_cast<horde::Theme>(level.horde_wave_theme);
 		horde::Theme chosen = horde::Theme::None;
 
-		if (!horde::director.bossPending && g_horde_themed_waves->integer &&
+		if (!horde::director.bossPending &&
+			horde::director.preset == horde::WildcardPreset::None &&
+			g_horde_themed_waves->integer &&
 			level.round_number >= g_horde_theme_min_wave->integer &&
-			frandom() < g_horde_theme_chance->value) {
+			frandom() < MM_Horde_Probability(g_horde_theme_chance->value, 0.2f)) {
 			std::array<const horde::ThemeDefinition *, horde::kHordeThemeCount> eligible = {};
 			size_t num_eligible = 0;
 
@@ -1542,7 +1893,8 @@ void MM_Horde_BeginWave()
 	// Build this wave's monster roster: a random subset of the eligible types so runs vary.
 	// Non-themed waves only (a themed wave is already a category subset). 0 = unrestricted.
 	level.horde_wave_roster = 0;
-	if (g_horde_wave_variety->integer &&
+	if (horde::director.preset == horde::WildcardPreset::None &&
+		g_horde_wave_variety->integer &&
 		static_cast<horde::Theme>(level.horde_wave_theme) == horde::Theme::None) {
 		std::array<int, horde::kHordeMonsterCount> eligible = {};
 		std::array<int, horde::kHordeMonsterCount> cheap = {};
@@ -1593,7 +1945,8 @@ void MM_Horde_BeginWave()
 
 	// Make each newly unlocked role visible instead of leaving progression entirely
 	// to weighted chance. The featured picks are folded into random rosters too.
-	horde::BuildFeaturedRoster();
+	if (horde::director.preset == horde::WildcardPreset::None)
+		horde::BuildFeaturedRoster();
 
 	// Decide whether this wave hosts a champion.
 	// Up to the content peak: spend the per-run budget (mm_match seeds 0-2), spread across the waves
@@ -1601,13 +1954,21 @@ void MM_Horde_BeginWave()
 	// derived from the same knobs (max_per_run * champion_chance champions per peak-length span) so
 	// champions keep appearing at the tuned cadence for any wave count.
 	level.horde_champion_pending = false;
-	if (!horde::director.bossPending && g_horde_champions->integer &&
+	if (!horde::director.bossPending &&
+		horde::director.preset == horde::WildcardPreset::None &&
+		g_horde_champions->integer &&
 		level.round_number >= g_horde_champion_min_wave->integer) {
 		if (horde::IsLateWave()) {
-			const int   span = max(1, g_horde_content_peak_wave->integer - g_horde_champion_min_wave->integer + 1);
-			const float rate = g_horde_champion_max_per_run->value * g_horde_champion_chance->value / span;
+			const int64_t span64 = static_cast<int64_t>(g_horde_content_peak_wave->integer) -
+				static_cast<int64_t>(g_horde_champion_min_wave->integer) + 1;
+			const int span = static_cast<int>(std::clamp<int64_t>(span64, 1,
+				std::numeric_limits<int>::max()));
+			const float champions_per_run = MM_Horde_ClampFiniteFloat(
+				g_horde_champion_max_per_run->value, 2.f, 0.f, 127.f);
+			const float chance = MM_Horde_Probability(g_horde_champion_chance->value, 0.6f);
+			const float rate = champions_per_run * chance / span;
 
-			if (frandom() < min(rate, 1.0f))
+			if (frandom() < MM_Horde_Probability(rate))
 				level.horde_champion_pending = true;
 		} else if (level.horde_champions_remaining > 0) {
 			// Spread the run's budget across the waves left until the peak (== roundlimit for the
@@ -1615,7 +1976,10 @@ void MM_Horde_BeginWave()
 			const int last_budget_wave = roundlimit->integer > 0
 				? min(roundlimit->integer, g_horde_content_peak_wave->integer)
 				: g_horde_content_peak_wave->integer;
-			const int waves_left = max(1, last_budget_wave - level.round_number + 1);
+			const int64_t waves_left64 = static_cast<int64_t>(last_budget_wave) -
+				static_cast<int64_t>(level.round_number) + 1;
+			const int waves_left = static_cast<int>(std::clamp<int64_t>(waves_left64, 1,
+				std::numeric_limits<int>::max()));
 
 			if (frandom() < static_cast<float>(level.horde_champions_remaining) / waves_left) {
 				level.horde_champion_pending = true;
@@ -1625,7 +1989,9 @@ void MM_Horde_BeginWave()
 	}
 
 	// DEBUG/TEST: force a champion every wave (overrides the roll above), regardless of min_wave.
-	if (!horde::director.bossPending && g_horde_champion_force->integer)
+	if (!horde::director.bossPending &&
+		horde::director.preset == horde::WildcardPreset::None &&
+		g_horde_champion_force->integer)
 		level.horde_champion_pending = true;
 
 	const int fighters = MM_Horde_CountFighters();
@@ -1633,11 +1999,14 @@ void MM_Horde_BeginWave()
 	level.horde_spawn_points_remaining = MM_Horde_WavePointBudget();
 
 	if (horde::director.bossPending)
-		level.horde_spawn_points_remaining = max(1, static_cast<int>(
-			level.horde_spawn_points_remaining * max(0.1f, g_horde_boss_budget_mult->value)));
+		level.horde_spawn_points_remaining = MM_Horde_ScaleInt(
+			level.horde_spawn_points_remaining,
+			MM_Horde_ClampFiniteFloat(g_horde_boss_budget_mult->value, 0.8f, 0.1f, 10.f),
+			level.horde_spawn_points_remaining, 1);
 	else if (const horde::ThemeDefinition *theme = horde::FindTheme(static_cast<horde::Theme>(level.horde_wave_theme)))
-		level.horde_spawn_points_remaining =
-			max(1, static_cast<int>(level.horde_spawn_points_remaining * theme->budget_mult));
+		level.horde_spawn_points_remaining = MM_Horde_ScaleInt(
+			level.horde_spawn_points_remaining, theme->budget_mult,
+			level.horde_spawn_points_remaining, 1);
 
 	horde::Adaptive_BeginWave();
 
@@ -1655,12 +2024,42 @@ void MM_Horde_BeginWave()
 // Also rejects spots whose ground is liquid. Returns false if the spot is unusable.
 namespace muffmode::horde {
 
+constexpr float kMaxValidatedCoordinate = 1'000'000.f;
+constexpr float kMaxValidatedHullOffset = 8192.f;
+
+bool OriginFinite(const vec3_t &origin)
+{
+	for (size_t axis = 0; axis < 3; axis++)
+		if (!std::isfinite(origin[axis]) || std::abs(origin[axis]) > kMaxValidatedCoordinate)
+			return false;
+
+	return true;
+}
+
+bool HullBoundsValid(const vec3_t &mins, const vec3_t &maxs)
+{
+	for (size_t axis = 0; axis < 3; axis++) {
+		if (!std::isfinite(mins[axis]) || !std::isfinite(maxs[axis]) ||
+			std::abs(mins[axis]) > kMaxValidatedHullOffset ||
+			std::abs(maxs[axis]) > kMaxValidatedHullOffset ||
+			mins[axis] > maxs[axis])
+			return false;
+	}
+
+	return true;
+}
+
 bool ValidateSpawnOrigin(vec3_t &origin, const vec3_t &check_mins, const vec3_t &check_maxs)
 {
+	if (!OriginFinite(origin) || !HullBoundsValid(check_mins, check_maxs))
+		return false;
+
 	// Lift only enough to put the hull bottom above the spawn plane. Tall bosses
 	// commonly have mins.z == 0, so a fixed 16-unit lift needlessly rejects them
 	// beneath ceilings they would fit after M_droptofloor.
 	origin[2] += max(1.f, -check_mins[2]);
+	if (!OriginFinite(origin))
+		return false;
 
 	if (!CheckSpawnPoint(origin, check_mins, check_maxs)) {
 		if (G_FixStuckObject_Generic(origin, check_mins, check_maxs,
@@ -1691,7 +2090,7 @@ int CountLivingAquatics()
 
 	for (size_t i = 1; i < globals.num_entities; i++) {
 		gentity_t *ent = &g_entities[i];
-		if (!IsLivingThreat(ent))
+		if (!IsLivingHostileMonster(ent))
 			continue;
 		if ((ent->flags & FL_SWIM) || ClassnameMatches(ent->classname, "monster_flipper"))
 			count++;
@@ -1700,8 +2099,17 @@ int CountLivingAquatics()
 	return count;
 }
 
+bool MonsterRequiresWater(const gentity_t *monster)
+{
+	return monster && ((monster->flags & FL_SWIM) ||
+		ClassnameMatches(monster->classname, "monster_flipper"));
+}
+
 bool WaterSpawnFarEnoughFromFighters(const vec3_t &origin)
 {
+	if (!OriginFinite(origin))
+		return false;
+
 	for (auto ec : active_clients())
 		if (ClientIsPlaying(ec->client) && ec->health > 0 && !ec->client->eliminated &&
 			(origin - ec->s.origin).length() < kWaterSpawnMinRadius)
@@ -1712,7 +2120,12 @@ bool WaterSpawnFarEnoughFromFighters(const vec3_t &origin)
 
 bool FullySubmerged(const vec3_t &origin, const vec3_t &mins, const vec3_t &maxs)
 {
+	if (!OriginFinite(origin) || !HullBoundsValid(mins, maxs))
+		return false;
+
 	auto is_safe_water = [](const vec3_t &sample) {
+		if (!OriginFinite(sample))
+			return false;
 		const contents_t contents = gi.pointcontents(sample);
 		return (contents & CONTENTS_WATER) && !(contents & (CONTENTS_LAVA | CONTENTS_SLIME));
 	};
@@ -1740,6 +2153,9 @@ bool FullySubmerged(const vec3_t &origin, const vec3_t &mins, const vec3_t &maxs
 bool ValidateAuthoredOrigin(vec3_t &origin, const vec3_t &mins, const vec3_t &maxs,
 	SpawnAnchorKind kind)
 {
+	if (!OriginFinite(origin) || !HullBoundsValid(mins, maxs))
+		return false;
+
 	if (!CheckSpawnPoint(origin, mins, maxs)) {
 		if (G_FixStuckObject_Generic(origin, mins, maxs,
 				[](const vec3_t &start, const vec3_t &trace_mins, const vec3_t &trace_maxs,
@@ -1762,6 +2178,33 @@ bool ValidateAuthoredOrigin(vec3_t &origin, const vec3_t &mins, const vec3_t &ma
 	return !(gi.pointcontents(floor.endpos) & (CONTENTS_LAVA | CONTENTS_SLIME));
 }
 
+bool OriginSharesFighterPHS(const vec3_t &origin)
+{
+	if (!OriginFinite(origin))
+		return false;
+
+	for (auto ec : active_clients())
+		if (ClientIsPlaying(ec->client) && ec->health > 0 && !ec->client->eliminated &&
+			gi.inPHS(origin, ec->s.origin, true))
+			return true;
+
+	return false;
+}
+
+bool ThreatInsideWorld(const gentity_t *monster)
+{
+	if (!monster || !OriginFinite(monster->s.origin) ||
+		!HullBoundsValid(monster->mins, monster->maxs) ||
+		(gi.pointcontents(monster->s.origin) & CONTENTS_SOLID))
+		return false;
+
+	// World containment must ignore overlapping actors; a zero-length
+	// MASK_MONSTERSOLID trace would misclassify a valid crowded fight as BSP escape.
+	const trace_t hull = gi.trace(monster->s.origin, monster->mins, monster->maxs,
+		monster->s.origin, monster, MASK_SOLID);
+	return !hull.startsolid && !hull.allsolid;
+}
+
 bool IsAnchorEntity(const gentity_t *ent, SpawnAnchorKind kind)
 {
 	if (!ent || !ent->inuse || ent->style != static_cast<int32_t>(kind) || !ent->classname)
@@ -1770,9 +2213,126 @@ bool IsAnchorEntity(const gentity_t *ent, SpawnAnchorKind kind)
 	return !Q_strcasecmp(ent->classname, AnchorClassname(kind));
 }
 
+size_t BossPlacementIndex(const BossDefinition *boss)
+{
+	if (!boss)
+		return bossMapPlacements.size();
+	for (size_t i = 0; i < kBosses.size(); i++)
+		if (boss == &kBosses[i])
+			return i;
+	if (boss == &kFallbackBoss)
+		return kHordeBossCount;
+	return bossMapPlacements.size();
+}
+
+bool BossAnchorSupportsProfile(gentity_t *anchor, const BossDefinition &boss)
+{
+	if (!IsAnchorEntity(anchor, SpawnAnchorKind::Boss))
+		return false;
+	if (anchor->message && *anchor->message && Q_strcasecmp(anchor->message, boss.id))
+		return false;
+
+	const bool exact_affinity = anchor->map && boss.classname &&
+		!Q_strcasecmp(anchor->map, boss.classname);
+	if (anchor->dmg && !exact_affinity)
+		return false;
+
+	vec3_t mins = boss.mins * EffectiveBossScale(boss);
+	vec3_t maxs = boss.maxs * EffectiveBossScale(boss);
+	if (anchor->s.scale > 0.f) {
+		const float base_scale = EffectiveBossScale(boss);
+		const float anchor_scale = EffectiveBossScale(boss, anchor->s.scale);
+		const float ratio = anchor_scale / max(0.05f, base_scale);
+		mins *= ratio;
+		maxs *= ratio;
+	}
+
+	vec3_t origin = anchor->s.origin;
+	return ValidateAuthoredOrigin(origin, mins, maxs, SpawnAnchorKind::Boss);
+}
+
+void BuildBossPlacementCatalog()
+{
+	for (BossMapPlacement &placement : bossMapPlacements) {
+		placement.authoredSpots = 0;
+		placement.fallbackSpots.clear();
+	}
+	bossMapEligible = {};
+	mapBossesAvailable = false;
+
+	auto inspect_profile = [](const BossDefinition &boss, size_t slot) {
+		BossMapPlacement &placement = bossMapPlacements[slot];
+
+		for (size_t i = 1; i < globals.num_entities; i++)
+			if (BossAnchorSupportsProfile(&g_entities[i], boss))
+				placement.authoredSpots++;
+
+		const float scale = EffectiveBossScale(boss);
+		const vec3_t mins = boss.mins * scale;
+		const vec3_t maxs = boss.maxs * scale;
+		for (int i = 0; i < level.num_spawn_spots; i++) {
+			gentity_t *spot = level.spawn_spots[i];
+			if (!spot || !spot->inuse)
+				continue;
+
+			vec3_t origin = spot->s.origin;
+			if (ValidateSpawnOrigin(origin, mins, maxs))
+				placement.fallbackSpots.push_back(spot);
+		}
+
+		return MM_Horde_BossPlacementSufficient(placement.authoredSpots,
+			placement.fallbackSpots.size(), EffectiveBossUnits(boss));
+	};
+
+	for (size_t i = 0; i < kBosses.size(); i++) {
+		bossMapEligible[i] = inspect_profile(kBosses[i], i);
+		mapBossesAvailable = mapBossesAvailable || bossMapEligible[i];
+	}
+	inspect_profile(kFallbackBoss, kHordeBossCount);
+
+	size_t compatible_profiles = 0;
+	size_t marked_fallbacks = 0;
+	for (size_t i = 0; i < kBosses.size(); i++) {
+		if (!bossMapEligible[i])
+			continue;
+		compatible_profiles++;
+		marked_fallbacks += bossMapPlacements[i].fallbackSpots.size();
+	}
+
+	if (mapBossesAvailable)
+		gi.Com_PrintFmt("MM_Horde: level-load boss placement catalog marked {} fallback uses across {} compatible profiles.\n",
+			marked_fallbacks, compatible_profiles);
+	else
+		gi.Com_Print("MM_Horde: no boss profile fits authored anchors or player-spawn fallbacks; boss waves disabled for this map.\n");
+}
+
+bool BossHasMapPlacement(const BossDefinition *boss)
+{
+	const size_t slot = BossPlacementIndex(boss);
+	if (slot >= bossMapPlacements.size())
+		return false;
+	if (slot < kHordeBossCount)
+		return bossMapEligible[slot];
+
+	const BossMapPlacement &placement = bossMapPlacements[slot];
+	return MM_Horde_BossPlacementSufficient(placement.authoredSpots,
+		placement.fallbackSpots.size(), EffectiveBossUnits(*boss));
+}
+
+const std::vector<gentity_t *> &BossFallbackSpots(const BossDefinition *boss)
+{
+	static const std::vector<gentity_t *> empty;
+	const size_t slot = BossPlacementIndex(boss);
+	return slot < bossMapPlacements.size() ? bossMapPlacements[slot].fallbackSpots : empty;
+}
+
 bool AnchorHasFighterContext(const vec3_t &origin)
 {
-	const float min_distance = max(0.f, g_horde_map_spawn_min_dist->value);
+	if (!OriginFinite(origin))
+		return false;
+
+	const float min_distance = MM_Horde_ClampFiniteFloat(g_horde_map_spawn_min_dist->value,
+		192.f, 0.f, 1'000'000.f);
 	bool any_fighter = false;
 	bool in_phs = false;
 
@@ -1868,7 +2428,7 @@ const BossDefinition *PickAuthoredBossProfile(int wave)
 			continue;
 
 		const BossDefinition *boss = FindBossDefinition(anchor->message);
-		if (!boss || !BossAvailableForWave(*boss, wave))
+		if (!boss || !BossHasMapPlacement(boss) || !BossAvailableForWave(*boss, wave))
 			continue;
 
 		const float weight = max(0.01f, anchor->random);
@@ -1884,6 +2444,11 @@ const BossDefinition *SelectBossForWave(int wave)
 {
 	if (g_horde_boss_force->string && *g_horde_boss_force->string) {
 		if (const BossDefinition *forced = FindBossDefinition(g_horde_boss_force->string)) {
+			if (!BossHasMapPlacement(forced)) {
+				gi.Com_PrintFmt("MM_Horde: forced boss '{}' has no level-load-validated placement on this map; boss wave skipped.\n",
+					forced->id);
+				return nullptr;
+			}
 			if (forced->units <= 1 || g_horde_boss_pairs->integer)
 				return forced;
 
@@ -1898,7 +2463,7 @@ const BossDefinition *SelectBossForWave(int wave)
 	if (const BossDefinition *authored = PickAuthoredBossProfile(wave))
 		return authored;
 
-	return PickBossForWave(wave, bossHistory.data(), bossHistoryCount);
+	return PickBossForWave(wave, bossHistory.data(), bossHistoryCount, &bossMapEligible);
 }
 
 SpawnAnchorKind MonsterHabitat(const char *classname)
@@ -1916,7 +2481,8 @@ bool PickWaterSpawn(const DirectorMonster *&out_monster, int remaining_points, v
 	out_monster = nullptr;
 	out_anchor = nullptr;
 
-	if (!g_horde_water_spawns->integer || frandom() >= clamp(g_horde_water_spawn_chance->value, 0.f, 1.f))
+	if (!g_horde_water_spawns->integer ||
+		frandom() >= MM_Horde_Probability(g_horde_water_spawn_chance->value, 0.3f))
 		return false;
 
 	const DirectorMonster *monster = PickAquaticForWave(level.round_number, remaining_points);
@@ -1979,8 +2545,8 @@ void CommitAuthoredSpawn(gentity_t *anchor, gentity_t *monster)
 		return;
 
 	const float cooldown = anchor->wait > 0.f
-		? anchor->wait
-		: max(0.f, g_horde_map_spawn_cooldown->value);
+		? FiniteSeconds(anchor->wait, 0.f, 3600.f)
+		: FiniteSeconds(g_horde_map_spawn_cooldown->value, 3.f, 3600.f);
 	anchor->timestamp = level.time + gtime_t::from_sec(cooldown);
 
 	monster->deathtarget = anchor->deathtarget;
@@ -1994,7 +2560,7 @@ void CommitAuthoredSpawn(gentity_t *anchor, gentity_t *monster)
 void RecordSpawnFailure(bool warmup, bool boss)
 {
 	if (boss) {
-		director.bossSpawnFailures++;
+		director.bossSpawnFailures = MM_Horde_SaturatingIncrement(director.bossSpawnFailures);
 		if (director.bossSpawnFailures >= 3) {
 			if (director.bossUnitsSpawned > 0) {
 				gi.Com_PrintFmt("MM_Horde: {} deployed {}/{} encounter units; continuing with the active boss set.\n",
@@ -2012,18 +2578,9 @@ void RecordSpawnFailure(bool warmup, bool boss)
 				} else {
 					gi.LocBroadcast_Print(PRINT_CENTER, "BOSS DEPLOYMENT INCOMPLETE\nFIGHT ON");
 				}
-			} else if (director.boss != &kFallbackBoss) {
-				gi.Com_PrintFmt("MM_Horde: {} cannot fit available spawn points; using {}.\n",
-					director.boss ? director.boss->display_name : "boss", kFallbackBoss.display_name);
-				director.boss = &kFallbackBoss;
-				director.bossUnitsTarget = 1;
-				director.bossUnitsSpawned = 0;
-				director.bossPending = true;
-				director.bossSpawnFailures = 0;
-				gi.LocBroadcast_Print(PRINT_CENTER, "BOSS DEPLOYMENT\n{}", kFallbackBoss.display_name);
 			} else {
 				gi.Com_PrintFmt("MM_Horde: {} cannot fit available spawn points; continuing without a boss.\n",
-					kFallbackBoss.display_name);
+					director.boss ? director.boss->display_name : "boss");
 				director.boss = nullptr;
 				director.bossPending = false;
 				director.bossUnitsTarget = 0;
@@ -2036,7 +2593,330 @@ void RecordSpawnFailure(bool warmup, bool boss)
 	level.horde_monster_spawn_time = warmup ? level.time + 5_sec : level.time + 1_sec;
 }
 
+int RetargetLivingThreats()
+{
+	int retargeted = 0;
+
+	for (size_t i = 1; i < globals.num_entities; i++) {
+		gentity_t *monster = &g_entities[i];
+		if (!IsLivingThreat(monster))
+			continue;
+
+		gentity_t *target = PickTarget(monster);
+		if (!target)
+			continue;
+
+		monster->enemy = target;
+		monster->monsterinfo.aiflags &=
+			~(AI_LOST_SIGHT | AI_PURSUIT_LAST_SEEN | AI_PURSUE_NEXT | AI_PURSUE_TEMP);
+		FoundTarget(monster);
+		retargeted++;
+	}
+
+	return retargeted;
+}
+
+gentity_t *StalledThreatCandidate()
+{
+	for (size_t i = 1; i < globals.num_entities; i++) {
+		gentity_t *monster = &g_entities[i];
+		if (IsLivingThreat(monster) && !OriginSharesFighterPHS(monster->s.origin))
+			return monster;
+	}
+
+	for (gentity_t *boss : director.bossEntities)
+		if (boss && IsLivingThreat(boss))
+			return boss;
+
+	for (size_t i = 1; i < globals.num_entities; i++)
+		if (IsLivingThreat(&g_entities[i]))
+			return &g_entities[i];
+
+	return nullptr;
+}
+
+bool RelocateStalledThreat(gentity_t *monster)
+{
+	if (!monster || !IsLivingHostileMonster(monster))
+		return false;
+	// A water-only monster must never be recovered onto a dry player spawn.
+	// If it actually escapes world space, fail closed and let the caller retire it.
+	if (MonsterRequiresWater(monster))
+		return false;
+
+	const bool old_origin_valid = ThreatInsideWorld(monster);
+	const vec3_t avoid_origin = OriginFinite(monster->s.origin) ? monster->s.origin : vec3_origin;
+	select_spawn_result_t result = SelectSpawnPoint(avoid_origin, monster->mins, monster->maxs);
+	if (!result.any_valid || !result.spot)
+		return false;
+
+	vec3_t origin = result.spot->s.origin;
+	if (!ValidateSpawnOrigin(origin, monster->mins, monster->maxs) ||
+		!OriginSharesFighterPHS(origin))
+		return false;
+
+	const vec3_t old_origin = monster->s.origin;
+	const vec3_t old_old_origin = monster->s.old_origin;
+	const vec3_t old_velocity = monster->velocity;
+	gentity_t *const old_groundentity = monster->groundentity;
+	gi.unlinkentity(monster);
+	monster->s.origin = origin;
+	monster->s.old_origin = origin;
+	monster->velocity = {};
+	monster->groundentity = nullptr;
+	gi.linkentity(monster);
+
+	// Monster spawn functions can replace the provisional hull. Verify the
+	// linked entity itself and roll back atomically if the destination is no
+	// longer contained or connected to the active play space.
+	if (!ThreatInsideWorld(monster) || !OriginSharesFighterPHS(monster->s.origin)) {
+		gi.unlinkentity(monster);
+		monster->s.origin = old_origin;
+		monster->s.old_origin = old_old_origin;
+		monster->velocity = old_velocity;
+		monster->groundentity = old_groundentity;
+		gi.linkentity(monster);
+		return false;
+	}
+
+	const vec3_t size = monster->maxs - monster->mins;
+	const float radius = max(24.0f, std::max({ size.x, size.y, size.z }) * 0.4f);
+	if (old_origin_valid)
+		SpawnGrow_Spawn(old_origin + (monster->mins + monster->maxs) * 0.5f, radius, radius * 2.0f);
+	SpawnGrow_Spawn(origin + (monster->mins + monster->maxs) * 0.5f, radius, radius * 2.0f);
+
+	if (gentity_t *target = PickTarget(monster)) {
+		monster->enemy = target;
+		monster->monsterinfo.aiflags &=
+			~(AI_LOST_SIGHT | AI_PURSUIT_LAST_SEEN | AI_PURSUE_NEXT | AI_PURSUE_TEMP);
+		FoundTarget(monster);
+	}
+
+	return true;
+}
+
+void RetireUnrecoverableThreat(gentity_t *monster)
+{
+	const int boss_slot = BossEntitySlot(monster);
+	if (boss_slot >= 0) {
+		director.bossEntities[boss_slot] = nullptr;
+		RetireBossHealthBar(boss_slot);
+	}
+
+	G_FreeEntity(monster);
+	InvalidateLivingCounts();
+}
+
+void RecoverStalledCombat()
+{
+	const int living = LivingThreatCount();
+	bool recovered_placement = false;
+
+	// A malformed map, auxiliary summon, or movement edge must never leave any
+	// live hostile monster outside BSP world space. Recover every escaped
+	// placement in this pass; if no habitat-safe destination exists, retire it
+	// without reward. PHS is enforced when monsters spawn, while later PHS
+	// separation is handled by the stall watchdog so normal room transitions do
+	// not teleport valid aquatic or temporarily occluded monsters.
+	const size_t entity_limit = globals.num_entities;
+	for (size_t i = 1; i < entity_limit; i++) {
+		gentity_t *monster = &g_entities[i];
+		if (!IsLivingHostileMonster(monster) || ThreatInsideWorld(monster))
+			continue;
+
+		const char *classname = monster->classname ? monster->classname : "monster";
+		if (RelocateStalledThreat(monster))
+			gi.Com_PrintFmt("MM_Horde: relocated escaped {} back into playable world space.\n",
+				classname);
+		else {
+			gi.Com_PrintFmt("MM_Horde: retired escaped {} with no valid recovery spawn.\n",
+				classname);
+			RetireUnrecoverableThreat(monster);
+		}
+		recovered_placement = true;
+	}
+
+	if (recovered_placement) {
+		RecordCombatProgress();
+		return;
+	}
+
+	if (!MM_Horde_StallRecoveryDue(level.horde_all_spawned, living,
+			level.time.milliseconds(), director.lastCombatProgressTime.milliseconds(),
+			g_horde_stall_timeout->value))
+		return;
+
+	if (director.stallRecoveryAttempts == 0) {
+		const int retargeted = RetargetLivingThreats();
+		gi.Com_PrintFmt("MM_Horde: no monster damage for {} seconds; retargeted {} threats.\n",
+			FiniteSeconds(g_horde_stall_timeout->value, 90.f, 3600.f), retargeted);
+	} else {
+		gentity_t *monster = StalledThreatCandidate();
+		const bool relocated = RelocateStalledThreat(monster);
+		const char *classname = monster && monster->classname
+			? monster->classname : "a remaining threat";
+		if (!relocated && MonsterRequiresWater(monster)) {
+			gi.Com_PrintFmt("MM_Horde: persistent combat stall; retired habitat-bound {} with no safe water recovery.\n",
+				classname);
+			RetireUnrecoverableThreat(monster);
+		} else {
+			gi.Com_PrintFmt("MM_Horde: persistent combat stall; {} {}.\n",
+				relocated ? "relocated" : "could not relocate", classname);
+		}
+	}
+
+	director.lastCombatProgressTime = level.time;
+	director.stallRecoveryAttempts = MM_Horde_SaturatingIncrement(director.stallRecoveryAttempts);
+}
+
 } // namespace muffmode::horde
+
+bool MM_Horde_MonsterEdgeDropsEnabled(const gentity_t *ent)
+{
+	if (!muffmode::horde::Active() || !g_horde_monster_edge_drops->integer ||
+		level.round_state != roundst_t::ROUND_IN_PROGRESS ||
+		!ent || !ent->inuse || !(ent->svflags & SVF_MONSTER) ||
+		ent->health <= 0 || ent->deadflag || !ent->groundentity ||
+		(ent->flags & (FL_FLY | FL_SWIM)) ||
+		(ent->monsterinfo.aiflags & AI_STAND_GROUND) ||
+		ent->monsterinfo.horde_reward_class == muffmode::horde::kHordeRewardBoss)
+		return false;
+
+	const gentity_t *enemy = ent->enemy;
+	return enemy && enemy->inuse && enemy->client && enemy->health > 0 &&
+		!enemy->deadflag && !enemy->client->eliminated &&
+		ClientIsPlaying(enemy->client);
+}
+
+int MM_Horde_ModifyDamage(const gentity_t *target, const gentity_t *attacker,
+	int damage, int means_of_death)
+{
+	if (!muffmode::horde::Active() ||
+		level.round_state != roundst_t::ROUND_IN_PROGRESS || damage <= 0 ||
+		!target || !attacker)
+		return damage;
+
+	const muffmode::horde::WildcardPreset preset = muffmode::horde::director.preset;
+	if (preset == muffmode::horde::WildcardPreset::Sawstorm &&
+		attacker->client && (target->svflags & SVF_MONSTER) &&
+		target->monsterinfo.horde_reward_class != muffmode::horde::kHordeRewardBoss &&
+		means_of_death == MOD_CHAINFIST)
+		return MM_Horde_ScaleInt(damage, 4.f, damage, 0);
+
+	if ((attacker->svflags & SVF_MONSTER) &&
+		target->client &&
+		attacker->monsterinfo.horde_reward_class != muffmode::horde::kHordeRewardBoss &&
+		(preset == muffmode::horde::WildcardPreset::GetOverHere ||
+			preset == muffmode::horde::WildcardPreset::PinballNight))
+		return MM_Horde_ScaleInt(damage, 0.85f, damage, 0);
+
+	return damage;
+}
+
+int MM_Horde_ModifyKnockback(const gentity_t *target, const gentity_t *attacker,
+	int knockback)
+{
+	if (!muffmode::horde::Active() ||
+		level.round_state != roundst_t::ROUND_IN_PROGRESS ||
+		muffmode::horde::director.preset != muffmode::horde::WildcardPreset::PinballNight ||
+		!target || !target->client || knockback <= 0 ||
+		(attacker && (attacker->svflags & SVF_MONSTER) &&
+			attacker->monsterinfo.horde_reward_class == muffmode::horde::kHordeRewardBoss))
+		return knockback;
+
+	return MM_Horde_ScaleInt(knockback, 5.f, knockback, 0);
+}
+
+void MM_Horde_ApplyDamagePull(gentity_t *target, const gentity_t *attacker, int damage)
+{
+	if (!muffmode::horde::Active() ||
+		level.round_state != roundst_t::ROUND_IN_PROGRESS ||
+		muffmode::horde::director.preset != muffmode::horde::WildcardPreset::GetOverHere ||
+		!target || !target->client || !attacker || attacker == target ||
+		!(attacker->svflags & SVF_MONSTER) ||
+		attacker->monsterinfo.horde_reward_class == muffmode::horde::kHordeRewardBoss ||
+		damage <= 0)
+		return;
+
+	vec3_t direction = attacker->s.origin - target->s.origin;
+	const float distance = direction.length();
+	if (!std::isfinite(distance) || distance < 1.f)
+		return;
+
+	direction *= 1.f / distance;
+	const float impulse = std::clamp(30.f + static_cast<float>(damage), 30.f, 160.f);
+	const vec3_t addition = direction * impulse;
+	if (std::isfinite(addition.x) && std::isfinite(addition.y) && std::isfinite(addition.z))
+		target->velocity += addition;
+}
+
+float MM_Horde_PlayerGravityScale()
+{
+	if (!muffmode::horde::Active() ||
+		level.round_state != roundst_t::ROUND_IN_PROGRESS)
+		return 1.f;
+
+	switch (muffmode::horde::director.preset) {
+	case muffmode::horde::WildcardPreset::LowGravity:
+		return 0.55f;
+	case muffmode::horde::WildcardPreset::PinballNight:
+		return 0.65f;
+	default:
+		return 1.f;
+	}
+}
+
+bool MM_Horde_ValidateMonsterPlacement(gentity_t *ent)
+{
+	if (!muffmode::horde::Active())
+		return true;
+	if (!ent || !ent->inuse || !(ent->svflags & SVF_MONSTER) ||
+		!muffmode::horde::ThreatInsideWorld(ent))
+		return false;
+
+	// Warmup can run before a fighter is established. During a live wave,
+	// connectivity to at least one living fighter is mandatory, which rejects
+	// sealed voids and disconnected map leaves even when their contents are not
+	// reported as solid by a malformed BSP.
+	if (level.round_state == roundst_t::ROUND_IN_PROGRESS &&
+		MM_Horde_CountFighters() > 0 &&
+		!muffmode::horde::OriginSharesFighterPHS(ent->s.origin))
+		return false;
+
+	return true;
+}
+
+bool MM_Horde_CountAuxiliaryMonster(gentity_t *ent)
+{
+	if (!muffmode::horde::Active() || level.round_state != roundst_t::ROUND_IN_PROGRESS)
+		return true;
+	if (!ent || !ent->inuse || !(ent->svflags & SVF_MONSTER) ||
+		ent->health <= 0 || ent->deadflag || (ent->svflags & SVF_DEADMONSTER) ||
+		(ent->monsterinfo.aiflags & AI_GOOD_GUY) ||
+		!MM_Horde_ValidateMonsterPlacement(ent))
+		return false;
+	if (!(ent->monsterinfo.aiflags & AI_DO_NOT_COUNT))
+		return true;
+
+	// CreateMonster and the medic resurrection path deliberately enter monster_start
+	// as AI_DO_NOT_COUNT. Balance the engine's total/killed counters when Horde elects
+	// to make one of those monsters a real wave threat. Keep reward class zero so
+	// repeated summons or revivals cannot produce score, drops, or rally progress.
+	const int monster_index = max(0, level.total_monsters);
+	if (g_debug_monster_kills->integer) {
+		if (static_cast<size_t>(monster_index) < level.monsters_registered.size())
+			level.monsters_registered[monster_index] = ent;
+		else if (static_cast<size_t>(monster_index) == level.monsters_registered.size())
+			gi.Com_PrintFmt("MM_Horde: debug monster registry full; auxiliary threat not tracked.\n");
+	}
+
+	ent->monsterinfo.aiflags &= ~AI_DO_NOT_COUNT;
+	ent->monsterinfo.horde_reward_class = 0;
+	level.total_monsters = MM_Horde_SaturatingIncrement(monster_index);
+	muffmode::horde::InvalidateLivingCounts();
+	muffmode::horde::RecordCombatProgress();
+	return true;
+}
 
 // [MuffMode] Pick a random validated floor position anywhere within the play area (the AABB of
 // the deathmatch spawn spots) for scattering Horde techs, rather than placing them on the spawn
@@ -2095,22 +2975,24 @@ void MM_Horde_RunSpawning()
 	horde::RefreshTargetLoadCache();
 
 	const float adaptive_mult = (!warmup && g_horde_enhanced_ai->integer) ? horde::AdaptivePressureMult() : 1.f;
-	const int living_threats = horde::LivingThreatCount();
+	const int living_pressure = horde::LivingPressureCount();
 
 	const int warmup_cap = max(1, g_horde_warmup_cap->integer);
-	if (warmup && living_threats >= warmup_cap)
+	if (warmup && living_pressure >= warmup_cap)
 		return;
 
 	// Cap concurrently-alive monsters during live waves. Without this, a high-budget
 	// swarm wave (many cheap monsters) can pile up hundreds of homing entities on a
 	// single player and overflow that client's network message buffer (SZ_GetSpace).
+	// Auxiliary summons and resurrections do not block wave completion, but do contribute
+	// to this pressure cap so they cannot bypass its safety purpose.
 	// Spawning pauses while at the cap and resumes as monsters die, so the wave still
 	// spawns its full budget over time - only peak concurrency is bounded. 0 disables.
 	const int alive_cap = MaxAliveCap();
 	int effective_cap = alive_cap;
 	if (!warmup && alive_cap > 0 && g_horde_enhanced_ai->integer)
-		effective_cap = max(1, static_cast<int>(alive_cap * min(adaptive_mult, 1.f)));
-	if (!warmup && alive_cap > 0 && living_threats >= effective_cap &&
+		effective_cap = MM_Horde_ScaleInt(alive_cap, min(adaptive_mult, 1.f), alive_cap, 1);
+	if (!warmup && alive_cap > 0 && living_pressure >= effective_cap &&
 		!horde::director.bossPending)
 		return;
 
@@ -2138,9 +3020,16 @@ void MM_Horde_RunSpawning()
 
 		if (is_boss) {
 			boss_definition = horde::director.boss;
-		} else if (!warmup && (featured_row = horde::PeekFeaturedMonster(remaining))) {
+		} else if (!warmup && horde::director.presetMonster &&
+			horde::director.presetMonster->spawn_points <= remaining) {
+			monster_row = horde::director.presetMonster;
+		} else if (!warmup &&
+			horde::director.preset == horde::WildcardPreset::None &&
+			(featured_row = horde::PeekFeaturedMonster(remaining))) {
 			monster_row = featured_row;
-		} else if (!warmup && horde::PickWaterSpawn(director_monster, remaining, spawn_origin,
+		} else if (!warmup &&
+			horde::director.preset == horde::WildcardPreset::None &&
+			horde::PickWaterSpawn(director_monster, remaining, spawn_origin,
 				spawn_angles, spawn_anchor)) {
 			location_ready = true;
 		}
@@ -2151,7 +3040,9 @@ void MM_Horde_RunSpawning()
 		else if (director_monster)
 			monster_class = director_monster->classname;
 		else
-			monster_class = monster_row
+			monster_class = horde::director.presetMonster
+				? (monster_row ? monster_row->classname : nullptr)
+				: monster_row
 				? monster_row->classname
 				: horde::PickMonsterForWave(&monster_row, remaining);
 		if (!monster_class) {
@@ -2162,17 +3053,23 @@ void MM_Horde_RunSpawning()
 			return;
 		}
 
+		const horde::PresetSpawnTuning preset_tuning = is_boss
+			? horde::PresetSpawnTuning{}
+			: horde::SpawnTuning(horde::director.preset);
 		vec3_t check_mins = director_monster ? director_monster->mins : horde::kDefaultSpawnMins;
 		vec3_t check_maxs = director_monster ? director_monster->maxs : horde::kDefaultSpawnMaxs;
 		if (boss_definition) {
 			const float scale = horde::EffectiveBossScale(*boss_definition);
 			check_mins = boss_definition->mins * scale;
 			check_maxs = boss_definition->maxs * scale;
+		} else {
+			check_mins *= preset_tuning.scale;
+			check_maxs *= preset_tuning.scale;
 		}
 
 		if (!location_ready && !warmup) {
 			const bool try_authored = is_boss ||
-				frandom() < clamp(g_horde_map_spawn_chance->value, 0.f, 1.f);
+				frandom() < MM_Horde_Probability(g_horde_map_spawn_chance->value, 0.75f);
 			if (try_authored) {
 				const horde::SpawnAnchorKind preferred = is_boss
 					? horde::SpawnAnchorKind::Boss
@@ -2192,14 +3089,20 @@ void MM_Horde_RunSpawning()
 		}
 
 		if (!location_ready) {
-			select_spawn_result_t result = horde::SelectSpawnPoint(vec3_origin, check_mins, check_maxs);
+			const std::vector<gentity_t *> &boss_fallbacks =
+				is_boss ? horde::BossFallbackSpots(boss_definition) :
+					horde::BossFallbackSpots(nullptr);
+			gentity_t *const *allowed_spots = is_boss ? boss_fallbacks.data() : nullptr;
+			const size_t allowed_count = is_boss ? boss_fallbacks.size() : 0;
+			select_spawn_result_t result = horde::SelectSpawnPoint(vec3_origin,
+				check_mins, check_maxs, allowed_spots, allowed_count, is_boss);
 			if (result.any_valid && result.spot) {
 				spawn_origin = result.spot->s.origin;
 				if (!horde::ValidateSpawnOrigin(spawn_origin, check_mins, check_maxs)) {
 					// Try a different candidate by excluding the failed spot from selection.
 					// avoid_point is honoured when g_dm_respawn_point_min_dist > 0 (default 256).
 					select_spawn_result_t retry = horde::SelectSpawnPoint(result.spot->s.origin,
-						check_mins, check_maxs);
+						check_mins, check_maxs, allowed_spots, allowed_count, is_boss);
 					bool retry_ok = false;
 					if (retry.any_valid && retry.spot && retry.spot != result.spot) {
 						spawn_origin = retry.spot->s.origin;
@@ -2224,10 +3127,17 @@ void MM_Horde_RunSpawning()
 			return;
 		}
 
+		if (!warmup && !horde::OriginSharesFighterPHS(spawn_origin)) {
+			horde::RecordSpawnFailure(false, is_boss);
+			return;
+		}
+
 		gentity_t *e = G_Spawn();
 		e->classname = monster_class;
 		e->s.origin = spawn_origin;
 		e->s.angles = spawn_angles;
+		if (!is_boss && preset_tuning.scale != 1.f)
+			e->s.scale = preset_tuning.scale;
 
 		// The first valid regular spawn of a champion-pending wave becomes the champion.
 		const bool is_champion = level.horde_champion_pending && !warmup && !is_boss;
@@ -2240,16 +3150,21 @@ void MM_Horde_RunSpawning()
 				boss_definition->min_level, g_horde_boss_health_per_wave->value);
 			const bool boss_anchor = spawn_anchor &&
 				spawn_anchor->style == static_cast<int32_t>(horde::SpawnAnchorKind::Boss);
-			const float profile_health_mult = boss_anchor && spawn_anchor->speed > 0.f
+			const float authored_health_mult = boss_anchor && spawn_anchor->speed > 0.f
 				? spawn_anchor->speed
 				: boss_definition->health_multiplier;
+			const float profile_health_mult = MM_Horde_ClampFiniteFloat(authored_health_mult,
+				boss_definition->health_multiplier, 0.05f, MM_HORDE_MAX_COMBAT_MULTIPLIER);
 			const float pair_health_mult = horde::director.bossUnitsTarget > 1
-				? max(0.05f, g_horde_boss_pair_health_mult->value)
+				? MM_Horde_ClampFiniteFloat(g_horde_boss_pair_health_mult->value,
+					1.f, 0.05f, MM_HORDE_MAX_COMBAT_MULTIPLIER)
 				: 1.f;
-
-			st.health_multiplier = max(0.1f, g_horde_boss_health_mult->value) *
-				player_health_mult * wave_health_mult * max(0.05f, profile_health_mult) *
-				pair_health_mult;
+			const float global_health_mult = MM_Horde_ClampFiniteFloat(
+				g_horde_boss_health_mult->value, 1.f, 0.1f, MM_HORDE_MAX_COMBAT_MULTIPLIER);
+			const double combined_health_mult = static_cast<double>(global_health_mult) *
+				player_health_mult * wave_health_mult * profile_health_mult * pair_health_mult;
+			st.health_multiplier = static_cast<float>(std::clamp(combined_health_mult,
+				0.1, static_cast<double>(MM_HORDE_MAX_COMBAT_MULTIPLIER)));
 
 			const uint32_t profile_spawnflags = boss_anchor && spawn_anchor->noise_index2 > 0
 				? static_cast<uint32_t>(spawn_anchor->sounds)
@@ -2279,11 +3194,11 @@ void MM_Horde_RunSpawning()
 				st.keys_specified.emplace("power_armor_type");
 			}
 			if (power_armor_power >= 0) {
-				e->monsterinfo.power_armor_power = power_armor_power;
+				e->monsterinfo.power_armor_power = min(power_armor_power, horde::kHordeMaxPowerArmor);
 				st.keys_specified.emplace("power_armor_power");
 			}
 			if (monster_slots >= 0) {
-				e->monsterinfo.monster_slots = monster_slots;
+				e->monsterinfo.monster_slots = min(monster_slots, horde::kHordeMaxSummonSlots);
 				st.keys_specified.emplace("monster_slots");
 			}
 			if (reinforcements) {
@@ -2291,7 +3206,10 @@ void MM_Horde_RunSpawning()
 				st.keys_specified.emplace("reinforcements");
 			}
 		} else {
-			st.health_multiplier = is_champion ? g_horde_champion_health_mult->value : 1.0f;
+			st.health_multiplier = is_champion
+				? MM_Horde_ClampFiniteFloat(g_horde_champion_health_mult->value,
+					3.f, 0.1f, MM_HORDE_MAX_COMBAT_MULTIPLIER)
+				: preset_tuning.health;
 		}
 		ED_CallSpawn(e);
 
@@ -2301,29 +3219,56 @@ void MM_Horde_RunSpawning()
 			horde::RecordSpawnFailure(warmup, is_boss);
 			return;
 		}
+		if (!MM_Horde_ValidateMonsterPlacement(e) ||
+			(!warmup && !horde::OriginSharesFighterPHS(e->s.origin))) {
+			gi.Com_PrintFmt("MM_Horde: rejected out-of-world or disconnected spawn for {}.\n",
+				e->classname ? e->classname : "monster");
+			G_FreeEntity(e);
+			horde::RecordSpawnFailure(false, is_boss);
+			return;
+		}
 
 		horde::ApplySpawnRoleTuning(e, monster_class);
+		if (!is_boss && !is_champion) {
+			e->monsterinfo.champion_damage_scale = preset_tuning.damage;
+			float movement_scale = preset_tuning.movement;
+			if (preset_tuning.scale != 1.f) {
+				const float applied_scale = std::isfinite(e->s.scale) && e->s.scale > 0.f
+					? MM_Horde_PresetEntityScale(e->s.scale)
+					: 1.f;
+				movement_scale /= applied_scale;
+			}
+			e->monsterinfo.scale *= movement_scale;
+			e->gravity *= preset_tuning.gravity;
+		}
 		e->monsterinfo.horde_reward_class = warmup ? 0 :
 			(is_boss ? horde::kHordeRewardBoss :
 				(is_champion ? horde::kHordeRewardChampion : horde::kHordeRewardRegular));
+		horde::InvalidateLivingCounts();
 
 		if (is_boss) {
 			const float wave_damage_mult = MM_Horde_BossWaveMultiplier(level.round_number,
 				boss_definition->min_level, g_horde_boss_damage_per_wave->value);
 			const bool boss_anchor = spawn_anchor &&
 				spawn_anchor->style == static_cast<int32_t>(horde::SpawnAnchorKind::Boss);
-			const float profile_damage_mult = boss_anchor && spawn_anchor->accel > 0.f
+			const float authored_damage_mult = boss_anchor && spawn_anchor->accel > 0.f
 				? spawn_anchor->accel
 				: boss_definition->damage_multiplier;
-
-			e->monsterinfo.champion_damage_scale = max(0.1f,
-				g_horde_boss_damage_mult->value * wave_damage_mult *
-				max(0.05f, profile_damage_mult));
+			const float profile_damage_mult = MM_Horde_ClampFiniteFloat(authored_damage_mult,
+				boss_definition->damage_multiplier, 0.05f, MM_HORDE_MAX_COMBAT_MULTIPLIER);
+			const float global_damage_mult = MM_Horde_ClampFiniteFloat(
+				g_horde_boss_damage_mult->value, 1.15f, 0.1f, MM_HORDE_MAX_COMBAT_MULTIPLIER);
+			const double combined_damage_mult = static_cast<double>(global_damage_mult) *
+				wave_damage_mult * profile_damage_mult;
+			e->monsterinfo.champion_damage_scale = static_cast<float>(std::clamp(
+				combined_damage_mult, 0.1, static_cast<double>(MM_HORDE_MAX_COMBAT_MULTIPLIER)));
 			e->monsterinfo.double_time = HOLD_FOREVER;
 
-			const float armor_mult = max(0.f, g_horde_boss_armor_mult->value);
-			e->monsterinfo.power_armor_power = static_cast<int32_t>(
-				std::round(e->monsterinfo.power_armor_power * armor_mult));
+			const float armor_mult = MM_Horde_ClampFiniteFloat(g_horde_boss_armor_mult->value,
+				1.f, 0.f, MM_HORDE_MAX_COMBAT_MULTIPLIER);
+			e->monsterinfo.power_armor_power = MM_Horde_ScaleInt(
+				e->monsterinfo.power_armor_power, armor_mult,
+				e->monsterinfo.power_armor_power, 0, horde::kHordeMaxPowerArmor);
 			e->monsterinfo.max_power_armor_power = e->monsterinfo.power_armor_power;
 			e->monsterinfo.initial_power_armor_type = e->monsterinfo.power_armor_type;
 
@@ -2348,25 +3293,41 @@ void MM_Horde_RunSpawning()
 				? (float)natural / (float)e->monsterinfo.base_health
 				: 1.0f;
 
-			const float floor_base = g_horde_champion_health_floor->value +
-				g_horde_champion_health_per_wave->value * (float)level.round_number;
-			const float floor_hp = floor_base * coop_mult;
+			const float floor_start = MM_Horde_ClampFiniteFloat(g_horde_champion_health_floor->value,
+				400.f, 0.f, static_cast<float>(horde::kHordeMaxMonsterHealth));
+			const float floor_per_wave = MM_Horde_ClampFiniteFloat(
+				g_horde_champion_health_per_wave->value, 25.f,
+				-static_cast<float>(horde::kHordeMaxMonsterHealth),
+				static_cast<float>(horde::kHordeMaxMonsterHealth));
+			const float safe_coop_mult = MM_Horde_ClampFiniteFloat(coop_mult, 1.f, 0.f,
+				MM_HORDE_MAX_COMBAT_MULTIPLIER);
+			const double floor_base = static_cast<double>(floor_start) +
+				static_cast<double>(floor_per_wave) * level.round_number;
+			const int floor_hp = MM_Horde_ClampFiniteInt(
+				std::max(0.0, floor_base) * safe_coop_mult, natural, 0,
+				horde::kHordeMaxMonsterHealth);
 
 			// Weakness signal drives the taper: 1.0 for a sub-floor monster (full help), 0.0 once its
 			// natural health reaches strong_ratio x floor.
-			const float strong_hp = floor_hp * g_horde_champion_strong_ratio->value;
-			const float denom = max(1.0f, strong_hp - floor_hp);
+			const float strong_ratio = MM_Horde_ClampFiniteFloat(
+				g_horde_champion_strong_ratio->value, 4.f, 0.1f, MM_HORDE_MAX_COMBAT_MULTIPLIER);
+			const float strong_hp = floor_hp * strong_ratio;
+			const float denom = max(1.0f, strong_hp - static_cast<float>(floor_hp));
 			const float weakness = clamp((strong_hp - (float)natural) / denom, 0.0f, 1.0f);
 
 			// Health: lift weak monsters to the floor; leave naturally-tough ones at their 3x. Co-op
 			// re-scaling on later joins only adds health, so the floor is never undercut.
-			const int champ_hp = max(natural, (int)floor_hp);
+			const int champ_hp = max(natural, floor_hp);
 			e->health = e->max_health = champ_hp;
 
 			// Tapered offensive buffs. Damage scale is stored for T_Damage; speed folds into the
 			// frame-distance multiplier (already = MODEL_SCALE * s.scale at this point).
-			e->monsterinfo.champion_damage_scale = lerp(1.0f, g_horde_champion_damage_mult->value, weakness);
-			e->monsterinfo.scale *= lerp(1.0f, g_horde_champion_speed_mult->value, weakness);
+			const float champion_damage_mult = MM_Horde_ClampFiniteFloat(
+				g_horde_champion_damage_mult->value, 2.f, 0.1f, MM_HORDE_MAX_COMBAT_MULTIPLIER);
+			const float champion_speed_mult = MM_Horde_ClampFiniteFloat(
+				g_horde_champion_speed_mult->value, 1.25f, 0.1f, 4.f);
+			e->monsterinfo.champion_damage_scale = lerp(1.0f, champion_damage_mult, weakness);
+			e->monsterinfo.scale *= lerp(1.0f, champion_speed_mult, weakness);
 
 			// EF_DOUBLE shell marks every champion regardless of tier.
 			e->monsterinfo.double_time = HOLD_FOREVER;
@@ -2384,6 +3345,7 @@ void MM_Horde_RunSpawning()
 			FoundTarget(e);
 
 		if (!warmup) {
+			horde::RecordCombatProgress();
 			const int spawn_cost = boss_definition ? boss_definition->spawn_points :
 				(director_monster ? director_monster->spawn_points :
 				(monster_row ? monster_row->spawn_points : 0));
@@ -2416,6 +3378,8 @@ void MM_Horde_AdjustPlayerScore(gclient_t *cl, int32_t offset)
 		return;
 
 	const int tier = horde::PerformanceTier(cl);
-	const int bonus = tier * max(0, g_horde_streak_score_bonus->integer);
-	G_AdjustPlayerScore(cl, offset + bonus, false, 0);
+	const int bonus = MM_Horde_ClampFiniteInt(
+		static_cast<double>(tier) * max(0, g_horde_streak_score_bonus->integer),
+		0, 0, std::numeric_limits<int>::max());
+	G_AdjustPlayerScore(cl, MM_Horde_SaturatingAdd(offset, bonus), false, 0);
 }

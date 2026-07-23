@@ -5,6 +5,7 @@
 #include "g_local.h"
 #include "muffmode/mm_combat_heatmap.h"
 #include "muffmode/mm_freezetag.h"
+#include "muffmode/mm_horde.h"
 #include "muffmode/mm_horde_ai_rules.h"
 
 /*
@@ -578,12 +579,14 @@ void T_Damage(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, const 
 
 	// power amplifier tech
 	damage = Tech_ApplyPowerAmp(attacker, damage);
+	damage = MM_Horde_ModifyDamage(targ, attacker, damage, static_cast<int>(mod.id));
 
 	if (RS(RS_Q3A)) {
 		knockback = damage;
 		if (knockback > 200)
 			knockback = 200;
 	}
+	knockback = MM_Horde_ModifyKnockback(targ, attacker, knockback);
 
 	if ((targ->flags & FL_NO_KNOCKBACK) ||
 			((targ->flags & FL_ALIVE_KNOCKBACK_ONLY) && (!targ->deadflag || targ->dead_time != level.time)))
@@ -742,6 +745,7 @@ void T_Damage(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, const 
 
 	// resistance tech
 	take = Tech_ApplyDisruptorShield(targ, take);
+	MM_Horde_ApplyDamagePull(targ, attacker, take);
 
 	CTF_CheckHurtCarrier(targ, attacker);
 
@@ -819,6 +823,7 @@ void T_Damage(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, const 
 			if (ShouldRecordCombatHeat(attacker, client))
 				muffmode::combat_heatmap::AddEvent(CombatHeatOrigin(targ, inflictor, point), static_cast<float>(take));
 			targ->health = targ->health - take;
+			MM_Horde_OnMonsterDamaged(targ, take);
 		}
 
 		if ((targ->flags & FL_IMMORTAL) && targ->health <= 0)

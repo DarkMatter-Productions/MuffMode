@@ -3,6 +3,7 @@
 // m_move.c -- monster movement
 
 #include "../g_local.h"
+#include "../muffmode/mm_horde.h"
 
 // this is used for communications out of g_movestep to say what entity
 // is blocking us
@@ -18,6 +19,50 @@ static bool M_ClassnameStartsWith(const gentity_t *ent, const char *prefix, size
 
 static bool M_IsTeslaMine(const gentity_t *ent) {
 	return M_HasClassname(ent, "tesla_mine");
+}
+
+// [MuffMode] Let an actively chasing Horde monster commit to a short, known-safe
+// drop. The prospective landing must be ordinary BSP, non-hazardous, reasonably
+// flat, and still connected to its target. Unknown/void drops fail closed.
+static bool M_TryHordeEdgeDrop(gentity_t *ent, const vec3_t &forward_origin,
+	contents_t mask, bool relink) {
+	if (!MM_Horde_MonsterEdgeDropsEnabled(ent))
+		return false;
+
+	if (!std::isfinite(forward_origin.x) || !std::isfinite(forward_origin.y) ||
+		!std::isfinite(forward_origin.z))
+		return false;
+
+	const float gravity_length = ent->gravityVector.length();
+	if (!std::isfinite(gravity_length) || gravity_length < 0.01f)
+		return false;
+
+	constexpr float kMaxEdgeDrop = 256.f;
+	const vec3_t gravity_direction = ent->gravityVector * (1.f / gravity_length);
+	const vec3_t landing_end = forward_origin + gravity_direction * kMaxEdgeDrop;
+	const trace_t landing = gi.trace(forward_origin, ent->mins, ent->maxs,
+		landing_end, ent, mask);
+	if (landing.startsolid || landing.allsolid || landing.fraction == 1.f ||
+		!landing.ent || landing.ent->solid != SOLID_BSP ||
+		landing.plane.normal.dot(gravity_direction * -1.f) < 0.5f ||
+		!gi.inPHS(landing.endpos, ent->enemy->s.origin, true))
+		return false;
+
+	water_level_t landing_waterlevel;
+	contents_t landing_watertype;
+	M_CatagorizePosition(ent, landing.endpos, landing_waterlevel, landing_watertype);
+	if ((landing_watertype & (CONTENTS_SLIME | CONTENTS_LAVA)) ||
+		landing_waterlevel > WATER_WAIST)
+		return false;
+
+	ent->s.origin = forward_origin;
+	ent->groundentity = nullptr;
+	ent->groundentity_linkcount = 0;
+	if (relink) {
+		gi.linkentity(ent);
+		// Horde's spawn/containment rules do not rely on trigger activation by monsters.
+	}
+	return true;
 }
 
 /*
@@ -671,8 +716,11 @@ static bool G_movestep(gentity_t *ent, vec3_t move, bool relink) {
 			return true;
 		}
 		// [Paril-KEX] allow dead monsters to "fall" off of edges in their death animation
-		else if (!ent->spawnflags.has(SPAWNFLAG_MONSTER_SUPER_STEP) && ent->health > 0)
+		else if (!ent->spawnflags.has(SPAWNFLAG_MONSTER_SUPER_STEP) && ent->health > 0) {
+			if (M_TryHordeEdgeDrop(ent, chosen_forward.endpos, mask, relink))
+				return true;
 			return false; // walked off an edge
+		}
 	}
 
 	// [Paril-KEX] if we didn't move at all (or barely moved), don't count it

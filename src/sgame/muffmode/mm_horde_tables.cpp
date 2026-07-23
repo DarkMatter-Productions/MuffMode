@@ -288,7 +288,8 @@ int CountThemeCandidates(HordeCategory category, int wave)
 
 		float weight = monster.weight + ((wave - max(1, monster.min_level)) * monster.lvl_w_adjust);
 		if (late_wave)
-			weight = max(weight, g_horde_weight_floor->value);
+			weight = max(weight, MM_Horde_ClampFiniteFloat(g_horde_weight_floor->value,
+				0.05f, 0.f, MM_HORDE_MAX_COMBAT_MULTIPLIER));
 		if (weight <= 0.0f)
 			continue;
 
@@ -399,7 +400,8 @@ const char *PickMonster(const WeightedItem **out_row, int remaining_points, Hord
 		// Past the content peak, decayed weights would cull chaff and starve themes; hold a floor
 		// so every still-eligible row stays spendable in late waves.
 		if (late_wave)
-			weight = max(weight, g_horde_weight_floor->value);
+			weight = max(weight, MM_Horde_ClampFiniteFloat(g_horde_weight_floor->value,
+				0.05f, 0.f, MM_HORDE_MAX_COMBAT_MULTIPLIER));
 
 		if (weight <= 0.0f)
 			continue;
@@ -520,7 +522,7 @@ gitem_t *PickDropItem(const std::array<item_id_t, 8> *drops)
 			profile_item = GetItemByIndex(choices[irandom(num_choices)]);
 	}
 
-	if (profile_item && frandom() < clamp(g_horde_drop_profile_bias->value, 0.f, 1.f))
+	if (profile_item && frandom() < MM_Horde_Probability(g_horde_drop_profile_bias->value, 0.85f))
 		return profile_item;
 
 	if (gitem_t *generic = PickItem())
@@ -537,7 +539,7 @@ gitem_t *PickChampionDrop()
 
 gitem_t *PickBossDrop(float powerup_chance)
 {
-	if (frandom() < clamp(powerup_chance, 0.f, 1.f))
+	if (frandom() < MM_Horde_Probability(powerup_chance, 0.35f))
 		if (gitem_t *powerup = GetItemByIndex(random_element(kBossPowerups)))
 			return powerup;
 
@@ -695,7 +697,7 @@ int EffectiveBossUnits(const BossDefinition &boss)
 float EffectiveBossScale(const BossDefinition &boss, float authored_scale)
 {
 	return MM_Horde_EffectiveBossScale(boss.model_scale, authored_scale,
-		max(0.f, g_horde_boss_scale_limit->value));
+		g_horde_boss_scale_limit->value);
 }
 
 bool BossAvailableForWave(const BossDefinition &boss, int wave)
@@ -712,12 +714,16 @@ bool BossAvailableForWave(const BossDefinition &boss, int wave)
 }
 
 const BossDefinition *PickBossForWave(int wave, const BossDefinition *const *recent,
-	size_t recent_count)
+	size_t recent_count, const std::array<bool, kHordeBossCount> *map_eligible)
 {
 	int newest_min_wave = 1;
-	for (const auto &boss : kBosses)
+	for (size_t boss_index = 0; boss_index < kBosses.size(); boss_index++) {
+		const BossDefinition &boss = kBosses[boss_index];
+		if (map_eligible && !(*map_eligible)[boss_index])
+			continue;
 		if (BossAvailableForWave(boss, wave))
 			newest_min_wave = max(newest_min_wave, boss.min_level);
+	}
 
 	const size_t requested_exclusions = min(recent_count,
 		static_cast<size_t>(max(0, g_horde_boss_repeat_window->integer)));
@@ -732,7 +738,10 @@ const BossDefinition *PickBossForWave(int wave, const BossDefinition *const *rec
 	for (size_t excluded = requested_exclusions + 1; excluded-- > 0;) {
 		float total_weight = 0.f;
 
-		for (const auto &boss : kBosses) {
+		for (size_t boss_index = 0; boss_index < kBosses.size(); boss_index++) {
+			const BossDefinition &boss = kBosses[boss_index];
+			if (map_eligible && !(*map_eligible)[boss_index])
+				continue;
 			if (!BossAvailableForWave(boss, wave) || !in_selection_band(boss))
 				continue;
 
@@ -752,7 +761,10 @@ const BossDefinition *PickBossForWave(int wave, const BossDefinition *const *rec
 		const float roll = frandom() * total_weight;
 		float cumulative = 0.f;
 
-		for (const auto &boss : kBosses) {
+		for (size_t boss_index = 0; boss_index < kBosses.size(); boss_index++) {
+			const BossDefinition &boss = kBosses[boss_index];
+			if (map_eligible && !(*map_eligible)[boss_index])
+				continue;
 			if (!BossAvailableForWave(boss, wave) || !in_selection_band(boss))
 				continue;
 

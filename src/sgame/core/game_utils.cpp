@@ -743,7 +743,12 @@ void G_AdjustPlayerScore(gclient_t *cl, int32_t offset, bool adjust_team, int32_
 		return;
 
 	if (offset || team_offset) {
-		cl->resp.score += offset;
+		// [MuffMode] Horde exposes configurable score bonuses and can run endlessly;
+		// keep a bad cvar or very long session from overflowing signed score state.
+		const int64_t score = static_cast<int64_t>(cl->resp.score) + offset;
+		cl->resp.score = static_cast<int32_t>(std::clamp(score,
+			static_cast<int64_t>(std::numeric_limits<int32_t>::min()),
+			static_cast<int64_t>(std::numeric_limits<int32_t>::max())));
 		CalculateRanks();
 	}
 

@@ -29,6 +29,8 @@ constexpr float kAdaptiveWaveSeconds = 90.0f;
 constexpr float kSpawnMinPlayerDistance = 192.0f;
 constexpr float kTargetIsolationWeightFraction = 0.50f;
 constexpr float kTargetHealthWeightFraction = 0.375f;
+constexpr float kMaxRetargetIntervalSeconds = 300.0f;
+constexpr float kMaxTargetSpreadWeight = 1'000'000.0f;
 
 struct AdaptiveState {
 	int     wave = -1;
@@ -89,7 +91,7 @@ void CountMonstersTargetingPlayers(int *counts, int count_capacity)
 		if (slot < 1 || slot >= count_capacity)
 			continue;
 
-		counts[slot]++;
+		counts[slot] = MM_Horde_SaturatingIncrement(counts[slot]);
 	}
 }
 
@@ -292,7 +294,8 @@ float TargetScore(gentity_t *from, gentity_t *candidate, int monsters_targeting)
 	const float nearest_ally = NearestLivingAllyDistance(candidate);
 	const float health_frac = static_cast<float>(max(candidate->health, 0)) /
 		static_cast<float>(max(candidate->max_health, 1));
-	const float spread_weight = max(0.0f, g_horde_target_spread_weight->value);
+	const float spread_weight = MM_Horde_ClampFiniteFloat(g_horde_target_spread_weight->value,
+		512.f, 0.f, kMaxTargetSpreadWeight);
 
 	return MM_Horde_ComputeRoleTargetScore(monsters_targeting, distance, nearest_ally, health_frac,
 		spread_weight, spread_weight * kTargetIsolationWeightFraction,
@@ -317,7 +320,7 @@ gentity_t *FindBestTarget(gentity_t *from, gentity_t *current)
 
 		int load = target_load[slot];
 		if (current && ec != current)
-			load++;
+			load = MM_Horde_SaturatingIncrement(load);
 
 		const float score = TargetScore(from, ec, load);
 		if (score < best_score) {
@@ -330,6 +333,14 @@ gentity_t *FindBestTarget(gentity_t *from, gentity_t *current)
 }
 
 } // namespace
+
+void ResetRuntimeState()
+{
+	adaptive_state = {};
+	adaptive_last_wave_pressure = 1.0f;
+	target_load_frame = gtime_t::from_ms(-1);
+	target_load.fill(0);
+}
 
 void RefreshTargetLoadCache()
 {
@@ -349,7 +360,10 @@ float AdaptivePressureMult()
 	const int   fighters = max(1, MM_Horde_CountFighters());
 	const float death_pressure = static_cast<float>(adaptive_state.playerDeathsWave) / static_cast<float>(fighters);
 
-	const int killed = max(0, level.killed_monsters - adaptive_state.monstersKilledAtStart);
+	const int64_t killed_delta = static_cast<int64_t>(level.killed_monsters) -
+		static_cast<int64_t>(adaptive_state.monstersKilledAtStart);
+	const int killed = static_cast<int>(std::clamp<int64_t>(killed_delta, 0,
+		std::numeric_limits<int>::max()));
 	const float elapsed = (level.time - adaptive_state.waveStartTime).seconds();
 	const float clear_rate = elapsed > 0.0f ? static_cast<float>(killed) / elapsed : 0.0f;
 	// Compare monsters/sec cleared against an expected monsters/sec derived from budget, not raw points.
@@ -372,8 +386,9 @@ void Adaptive_BeginWave()
 
 	const float budget_mult = MM_Horde_ComputeAdaptiveBudgetMult(adaptive_last_wave_pressure);
 	if (budget_mult != 1.0f)
-		level.horde_spawn_points_remaining =
-			max(1, static_cast<int>(level.horde_spawn_points_remaining * budget_mult));
+		level.horde_spawn_points_remaining = MM_Horde_ScaleInt(
+			level.horde_spawn_points_remaining, budget_mult,
+			level.horde_spawn_points_remaining, 1);
 
 	adaptive_state.wave = level.round_number;
 	adaptive_state.waveBudgetStart = level.horde_spawn_points_remaining;
@@ -394,10 +409,12 @@ void Adaptive_RecordWaveEnd()
 void Adaptive_RecordPlayerDeath()
 {
 	if (g_horde_enhanced_ai->integer)
-		adaptive_state.playerDeathsWave++;
+		adaptive_state.playerDeathsWave = MM_Horde_SaturatingIncrement(adaptive_state.playerDeathsWave);
 }
 
-select_spawn_result_t SelectSpawnPoint(vec3_t avoid_point, const vec3_t &check_mins, const vec3_t &check_maxs)
+select_spawn_result_t SelectSpawnPoint(vec3_t avoid_point, const vec3_t &check_mins,
+	const vec3_t &check_maxs, gentity_t *const *allowed_spots, size_t allowed_count,
+	bool restrict_to_allowed)
 {
 	struct Candidate {
 		gentity_t *spot;
@@ -423,10 +440,11 @@ select_spawn_result_t SelectSpawnPoint(vec3_t avoid_point, const vec3_t &check_m
 		fighters++;
 	}
 
-	if (fighters < 1)
+	if (fighters < 1 && !restrict_to_allowed)
 		return SelectDeathmatchSpawnPoint(nullptr, avoid_point, SPAWN_FARTHEST, false, true, false, false);
 
-	cluster /= static_cast<float>(fighters);
+	if (fighters > 0)
+		cluster /= static_cast<float>(fighters);
 
 	float cv_dist = g_dm_respawn_point_min_dist->value;
 	if (cv_dist > 512.0f)
@@ -453,26 +471,33 @@ select_spawn_result_t SelectSpawnPoint(vec3_t avoid_point, const vec3_t &check_m
 			close_candidates.push_back(candidate);
 	};
 
-	gentity_t *spot = nullptr;
-	while ((spot = G_FindByString<&gentity_t::classname>(spot, "info_player_deathmatch")) != nullptr)
-		try_add_spot(spot);
+	if (restrict_to_allowed) {
+		for (size_t i = 0; i < allowed_count; i++)
+			try_add_spot(allowed_spots ? allowed_spots[i] : nullptr);
+	} else {
+		gentity_t *spot = nullptr;
+		while ((spot = G_FindByString<&gentity_t::classname>(spot, "info_player_deathmatch")) != nullptr)
+			try_add_spot(spot);
 
-	// If every deathmatch spot is too close, still give team spawns a chance to
-	// provide a tactically safe location before falling back to the close set.
-	if (candidates.empty()) {
-		spot = nullptr;
-		while ((spot = G_FindByString<&gentity_t::classname>(spot, "info_player_team_red")) != nullptr)
-			try_add_spot(spot);
-		spot = nullptr;
-		while ((spot = G_FindByString<&gentity_t::classname>(spot, "info_player_team_blue")) != nullptr)
-			try_add_spot(spot);
+		// If every deathmatch spot is too close, still give team spawns a chance to
+		// provide a tactically safe location before falling back to the close set.
+		if (candidates.empty()) {
+			spot = nullptr;
+			while ((spot = G_FindByString<&gentity_t::classname>(spot, "info_player_team_red")) != nullptr)
+				try_add_spot(spot);
+			spot = nullptr;
+			while ((spot = G_FindByString<&gentity_t::classname>(spot, "info_player_team_blue")) != nullptr)
+				try_add_spot(spot);
+		}
 	}
 
 	if (candidates.empty())
 		candidates.swap(close_candidates);
 
 	if (candidates.empty())
-		return SelectDeathmatchSpawnPoint(nullptr, avoid_point, SPAWN_FARTHEST, false, true, false, false);
+		return restrict_to_allowed
+			? select_spawn_result_t {}
+			: SelectDeathmatchSpawnPoint(nullptr, avoid_point, SPAWN_FARTHEST, false, true, false, false);
 	if (candidates.size() == 1)
 		return { candidates.front().spot, true };
 
@@ -532,7 +557,8 @@ void ApplySpawnRoleTuning(gentity_t *ent, const char *classname)
 	if (SupportsBlindfireClassname(classname))
 		ent->monsterinfo.blindfire = true;
 
-	const float retarget_sec = max(0.0f, g_horde_retarget_interval->value);
+	const float retarget_sec = MM_Horde_ClampFiniteFloat(g_horde_retarget_interval->value,
+		8.f, 0.f, kMaxRetargetIntervalSeconds);
 	if (retarget_sec > 0.0f) {
 		ent->monsterinfo.horde_retarget_time = level.time +
 			random_time(gtime_t::from_sec(retarget_sec * 0.75f), gtime_t::from_sec(retarget_sec * 1.25f));
@@ -555,7 +581,7 @@ gentity_t *PickTarget(gentity_t *from)
 	if (best) {
 		const int best_slot = static_cast<int>(best - g_entities);
 		if (best_slot >= 0 && best_slot < static_cast<int>(target_load.size()))
-			target_load[best_slot]++;
+			target_load[best_slot] = MM_Horde_SaturatingIncrement(target_load[best_slot]);
 	}
 
 	return best ? best : ClosestPlayerToPoint(origin);
@@ -565,7 +591,9 @@ bool MaybeRetarget(gentity_t *monster)
 {
 	if (!g_horde_enhanced_ai->integer || !monster || monster->health <= 0)
 		return false;
-	if (g_horde_retarget_interval->value <= 0.0f || monster->monsterinfo.horde_retarget_time > level.time)
+	const float retarget_sec = MM_Horde_ClampFiniteFloat(g_horde_retarget_interval->value,
+		8.f, 0.f, kMaxRetargetIntervalSeconds);
+	if (retarget_sec <= 0.0f || monster->monsterinfo.horde_retarget_time > level.time)
 		return false;
 	if (monster->monsterinfo.aiflags & (AI_MEDIC | AI_COMBAT_POINT | AI_SOUND_TARGET))
 		return false;
@@ -573,7 +601,6 @@ bool MaybeRetarget(gentity_t *monster)
 		monster->enemy->client->eliminated)
 		return false;
 
-	const float retarget_sec = max(0.1f, g_horde_retarget_interval->value);
 	monster->monsterinfo.horde_retarget_time = level.time +
 		random_time(gtime_t::from_sec(retarget_sec * 0.75f), gtime_t::from_sec(retarget_sec * 1.25f));
 
@@ -594,13 +621,16 @@ bool MaybeRetarget(gentity_t *monster)
 		return false;
 
 	const float current_score = TargetScore(monster, current, target_load[current_slot]);
-	const float best_score = TargetScore(monster, best, target_load[best_slot] + 1);
-	const float switch_margin = max(32.0f, g_horde_target_spread_weight->value * 0.25f);
+	const float best_score = TargetScore(monster, best,
+		MM_Horde_SaturatingIncrement(target_load[best_slot]));
+	const float spread_weight = MM_Horde_ClampFiniteFloat(g_horde_target_spread_weight->value,
+		512.f, 0.f, kMaxTargetSpreadWeight);
+	const float switch_margin = max(32.0f, spread_weight * 0.25f);
 	if (best_score + switch_margin >= current_score)
 		return false;
 
 	target_load[current_slot] = max(0, target_load[current_slot] - 1);
-	target_load[best_slot]++;
+	target_load[best_slot] = MM_Horde_SaturatingIncrement(target_load[best_slot]);
 	monster->oldenemy = nullptr;
 	monster->enemy = best;
 	monster->goalentity = best;

@@ -6,6 +6,7 @@
 #include "muffmode/mm_freezetag.h"
 #include "muffmode/mm_hud_stat_contracts.h"
 #include "muffmode/mm_horde.h"
+#include "muffmode/mm_horde_ai_rules.h"
 #include "muffmode/mm_lms.h"
 #include "muffmode/mm_red_rover_rules.h"
 #include "muffmode/mm_scoreboard_layout.h"
@@ -855,8 +856,8 @@ static void G_SetGametypeStats(gentity_t *ent) {
 
 	// Right-stack lives digit (yt 42): raw count in STAT_LIVES, num(1) in layout.
 	if (GT(GT_HORDE) && g_horde_lives->integer > 0) {
-		const int lives = ent->client->pers.lives;
-		ent->client->ps.stats[STAT_LIVES] = lives > 0 ? lives : 0;
+		ent->client->ps.stats[STAT_LIVES] =
+			MM_Horde_HudCounterValue(ent->client->pers.lives);
 	} else if (GT(GT_LMS) && ClientIsPlaying(ent->client) && !ent->client->eliminated) {
 		const int lives = ent->client->pers.lives > 0 ? ent->client->pers.lives : MM_LMS_LivesPerRound();
 		ent->client->ps.stats[STAT_LIVES] = lives;
@@ -891,8 +892,10 @@ static void G_SetGametypeStats(gentity_t *ent) {
 
 	if (level.match_state == MATCH_IN_PROGRESS) {
 		if (GT(GT_HORDE)) {
-			ent->client->ps.stats[STAT_HORDE_REMAINING] = MM_Horde_LivingThreatCount();
-			ent->client->ps.stats[STAT_HORDE_WAVE] = level.round_number;
+			ent->client->ps.stats[STAT_HORDE_REMAINING] =
+				MM_Horde_HudCounterValue(MM_Horde_LivingThreatCount());
+			ent->client->ps.stats[STAT_HORDE_WAVE] =
+				MM_Horde_HudCounterValue(level.round_number);
 		} else {
 			ent->client->ps.stats[STAT_HORDE_REMAINING] = 0;
 			ent->client->ps.stats[STAT_HORDE_WAVE] = 0;

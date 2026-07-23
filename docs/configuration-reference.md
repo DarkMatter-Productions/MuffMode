@@ -421,6 +421,42 @@ or drops.
 | `g_horde_wave_variety` | `1` | Enables roster variety limits for non-themed waves. |
 | `g_horde_wave_min_types` | `3` | Minimum monster type count when wave variety can be satisfied. |
 
+## Horde Wildcard Waves And Edge Drops
+
+Wildcard Waves are an opt-in set of unusual wave modifiers suggested by playtester HonkHonk. They are disabled
+as a group by default: individual weights only affect selection after `g_horde_preset_chance` is set above `0`.
+A Wildcard replaces the normal theme, roster, featured-spawn, and champion choices for that wave, preventing
+modifier stacking. Boss units never receive Wildcard scaling or combat modifiers; setting
+`g_horde_preset_allow_boss_waves 1` only permits the boss wave's ordinary escorts to use one.
+
+Model and collision scaling always stay synchronized and are clamped to `0.5`-`1.5`. Scaled monsters use the
+same pre-spawn and post-spawn world validation as every other Horde threat. Clone Army excludes medics so a
+single-type wave cannot recursively grow through revivals. Tiny Shamblers is ineligible before the Shambler's
+wave-10 unlock. Weights are clamped to `0`-`12`; a weight of `0` disables that preset.
+
+| Cvar | Default | Purpose |
+| --- | --- | --- |
+| `g_horde_monster_edge_drops` | `1` | Lets a living ground monster walk off an edge only while actively chasing a living fighter and only when a non-hazardous, sufficiently flat BSP landing exists within 256 units and remains in the target's PHS. Bosses, flyers, swimmers, stand-ground monsters, voids, lava, slime, and deep water are excluded. |
+| `g_horde_preset_chance` | `0` | Chance that an eligible wave becomes a Wildcard Wave; clamped to `0`-`1`. `0` disables every Wildcard regardless of its weight. |
+| `g_horde_preset_allow_boss_waves` | `0` | Allows a Wildcard on scheduled boss waves. It applies only to ordinary escorts, never to boss units. |
+| `g_horde_preset_weight_clone_army` | `7` | One eligible non-medic director monster type fills the ordinary wave. |
+| `g_horde_preset_weight_funhouse_horde` | `5` | Each director monster is either `0.6x` or `1.45x` model/hull scale, with bounded health, damage, and movement compensation. |
+| `g_horde_preset_weight_get_over_here` | `4` | Ordinary monster hits deal `85%` damage and add a capped pull toward the attacker. |
+| `g_horde_preset_weight_giant_horde` | `4` | Director monsters use `1.35x` model/hull scale, `1.6x` health, `1.1x` damage, and `0.75x` movement. |
+| `g_horde_preset_weight_glass_cannon` | `8` | Director monsters use `0.4x` health and `1.8x` damage. |
+| `g_horde_preset_weight_low_gravity` | `3` | Uses `55%` gravity for fighters and director monsters for this wave without changing the server's global gravity cvar. |
+| `g_horde_preset_weight_tiny_shamblers` | `4` | From wave 10 onward, fills the ordinary wave with `0.55x` Shamblers using reduced health/damage and faster movement. |
+| `g_horde_preset_weight_tiny_terror` | `10` | Director monsters use `0.6x` model/hull scale, `0.35x` health, `0.7x` damage, and `1.5x` movement. |
+| `g_horde_preset_weight_pinball_night` | `4` | Uses `65%` fighter/director-monster gravity, `500%` knockback against fighters, and `85%` ordinary-monster damage. |
+| `g_horde_preset_weight_sawstorm` | `5` | Quadruples player Chainfist damage against non-boss monsters for the wave. |
+
+The proposed route-time hull shrinking, visual-only scaling, Hyper Wave, Jackpot Wave, Kill Medic instant
+revival, Mini Me spawn multiplication, and Boss Duel are intentionally not implemented. Route-time shrinking
+can restore a hull while overlapping geometry; visual-only scaling creates misleading collision; the Hyper
+proposal cannot safely accelerate every monster attack animation as one uniform rule; loot/revival/copy
+mechanics can multiply live entities or drops; and making hostile boss AI duel reliably would require new
+faction, target, summon, completion, and reposition semantics rather than a safe director modifier.
+
 ## Horde Bosses, Water Ambushes, And Reinforcements
 
 Scheduled boss waves replace the champion roll for that wave, reduce the normal escort budget, spawn the boss
@@ -435,13 +471,17 @@ Selection follows unlock tiers, avoids the configured number of recent profiles 
 alternatives, and gives a compatible authored `horde_boss` anchor priority over the global roll. Boss health gains
 20% per additional active fighter, then applies profile, pair, global, and post-unlock wave multipliers. Damage
 uses the equivalent profile/global/endless growth path. Power armor can be scaled separately. The default model
-scale limit keeps Modir and other unusually large campaign variants usable on multiplayer maps; set it to `0` to
-preserve unrestricted authored geometry.
+scale limit keeps Modir and other unusually large campaign variants usable on multiplayer maps; setting it to
+`0` disables that configurable limit while retaining an absolute safety ceiling of `16`.
 
-Carrier/Widow reinforcements and medic-resurrected monsters count toward live pressure and wave completion, but
-do not grant repeat rewards. If an encounter cannot fit any available authored or player spawn after repeated
-attempts, Horde falls back to a compact Tank Commander. If part of a pair has already deployed, the director keeps
-the active unit instead of replacing it; if the fallback also fails, the escort wave continues without stalling.
+Carrier and Medic Commander reinforcements remain pressure-only, but Widow-spawned monsters and successful
+medic revivals become counted threats that must be killed before the wave can end. All summoned or revived
+monsters remain ineligible for repeat score, rally progress, or drops, and transition cleanup removes any
+pressure-only survivors. At level load, Horde tests every boss profile's scaled hull against authored boss anchors and
+player spawns, records only the player points suitable for that profile, and excludes profiles without enough
+placements (including two distinct placements for enabled pair encounters). A map with no compatible profile
+does not schedule boss waves. Runtime blockage can still cancel a deployment after bounded retries, but never
+forces a different boss that was not validated for the map.
 
 Aquatic attempts can use authored `monster_flipper` placements, underwater `monster_gekk` placements, or
 explicit water anchors, choosing either a Flipper or swimming Gekk. If no authored water location is usable, the
@@ -465,8 +505,8 @@ and applies short spawn protection. The per-wave cap prevents an endless death l
 | `g_horde_boss_machinegames` | `1` | Includes the Call of the Machine named profiles in progression rolls. Explicit `g_horde_boss_force` still permits one while this is `0`. |
 | `g_horde_boss_pairs` | `1` | Enables the two-unit `children_of_makron` and `masters_of_the_machine` profiles. |
 | `g_horde_boss_repeat_window` | `2` | Avoids this many most-recent boss profiles when the active tier has enough alternatives; exclusions relax oldest-first if necessary. |
-| `g_horde_boss_force` | empty | Forces one profile ID on every scheduled boss wave, bypassing unlock and MachineGames filters. Pair profiles still require `g_horde_boss_pairs 1`. |
-| `g_horde_boss_scale_limit` | `2.5` | Maximum applied boss model/hull scale. `0` disables the cap and preserves unrestricted profile or anchor scale. |
+| `g_horde_boss_force` | empty | Forces one profile ID on every scheduled boss wave, bypassing unlock and MachineGames filters. Pair profiles still require `g_horde_boss_pairs 1`, and the forced profile is skipped if its level-load placement catalog has no suitable authored/player points. |
+| `g_horde_boss_scale_limit` | `2.5` | Maximum applied boss model/hull scale. `0` disables this configurable cap; an absolute safety ceiling of `16` still protects collision and trace math. |
 | `g_horde_boss_health_per_wave` | `0.05` | Adds this fraction of health for each wave after the selected profile's unlock wave. Negative values behave as `0`. |
 | `g_horde_boss_damage_per_wave` | `0.01` | Adds this fraction of outgoing damage for each wave after the selected profile's unlock wave. Negative values behave as `0`. |
 | `g_horde_boss_pair_health_mult` | `1.0` | Per-unit health multiplier for paired encounters. Values below `0.05` are treated as `0.05`. |
@@ -628,6 +668,7 @@ Defaults to `1` (enabled); set to `0` to restore legacy horde monster targeting 
 | `g_horde_enhanced_ai` | `1` | Target spread, tactical hull-aware placement, adaptive pacing, per-spawn roles, periodic retargeting, extended aggro, attack stagger, and medic corpse-resurrect priority. |
 | `g_horde_target_spread_weight` | `512` | Score penalty for each monster already assigned to a fighter. Hunters also use half this value to prefer isolated fighters; heavies use 37.5% to prefer healthier fighters. `0` leaves distance as the main target score. |
 | `g_horde_retarget_interval` | `8.0` | Seconds between per-monster target-load rebalance checks. Close engagements and special AI goals remain sticky. `0` disables periodic retargeting. |
+| `g_horde_stall_timeout` | `90` | Seconds with no damage to a counted Horde monster after all spawns are committed before recovery runs. The first timeout retargets every threat; another timeout relocates one stranded threat to a validated in-PHS combat spawn. Invalid or escaped world-space positions are recovered immediately regardless of this value. `0` disables only the timed recovery. |
 
 ## Debug-Only Weapon Balance Cvars
 

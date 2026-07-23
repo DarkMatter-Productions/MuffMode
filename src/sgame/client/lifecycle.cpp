@@ -750,6 +750,7 @@ void ClientSpawn(gentity_t *ent) {
 	client_respawn_t		resp;
 	client_session_t		sess;
 	const gtime_t			horde_reinforcement_protection = client->pers.horde_reinforcement_protection;
+	const gtime_t			horde_elim_msg_next = client->horde_elim_msg_next;
 
 	if (GTF(GTF_ROUNDS) && level.match_state == matchst_t::MATCH_IN_PROGRESS && notGT(GT_HORDE)) {
 		const bool round_locked = level.round_state == roundst_t::ROUND_IN_PROGRESS ||
@@ -895,6 +896,8 @@ void ClientSpawn(gentity_t *ent) {
 	client->pers = saved;
 	client->resp = resp;
 	client->sess = sess;
+	if (GT(GT_HORDE) && eliminated)
+		client->horde_elim_msg_next = horde_elim_msg_next;
 	client->chaingun_shots = 1; // first shot deals 5 damage (4 + (1 & 1))
 
 	// on a new, fresh spawn (always in DM, clear inventory
@@ -1099,6 +1102,11 @@ deathmatch mode, so clear everything out before starting them.
 =====================
 */
 static void ClientBeginDeathmatch(gentity_t *ent) {
+	// SpawnEntities marks retained clients unspawned before the engine calls
+	// ClientBegin for the new map. Preserve that distinction across ClientSpawn,
+	// which initializes pers.spawned again.
+	const bool fresh_connection = ent->client->pers.spawned;
+
 	G_InitGentity(ent);
 
 	// make sure we have a known default
@@ -1112,7 +1120,7 @@ static void ClientBeginDeathmatch(gentity_t *ent) {
 	if (level.intermission_time) {
 		MoveClientToIntermission(ent);
 	} else {
-		if (!(ent->svflags & SVF_NOCLIENT)) {
+		if (fresh_connection && !(ent->svflags & SVF_NOCLIENT)) {
 			// send effect
 			gi.WriteByte(svc_muzzleflash);
 			gi.WriteEntity(ent);
@@ -1273,6 +1281,15 @@ void ClientBegin(gentity_t *ent) {
 	ent->client->awaiting_respawn = false;
 	ent->client->respawn_timeout = 0_ms;
 
+	// SpawnEntities clears client edicts between maps, while ClientConnect is not
+	// called again for retained clients. Restore engine-visible identity before
+	// begin/spawn work so retained bots cannot fall through the human-client path.
+	ent->svflags |= SVF_PLAYER;
+	if (ent->client->sess.is_a_bot)
+		ent->svflags |= SVF_BOT;
+	else
+		ent->svflags &= ~SVF_BOT;
+
 	// set inactivity timer
 	gtime_t cv = gtime_t::from_sec(g_inactivity->integer);
 	if (cv) {
@@ -1284,8 +1301,16 @@ void ClientBegin(gentity_t *ent) {
 	// [Paril-KEX] we're always connected by this point...
 	ent->client->pers.connected = true;
 
-	// InitGame() zeroes game.clients (TAG_GAME) on every map load; ClientConnect() is not
-	// called again when changing maps, so reload persisted prefs here every ClientBegin.
+	// Map loads clear engine configstrings without calling ClientConnect again.
+	// Republish retained name/skin data before exposing MODELINDEX_PLAYER so the
+	// renderer cannot observe a player backed by a stale map model handle.
+	if (ent->client->pers.userinfo[0]) {
+		char userinfo[MAX_INFO_STRING];
+		Q_strlcpy(userinfo, ent->client->pers.userinfo, sizeof(userinfo));
+		ClientUserinfoChanged(ent, userinfo);
+	}
+
+	// Reload persisted preferences here every ClientBegin.
 	if (!(ent->svflags & SVF_BOT))
 		MM_ClientInitPConfig(ent);
 
@@ -2174,7 +2199,11 @@ void ClientThink(gentity_t *ent, usercmd_t *ucmd) {
 		client->ps.pmove.haste = (client->pu_time_haste > level.time) && MM_RulesetHasteBoostsMovement();
 
 		// trigger_gravity support
-		client->ps.pmove.gravity = (short)(level.gravity * ent->gravity);
+		client->ps.pmove.gravity = static_cast<int16_t>(MM_Horde_ClampFiniteInt(
+			static_cast<double>(level.gravity) * static_cast<double>(ent->gravity) *
+				MM_Horde_PlayerGravityScale(),
+			level.gravity, std::numeric_limits<int16_t>::min(),
+			std::numeric_limits<int16_t>::max()));
 		pm.s = client->ps.pmove;
 
 		pm.s.origin = ent->s.origin;

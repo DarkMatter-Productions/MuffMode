@@ -11,6 +11,7 @@ black widow, part 2
 // timestamp used to prevent rapid fire of melee attack
 
 #include "../g_local.h"
+#include "muffmode/mm_horde.h"
 #include "m_widow2.h"
 #include "m_flash.h"
 
@@ -159,6 +160,8 @@ static void Widow2Spawn(gentity_t *self) {
 			ent->think(ent);
 
 			ent->monsterinfo.aiflags |= AI_SPAWNED_WIDOW | AI_DO_NOT_COUNT | AI_IGNORE_SHOTS;
+			// [MuffMode] Widow offspring are real Horde wave threats, but remain reward-neutral.
+			MM_Horde_CountAuxiliaryMonster(ent);
 
 			if (!InCoopStyle()) {
 				designated_enemy = self->enemy;

@@ -118,7 +118,7 @@ bool BossAvailableForWave(const BossDefinition &boss, int wave);
 int EffectiveBossUnits(const BossDefinition &boss);
 float EffectiveBossScale(const BossDefinition &boss, float authored_scale = 0.f);
 const BossDefinition *PickBossForWave(int wave, const BossDefinition *const *recent,
-	size_t recent_count);
+	size_t recent_count, const std::array<bool, kHordeBossCount> *map_eligible = nullptr);
 const DirectorMonster *PickAquaticForWave(int wave, int remaining_points);
 void PrecacheTableMonsters();
 void PrecacheDirectorMonsters();

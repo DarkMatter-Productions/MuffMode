@@ -98,6 +98,24 @@ MM_TEST(parse_non_negative_int_rejects_negative_and_malformed_values) {
 	MM_CHECK_FALSE(MM_ParseNonNegativeIntArg("1.0"));
 }
 
+MM_TEST(reinforcement_specs_keep_classname_and_strength_paired) {
+	const auto stalker = MM_ParseReinforcementSpec("monster_stalker 1");
+	MM_CHECK(stalker.has_value());
+	MM_CHECK_EQ(stalker->classname, std::string_view("monster_stalker"));
+	MM_CHECK_EQ(stalker->strength, 1);
+
+	const auto gladiator = MM_ParseReinforcementSpec("\tmonster_gladiator   6 \r\n");
+	MM_CHECK(gladiator.has_value());
+	MM_CHECK_EQ(gladiator->classname, std::string_view("monster_gladiator"));
+	MM_CHECK_EQ(gladiator->strength, 6);
+
+	MM_CHECK_FALSE(MM_ParseReinforcementSpec(""));
+	MM_CHECK_FALSE(MM_ParseReinforcementSpec("monster_stalker"));
+	MM_CHECK_FALSE(MM_ParseReinforcementSpec("monster_stalker 0"));
+	MM_CHECK_FALSE(MM_ParseReinforcementSpec("monster_stalker -1"));
+	MM_CHECK_FALSE(MM_ParseReinforcementSpec("monster_stalker 1 trailing"));
+}
+
 MM_TEST(parse_uint32_rejects_signed_malformed_and_overflow_values) {
 	MM_CHECK_EQ(*MM_ParseUInt32Arg("0"), 0u);
 	MM_CHECK_EQ(*MM_ParseUInt32Arg("4294967295"), std::numeric_limits<uint32_t>::max());
@@ -607,6 +625,25 @@ MM_TEST(horde_midwave_spawns_preserve_remaining_lives) {
 	MM_CHECK_FALSE(MM_Horde_ShouldEliminateMidWaveSpawn(false, false, 0));
 }
 
+MM_TEST(horde_converted_monsters_preserve_skill_inhibition) {
+	MM_CHECK(MM_Horde_SourceMonsterInhibitedBySkill(0, true, false, false));
+	MM_CHECK_FALSE(MM_Horde_SourceMonsterInhibitedBySkill(0, false, true, true));
+	MM_CHECK(MM_Horde_SourceMonsterInhibitedBySkill(1, false, true, false));
+	MM_CHECK_FALSE(MM_Horde_SourceMonsterInhibitedBySkill(1, true, false, true));
+	MM_CHECK(MM_Horde_SourceMonsterInhibitedBySkill(2, false, false, true));
+	MM_CHECK(MM_Horde_SourceMonsterInhibitedBySkill(3, false, false, true));
+	MM_CHECK_FALSE(MM_Horde_SourceMonsterInhibitedBySkill(3, true, true, false));
+}
+
+MM_TEST(horde_hud_counters_do_not_wrap_signed_stats) {
+	MM_CHECK_EQ(MM_Horde_HudCounterValue(-1), 0);
+	MM_CHECK_EQ(MM_Horde_HudCounterValue(42), 42);
+	MM_CHECK_EQ(MM_Horde_HudCounterValue(std::numeric_limits<int16_t>::max()),
+		std::numeric_limits<int16_t>::max());
+	MM_CHECK_EQ(MM_Horde_HudCounterValue(std::numeric_limits<int>::max()),
+		std::numeric_limits<int16_t>::max());
+}
+
 MM_TEST(horde_burst_and_reinforcement_thresholds_are_bounded) {
 	MM_CHECK_FALSE(MM_Horde_ShouldRestAfterSpawn(5, 6));
 	MM_CHECK(MM_Horde_ShouldRestAfterSpawn(6, 6));
@@ -620,6 +657,15 @@ MM_TEST(horde_burst_and_reinforcement_thresholds_are_bounded) {
 	MM_CHECK_FALSE(MM_Horde_WaveCleared(false, 0));
 	MM_CHECK_FALSE(MM_Horde_WaveCleared(true, 1));
 	MM_CHECK(MM_Horde_WaveCleared(true, 0));
+
+	MM_CHECK_FALSE(MM_Horde_StallRecoveryDue(false, 1, 90'000, 0, 90.f));
+	MM_CHECK_FALSE(MM_Horde_StallRecoveryDue(true, 0, 90'000, 0, 90.f));
+	MM_CHECK_FALSE(MM_Horde_StallRecoveryDue(true, 1, 89'999, 0, 90.f));
+	MM_CHECK(MM_Horde_StallRecoveryDue(true, 1, 90'000, 0, 90.f));
+	MM_CHECK_FALSE(MM_Horde_StallRecoveryDue(true, 1, 90'000, 0, 0.f));
+	MM_CHECK_FALSE(MM_Horde_StallRecoveryDue(true, 1, 1'000, 2'000, 1.f));
+	MM_CHECK(MM_Horde_StallRecoveryDue(true, 1, 90'000, 0,
+		std::numeric_limits<float>::quiet_NaN()));
 }
 
 MM_TEST(horde_performance_tiers_scale_score_and_drop_momentum) {
@@ -635,6 +681,8 @@ MM_TEST(horde_performance_tiers_scale_score_and_drop_momentum) {
 	MM_CHECK_EQ(MM_Horde_DropChance(0.35f, 0.08f, 3), 0.59f);
 	MM_CHECK_EQ(MM_Horde_DropChance(0.9f, 0.2f, 3), 1.0f);
 	MM_CHECK_EQ(MM_Horde_DropChance(-1.0f, 0.2f, 0), 0.0f);
+	MM_CHECK_EQ(MM_Horde_Probability(std::numeric_limits<float>::quiet_NaN(), 0.35f), 0.35f);
+	MM_CHECK_EQ(MM_Horde_Probability(std::numeric_limits<float>::infinity(), 0.35f), 0.35f);
 }
 
 MM_TEST(horde_progression_ramps_roster_breadth_and_unlock_showcases) {
@@ -648,6 +696,28 @@ MM_TEST(horde_progression_ramps_roster_breadth_and_unlock_showcases) {
 	MM_CHECK_EQ(MM_Horde_MonsterUnlockWave(-1), 1);
 	MM_CHECK_EQ(MM_Horde_MonsterUnlockWave(1), 1);
 	MM_CHECK_EQ(MM_Horde_MonsterUnlockWave(8), 8);
+}
+
+MM_TEST(horde_wildcard_policy_is_opt_in_and_bounded) {
+	MM_CHECK_EQ(MM_Horde_PresetWeight(-1), 0);
+	MM_CHECK_EQ(MM_Horde_PresetWeight(7), 7);
+	MM_CHECK_EQ(MM_Horde_PresetWeight(999), 12);
+
+	MM_CHECK_FALSE(MM_Horde_ShouldSelectPreset(false, false, 0.f, 0.f));
+	MM_CHECK_FALSE(MM_Horde_ShouldSelectPreset(true, false, 1.f, 0.f));
+	MM_CHECK(MM_Horde_ShouldSelectPreset(true, true, 1.f, 0.f));
+	MM_CHECK(MM_Horde_ShouldSelectPreset(false, false, 0.1f, 0.099f));
+	MM_CHECK_FALSE(MM_Horde_ShouldSelectPreset(false, false, 0.1f, 0.1f));
+	MM_CHECK_FALSE(MM_Horde_ShouldSelectPreset(false, false,
+		std::numeric_limits<float>::quiet_NaN(), 0.f));
+	MM_CHECK_FALSE(MM_Horde_ShouldSelectPreset(false, false, 1.f,
+		std::numeric_limits<float>::quiet_NaN()));
+
+	MM_CHECK_EQ(MM_Horde_PresetEntityScale(0.1f), 0.5f);
+	MM_CHECK_EQ(MM_Horde_PresetEntityScale(0.65f), 0.65f);
+	MM_CHECK_EQ(MM_Horde_PresetEntityScale(2.f), 1.5f);
+	MM_CHECK_EQ(MM_Horde_PresetEntityScale(
+		std::numeric_limits<float>::infinity()), 1.f);
 }
 
 MM_TEST(horde_boss_tier_window_keeps_late_bosses_progressive) {
@@ -671,6 +741,11 @@ MM_TEST(horde_boss_encounter_profiles_bound_pairs_scale_and_endless_growth) {
 	MM_CHECK_EQ(MM_Horde_EffectiveBossUnits(3, true, 2), 2);
 	MM_CHECK_EQ(MM_Horde_EffectiveBossUnits(2, false, 2), 1);
 	MM_CHECK_EQ(MM_Horde_EffectiveBossUnits(1, true, 2), 1);
+	MM_CHECK(MM_Horde_BossPlacementSufficient(1, 0, 1));
+	MM_CHECK(MM_Horde_BossPlacementSufficient(1, 1, 2));
+	MM_CHECK(MM_Horde_BossPlacementSufficient(0, 2, 2));
+	MM_CHECK_FALSE(MM_Horde_BossPlacementSufficient(0, 1, 2));
+	MM_CHECK_FALSE(MM_Horde_BossPlacementSufficient(1, 0, 2));
 
 	MM_CHECK_EQ(MM_Horde_EffectiveBossScale(5.5f, 0.f, 2.5f), 2.5f);
 	MM_CHECK_EQ(MM_Horde_EffectiveBossScale(1.25f, 0.8f, 2.5f), 0.8f);
@@ -680,6 +755,13 @@ MM_TEST(horde_boss_encounter_profiles_bound_pairs_scale_and_endless_growth) {
 	MM_CHECK_EQ(MM_Horde_BossWaveMultiplier(12, 12, 0.05f), 1.f);
 	MM_CHECK_EQ(MM_Horde_BossWaveMultiplier(18, 12, 0.05f), 1.3f);
 	MM_CHECK_EQ(MM_Horde_BossWaveMultiplier(18, 12, -1.f), 1.f);
+	MM_CHECK_EQ(MM_Horde_BossWaveMultiplier(std::numeric_limits<int>::max(), 1,
+		std::numeric_limits<float>::infinity()), 1.f);
+	MM_CHECK_EQ(MM_Horde_BossWaveMultiplier(std::numeric_limits<int>::max(), 1,
+		std::numeric_limits<float>::max()), MM_HORDE_MAX_COMBAT_MULTIPLIER);
+	MM_CHECK_EQ(MM_Horde_EffectiveBossScale(std::numeric_limits<float>::infinity(), 0.f, 0.f), 1.f);
+	MM_CHECK_EQ(MM_Horde_EffectiveBossScale(1.f, std::numeric_limits<float>::max(), 0.f),
+		MM_HORDE_MAX_BOSS_SCALE);
 
 	MM_CHECK_FALSE(MM_Horde_BossEncounterDefeated(true, 0));
 	MM_CHECK_FALSE(MM_Horde_BossEncounterDefeated(false, 1));
@@ -701,6 +783,7 @@ MM_TEST(horde_outgoing_damage_scale_supports_buffs_and_reductions) {
 MM_TEST(horde_adaptive_spawn_mult_bounds_and_direction) {
 	MM_CHECK_EQ(MM_Horde_ClampAdaptiveSpawnMult(2.f), 1.35f);
 	MM_CHECK_EQ(MM_Horde_ClampAdaptiveSpawnMult(0.1f), 0.65f);
+	MM_CHECK_EQ(MM_Horde_ClampAdaptiveSpawnMult(std::numeric_limits<float>::quiet_NaN()), 1.f);
 
 	const float coasting = MM_Horde_ComputeAdaptiveSpawnMult(0.95f, 0.1f, 1.5f);
 	const float struggling = MM_Horde_ComputeAdaptiveSpawnMult(0.2f, 0.9f, 0.3f);
@@ -725,6 +808,36 @@ MM_TEST(horde_late_escalation_max_alive_cap) {
 	MM_CHECK_EQ(MM_Horde_LateMaxAlive(base, 17, peak, 2, 70, true), 70);
 	MM_CHECK_EQ(MM_Horde_LateMaxAlive(base, 18, peak, 2, 70, true), 70);
 	MM_CHECK_EQ(MM_Horde_LateMaxAlive(base, 19, peak, 2, 72, true), 72);
+	MM_CHECK_EQ(MM_Horde_LateMaxAlive(std::numeric_limits<int>::max(),
+		std::numeric_limits<int>::max(), 0, std::numeric_limits<int>::max(),
+		std::numeric_limits<int>::max(), true), std::numeric_limits<int>::max());
+	MM_CHECK_EQ(MM_Horde_LateMaxAlive(-10, 20, peak, 2, 70, true), 0);
+	MM_CHECK_EQ(MM_Horde_LateMaxAlive(base, 20, peak, -2, 70, true), base);
+	MM_CHECK_EQ(MM_Horde_LateMaxAlive(base, 20, peak, 2, 10, true), base);
+}
+
+MM_TEST(horde_budget_math_and_integer_scaling_are_saturating) {
+	MM_CHECK_EQ(MM_Horde_ComputeWaveBudget(12, 15, 5, 0, 0, 12, 0.6f, 1.f, 1.f), 75);
+	MM_CHECK_EQ(MM_Horde_ComputeWaveBudget(18, 15, 5, 0, 0, 12, 0.6f, 1.f, 1.f), 93);
+	MM_CHECK_EQ(MM_Horde_ComputeWaveBudget(std::numeric_limits<int>::max(),
+		std::numeric_limits<int>::max(), std::numeric_limits<int>::max(), 0, 0,
+		std::numeric_limits<int>::max(), std::numeric_limits<float>::max(),
+		std::numeric_limits<float>::max(), std::numeric_limits<float>::max()),
+		std::numeric_limits<int>::max());
+	MM_CHECK_EQ(MM_Horde_ComputeWaveBudget(12, 15, 5, 0, 0, 12,
+		std::numeric_limits<float>::infinity(), std::numeric_limits<float>::infinity(),
+		std::numeric_limits<float>::quiet_NaN()), 75);
+
+	MM_CHECK_EQ(MM_Horde_ScaleInt(100, 1.5f, 100, 0, 1000), 150);
+	MM_CHECK_EQ(MM_Horde_ScaleInt(100, std::numeric_limits<float>::infinity(), 100, 0, 1000), 100);
+	MM_CHECK_EQ(MM_Horde_ScaleInt(100, std::numeric_limits<float>::infinity(), 75, 1000, 0), 75);
+	MM_CHECK_EQ(MM_Horde_ScaleInt(100, 2.f, 75, 150, 0), 150);
+	MM_CHECK_EQ(MM_Horde_ScaleInt(std::numeric_limits<int>::max(), 2.f, 1),
+		std::numeric_limits<int>::max());
+	MM_CHECK_EQ(MM_Horde_SaturatingAdd(std::numeric_limits<int>::max(), 1),
+		std::numeric_limits<int>::max());
+	MM_CHECK_EQ(MM_Horde_SaturatingIncrement(std::numeric_limits<int>::max()),
+		std::numeric_limits<int>::max());
 }
 
 MM_TEST(loc_line_parser_extracts_position_and_multiword_label) {

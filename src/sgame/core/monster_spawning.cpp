@@ -2,6 +2,7 @@
 // Licensed under the GNU General Public License 2.0.
 
 #include "g_local.h"
+#include "muffmode/mm_horde.h"
 
 //
 // Monster spawning code
@@ -37,6 +38,18 @@ gentity_t *CreateMonster(const vec3_t &origin, const vec3_t &angles, const char 
 
 	newEnt->gravityVector = { 0, 0, -1 };
 	ED_CallSpawn(newEnt);
+
+	// [MuffMode] Dynamic medic/carrier/widow summons bypass the Horde director.
+	// Reject them immediately if their final monster hull is outside or
+	// disconnected from the live play space; the continuous guard handles
+	// subsequent movement escapes.
+	if (!newEnt->inuse || !(newEnt->svflags & SVF_MONSTER) ||
+		!MM_Horde_ValidateMonsterPlacement(newEnt)) {
+		if (newEnt->inuse)
+			G_FreeEntity(newEnt);
+		return nullptr;
+	}
+
 	newEnt->s.renderfx |= RF_IR_VISIBLE;
 
 	return newEnt;

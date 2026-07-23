@@ -10,6 +10,7 @@
 #include "muffmode/mm_gametype.h"
 #include "muffmode/mm_ghost.h"
 #include "muffmode/mm_horde.h"
+#include "muffmode/mm_horde_ai_rules.h"
 #include "muffmode/mm_lms.h"
 #include "muffmode/mm_lms_rules.h"
 #include "muffmode/mm_match.h"
@@ -22,6 +23,7 @@
 #include <algorithm>
 #include <cstdlib>
 #include <iterator>
+#include <limits>
 
 extern cvar_t *g_horde_champions;
 extern cvar_t *g_horde_champion_max_per_run;
@@ -485,9 +487,12 @@ void Match_Start() {
 	level.horde_champions_remaining = 0;
 	if (GT(GT_HORDE) && g_horde_champions->integer) {
 		int n = 0;
-		for (int i = 0; i < g_horde_champion_max_per_run->integer; i++)
-			if (frandom() < g_horde_champion_chance->value)
-				n++;
+		const int max_champions = clamp(g_horde_champion_max_per_run->integer, 0,
+			static_cast<int>(std::numeric_limits<int8_t>::max()));
+		const float champion_chance = MM_Horde_Probability(g_horde_champion_chance->value, 0.6f);
+		for (int i = 0; i < max_champions; i++)
+			if (frandom() < champion_chance)
+				n = MM_Horde_SaturatingIncrement(n);
 		level.horde_champions_remaining = static_cast<int8_t>(n);
 	}
 

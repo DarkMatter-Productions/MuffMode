@@ -1374,9 +1374,13 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
 		}
 	}
 
-	// Proper C++ reset: destroy prior non-trivial members (std::string / VoteStateData)
-	// instead of memset + placement-new, which leaked heap blocks on every gamemap.
-	level = {};
+	// Proper C++ reset: destroy and reconstruct the whole object instead of
+	// memset + partial placement-new, which leaked heap blocks on every gamemap.
+	// Avoid assigning from a value-initialized temporary: level_locals_t is large
+	// enough for that temporary to consume a significant fraction of the game
+	// thread's stack.
+	level.~level_locals_t();
+	new (&level) level_locals_t {};
 	level.entstring = std::move(saved_entstring);
 	entities = level.entstring.c_str();
 	MM_Ghost_ClearAll();
@@ -1385,6 +1389,13 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
 		level.entstring.size());
 
 	memset(g_entities, 0, game.maxentities * sizeof(g_entities[0]));
+
+	// The entity array is empty again, so its published high-water mark must be
+	// reset as well. Leaving the previous map's peak here makes the engine consume
+	// hundreds of zeroed entity states during the first reconnect snapshot; after
+	// a busy Horde map those stale slots can retain invalid renderer resources.
+	globals.num_entities = static_cast<uint32_t>(
+		min(static_cast<size_t>(game.maxclients) + 1, static_cast<size_t>(game.maxentities)));
 	
 	// all other flags are not important atm
 	globals.server_flags &= SERVER_FLAG_LOADING;
@@ -1517,6 +1528,8 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
 	}
 
 	G_LocateSpawnSpots();
+	// [MuffMode] Boss hull fallback catalog requires the completed player-spawn cache.
+	MM_Horde_FinalizeLevelSpawns();
 	muffmode::combat_heatmap::ResetForNewLevel();
 
 	SetIntermissionPoint();

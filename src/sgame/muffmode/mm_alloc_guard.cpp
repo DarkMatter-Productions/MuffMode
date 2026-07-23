@@ -35,6 +35,7 @@
 
 #include "muffmode/mm_spawn_rules.h"
 
+#include <atomic>
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
@@ -63,18 +64,12 @@ constexpr unsigned long long kSuspiciousAllocBytes = 256ull * 1024ull * 1024ull;
 
 constexpr const char *kAllocLogFile = "muffmode_alloc.log";
 
-// Allocation-free recursion guard. thread_local is zero-initialized before dynamic
-// init, so it is safe during C++ static construction. Worst case across threads is
-// a duplicated log line, never a crash or nested malloc inside the logger.
-thread_local bool in_logger = false;
+// The logger itself allocates (fopen); guard against re-entering it if that inner
+// work also trips the size threshold or fails. An atomic flag avoids a data race
+// when engine-owned threads allocate concurrently and is usable during static init.
+std::atomic_flag in_logger = ATOMIC_FLAG_INIT;
 
 #if defined(_WIN32)
-uintptr_t ModuleBase()
-{
-	static uintptr_t base = reinterpret_cast<uintptr_t>(GetModuleHandleA("game_x64.dll"));
-	return base;
-}
-
 HMODULE SelfModule()
 {
 	HMODULE self = nullptr;
@@ -82,6 +77,12 @@ HMODULE SelfModule()
 		GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
 		reinterpret_cast<LPCSTR>(&SelfModule), &self);
 	return self;
+}
+
+uintptr_t ModuleBase()
+{
+	static uintptr_t base = reinterpret_cast<uintptr_t>(SelfModule());
+	return base;
 }
 
 // Loaded via GetProcAddress (kernel32, always linked) so we take no import-lib
@@ -98,7 +99,7 @@ CaptureStackFn CaptureStack()
 	return fn;
 }
 
-bool ResolveLogPath(char *out, size_t out_cap)
+bool ResolveModuleLogPath(char *out, size_t out_cap)
 {
 	if (!out || out_cap == 0)
 		return false;
@@ -113,19 +114,18 @@ bool ResolveLogPath(char *out, size_t out_cap)
 		}
 	}
 
+	return false;
+}
+
+bool ResolveTempLogPath(char *out, size_t out_cap)
+{
+	if (!out || out_cap == 0)
+		return false;
+
 	char temp_path[MAX_PATH] = {};
 	const DWORD temp_len = GetTempPathA(MAX_PATH, temp_path);
-	if (temp_len > 0 && temp_len < MAX_PATH) {
-		if (MM_JoinDirectoryFile(out, out_cap, temp_path, kAllocLogFile))
-			return true;
-	}
-
-	if (std::strlen(kAllocLogFile) + 1 <= out_cap) {
-		std::memcpy(out, kAllocLogFile, std::strlen(kAllocLogFile) + 1);
-		return true;
-	}
-
-	return false;
+	return temp_len > 0 && temp_len < MAX_PATH &&
+		MM_JoinDirectoryFile(out, out_cap, temp_path, kAllocLogFile);
 }
 #endif
 
@@ -155,20 +155,37 @@ void FormatTimestamp(char *ts, size_t ts_cap)
 
 FILE *OpenAllocLog(char *log_path, size_t log_path_cap)
 {
-	FILE *f = nullptr;
 	if (log_path && log_path_cap > 0)
 		log_path[0] = '\0';
+
+	auto try_path = [log_path, log_path_cap](const char *candidate) -> FILE * {
+		if (!candidate || !*candidate)
+			return nullptr;
+
+		FILE *opened = std::fopen(candidate, "ab");
+		if (!opened)
+			return nullptr;
+
+		if (log_path && log_path_cap > 0) {
+			const size_t candidate_len = std::strlen(candidate);
+			if (candidate_len + 1 <= log_path_cap)
+				std::memcpy(log_path, candidate, candidate_len + 1);
+		}
+		return opened;
+	};
+
 #if defined(_WIN32)
-	if (log_path && log_path_cap > 0 && ResolveLogPath(log_path, log_path_cap))
-		f = std::fopen(log_path, "ab");
-	if (!f)
-		f = std::fopen(kAllocLogFile, "ab");
-#else
-	(void)log_path;
-	(void)log_path_cap;
-	f = std::fopen(kAllocLogFile, "ab");
+	char candidate[512] = {};
+	if (ResolveModuleLogPath(candidate, sizeof(candidate)))
+		if (FILE *f = try_path(candidate))
+			return f;
+
+	if (ResolveTempLogPath(candidate, sizeof(candidate)))
+		if (FILE *f = try_path(candidate))
+			return f;
 #endif
-	return f;
+
+	return try_path(kAllocLogFile);
 }
 
 #if defined(_WIN32)
@@ -235,9 +252,8 @@ void AppendMemorySnapshot(FILE *f)
 // size_bytes is ignored for LOADED (pass 0).
 void LogEvent(const char *kind, unsigned long long size_bytes, bool include_backtrace)
 {
-	if (in_logger)
+	if (in_logger.test_and_set(std::memory_order_acquire))
 		return;
-	in_logger = true;
 
 	char ts[32] = {};
 	FormatTimestamp(ts, sizeof(ts));
@@ -325,7 +341,7 @@ void LogEvent(const char *kind, unsigned long long size_bytes, bool include_back
 		std::fclose(f);
 	}
 
-	in_logger = false;
+	in_logger.clear(std::memory_order_release);
 }
 
 void LogAlloc(const char *kind, unsigned long long size)
@@ -348,13 +364,27 @@ void *GuardedAlloc(std::size_t size, bool throw_on_fail)
 	if (static_cast<unsigned long long>(size) >= kSuspiciousAllocBytes)
 		LogAlloc("HUGE", size);
 
-	void *p = std::malloc(size ? size : 1);
-	if (!p) {
-		LogAlloc("FAILED", size);
-		if (throw_on_fail)
-			throw std::bad_alloc();
+	for (;;) {
+		if (void *p = std::malloc(size ? size : 1))
+			return p;
+
+		std::new_handler handler = std::get_new_handler();
+		if (!handler) {
+			LogAlloc("FAILED", size);
+			if (throw_on_fail)
+				throw std::bad_alloc();
+			return nullptr;
+		}
+
+		try {
+			handler();
+		} catch (...) {
+			LogAlloc("FAILED", size);
+			if (throw_on_fail)
+				throw;
+			return nullptr;
+		}
 	}
-	return p;
 }
 
 void *GuardedAlignedAlloc(std::size_t size, std::size_t alignment, bool throw_on_fail)
@@ -365,20 +395,35 @@ void *GuardedAlignedAlloc(std::size_t size, std::size_t alignment, bool throw_on
 	if (static_cast<unsigned long long>(size) >= kSuspiciousAllocBytes)
 		LogAlloc("HUGE_ALIGNED", size);
 
+	for (;;) {
 #if defined(_WIN32)
-	void *p = _aligned_malloc(size ? size : 1, alignment);
+		void *p = _aligned_malloc(size ? size : 1, alignment);
 #else
-	void *p = nullptr;
-	if (posix_memalign(&p, alignment, size ? size : 1) != 0)
-		p = nullptr;
+		void *p = nullptr;
+		if (posix_memalign(&p, alignment, size ? size : 1) != 0)
+			p = nullptr;
 #endif
 
-	if (!p) {
-		LogAlloc("FAILED_ALIGNED", size);
-		if (throw_on_fail)
-			throw std::bad_alloc();
+		if (p)
+			return p;
+
+		std::new_handler handler = std::get_new_handler();
+		if (!handler) {
+			LogAlloc("FAILED_ALIGNED", size);
+			if (throw_on_fail)
+				throw std::bad_alloc();
+			return nullptr;
+		}
+
+		try {
+			handler();
+		} catch (...) {
+			LogAlloc("FAILED_ALIGNED", size);
+			if (throw_on_fail)
+				throw;
+			return nullptr;
+		}
 	}
-	return p;
 }
 
 void GuardedFree(void *p) noexcept
@@ -399,31 +444,50 @@ void GuardedAlignedFree(void *p) noexcept
 
 } // namespace
 
-void *operator new(std::size_t size)   { return GuardedAlloc(size, true); }
+#if defined(_MSC_VER)
+	#define MM_ALLOC_THROWING_ANNOTATIONS _Ret_notnull_ _Post_writable_byte_size_(size)
+	#define MM_ALLOC_NOTHROW_ANNOTATIONS _Ret_maybenull_ _Success_(return != 0) _Post_writable_byte_size_(size)
+#else
+	#define MM_ALLOC_THROWING_ANNOTATIONS
+	#define MM_ALLOC_NOTHROW_ANNOTATIONS
+#endif
+
+MM_ALLOC_THROWING_ANNOTATIONS
+void *operator new(std::size_t size) { return GuardedAlloc(size, true); }
+MM_ALLOC_THROWING_ANNOTATIONS
 void *operator new[](std::size_t size) { return GuardedAlloc(size, true); }
 
-void *operator new(std::size_t size, const std::nothrow_t &) noexcept   { return GuardedAlloc(size, false); }
+MM_ALLOC_NOTHROW_ANNOTATIONS
+void *operator new(std::size_t size, const std::nothrow_t &) noexcept { return GuardedAlloc(size, false); }
+MM_ALLOC_NOTHROW_ANNOTATIONS
 void *operator new[](std::size_t size, const std::nothrow_t &) noexcept { return GuardedAlloc(size, false); }
 
+MM_ALLOC_THROWING_ANNOTATIONS
 void *operator new(std::size_t size, std::align_val_t alignment)
 {
 	return GuardedAlignedAlloc(size, static_cast<std::size_t>(alignment), true);
 }
 
+MM_ALLOC_THROWING_ANNOTATIONS
 void *operator new[](std::size_t size, std::align_val_t alignment)
 {
 	return GuardedAlignedAlloc(size, static_cast<std::size_t>(alignment), true);
 }
 
+MM_ALLOC_NOTHROW_ANNOTATIONS
 void *operator new(std::size_t size, std::align_val_t alignment, const std::nothrow_t &) noexcept
 {
 	return GuardedAlignedAlloc(size, static_cast<std::size_t>(alignment), false);
 }
 
+MM_ALLOC_NOTHROW_ANNOTATIONS
 void *operator new[](std::size_t size, std::align_val_t alignment, const std::nothrow_t &) noexcept
 {
 	return GuardedAlignedAlloc(size, static_cast<std::size_t>(alignment), false);
 }
+
+#undef MM_ALLOC_THROWING_ANNOTATIONS
+#undef MM_ALLOC_NOTHROW_ANNOTATIONS
 
 void operator delete(void *p) noexcept   { GuardedFree(p); }
 void operator delete[](void *p) noexcept { GuardedFree(p); }

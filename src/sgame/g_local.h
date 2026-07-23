@@ -1802,7 +1802,12 @@ struct spawn_temp_t {
 	std::unordered_set<const char *> keys_specified;
 
 	inline bool was_key_specified(const char *key) const {
-		return keys_specified.find(key) != keys_specified.end();
+		if (!key)
+			return false;
+		for (const char *specified : keys_specified)
+			if (specified && !strcmp(specified, key))
+				return true;
+		return false;
 	}
 
 	const char *cvar;
@@ -2445,6 +2450,20 @@ extern cvar_t *g_horde_streak_step;
 extern cvar_t *g_horde_streak_upgrade_chance;
 extern cvar_t *g_horde_wave_survival_bonus;
 extern cvar_t *g_horde_wave_type_ramp;
+extern cvar_t *g_horde_stall_timeout;
+extern cvar_t *g_horde_monster_edge_drops;
+extern cvar_t *g_horde_preset_allow_boss_waves;
+extern cvar_t *g_horde_preset_chance;
+extern cvar_t *g_horde_preset_weight_clone_army;
+extern cvar_t *g_horde_preset_weight_funhouse_horde;
+extern cvar_t *g_horde_preset_weight_get_over_here;
+extern cvar_t *g_horde_preset_weight_giant_horde;
+extern cvar_t *g_horde_preset_weight_glass_cannon;
+extern cvar_t *g_horde_preset_weight_low_gravity;
+extern cvar_t *g_horde_preset_weight_tiny_shamblers;
+extern cvar_t *g_horde_preset_weight_tiny_terror;
+extern cvar_t *g_horde_preset_weight_pinball_night;
+extern cvar_t *g_horde_preset_weight_sawstorm;
 extern cvar_t *g_lms_lives;
 extern cvar_t *g_horde_start_chainsaw;
 extern cvar_t *g_horde_item_respawn_scale;
@@ -3823,6 +3842,7 @@ struct gclient_t {
 	gtime_t	 last_firing_time;
 
 	bool		eliminated;
+	gtime_t		horde_elim_msg_next; // next time MM_Horde_NotifyEliminatedSpectator may reprint
 
 	bool		ready_to_exit;
 

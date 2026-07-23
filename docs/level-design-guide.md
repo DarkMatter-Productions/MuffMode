@@ -150,8 +150,11 @@ Bespoke maps and `.ent` overrides can place explicit anchors:
 | `info_horde_boss_spawn` | Large, deliberately cleared boss arena placement. |
 
 All anchors are optional. The director validates hull clearance, minimum fighter distance, wave bounds, water
-volume where applicable, and PHS relevance; if an anchor is unsafe it falls back through other compatible
-monster anchors and then player spawn locations.
+volume where applicable, and PHS relevance. During level load, it also tests each scaled boss profile against
+all boss anchors and player spawns, marking the player points that can safely fit that specific profile. Boss
+selection is restricted to profiles with enough validated placements; enabled pair encounters require two.
+Maps with no compatible boss profile run ordinary escort waves at the scheduled cadence instead of forcing a
+boss. Other monster spawns fall back through compatible anchors and then player spawn locations.
 
 | Key | Default | Effect |
 | --- | --- | --- |
@@ -163,7 +166,7 @@ monster anchors and then player spawn locations.
 | `horde_boss` | unset | On `info_horde_boss_spawn`, selects a named boss profile ID and implies its required `horde_monster` class. The profile can also influence the boss-wave roll before spawning begins. |
 | `horde_boss_health_mult` | profile value | Positive replacement for the profile's authored health multiplier. Global, fighter, pair, and endless-wave multipliers still apply. |
 | `horde_boss_damage_mult` | profile value | Positive replacement for the profile's outgoing-damage multiplier. |
-| `horde_boss_scale` | profile value | Replacement model/hull scale, still bounded by `g_horde_boss_scale_limit` unless that cvar is `0`. |
+| `horde_boss_scale` | profile value | Replacement model/hull scale, bounded by `g_horde_boss_scale_limit`; setting that cvar to `0` still retains the absolute safety ceiling of `16`. |
 | `horde_boss_spawnflags` | profile value | Raw class-specific monster spawnflags. Set `0` to clear profile flags. Do not include common monster `AMBUSH`, `TRIGGER_SPAWN`, or `SIGHT` bits (`1`, `2`, `4`); the built-in Masters profile handles the Shambler's overlapping precision flag internally. |
 | `horde_boss_power_armor_type` | profile value | `0` none, `1` power screen, `2` power shield. |
 | `horde_boss_power_armor` | profile value | Power-armor capacity before `g_horde_boss_armor_mult`. |

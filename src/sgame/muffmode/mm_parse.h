@@ -125,6 +125,32 @@ inline std::optional<int32_t> MM_ParseNonNegativeIntArg(const char *s) {
 	return value;
 }
 
+struct mm_reinforcement_spec_t {
+	std::string_view classname;
+	int32_t          strength;
+};
+
+inline std::optional<mm_reinforcement_spec_t> MM_ParseReinforcementSpec(std::string_view entry) {
+	entry = MM_TrimAsciiWhitespace(entry);
+	if (entry.empty())
+		return std::nullopt;
+
+	size_t split = 0;
+	while (split < entry.size() && !MM_IsAsciiWhitespace(entry[split]))
+		split++;
+
+	if (split == entry.size())
+		return std::nullopt;
+
+	const std::string_view classname = entry.substr(0, split);
+	const std::string_view strength_text = MM_TrimAsciiWhitespace(entry.substr(split));
+	const auto strength = MM_ParseIntText(strength_text);
+	if (!strength || *strength <= 0)
+		return std::nullopt;
+
+	return mm_reinforcement_spec_t { classname, *strength };
+}
+
 inline std::optional<float> MM_ParseFloatArg(const char *s) {
 	if (!s || !*s)
 		return std::nullopt;

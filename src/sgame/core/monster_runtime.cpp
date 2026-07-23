@@ -4,6 +4,7 @@
 #include "bots/bot_includes.h"
 // [MuffMode] Horde kill scoring hook
 #include "muffmode/mm_horde.h"
+#include "muffmode/mm_horde_ai_rules.h"
 
 extern cvar_t *g_horde_enhanced_ai;
 
@@ -546,7 +547,8 @@ static void M_MoveFrame(gentity_t *self) {
 }
 
 void G_MonsterKilled(gentity_t *self) {
-	level.killed_monsters++;
+	level.killed_monsters =
+		MM_Horde_SaturatingIncrement(max(0, level.killed_monsters));
 	// [MuffMode] Horde rolls kill rewards/scoring off every counted kill
 	MM_Horde_OnMonsterKilled(self);
 
@@ -615,8 +617,8 @@ void M_ProcessPain(gentity_t *e) {
 			if (!(e->spawnflags & SPAWNFLAG_MONSTER_DEAD)) {
 				if (!(e->monsterinfo.aiflags & AI_DO_NOT_COUNT))
 					G_MonsterKilled(e);
-				// [MuffMode] Horde reinforcements/summons are AI_DO_NOT_COUNT so they don't
-				// inflate level.total_monsters, but they still need a kill-reward roll
+				// [MuffMode] Pressure-only Horde reinforcements remain AI_DO_NOT_COUNT.
+				// Their reward class is zero, so this only invalidates live-count state.
 				else if (!(e->monsterinfo.aiflags & AI_GOOD_GUY))
 					MM_Horde_OnMonsterKilled(e);
 			}
@@ -1149,9 +1151,14 @@ bool monster_start(gentity_t *self) {
 		self->monsterinfo.aiflags |= AI_DO_NOT_COUNT;
 
 	if (!(self->monsterinfo.aiflags & AI_DO_NOT_COUNT) && !self->spawnflags.has(SPAWNFLAG_MONSTER_DEAD)) {
-		if (g_debug_monster_kills->integer)
-			level.monsters_registered[level.total_monsters] = self;
-		level.total_monsters++;
+		const int monster_index = max(0, level.total_monsters);
+		if (g_debug_monster_kills->integer) {
+			if (static_cast<size_t>(monster_index) < level.monsters_registered.size())
+				level.monsters_registered[monster_index] = self;
+			else if (static_cast<size_t>(monster_index) == level.monsters_registered.size())
+				gi.Com_PrintFmt("monster_start: debug registry full; later monsters will not be tracked.\n");
+		}
+		level.total_monsters = MM_Horde_SaturatingIncrement(monster_index);
 	}
 
 	self->nextthink = level.time + FRAME_TIME_S;
