@@ -3273,7 +3273,6 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
 //
 bool FollowTargetAllowed(gentity_t *viewer, gentity_t *target);
 bool FollowFirstPersonEnabled(const gentity_t *ent);
-const char *FollowViewModeName(const gentity_t *ent);
 void ToggleFollowViewMode(gentity_t *ent);
 void SyncFollowPresentation(gentity_t *ent);
 void SetFollowTarget(gentity_t *ent, gentity_t *target);

@@ -175,7 +175,7 @@ Required repository secrets:
 
 | Secret | Purpose |
 | --- | --- |
-| `COPILOT_GITHUB_TOKEN` | Fine-grained user PAT used only by the standalone `copilot` CLI. It must belong to a user with GitHub Copilot access and include the Copilot Requests permission. |
+| `COPILOT_GITHUB_TOKEN` | Optional. Fine-grained user PAT used only by the standalone `copilot` CLI. It must belong to a user with GitHub Copilot access and include the Copilot Requests permission. Without it (and with `require_copilot` unchecked), the release ships an English-only README and skips localized translations. |
 | `DISCORD_RELEASE_WEBHOOK` | Discord webhook consumed by the release announcement job. The release workflow checks that it exists before publishing. |
 
 Optional repository variables:
@@ -186,7 +186,7 @@ Optional repository variables:
 | `DISCORD_RELEASE_MENTIONS` | Text appended to the Discord announcement headline. Defaults to `<@&1424165484491964667> <@&1390287267276525628>` for the `@quake2` and `@playtester` roles. Use Discord role mention IDs such as `<@&123456789>` if you want actual role notifications. |
 | `DISCORD_FEEDBACK_CHANNEL` | Channel link used in the feedback line. Defaults to `<#1509926054175834133>` for `#muffmode`. |
 
-`RELEASE_BOT_TOKEN` is accepted as a legacy fallback for Copilot authentication, but the built-in `GITHUB_TOKEN` now handles version-file commits and `gh release create`. If no Copilot token is present, the workflow fails during preflight because localized HTML guide translation is a required release step. Because releases created with `GITHUB_TOKEN` do not trigger other workflows, this release workflow posts the Discord announcement itself after the GitHub release is published. The separate **Broadcast Release To Discord** workflow remains useful for releases published manually through GitHub.
+`RELEASE_BOT_TOKEN` is accepted as a legacy fallback for Copilot authentication, but the built-in `GITHUB_TOKEN` now handles version-file commits and `gh release create`. If no Copilot token is present, the workflow warns during preflight and ships without localized README translations (English README only) -- unless `require_copilot` is checked, in which case it fails instead. Because releases created with `GITHUB_TOKEN` do not trigger other workflows, this release workflow posts the Discord announcement itself after the GitHub release is published. The separate **Broadcast Release To Discord** workflow remains useful for releases published manually through GitHub.
 
 Workflow inputs:
 
@@ -198,10 +198,10 @@ Workflow inputs:
 | `channel` | Defaults to `beta`; non-stable channels publish as prereleases. |
 | `commit_version_files` | Updates `VERSION` and `src/sgame/g_local.h`, commits, and pushes before publishing. |
 | `skip_installer` | Creates only the zip package when the installer is intentionally not wanted. |
-| `require_copilot` | Requires GitHub Copilot CLI generation for the original English README and fails if Copilot authentication is unavailable. Leave disabled to allow the deterministic English fallback; localized README translations still require Copilot. |
+| `require_copilot` | Fails the release if Copilot authentication is unavailable, instead of falling back to a deterministic English-only README with no localized translations. Leave disabled to allow that fallback. |
 | `release_intro` | Optional manual intro for the GitHub release notes and Discord announcement. Leave blank to let the script generate one from the most significant changelog entries. |
 
-The release workflow requires Copilot auth, installs the current standalone GitHub Copilot CLI with `npm install -g @github/copilot`, exports `COPILOT_GITHUB_TOKEN`, and primes `copilot --help` before generating the end-user HTML README and its localized German, Polish, French, Hungarian, and Bulgarian siblings.
+The release workflow installs the current standalone GitHub Copilot CLI with `npm install -g @github/copilot` and, when a Copilot token is configured, exports `COPILOT_GITHUB_TOKEN` and primes `copilot --help` before generating the end-user HTML README and its localized German, Polish, French, Hungarian, and Bulgarian siblings. Without a token, it falls back to a deterministic English-only README and skips the localized siblings entirely (unless `require_copilot` is checked).
 
 ## Publish Locally
 

@@ -1682,9 +1682,9 @@ void SP_worldspawn(gentity_t *ent) {
 
 	// statusbar prog
 	MM_InitStatusbar();
-	gi.configstring(CONFIG_SPECTATOR_MODE_FREE, "SPECTATOR | FIRE/JUMP FOLLOW");
-	gi.configstring(CONFIG_SPECTATOR_MODE_FOLLOW_FIRST, "SPECTATOR | FIRST-PERSON");
-	gi.configstring(CONFIG_SPECTATOR_MODE_FOLLOW_THIRD, "SPECTATOR | THIRD-PERSON");
+	gi.configstring(CONFIG_SPECTATOR_MODE_FREE, "SPECTATOR");
+	gi.configstring(CONFIG_SPECTATOR_MODE_FOLLOW_FIRST, "SPECTATOR");
+	gi.configstring(CONFIG_SPECTATOR_MODE_FOLLOW_THIRD, "SPECTATOR");
 
 	// [Paril-KEX] air accel handled by game DLL now, and allow
 	// it to be changed in sp/coop

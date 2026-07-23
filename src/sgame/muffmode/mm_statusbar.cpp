@@ -184,7 +184,7 @@ void EmitRoundCounter(statusbar_t &sb, round_counter_profile_t profile, const ch
 	EmitRightLabeledValue(sb, hud_vanchor_t::Top, 2, 22, STAT_ROUND_NUMBER, label);
 }
 
-void EmitHordeRemainingStack(statusbar_t &sb)
+void EmitHordeWaveAndRemainingStack(statusbar_t &sb)
 {
 	if (!GT(GT_HORDE))
 		return;
@@ -341,7 +341,7 @@ void MM_InitStatusbar()
 			muffmode::statusbar::EmitHordeCoopWaveHeader(sb);
 
 		if (GT(GT_HORDE))
-			muffmode::statusbar::EmitHordeRemainingStack(sb);
+			muffmode::statusbar::EmitHordeWaveAndRemainingStack(sb);
 	}
 	if (!deathmatch->integer) {
 		sb.ifstat(STAT_POWERUP_ICON).yb(-76).endifstat();
