@@ -14,7 +14,8 @@ namespace muffmode::statusbar {
 // Most recently built CS_STATUSBAR layout string, kept for the hud_dump dev command.
 std::string g_last_layout;
 
-// JSON-escape the layout string (it contains quoted tokens such as string "FOLLOWING").
+// JSON-escape the layout string (it contains quoted tokens such as string "FOLLOWING" and
+// string2 "SPECTATOR").
 std::string JsonEscape(const std::string &in)
 {
 	std::string out;
@@ -390,6 +391,7 @@ void MM_InitStatusbar()
 		if (GT(GT_LMS))
 			sb.ifstat(STAT_CENTER_LINE).xv(0).yt(26).stat_string(STAT_CENTER_LINE).endifstat();
 		sb.ifstat(STAT_FOLLOW).xv(0).yb(-68).string("FOLLOWING").xv(80).stat_string(STAT_FOLLOW).endifstat();
+		sb.ifstat(STAT_SPECTATOR).xv(0).yb(-58).stat_string2(STAT_SPECTATOR).endifstat();
 
 		sb.ifstat(STAT_CROSSHAIR_ID_VIEW).xv(122).yb(-128).stat_pname(STAT_CROSSHAIR_ID_VIEW).endifstat();
 		sb.ifstat(STAT_CROSSHAIR_ID_VIEW_COLOR).xv(156).yb(-118).pic(STAT_CROSSHAIR_ID_VIEW_COLOR).endifstat();
@@ -462,7 +464,7 @@ bool MM_DumpStatusbar(std::string *out_path)
 	MM_HUD_STAT(STAT_MINISCORE_SECOND_PIC) MM_HUD_STAT(STAT_MINISCORE_SECOND_SCORE)
 	MM_HUD_STAT(STAT_MINISCORE_SECOND_POS)
 	MM_HUD_STAT(STAT_COUNTDOWN) MM_HUD_STAT(STAT_MATCH_STATE) MM_HUD_STAT(STAT_CENTER_LINE)
-	MM_HUD_STAT(STAT_FOLLOW)
+	MM_HUD_STAT(STAT_FOLLOW) MM_HUD_STAT(STAT_SPECTATOR)
 	MM_HUD_STAT(STAT_CROSSHAIR_ID_VIEW) MM_HUD_STAT(STAT_CROSSHAIR_ID_VIEW_COLOR)
 #undef MM_HUD_STAT
 	// trailing dummy key keeps the JSON valid despite the trailing commas above
