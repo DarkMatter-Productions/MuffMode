@@ -98,6 +98,8 @@ extern cvar_t *g_horde_streak_max_tier;
 extern cvar_t *g_horde_streak_score_bonus;
 extern cvar_t *g_horde_streak_drop_bonus;
 extern cvar_t *g_horde_streak_upgrade_chance;
+extern cvar_t *g_horde_momentum_messages;
+extern cvar_t *g_horde_wave_flawless_message;
 extern cvar_t *g_horde_wave_survival_bonus;
 extern cvar_t *g_horde_reinforcement_kills;
 extern cvar_t *g_horde_reinforcements_per_wave;
@@ -545,6 +547,9 @@ void ResetWavePerformance()
 	}
 }
 
+// shown on wave clear; the flawless centerprint reuses it so it does not blank the notice
+constexpr const char *kWaveClearedMessage = "Monsters eliminated!";
+
 void AwardWavePerformance()
 {
 	const int survival_bonus = max(0, g_horde_wave_survival_bonus->integer);
@@ -558,7 +563,9 @@ void AwardWavePerformance()
 			continue;
 
 		G_AdjustPlayerScore(ec->client, survival_bonus, false, 0);
-		gi.LocClient_Print(ec, PRINT_HIGH, "Flawless wave: +{} score.\n", survival_bonus);
+		if (g_horde_wave_flawless_message->integer)
+			gi.LocClient_Print(ec, PRINT_CENTER, "{}\nFlawless wave: +{} score",
+				kWaveClearedMessage, survival_bonus);
 	}
 }
 
@@ -1517,7 +1524,7 @@ void MM_Horde_OnMonsterKilled(gentity_t *ent)
 			MM_Horde_SaturatingIncrement(killer_client->pers.horde_kill_streak);
 		performance_tier = horde::PerformanceTier(killer_client);
 
-		if (performance_tier > old_tier)
+		if (performance_tier > old_tier && g_horde_momentum_messages->integer)
 			gi.LocClient_Print(killer, PRINT_HIGH,
 				"Horde momentum tier {}: bonus score and improved drops.\n", performance_tier);
 	}
@@ -1746,7 +1753,7 @@ bool MM_Horde_UpdateRoundInProgress()
 	horde::RecoverStalledCombat();
 
 	if (MM_Horde_WaveCleared(level.horde_all_spawned, horde::LivingThreatCount())) {
-		gi.LocBroadcast_Print(PRINT_CENTER, "Monsters eliminated!\n");
+		gi.LocBroadcast_Print(PRINT_CENTER, "{}\n", horde::kWaveClearedMessage);
 		gi.positioned_sound(world->s.origin, world, CHAN_AUTO | CHAN_RELIABLE, gi.soundindex("ctf/flagcap.wav"), 1, ATTN_NONE, 0);
 		return true;
 	}

@@ -821,7 +821,9 @@ contributes at least one kill and finishes the wave without dying receives the c
 | `g_horde_streak_score_bonus` | `1` | Additional score per credited kill for each active momentum tier. |
 | `g_horde_streak_drop_bonus` | `0.08` | Added regular/champion drop chance per momentum tier. |
 | `g_horde_streak_upgrade_chance` | `0.20` | Per-tier chance to upgrade a successful regular/champion drop to its next value class. |
+| `g_horde_momentum_messages` | `0` | Print momentum-tier notifications to the player. Off by default; the score and drop bonuses still apply when disabled. |
 | `g_horde_wave_survival_bonus` | `2` | Score awarded after a contributed, deathless wave. `0` disables it. |
+| `g_horde_wave_flawless_message` | `1` | Centerprint the flawless-wave notice to qualifying players. `0` hides it; the score bonus still applies either way. |
 
 ## Horde Item Respawn
 

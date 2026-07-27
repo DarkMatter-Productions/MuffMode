@@ -12,7 +12,7 @@
 constexpr const char *GAMEVERSION = "baseq2";
 
 constexpr const char *GAMEMOD_TITLE = "Muff Mode";
-constexpr const char *GAMEMOD_VERSION = "0.70.3";
+constexpr const char *GAMEMOD_VERSION = "0.70.4";
 
 //==================================================================
 
@@ -2485,11 +2485,13 @@ extern cvar_t *g_horde_map_monster_spawns;
 extern cvar_t *g_horde_map_spawn_chance;
 extern cvar_t *g_horde_map_spawn_cooldown;
 extern cvar_t *g_horde_map_spawn_min_dist;
+extern cvar_t *g_horde_momentum_messages;
 extern cvar_t *g_horde_streak_drop_bonus;
 extern cvar_t *g_horde_streak_max_tier;
 extern cvar_t *g_horde_streak_score_bonus;
 extern cvar_t *g_horde_streak_step;
 extern cvar_t *g_horde_streak_upgrade_chance;
+extern cvar_t *g_horde_wave_flawless_message;
 extern cvar_t *g_horde_wave_survival_bonus;
 extern cvar_t *g_horde_wave_type_ramp;
 extern cvar_t *g_horde_stall_timeout;
