@@ -7,6 +7,8 @@ This folder contains the server config bundle shipped with Muff Mode. Use it as 
 | File | Purpose |
 | --- | --- |
 | `server-base.cfg` | Shared baseline for safety, voting, entity overrides, player limits, and common quality-of-life settings. |
+| `muffmode-map-pool.example.json` | Extensive opt-in structured catalog covering rerelease multiplayer maps and the maps included with MuffMode. Copy it to a new filename before customizing it. |
+| `muffmode-map-cycle.example.txt` | Matching opt-in automatic-rotation example. Copy it to a new filename before customizing it. |
 | `gt-FFA.cfg` | Free-for-all preset. |
 | `gt-DUEL.cfg` | Duel preset. |
 | `gt-TDM.cfg` | Team Deathmatch preset. |
@@ -28,6 +30,13 @@ This folder contains the server config bundle shipped with Muff Mode. Use it as 
 3. Open the console and run `exec server-base.cfg`.
 4. Run one gametype preset, for example `exec gt-FFA.cfg`, `exec gt-DUEL.cfg`, or `exec gt-ARENA.cfg`.
 5. Run `doctor` after editing configs to check for risky cvar combinations.
+
+For the optional structured map system, copy the two `muffmode-map-*.example`
+files to new leaf filenames in this folder, then set `g_maps_pool_file` and
+`g_maps_cycle_file` to those copies. Keeping the operator-owned copies
+separate prevents a later package update from replacing local map choices.
+Without these cvars, existing `g_map_pool` and `g_map_list` behavior is
+unchanged.
 
 Before using or making `arena` votable, install Arena-compatible maps you are
 licensed to host and configure an Arena map list in `gt-ARENA.cfg`. Tagged

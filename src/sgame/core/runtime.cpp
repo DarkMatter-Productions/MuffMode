@@ -13,6 +13,7 @@
 #include "muffmode/mm_ghost.h"
 #include "muffmode/mm_horde.h"
 #include "muffmode/mm_loc.h"
+#include "muffmode/mm_map_pool.h"
 #include "muffmode/mm_maps.h"
 #include "muffmode/mm_match.h"
 #include "muffmode/mm_motd.h"
@@ -366,6 +367,10 @@ cvar_t *g_lag_compensation_enhanced;
 cvar_t *g_map_list;
 cvar_t *g_map_list_shuffle;
 cvar_t *g_map_pool;
+cvar_t *g_maps_pool_file;
+cvar_t *g_maps_cycle_file;
+cvar_t *g_maps_random;
+cvar_t *g_maps_repeat_delay;
 cvar_t *g_votable_gametypes;
 cvar_t *g_votable_rulesets;
 cvar_t *g_match_lock;
@@ -911,6 +916,10 @@ static void InitGame() {
 	g_map_list = gi.cvar("g_map_list", "", CVAR_NOFLAGS);
 	g_map_list_shuffle = gi.cvar("g_map_list_shuffle", "1", CVAR_NOFLAGS);
 	g_map_pool = gi.cvar("g_map_pool", "", CVAR_NOFLAGS);
+	g_maps_pool_file = gi.cvar("g_maps_pool_file", "", CVAR_NOFLAGS);
+	g_maps_cycle_file = gi.cvar("g_maps_cycle_file", "", CVAR_NOFLAGS);
+	g_maps_random = gi.cvar("g_maps_random", "1", CVAR_NOFLAGS);
+	g_maps_repeat_delay = gi.cvar("g_maps_repeat_delay", "1800", CVAR_NOFLAGS);
 	g_votable_gametypes = gi.cvar("g_votable_gametypes", "", CVAR_NOFLAGS);
 	g_votable_rulesets = gi.cvar("g_votable_rulesets", "", CVAR_NOFLAGS);
 	g_match_lock = gi.cvar("g_match_lock", "0", CVAR_SERVERINFO);
@@ -1055,6 +1064,7 @@ static void InitGame() {
 
 	MM_LoadMOTD();
 	MM_ClearLocCache();
+	MM_InitMapPoolSystem();
 
 	if (g_dm_exec_level_cfg->integer)
 		gi.AddCommandString(G_Fmt("exec {}\n", level.mapname).data());
@@ -1676,6 +1686,7 @@ void CalculateRanks() {
 static void ShutdownGame() {
 	gi.Com_Print("==== ShutdownGame ====\n");
 
+	MM_ShutdownMapPoolSystem();
 	gi.FreeTags(TAG_LEVEL);
 	gi.FreeTags(TAG_GAME);
 }

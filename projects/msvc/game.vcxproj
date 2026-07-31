@@ -194,6 +194,7 @@
     <ClInclude Include="..\..\src\sgame\muffmode\mm_lms_rules.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_loc.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_loc_parse.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_map_pool.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_maps.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_match.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_menu.h" />
@@ -322,6 +323,7 @@
     <ClCompile Include="..\..\src\sgame\muffmode\mm_items_rules.cpp" />
     <ClCompile Include="..\..\src\sgame\muffmode\mm_lms.cpp" />
     <ClCompile Include="..\..\src\sgame\muffmode\mm_loc.cpp" />
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_map_pool.cpp" />
     <ClCompile Include="..\..\src\sgame\muffmode\mm_maps.cpp" />
     <ClCompile Include="..\..\src\sgame\muffmode\mm_match.cpp" />
     <ClCompile Include="..\..\src\sgame\muffmode\mm_menu.cpp" />

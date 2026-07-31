@@ -11,6 +11,7 @@
 #include "muffmode/mm_freezetag.h"
 #include "muffmode/mm_ghost.h"
 #include "muffmode/mm_loc.h"
+#include "muffmode/mm_map_pool.h"
 #include "muffmode/mm_maps.h"
 #include "muffmode/mm_match.h"
 #include "muffmode/mm_menu.h"
@@ -2346,6 +2347,22 @@ static void Cmd_MapList_f(gentity_t *ent) {
 	MM_CmdMapList(ent);
 }
 
+static void Cmd_MapPool_f(gentity_t *ent) {
+	MM_CmdMapPool(ent);
+}
+
+static void Cmd_MapCycle_f(gentity_t *ent) {
+	MM_CmdMapCycle(ent);
+}
+
+static void Cmd_LoadMapPool_f(gentity_t *ent) {
+	MM_CmdLoadMapPool(ent);
+}
+
+static void Cmd_LoadMapCycle_f(gentity_t *ent) {
+	MM_CmdLoadMapCycle(ent);
+}
+
 static void Cmd_MyMap_f(gentity_t *ent) {
 	MM_CmdMyMap(ent);
 }
@@ -2427,12 +2444,16 @@ cmds_t client_cmds[] = {
 	{"kill_ai",			Cmd_Kill_AI_f,			CF_CHEAT_PROTECT},
 	{"listentities",	Cmd_ListEntities_f,		CF_ALLOW_DEAD | CF_ALLOW_INT | CF_ALLOW_SPEC | CF_CHEAT_PROTECT},
 	{"listmonsters",	Cmd_ListMonsters_f,		CF_ALLOW_DEAD | CF_ALLOW_INT | CF_ALLOW_SPEC | CF_CHEAT_PROTECT},
+	{"load_mapcycle",	Cmd_LoadMapCycle_f,		CF_ADMIN_ONLY | CF_ALLOW_INT | CF_ALLOW_SPEC},
+	{"load_mappool",	Cmd_LoadMapPool_f,		CF_ADMIN_ONLY | CF_ALLOW_INT | CF_ALLOW_SPEC},
 	{"loadmotd",		Cmd_LoadMotd_f,			CF_ADMIN_ONLY | CF_ALLOW_INT | CF_ALLOW_SPEC},
 	{"loc",				Cmd_Loc_f,				CF_NONE},
 	{"lockteam",		Cmd_LockTeam_f,			CF_ALLOW_DEAD | CF_ALLOW_SPEC},
 	{"map_restart",		Cmd_MapRestart_f,		CF_ADMIN_ONLY | CF_ALLOW_INT | CF_ALLOW_SPEC},
+	{"mapcycle",		Cmd_MapCycle_f,			CF_ALLOW_DEAD | CF_ALLOW_SPEC},
 	{"mapinfo",			Cmd_MapInfo_f,			CF_ALLOW_DEAD | CF_ALLOW_SPEC},
 	{"maplist",			Cmd_MapList_f,			CF_ALLOW_DEAD | CF_ALLOW_SPEC},
+	{"mappool",			Cmd_MapPool_f,			CF_ALLOW_DEAD | CF_ALLOW_SPEC},
 	{"motd",			Cmd_Motd_f,				CF_ALLOW_SPEC | CF_ALLOW_INT},
 	{"mymap",			Cmd_MyMap_f,			CF_ALLOW_DEAD | CF_ALLOW_SPEC},
 	{"nextmap",			Cmd_NextMap_f,			CF_ADMIN_ONLY | CF_ALLOW_INT | CF_ALLOW_SPEC},

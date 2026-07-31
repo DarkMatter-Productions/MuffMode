@@ -1,0 +1,26 @@
+// MuffMode structured map-cycle example.
+// Copy this file to a different leaf filename before editing it.
+// Entries can be split by any whitespace; // and block comments are accepted.
+
+// Quake II and Call of the Machine deathmatch
+q2dm1 q2dm2 q2dm3 q2dm4 q2dm5 q2dm6 q2dm7 q2dm8
+base64 city64 sewer64 mgdm1
+
+// Capture the Flag. These entries are considered only by CTF-style modes.
+q2ctf1 q2ctf2 q2ctf3 q2ctf4 q2ctf5
+ndctf0 q2kctf1 q2kctf2
+
+// The Reckoning
+xdm1 xdm2 xdm3 xdm4 xdm5 xdm6 xdm7
+
+// Ground Zero
+rdm1 rdm2 rdm3 rdm4 rdm5 rdm6 rdm7
+rdm8 rdm9 rdm10 rdm11 rdm12 rdm13 rdm14
+
+// Quake II 64
+q64/dm1 q64/dm2 q64/dm3 q64/dm4 q64/dm5
+q64/dm6 q64/dm7 q64/dm8 q64/dm9 q64/dm10
+
+// Maps included with MuffMode releases
+mm-aerowalk mm-coldzero mm-crucible mm-kmachine mm-powertrip
+mm-rage mm-railgun101 mm-reclamation mm-recycler

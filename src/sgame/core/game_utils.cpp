@@ -9,6 +9,7 @@
 #include "muffmode/mm_profile.h"
 #include "muffmode/mm_parse.h"
 #include "muffmode/mm_skin.h"
+#include "muffmode/mm_spawn_rules.h"
 #include "muffmode/mm_time_format.h"
 #include "muffmode/mm_team.h"
 #include "muffmode/mm_announcer_rules.h"
@@ -169,6 +170,11 @@ static gentity_t *G_ResolveDelayedActivator(gentity_t *ent) {
 	return activator;
 }
 
+// Internal marker for a DelayedUse created by a spawn-time map relay. The
+// entity may fire after SERVER_FLAG_LOADING has cleared, but it still belongs
+// to map initialization and must not be suppressed by a round countdown.
+constexpr int32_t HACKFLAG_DELAYED_MAP_INITIALIZATION = 1 << 30;
+
 static THINK(Think_Delay) (gentity_t *ent) -> void {
 	// Keep firing the source room's environmental targets, but do not pass a
 	// disconnected, reused, or cross-room client to player-specific callbacks.
@@ -264,7 +270,16 @@ void G_UseTargets(gentity_t *ent, gentity_t *activator) {
 	if (!ent)
 		return;
 
-	if (notGT(GT_ARENA) && IsCombatDisabled())
+	// Map-authored spawn-time relays (notably trigger_always) must initialize
+	// while an entity lump is loading. A round reload deliberately occurs
+	// during countdown, but that transient combat state must not suppress map
+	// setup targets or change their helper-entity allocation topology.
+	const bool delayed_map_initialization =
+		ent->think == Think_Delay &&
+		(ent->hackflags & HACKFLAG_DELAYED_MAP_INITIALIZATION);
+	if (!(globals.server_flags & SERVER_FLAG_LOADING) &&
+		!delayed_map_initialization &&
+		notGT(GT_ARENA) && IsCombatDisabled())
 		return;
 
 	//
@@ -276,6 +291,8 @@ void G_UseTargets(gentity_t *ent, gentity_t *activator) {
 		t->classname = "DelayedUse";
 		t->nextthink = level.time + gtime_t::from_sec(ent->delay);
 		t->think = Think_Delay;
+		if (globals.server_flags & SERVER_FLAG_LOADING)
+			t->hackflags |= HACKFLAG_DELAYED_MAP_INITIALIZATION;
 		t->activator = activator;
 		t->count = activator ? activator->spawn_count : 0;
 		if (!activator)
@@ -452,12 +469,17 @@ gentity_t *G_Spawn() {
 	size_t i;
 	const size_t first_spawn_entity = min(static_cast<size_t>(game.maxclients) + 1, static_cast<size_t>(game.maxentities));
 	const size_t entity_limit = G_EntitySearchLimit();
+	const bool loading_entities = globals.server_flags & SERVER_FLAG_LOADING;
 
 	for (i = first_spawn_entity; i < entity_limit; i++) {
 		gentity_t *e = &g_entities[i];
 		// the first couple seconds of server time can involve a lot of
-		// freeing and allocating, so relax the replacement policy
-		if (!e->inuse && (e->freetime < 2_sec || level.time - e->freetime > 500_ms)) {
+		// freeing and allocating, so relax the replacement policy. A saved
+		// entity-lump reload has the same allocation pattern at an arbitrary
+		// level time and must also be able to recycle inhibited definitions.
+		if (!e->inuse &&
+			(loading_entities || e->freetime < 2_sec ||
+				level.time - e->freetime > 500_ms)) {
 			G_InitGentity(e);
 			return e;
 		}
@@ -498,7 +520,7 @@ THINK(G_FreeEntity) (gentity_t *ed) -> void {
 
 	gi.Bot_UnRegisterEntity(ed);
 
-	int32_t id = ed->spawn_count + 1;
+	const int32_t id = MM_NextEntityGeneration(ed->spawn_count);
 	memset(ed, 0, sizeof(*ed));
 	ed->s.number = ed - g_entities;
 	ed->classname = "freed";

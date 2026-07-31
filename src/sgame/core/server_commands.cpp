@@ -3,6 +3,7 @@
 
 #include "g_local.h"
 #include "debug_log.h"
+#include "muffmode/mm_map_pool.h"
 #include "muffmode/mm_maps.h"
 #include "muffmode/mm_nav_bake.h"
 #include "muffmode/mm_parse.h"
@@ -32,6 +33,22 @@ static void SVCmd_GametypeChangeMapFirst_f() {
 	MM_GametypeChangeMapFirst();
 }
 
+static void SVCmd_LoadMapPool_f() {
+	if (gi.argc() != 2) {
+		gi.LocClient_Print(nullptr, PRINT_HIGH, "Usage: sv load_mappool\n");
+		return;
+	}
+	MM_ReloadMapPool(nullptr);
+}
+
+static void SVCmd_LoadMapCycle_f() {
+	if (gi.argc() != 2) {
+		gi.LocClient_Print(nullptr, PRINT_HIGH, "Usage: sv load_mapcycle\n");
+		return;
+	}
+	MM_ReloadMapCycle(nullptr);
+}
+
 // [MuffMode] Generate a walk-only bot nav file for the current map.
 // Usage: sv nav_bake [grid]  (grid = lattice spacing in units; default 96)
 static void SVCmd_NavBake_f() {
@@ -57,6 +74,10 @@ void ServerCommand() {
 		SVCmd_NextMap_f();
 	else if (Q_strcasecmp(cmd, "gt_changemap_first") == 0)
 		SVCmd_GametypeChangeMapFirst_f();
+	else if (Q_strcasecmp(cmd, "load_mapcycle") == 0)
+		SVCmd_LoadMapCycle_f();
+	else if (Q_strcasecmp(cmd, "load_mappool") == 0)
+		SVCmd_LoadMapPool_f();
 	else if (Q_strcasecmp(cmd, "nav_bake") == 0)
 		SVCmd_NavBake_f();
 	else

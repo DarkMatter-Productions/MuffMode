@@ -115,6 +115,8 @@ internal static partial class InstallationManager
     private static readonly HashSet<string> RequiredPackageFiles = new(StringComparer.OrdinalIgnoreCase)
     {
         Path.Combine("rerelease", "baseq2", "CONFIGS_README.md"),
+        Path.Combine("rerelease", "baseq2", "muffmode-map-cycle.example.txt"),
+        Path.Combine("rerelease", "baseq2", "muffmode-map-pool.example.json"),
         Path.Combine("rerelease", "baseq2", "gt-ARENA.cfg"),
         Path.Combine("rerelease", "baseq2", "gt-CA.cfg"),
         Path.Combine("rerelease", "baseq2", "gt-CTF.cfg"),
@@ -145,6 +147,8 @@ internal static partial class InstallationManager
         "VERSION",
         Path.Combine("rerelease", "baseq2", "CONFIGS_README.md"),
         Path.Combine("rerelease", "baseq2", "game_x64.dll"),
+        Path.Combine("rerelease", "baseq2", "muffmode-map-cycle.example.txt"),
+        Path.Combine("rerelease", "baseq2", "muffmode-map-pool.example.json"),
         Path.Combine("rerelease", "baseq2", "gt-ARENA.cfg"),
         Path.Combine("rerelease", "baseq2", "gt-CA.cfg"),
         Path.Combine("rerelease", "baseq2", "gt-CTF.cfg"),

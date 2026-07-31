@@ -29,6 +29,8 @@ Use commands in the form `command [arg]`.
 | `vote <yes|no>` | Force-pass or fail a vote when used with admin authority. |
 | `forcevote` | Force the current vote result. |
 | `spawn <entity> [spawn_args]` | Spawn an entity without requiring cheats. |
+| `load_mappool` / dedicated console `sv load_mappool` | Reload the structured pool and validate its configured cycle. |
+| `load_mapcycle` / dedicated console `sv load_mapcycle` | Reload only the configured structured cycle. |
 | `loadmotd` | Reload the message of the day file. |
 | `doctor` | Print diagnostics for risky or inconsistent cvar combinations. |
 | `boot <player>` | Remove a player, depending on server admin configuration. |
@@ -480,6 +482,10 @@ uncapped by default.
 
 | Cvar | Default | Purpose |
 | --- | --- | --- |
+| `g_maps_pool_file` | empty | Opt-in structured map-pool JSON leaf filename under `baseq2`; empty keeps legacy map sources active. |
+| `g_maps_cycle_file` | empty | Optional structured cycle leaf filename under `baseq2`; requires a valid structured pool. |
+| `g_maps_random` | `1` | `1` selects randomly from eligible cycle maps, with `popular` maps weighted twice; `0` follows cycle order. |
+| `g_maps_repeat_delay` | `1800` | Preferred seconds before a structured-cycle map repeats; clamped to `0`–`86400` and relaxed if necessary to keep rotation moving. |
 | `g_map_list` | empty | Space-separated map rotation. |
 | `g_map_list_shuffle` | `1` | `0` disables shuffle, `1` shuffles on wrap, `2` shuffles once per gametype session. |
 | `g_map_pool` | empty | Additional voting map pool. |
@@ -491,6 +497,100 @@ uncapped by default.
 | `g_entity_override_dir` | `maps` | Directory for entity override `.ent` files. |
 | `g_entity_override_load` | `1` | Loads entity override files on map load. |
 | `g_entity_override_save` | `0` | Saves entity override files when none exist. |
+
+### Structured Map Pools (Optional)
+
+Structured map pools provide a large searchable catalog plus a separate
+automatic-rotation cycle. They are opt-in: copy
+`muffmode-map-pool.example.json` and `muffmode-map-cycle.example.txt` to new
+leaf filenames in `rerelease/baseq2`, edit those copies, then configure them:
+
+```text
+set g_maps_pool_file "muffmode-map-pool.json"
+set g_maps_cycle_file "muffmode-map-cycle.txt"
+set g_maps_random "1"
+set g_maps_repeat_delay "1800"
+```
+
+Only safe leaf filenames are accepted for these two cvars; paths and traversal
+segments are rejected. Map identifiers inside the files may use safe
+subdirectories such as `q64/dm1`.
+
+The JSON root must contain a `maps` array. Each usable entry requires a safe
+`bsp` string and at least one true mode flag:
+
+```json
+{
+  "maps": [
+    {
+      "bsp": "q2dm1",
+      "title": "The Edge",
+      "episode": "baseq2",
+      "dm": true,
+      "duel": true,
+      "min": 2,
+      "max": 8,
+      "popular": true
+    }
+  ]
+}
+```
+
+Supported fields are:
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `bsp` | yes | Safe map identifier, without `.bsp`. Duplicate identifiers are matched case-insensitively and the first valid entry wins. |
+| `dm`, `tdm`, `ctf`, `duel`, `arena` | one or more | Boolean mode-suitability flags. CTF and Arena always require their matching flags. Duel/TDM tags are preferred when present, with generic `dm` maps used as fallback at every eligibility tier. |
+| `title` | no | Display title; defaults to `bsp`. |
+| `episode` | no | Display/filter grouping such as `baseq2`, `rogue`, or `muffmode`. |
+| `min`, `max` | no | Inclusive human-player bounds; `0` or omission means no bound. |
+| `popular` | no | Gives the map weight `2` instead of `1` when `g_maps_random` is enabled. |
+| `custom`, `custom_textures`, `custom_sounds` | no | Catalog metadata. Either asset flag also marks the entry as custom. |
+
+The cycle is an ordered whitespace-separated list of `bsp` identifiers from
+the pool. It accepts `//` line comments and `/* ... */` block comments,
+removes case-insensitive duplicates, and ignores safe names not found in the
+pool. With `g_maps_random 0`, the order determines the next eligible map. With
+`g_maps_random 1`, the cycle is the eligible set and `popular` supplies the
+only extra weighting.
+
+Selection uses the requested raw gametype, so a transition into Arena can
+choose an `arena`-tagged map before that mode becomes effective. It first
+honors human-player bounds and the repeat delay; Duel/TDM tries its specialized
+tag before generic `dm` fallback at each tier. If needed, selection relaxes
+the repeat delay and then player bounds, but it always excludes the current
+map. If no other compatible cycle entry remains, normal legacy `g_map_list`
+transition handling continues.
+
+The structured and legacy systems interoperate as follows:
+
+| Structured state | Voting and MyMap source | Automatic rotation |
+| --- | --- | --- |
+| No valid structured pool | Legacy `g_map_pool` plus `g_map_list` | Legacy `g_map_list` |
+| Valid pool, but no valid cycle | Structured pool | Legacy `g_map_list` |
+| Valid pool and cycle | Structured pool | Structured cycle, then legacy `g_map_list` if no eligible map can be selected |
+
+Malformed roots and oversized inputs fail closed. Invalid individual pool
+entries and unusable cycle tokens are skipped with bounded diagnostics; a pool
+with no usable multiplayer entries or a cycle with no recognized entries
+fails. Once a structured snapshot is active, a failed live reload keeps that
+complete last-known-good snapshot. On the first load, a valid pool is still
+published if its configured cycle is invalid, so structured voting/MyMap works
+while legacy `g_map_list` handles rotation; if the pool itself is invalid,
+both uses remain legacy. Clearing `g_maps_cycle_file` disables only the
+structured cycle. Clearing `g_maps_pool_file` disables the structured system
+immediately and returns both voting and rotation to legacy sources.
+
+Players can inspect the active catalog with `mappool [filter]` and the active
+cycle with `mapcycle [filter]`. Filters match map identifiers, titles, and
+episodes; the exact filters `dm`, `tdm`, `ctf`, `duel`, `arena`, `popular`,
+and `custom` select metadata. Each listing prints at most the first 32 matches
+and asks for a narrower filter when more remain. `maplist` summarizes both
+structured status and any active legacy fallback. An authenticated admin can
+run `load_mappool` after changing the pool (this transaction also validates
+the configured cycle), or `load_mapcycle` after changing only the cycle. A
+dedicated console can use `sv load_mappool` and `sv load_mapcycle`.
 
 ## Item And Gameplay Cvars
 

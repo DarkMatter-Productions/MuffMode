@@ -15,11 +15,11 @@
 #include "muffmode/mm_parse.h"
 #include "muffmode/mm_pconfig.h"
 #include "muffmode/mm_ruleset.h"
+#include "muffmode/mm_spawn_rules.h"
 #include "muffmode/mm_spawn_loadout.h"
 #include "muffmode/mm_team.h"
 #include "muffmode/mm_vote.h"
 
-gentity_t *G_UnsafeSpawnPosition(vec3_t spot, bool check_players, const gentity_t *ignore = nullptr);
 bool ClientArenaEliminationCorpse(const gclient_t *client);
 
 //=======================================================================
@@ -1737,10 +1737,7 @@ void ClientDisconnect(gentity_t *ent) {
 		// End this client-entity lifetime explicitly. Client slots are not passed
 		// through G_FreeEntity, so delayed callbacks need the same generation
 		// change before a later connection can reuse the slot.
-		if (ent->spawn_count == std::numeric_limits<int32_t>::max())
-			ent->spawn_count = std::numeric_limits<int32_t>::min();
-		else
-			ent->spawn_count++;
+		ent->spawn_count = MM_NextEntityGeneration(ent->spawn_count);
 		ent->inuse = false;
 		ent->sv.init = false;
 		ent->classname = "disconnected";

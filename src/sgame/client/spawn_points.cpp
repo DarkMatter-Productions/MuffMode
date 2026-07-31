@@ -842,8 +842,9 @@ static gentity_t *SelectSingleSpawnPoint(gentity_t *ent) {
 }
 
 // [Paril-KEX]
-gentity_t *G_UnsafeSpawnPosition(vec3_t spot, bool check_players, const gentity_t *ignore) {
-	return UnsafeSpawnPosition(spot, check_players, ignore);
+gentity_t *G_UnsafeSpawnPosition(vec3_t spot, bool check_players,
+	const gentity_t *ignore, bool allow_nudge) {
+	return UnsafeSpawnPosition(spot, check_players, ignore, allow_nudge);
 }
 
 static gentity_t *SelectCoopSpawnPoint(gentity_t *ent, bool force_spawn, bool check_players) {

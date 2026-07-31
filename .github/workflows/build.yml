@@ -23,6 +23,10 @@ jobs:
         shell: pwsh
         run: ./scripts/ci/check-generated-artifacts.ps1
 
+      - name: Check map-pool examples
+        shell: pwsh
+        run: ./scripts/ci/check-map-pool-examples.ps1
+
       - name: Check changelog ledger
         shell: pwsh
         run: ./scripts/ci/check-changelog.ps1

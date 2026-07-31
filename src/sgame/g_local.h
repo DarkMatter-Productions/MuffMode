@@ -2598,6 +2598,10 @@ extern cvar_t *g_lag_compensation_enhanced;
 extern cvar_t *g_map_list;
 extern cvar_t *g_map_list_shuffle;
 extern cvar_t *g_map_pool;
+extern cvar_t *g_maps_pool_file;
+extern cvar_t *g_maps_cycle_file;
+extern cvar_t *g_maps_random;
+extern cvar_t *g_maps_repeat_delay;
 extern cvar_t *g_votable_gametypes;
 extern cvar_t *g_votable_rulesets;
 extern cvar_t *g_match_lock;
@@ -3176,6 +3180,8 @@ unsigned int P_GetLobbyUserNum(const gentity_t *player);
 void G_UpdateLevelEntry();
 void G_EndOfUnitMessage();
 bool SelectSpawnPoint(gentity_t *ent, vec3_t &origin, vec3_t &angles, bool force_spawn, bool &landmark);
+gentity_t *G_UnsafeSpawnPosition(vec3_t spot, bool check_players,
+	const gentity_t *ignore = nullptr, bool allow_nudge = true);
 
 struct select_spawn_result_t {
 	gentity_t *spot;
@@ -3313,6 +3319,12 @@ bool InAMatch();
 void ChangeGametype(gametype_t gt);
 void GT_Changes();
 void SpawnEntities(const char *mapname, const char *entities, const char *spawnpoint);
+enum class world_entity_reload_result_t : uint8_t {
+	reloaded,
+	fallback_allowed,
+	already_in_progress
+};
+world_entity_reload_result_t G_ResetWorldEntitiesFromSavedString();
 
 //
 // sgame/core/following_camera.cpp

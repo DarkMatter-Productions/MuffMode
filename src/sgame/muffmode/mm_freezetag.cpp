@@ -1571,6 +1571,20 @@ void MM_FreezeTag_ClearClient(gentity_t *ent)
 	}
 }
 
+void MM_FreezeTag_DetachWorldEntities()
+{
+	if (!MM_FreezeTag_IsActive())
+		return;
+
+	// Preserve the frozen/dead decision until MM_FreezeTag_ResetRoundPlayers
+	// runs against the freshly rebuilt spawn cache, but release proxies before
+	// their entity slots can be reused by map entities.
+	for (auto ec : active_clients()) {
+		if (freeze_state_t *state = StateFor(ec))
+			FreeFrozenViewProxy(ec, *state);
+	}
+}
+
 void MM_FreezeTag_OnRoundReset()
 {
 	if (!MM_FreezeTag_IsActive())
@@ -1594,7 +1608,14 @@ void MM_FreezeTag_ResetRoundPlayers()
 
 		const bool frozen = RawFrozen(ec);
 		const bool waiting_or_dead = ec->client->eliminated || ec->deadflag || ec->health <= 0;
-		const bool respawn = respawn_all || frozen || waiting_or_dead;
+		// A survivor may keep their loadout and position between rounds, but the
+		// restored entity string can put a reset mover or solid brush around that
+		// position. Respawn only those survivors whose player hull is no longer
+		// valid in the rebuilt world.
+		const bool unsafe_survivor_position =
+			!respawn_all && !frozen && !waiting_or_dead &&
+			G_UnsafeSpawnPosition(ec->s.origin, false, ec, false);
+		const bool respawn = respawn_all || frozen || waiting_or_dead || unsafe_survivor_position;
 		if (!respawn)
 			continue;
 

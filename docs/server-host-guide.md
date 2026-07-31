@@ -66,6 +66,45 @@ map q2dm1
 
 Run `doctor` after changing server settings. It checks common misconfigurations and reports suggested fixes.
 
+## Optional Structured Map Pool
+
+For a large catalog, searchable map listings, mode/player-count eligibility,
+and repeat-aware rotation, start from the two packaged example files:
+
+1. Copy `muffmode-map-pool.example.json` to
+   `rerelease/baseq2/muffmode-map-pool.json`.
+2. Copy `muffmode-map-cycle.example.txt` to
+   `rerelease/baseq2/muffmode-map-cycle.txt`.
+3. Edit the copies, leaving the `.example` files as upgrade-safe references.
+4. Add the following to your shared server config:
+
+```text
+set g_maps_pool_file "muffmode-map-pool.json"
+set g_maps_cycle_file "muffmode-map-cycle.txt"
+set g_maps_random "1"
+set g_maps_repeat_delay "1800"
+```
+
+The pool controls map voting and MyMap choices. The cycle is the eligible set
+for automatic transitions: random mode gives entries marked `popular` twice
+the normal weight, while `g_maps_random 0` follows file order. Use
+`mappool [filter]`, `mapcycle [filter]`, and `maplist` to inspect the live
+state. After editing, an authenticated in-game admin can run `load_mappool`
+(pool and configured cycle) or `load_mapcycle` (cycle only). From a dedicated
+console, use `sv load_mappool` or `sv load_mapcycle`.
+
+The feature is deliberately optional. With no valid structured pool,
+`g_map_pool` and `g_map_list` behave as before. A valid pool without a valid
+cycle supplies voting/MyMap choices while `g_map_list` still rotates maps.
+Even with an active cycle, an impossible mode selection falls through to
+`g_map_list`. Failed live reloads preserve an existing last-known-good
+snapshot. If the first pool load succeeds but its configured cycle fails, the
+valid pool still supplies voting/MyMap choices and `g_map_list` rotates maps.
+Clearing `g_maps_pool_file` returns immediately to the legacy sources.
+
+See [Structured Map Pools](configuration-reference.md#structured-map-pools-optional)
+for the JSON schema, filters, selection rules, and full fallback matrix.
+
 ## Competitive Match Baseline
 
 For pickups, scrims, and events, start stricter than a casual public server and then loosen only what your group actually wants.

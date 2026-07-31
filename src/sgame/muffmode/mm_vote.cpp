@@ -597,9 +597,11 @@ void MM_VotePassMap()
 		level.vote_state.arg.c_str(), (int)level.vote_state.arg.length(),
 		(void *)level.vote_state.arg.c_str());
 
-	if (!MM_IsSafeMapToken(level.vote_state.arg.c_str()) || level.vote_state.arg.length() >= sizeof(level.nextmap))
+	if (!MM_IsSafeMapToken(level.vote_state.arg.c_str()) ||
+		level.vote_state.arg.length() >= sizeof(level.nextmap) ||
+		!muffmode::maps::ContainsConfiguredMap(level.vote_state.arg.c_str()))
 	{
-		gi.LocBroadcast_Print(PRINT_HIGH, "Map vote failed: invalid map name.\n");
+		gi.LocBroadcast_Print(PRINT_HIGH, "Map vote failed: map is no longer available.\n");
 		vote::MM_MarkExecutingVoteFailed();
 		return;
 	}

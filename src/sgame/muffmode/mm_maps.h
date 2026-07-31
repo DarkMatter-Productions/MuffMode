@@ -12,6 +12,27 @@ struct gentity_t;
 
 namespace muffmode::maps {
 
+inline char CanonicalMapTokenChar(char value) noexcept
+{
+	if (value == '\\')
+		return '/';
+	if (value >= 'A' && value <= 'Z')
+		return static_cast<char>(value + ('a' - 'A'));
+	return value;
+}
+
+inline bool MapTokensEqual(
+	std::string_view lhs,
+	std::string_view rhs) noexcept
+{
+	if (lhs.size() != rhs.size())
+		return false;
+	for (size_t i = 0; i < lhs.size(); i++)
+		if (CanonicalMapTokenChar(lhs[i]) != CanonicalMapTokenChar(rhs[i]))
+			return false;
+	return true;
+}
+
 inline bool IsSafeMapTokenText(std::string_view mapname, size_t max_qpath) noexcept
 {
 	if (mapname.empty() || mapname.size() >= max_qpath)
@@ -72,6 +93,7 @@ void MM_ShuffleMapList();
 void MM_GametypeChangeMapFirst();
 bool MM_TryBeginIntermissionFromMapList();
 void MM_HandleMapShuffleCvarChange();
+void MM_PruneMapQueueToConfiguredMaps();
 
 // [MuffMode] MyMap queue (game.mapqueue state remains in game_locals_t).
 int MM_MQ_Count();

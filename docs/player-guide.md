@@ -135,7 +135,9 @@ In Freeze Tag, dying during a live round freezes you in place instead of sending
 | `callvote <command> <arg>` or `cv <command> <arg>` | Start a vote. |
 | `vote yes` or `vote no` | Vote on an active proposal. |
 | `mymap <map>` | Add a valid map to the MyMap queue. |
-| `maplist` | Print the current server map list. |
+| `maplist` | Summarize the active structured pool/cycle and any legacy map-list fallback. |
+| `mappool [filter]` | List the first 32 matching maps in the structured voting/MyMap catalog, optionally filtered by name, title, episode, mode, `popular`, or `custom`. |
+| `mapcycle [filter]` | List the first 32 matches in the active structured automatic-rotation cycle with the same optional filters. |
 | `motd` | Print the message of the day. |
 | `forfeit` | Forfeit a duel when `g_allow_forfeit` is enabled. |
 | `ghost <code>` | Restore a saved in-progress match slot when automatic reconnect recovery is not available. |

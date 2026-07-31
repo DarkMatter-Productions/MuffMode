@@ -320,7 +320,11 @@ static THINK(Tech_SpawnAll) (gentity_t *ent) -> void {
 	if (!strcmp(g_allow_techs->string, "auto"))
 		num = 1;
 	else
-		num = g_allow_techs->integer;
+		// g_allow_techs is documented and treated everywhere else as a
+		// boolean. Normalize all enabled numeric values to one copy of each
+		// tech; negative or oversized values must never become an unbounded
+		// size_t loop or exhaust the entity pool.
+		num = !!g_allow_techs->integer;
 
 	if (!num)
 		return;

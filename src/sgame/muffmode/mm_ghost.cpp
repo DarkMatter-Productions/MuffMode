@@ -88,6 +88,35 @@ struct AutoGhostSnapshot {
 
 std::array<AutoGhostSnapshot, MAX_CLIENTS> auto_ghosts;
 
+void ClearTransientClientReferences(gclient_t &client)
+{
+	client.resp.ghost = nullptr;
+	client.oldgroundentity = nullptr;
+	client.follow_queued_target = nullptr;
+	client.follow_queued_time = 0_ms;
+	client.follow_target = nullptr;
+	client.follow_update = false;
+	client.owned_sphere = nullptr;
+	client.tracker_pain_time = 0_ms;
+	client.inmenu = false;
+	client.menu = nullptr;
+	client.menudirty = false;
+	client.grapple_ent = nullptr;
+	client.grapple_state = GRAPPLE_STATE_FLY;
+	client.trail_head = nullptr;
+	client.trail_tail = nullptr;
+	client.landmark_free_fall = false;
+	client.landmark_name = nullptr;
+	client.landmark_rel_pos = {};
+	client.sight_entity = nullptr;
+	client.sound_entity = nullptr;
+	client.sound2_entity = nullptr;
+	client.num_lag_origins = 0;
+	client.next_lag_origin = 0;
+	client.is_lag_compensated = false;
+	client.lag_restore = {};
+}
+
 size_t GhostSlotCapacity()
 {
 	const size_t configured = game.maxclients ? static_cast<size_t>(game.maxclients) : MAX_CLIENTS_KEX;
@@ -810,6 +839,10 @@ bool CaptureActivePlayerSnapshot(gentity_t *ent, bool start_auto_timeout)
 	snapshot.remaining = gtime_t::from_sec(ghost_seconds);
 	muffmode::CopyString(snapshot.social_id, ent->client->pers.social_id);
 	snapshot.client = *ent->client;
+	// A snapshot owns values, not live entity or TAG_LEVEL references. Keeping
+	// those pointers would let a later world reload turn them into aliases of
+	// newly spawned map entities before the client is reinstated.
+	ClearTransientClientReferences(snapshot.client);
 	snapshot.client.pers.health = ent->health;
 	snapshot.client.pers.max_health = ent->max_health;
 	snapshot.client.pers.saved_flags = ent->flags & (FL_FLASHLIGHT | FL_GODMODE | FL_NOTARGET | FL_POWER_ARMOR | FL_WANTS_POWER_ARMOR);
@@ -842,6 +875,9 @@ bool RestoreSnapshot(gentity_t *ent, int ghost_index, bool manual)
 	const bool keep_current_admin = ent->client->sess.admin;
 
 	*ent->client = snapshot.client;
+	// Defend older/in-memory snapshots too: RestoreEntityLife links the player
+	// and can invoke KillBox before the full post-restore sanitizer runs.
+	ClearTransientClientReferences(*ent->client);
 	RestoreEntityLife(ent, snapshot.entity);
 	SanitizeRestoredClient(ent, ghost_index, keep_current_admin);
 

@@ -128,64 +128,59 @@ ResetEntities
 Reset clients and items
 ============
 */
-void ResetEntities(bool reset_players, bool reset_ghost, bool reset_score)
+static void ResetPlayers(bool reset_ghost, bool reset_score)
 {
-	// reset the players
-	if (reset_players) {
-		for (auto ec : active_clients()) {
-			// [muff] Store bot team before reset to preserve it
-			team_t saved_bot_team = TEAM_NONE;
-			bool is_bot = (ec->svflags & SVF_BOT) || ec->client->sess.is_a_bot;
-			if (is_bot && ec->client && ClientIsPlaying(ec->client)) {
-				saved_bot_team = ec->client->sess.team;
-			}
+	for (auto ec : active_clients()) {
+		// [muff] Store bot team before reset to preserve it
+		team_t saved_bot_team = TEAM_NONE;
+		const bool is_bot = (ec->svflags & SVF_BOT) || ec->client->sess.is_a_bot;
+		if (is_bot && ClientIsPlaying(ec->client))
+			saved_bot_team = ec->client->sess.team;
 
-			ec->client->resp.ctf_state = 0;
-			if (reset_score)
-				ec->client->resp.score = 0;
+		ec->client->resp.ctf_state = 0;
+		if (reset_score)
+			ec->client->resp.score = 0;
+		if (reset_ghost)
+			MM_Ghost_ClearClient(ec);
+
+		if (ClientIsPlaying(ec->client)) {
 			if (reset_ghost)
-				MM_Ghost_ClearClient(ec);
+				MM_Ghost_Assign(ec);
 
-			if (ClientIsPlaying(ec->client)) {
-				if (reset_ghost) {
-					// make up a ghost code
-					MM_Ghost_Assign(ec);
-				}
-				//if (!ec->client->eliminated) {
-				Weapon_Grapple_DoReset(ec->client);
-				ec->svflags = SVF_NOCLIENT;
-				ec->flags &= ~FL_GODMODE;
+			Weapon_Grapple_DoReset(ec->client);
+			ec->svflags = SVF_NOCLIENT;
+			ec->flags &= ~FL_GODMODE;
 
-				ec->client->eliminated = false;
-				ec->client->pers.dmg_scorer = 0;
-				ec->client->pers.dmg_team = 0;
-				ec->client->respawn_time = level.time;	// +random_time(1_sec, 4_sec);
-				ec->client->pers.last_spawn_time = level.time;
-				ec->client->ps.pmove.pm_type = PM_DEAD;
-				ec->client->anim_priority = ANIM_DEATH;
-				ec->s.frame = FRAME_death308 - 1;
-				ec->client->anim_end = FRAME_death308;
-				ec->deadflag = true;
-				ec->movetype = MOVETYPE_NOCLIP;
-				ec->client->ps.gunindex = 0;
-				ec->client->ps.gunskin = 0;
-				gi.linkentity(ec);
-				//}
-			}
-
-			// [muff] Restore bot team assignment to keep them playing
-			if (is_bot && ec->client && saved_bot_team != TEAM_NONE) {
-				ec->client->sess.team = saved_bot_team;
-				P_PublishEngineTeam(ec);
-				// Ensure bot SVF flags are preserved
-				if (ec->client->sess.is_a_bot)
-					ec->svflags |= SVF_BOT;
-			}
+			ec->client->eliminated = false;
+			ec->client->pers.dmg_scorer = 0;
+			ec->client->pers.dmg_team = 0;
+			ec->client->respawn_time = level.time;
+			ec->client->pers.last_spawn_time = level.time;
+			ec->client->ps.pmove.pm_type = PM_DEAD;
+			ec->client->anim_priority = ANIM_DEATH;
+			ec->s.frame = FRAME_death308 - 1;
+			ec->client->anim_end = FRAME_death308;
+			ec->deadflag = true;
+			ec->movetype = MOVETYPE_NOCLIP;
+			ec->client->ps.gunindex = 0;
+			ec->client->ps.gunskin = 0;
+			gi.linkentity(ec);
 		}
 
-		CalculateRanks();
+		// [muff] Restore bot team assignment to keep them playing
+		if (is_bot && saved_bot_team != TEAM_NONE) {
+			ec->client->sess.team = saved_bot_team;
+			P_PublishEngineTeam(ec);
+			if (ec->client->sess.is_a_bot)
+				ec->svflags |= SVF_BOT;
+		}
 	}
-	
+
+	CalculateRanks();
+}
+
+static void LegacyResetWorldEntities()
+{
 	// reset the level items
 	Tech_Reset();
 	CTF_ResetFlags();
@@ -266,6 +261,70 @@ void ResetEntities(bool reset_players, bool reset_ghost, bool reset_score)
 	}
 }
 
+static void PreparePlayersForLegacyWorldReset()
+{
+	for (auto ec : active_clients()) {
+		Weapon_Grapple_DoReset(ec->client);
+		if (ec->client->owned_sphere) {
+			if (ec->client->owned_sphere->inuse)
+				G_FreeEntity(ec->client->owned_sphere);
+			ec->client->owned_sphere = nullptr;
+		}
+		ec->client->trail_head = nullptr;
+		ec->client->trail_tail = nullptr;
+		ec->client->oldgroundentity = nullptr;
+		ec->client->sight_entity = nullptr;
+		ec->client->sound_entity = nullptr;
+		ec->client->sound2_entity = nullptr;
+		ec->groundentity = nullptr;
+		ec->groundentity_linkcount = 0;
+	}
+	PlayerTrail_Destroy(nullptr);
+}
+
+void ResetEntities(bool reset_players, bool reset_ghost, bool reset_score)
+{
+	static bool reset_in_progress = false;
+	if (reset_in_progress) {
+		gi.Com_Print("Ignoring a nested entity reset while the world is being rebuilt.\n");
+		return;
+	}
+	reset_in_progress = true;
+	struct reset_scope_t {
+		bool &active;
+		~reset_scope_t() { active = false; }
+	} reset_scope { reset_in_progress };
+
+	// Freeze state can own a non-client view proxy. Release it before entity
+	// slots are cleared, for the same reason grapples are detached before reload.
+	if (MM_FreezeTag_IsActive()) {
+		if (reset_players)
+			MM_FreezeTag_OnRoundReset();
+		else
+			MM_FreezeTag_DetachWorldEntities();
+	}
+
+	const world_entity_reload_result_t reload_result =
+		G_ResetWorldEntitiesFromSavedString();
+	if (reload_result == world_entity_reload_result_t::reloaded) {
+		if (reset_players)
+			ResetPlayers(reset_ghost, reset_score);
+		return;
+	}
+	if (reload_result == world_entity_reload_result_t::already_in_progress) {
+		gi.Com_Print("Ignoring a nested entity reset while the world is being rebuilt.\n");
+		return;
+	}
+
+	// A missing/invalid cached lump is non-fatal: retain the proven legacy
+	// cleanup path. Reset player-owned entities first so that sweep cannot leave
+	// dangling grapple/sphere pointers behind.
+	PreparePlayersForLegacyWorldReset();
+	if (reset_players)
+		ResetPlayers(reset_ghost, reset_score);
+	LegacyResetWorldEntities();
+}
+
 } // namespace muffmode::match
 
 namespace match = muffmode::match;
@@ -336,7 +395,7 @@ StartNewRound
 */
 namespace muffmode::match {
 
-bool StartNewRound()
+bool StartNewRound(bool reset_world = true)
 {
 	if (!MM_GametypeHasFlag(GTF_ROUNDS)) {
 		level.round_state = roundst_t::ROUND_NONE;
@@ -348,17 +407,21 @@ bool StartNewRound()
 	level.round_state_timer = level.time + gtime_t::from_sec(g_round_countdown->integer);
 	level.countdown_check = 0_sec;
 
-	if (!MM_Horde_ShouldSkipEntitiesReset()) {
+	if (reset_world && !MM_Horde_ShouldSkipEntitiesReset()) {
 		if (GT(GT_FREEZE)) {
 			ResetEntities(false, false, false);
-			MM_FreezeTag_ResetRoundPlayers();
 		} else {
 			ResetEntities(true, false, false);
 		}
 	}
 
-	if (GT(GT_FREEZE))
+	if (GT(GT_FREEZE)) {
+		// Match_Start already rebuilt the world before calling us with
+		// reset_world=false, but its staged players still need the same
+		// countdown respawn policy as subsequent rounds.
+		MM_FreezeTag_ResetRoundPlayers();
 		MM_FreezeTag_OnRoundReset();
+	}
 
 	// LMS: re-arm each player's per-round lives after the reset respawned them.
 	if (GT(GT_LMS))
@@ -490,7 +553,11 @@ void Match_Start() {
 
 	level.total_player_deaths = 0;
 
-	// Horde: roll this run's champion budget (none/one/two) from independent slot rolls.
+	MM_Ghost_ClearAll();
+	match::ResetEntities(true, true, true);
+
+	// Horde world initialization is part of the entity reload, so choose this
+	// match's champion budget only after the fresh world has been constructed.
 	level.horde_champions_remaining = 0;
 	if (GT(GT_HORDE) && g_horde_champions->integer) {
 		int n = 0;
@@ -503,8 +570,6 @@ void Match_Start() {
 		level.horde_champions_remaining = static_cast<int8_t>(n);
 	}
 
-	MM_Ghost_ClearAll();
-	match::ResetEntities(true, true, true);
 	UnReadyAll();
 	ValidateCaptains();
 
@@ -530,7 +595,9 @@ void Match_Start() {
 	if (GT(GT_RR))
 		level.round_number = 0;
 
-	if (match::StartNewRound())
+	// ResetEntities already rebuilt the world; round modes should initialize
+	// their first countdown without parsing the same entity lump a second time.
+	if (match::StartNewRound(false))
 		return;
 
 	gi.LocBroadcast_Print(PRINT_CENTER, "FIGHT!");

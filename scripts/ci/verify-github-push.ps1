@@ -507,6 +507,9 @@ if (-not $SkipLocalGates) {
     Invoke-RepoScript -Name "Check generated artifacts" -Action {
         & (Join-Path $repoRoot "scripts\ci\check-generated-artifacts.ps1")
     }
+    Invoke-RepoScript -Name "Check map-pool examples" -Action {
+        & (Join-Path $repoRoot "scripts\ci\check-map-pool-examples.ps1")
+    }
     Invoke-RepoScript -Name "Check changelog ledger" -Action {
         & (Join-Path $repoRoot "scripts\ci\check-changelog.ps1")
     }

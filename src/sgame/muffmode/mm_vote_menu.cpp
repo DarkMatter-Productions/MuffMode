@@ -4,6 +4,7 @@
 #include "g_local.h"
 #include "core/debug_log.h"
 #include "muffmode/mm_gametype.h"
+#include "muffmode/mm_map_pool.h"
 #include "muffmode/mm_maps.h"
 #include "muffmode/mm_menu.h"
 #include "muffmode/mm_parse.h"
@@ -546,7 +547,8 @@ static MapMenuSourceRevision CurrentMapMenuSourceRevision()
 		g_map_list,
 		g_map_list ? g_map_list->modified_count : 0,
 		g_map_pool,
-		g_map_pool ? g_map_pool->modified_count : 0
+		g_map_pool ? g_map_pool->modified_count : 0,
+		MM_MapPoolRevision()
 	};
 }
 

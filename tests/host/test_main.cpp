@@ -11,6 +11,7 @@
 #include "muffmode/mm_items_rules.h"
 #include "muffmode/mm_lms_rules.h"
 #include "muffmode/mm_loc_parse.h"
+#include "muffmode/mm_map_pool.h"
 #include "muffmode/mm_maps.h"
 #include "muffmode/mm_motd.h"
 #include "muffmode/mm_parse.h"
@@ -212,6 +213,8 @@ MM_TEST(map_tokens_reject_traversal_segments_and_unsafe_characters) {
 	MM_CHECK(IsSafeMapTokenText("base1", 64));
 	MM_CHECK(IsSafeMapTokenText("q64/outpost", 64));
 	MM_CHECK(IsSafeMapTokenText("glug!", 64));
+	MM_CHECK(muffmode::maps::MapTokensEqual("q64/outpost", "Q64\\OUTPOST"));
+	MM_CHECK_FALSE(muffmode::maps::MapTokensEqual("q64/outpost", "q64/outpost2"));
 	MM_CHECK_FALSE(IsSafeMapTokenText("", 64));
 	MM_CHECK_FALSE(IsSafeMapTokenText(".", 64));
 	MM_CHECK_FALSE(IsSafeMapTokenText("..", 64));
@@ -222,6 +225,132 @@ MM_TEST(map_tokens_reject_traversal_segments_and_unsafe_characters) {
 	MM_CHECK_FALSE(IsSafeMapTokenText("bad;map", 64));
 	MM_CHECK_FALSE(IsSafeMapTokenText("bad|map", 64));
 	MM_CHECK_FALSE(IsSafeMapTokenText(std::string(64, 'a'), 64));
+}
+
+MM_TEST(map_pool_config_filenames_are_bounded_safe_leaves) {
+	using muffmode::map_pool::IsSafeConfigLeaf;
+
+	MM_CHECK(IsSafeConfigLeaf("muffmode-map-pool.json", 128));
+	MM_CHECK(IsSafeConfigLeaf("map_cycle-2.txt", 128));
+	MM_CHECK_FALSE(IsSafeConfigLeaf("", 128));
+	MM_CHECK_FALSE(IsSafeConfigLeaf(".", 128));
+	MM_CHECK_FALSE(IsSafeConfigLeaf("..", 128));
+	MM_CHECK_FALSE(IsSafeConfigLeaf("maps..json", 128));
+	MM_CHECK_FALSE(IsSafeConfigLeaf("../maps.json", 128));
+	MM_CHECK_FALSE(IsSafeConfigLeaf("config/maps.json", 128));
+	MM_CHECK_FALSE(IsSafeConfigLeaf("config\\maps.json", 128));
+	MM_CHECK_FALSE(IsSafeConfigLeaf("maps list.json", 128));
+	MM_CHECK_FALSE(IsSafeConfigLeaf("C:maps.json", 128));
+	MM_CHECK_FALSE(IsSafeConfigLeaf("maps.", 128));
+	MM_CHECK_FALSE(IsSafeConfigLeaf("CON", 128));
+	MM_CHECK_FALSE(IsSafeConfigLeaf("nul.json", 128));
+	MM_CHECK_FALSE(IsSafeConfigLeaf("Com9.txt", 128));
+	MM_CHECK_FALSE(IsSafeConfigLeaf("LPT1.cycle", 128));
+	MM_CHECK_FALSE(IsSafeConfigLeaf(std::string("maps\0.json", 10), 128));
+	MM_CHECK_FALSE(IsSafeConfigLeaf(std::string(128, 'a'), 128));
+}
+
+MM_TEST(map_cycle_parser_preserves_order_comments_and_case_insensitive_deduplication) {
+	using muffmode::map_pool::ParseCycleText;
+
+	const auto result = ParseCycleText(
+		"// stock and rerelease maps\n"
+		"q2dm1 q64/outpost\n"
+		"Q2DM1 q64\\outpost /* duplicates */ glug!\n"
+		"q2dm2/* adjacent comment */q2dm3\n",
+		64);
+
+	MM_CHECK(result.valid);
+	MM_CHECK(result.error.empty());
+	MM_CHECK_EQ(result.tokens_seen, 7u);
+	MM_CHECK_EQ(result.invalid_tokens, 0u);
+	MM_CHECK_EQ(result.duplicate_tokens, 2u);
+	MM_CHECK_EQ(result.maps.size(), 5u);
+	MM_CHECK_EQ(result.maps[0], std::string("q2dm1"));
+	MM_CHECK_EQ(result.maps[1], std::string("q64/outpost"));
+	MM_CHECK_EQ(result.maps[2], std::string("glug!"));
+	MM_CHECK_EQ(result.maps[3], std::string("q2dm2"));
+	MM_CHECK_EQ(result.maps[4], std::string("q2dm3"));
+}
+
+MM_TEST(map_cycle_parser_discards_unsafe_tokens_without_discarding_valid_order) {
+	using muffmode::map_pool::ParseCycleText;
+
+	const auto result = ParseCycleText(
+		"q2dm1 ../base1 bad;map q2dm2",
+		64);
+
+	MM_CHECK(result.valid);
+	MM_CHECK_EQ(result.tokens_seen, 4u);
+	MM_CHECK_EQ(result.invalid_tokens, 2u);
+	MM_CHECK_EQ(result.duplicate_tokens, 0u);
+	MM_CHECK_EQ(result.maps.size(), 2u);
+	MM_CHECK_EQ(result.maps[0], std::string("q2dm1"));
+	MM_CHECK_EQ(result.maps[1], std::string("q2dm2"));
+}
+
+MM_TEST(map_cycle_parser_rejects_malformed_or_over_limit_input) {
+	using muffmode::map_pool::ParseCycleText;
+
+	const auto unterminated = ParseCycleText("q2dm1 /* missing end", 64);
+	MM_CHECK_FALSE(unterminated.valid);
+	MM_CHECK_EQ(unterminated.error, std::string("cycle has an unterminated block comment"));
+
+	const char with_nul[] = { 'q', '2', 'd', 'm', '1', '\0', 'q', '2', 'd', 'm', '2' };
+	const auto embedded_nul =
+		ParseCycleText(std::string_view(with_nul, sizeof(with_nul)), 64);
+	MM_CHECK_FALSE(embedded_nul.valid);
+	MM_CHECK_EQ(embedded_nul.error, std::string("cycle contains an embedded NUL byte"));
+
+	const auto token_limit = ParseCycleText("q2dm1 q2dm2 q2dm3", 64, 2);
+	MM_CHECK_FALSE(token_limit.valid);
+	MM_CHECK_EQ(token_limit.tokens_seen, 3u);
+	MM_CHECK_EQ(token_limit.error, std::string("cycle contains too many tokens"));
+
+	const auto path_limit = ParseCycleText("1234567 12345678 q2dm1", 8);
+	MM_CHECK(path_limit.valid);
+	MM_CHECK_EQ(path_limit.tokens_seen, 3u);
+	MM_CHECK_EQ(path_limit.invalid_tokens, 1u);
+	MM_CHECK_EQ(path_limit.maps.size(), 2u);
+	MM_CHECK_EQ(path_limit.maps[0], std::string("1234567"));
+	MM_CHECK_EQ(path_limit.maps[1], std::string("q2dm1"));
+}
+
+MM_TEST(map_pool_mode_preferences_and_relaxation_order_are_explicit) {
+	using namespace muffmode::map_pool;
+
+	const mode_selection_t arena =
+		ResolveModeSelection(true, false, false, false, true, true);
+	MM_CHECK_EQ(arena.preferred, MAP_MODE_ARENA);
+	MM_CHECK_EQ(arena.fallback, MAP_MODE_NONE);
+
+	const mode_selection_t ctf =
+		ResolveModeSelection(false, true, false, true, true, true);
+	MM_CHECK_EQ(ctf.preferred, MAP_MODE_CTF);
+	MM_CHECK_EQ(ctf.fallback, MAP_MODE_NONE);
+
+	const mode_selection_t duel =
+		ResolveModeSelection(false, false, true, false, true, false);
+	MM_CHECK_EQ(duel.preferred, MAP_MODE_DUEL);
+	MM_CHECK_EQ(duel.fallback, MAP_MODE_DM);
+
+	const mode_selection_t duel_without_preferred_maps =
+		ResolveModeSelection(false, false, true, false, false, false);
+	MM_CHECK_EQ(duel_without_preferred_maps.preferred, MAP_MODE_DM);
+	MM_CHECK_EQ(duel_without_preferred_maps.fallback, MAP_MODE_NONE);
+
+	const mode_selection_t teams =
+		ResolveModeSelection(false, false, false, true, false, true);
+	MM_CHECK_EQ(teams.preferred, MAP_MODE_TDM);
+	MM_CHECK_EQ(teams.fallback, MAP_MODE_DM);
+
+	MM_CHECK_EQ(SELECTION_RELAXATIONS.size(), 3u);
+	MM_CHECK(SELECTION_RELAXATIONS[0].enforce_player_bounds);
+	MM_CHECK(SELECTION_RELAXATIONS[0].enforce_cooldown);
+	MM_CHECK(SELECTION_RELAXATIONS[1].enforce_player_bounds);
+	MM_CHECK_FALSE(SELECTION_RELAXATIONS[1].enforce_cooldown);
+	MM_CHECK_FALSE(SELECTION_RELAXATIONS[2].enforce_player_bounds);
+	MM_CHECK_FALSE(SELECTION_RELAXATIONS[2].enforce_cooldown);
 }
 
 MM_TEST(changelevel_tokens_allow_unit_markers_without_allowing_commands) {
@@ -247,18 +376,20 @@ MM_TEST(map_vote_snapshot_refreshes_only_for_source_revision_changes) {
 	int list_b = 0;
 	int pool_a = 0;
 	int pool_b = 0;
-	const MapMenuSourceRevision original { &list_a, 7, &pool_a, 11 };
+	const MapMenuSourceRevision original { &list_a, 7, &pool_a, 11, 23 };
 
 	MM_CHECK(MapMenuSnapshotNeedsRefresh(false, original, original));
 	MM_CHECK_FALSE(MapMenuSnapshotNeedsRefresh(true, original, original));
 	MM_CHECK(MapMenuSnapshotNeedsRefresh(
-		true, original, { &list_a, 8, &pool_a, 11 }));
+		true, original, { &list_a, 8, &pool_a, 11, 23 }));
 	MM_CHECK(MapMenuSnapshotNeedsRefresh(
-		true, original, { &list_a, 7, &pool_a, 12 }));
+		true, original, { &list_a, 7, &pool_a, 12, 23 }));
 	MM_CHECK(MapMenuSnapshotNeedsRefresh(
-		true, original, { &list_b, 7, &pool_a, 11 }));
+		true, original, { &list_b, 7, &pool_a, 11, 23 }));
 	MM_CHECK(MapMenuSnapshotNeedsRefresh(
-		true, original, { &list_a, 7, &pool_b, 11 }));
+		true, original, { &list_a, 7, &pool_b, 11, 23 }));
+	MM_CHECK(MapMenuSnapshotNeedsRefresh(
+		true, original, { &list_a, 7, &pool_a, 11, 24 }));
 }
 
 MM_TEST(motd_filenames_reject_paths_devices_and_shell_metacharacters) {
@@ -1753,6 +1884,55 @@ MM_TEST(spawn_rules_repeated_resets_do_not_retain_prior_strings) {
 
 	MM_ResetLevelCppState(state, std::string("final"));
 	MM_CHECK_EQ(state.entstring, std::string("final"));
+}
+
+MM_TEST(spawn_rules_entity_generation_advances_without_signed_overflow) {
+	MM_CHECK_EQ(MM_NextEntityGeneration(0), 1);
+	MM_CHECK_EQ(MM_NextEntityGeneration(-1), 0);
+	MM_CHECK_EQ(
+		MM_NextEntityGeneration(std::numeric_limits<int32_t>::max()),
+		std::numeric_limits<int32_t>::min());
+}
+
+MM_TEST(spawn_rules_entity_lump_preflight_accepts_valid_world) {
+	const std::string lump =
+		"// cached effective map entities\n"
+		"{\n"
+		"\"classname\" \"worldspawn\"\n"
+		"\"message\" \"Test Map\"\n"
+		"}\n"
+		"{ \"classname\" \"info_player_deathmatch\" \"origin\" \"0 0 24\" }\n";
+
+	const mm_entity_lump_validation_t result = MM_ValidateEntityLump(lump, 8);
+	MM_CHECK(result.valid);
+	MM_CHECK_EQ(result.entity_count, 2u);
+	MM_CHECK_EQ(result.error, nullptr);
+}
+
+MM_TEST(spawn_rules_entity_lump_preflight_rejects_malformed_or_unsafe_input) {
+	MM_CHECK_FALSE(MM_ValidateEntityLump("", 8).valid);
+	MM_CHECK_FALSE(MM_ValidateEntityLump(
+		"{ \"classname\" \"info_player_deathmatch\" }", 8).valid);
+	MM_CHECK_FALSE(MM_ValidateEntityLump(
+		"{ \"classname\" \"worldspawn\" ", 8).valid);
+	MM_CHECK_FALSE(MM_ValidateEntityLump(
+		"{ \"classname\" \"worldspawn }", 8).valid);
+	MM_CHECK_FALSE(MM_ValidateEntityLump(
+		"{ \"classname\" \"worldspawn\" } { \"origin\" \"0 0 0\" }", 8).valid);
+	MM_CHECK_FALSE(MM_ValidateEntityLump(
+		"{ \"classname\" \"worldspawn\" } { \"classname\" \"worldspawn\" }", 8).valid);
+	MM_CHECK_FALSE(MM_ValidateEntityLump(
+		"{ \"classname\" \"worldspawn\" } { \"classname\" \"item_quad\" }", 1).valid);
+	MM_CHECK_FALSE(MM_ValidateEntityLump(
+		"{ \"classname\" \"WorldSpawn\" }", 8).valid);
+	MM_CHECK_FALSE(MM_ValidateEntityLump(
+		"{ \"classname\" \"worldspawn\" \"message\" \"}junk\" }", 8).valid);
+	MM_CHECK(MM_ValidateEntityLump(
+		"{ \"classname\" \"worldspawn\" }junk", 8).valid);
+
+	std::string embedded_nul = "{ \"classname\" \"worldspawn\" }";
+	embedded_nul.insert(4, 1, '\0');
+	MM_CHECK_FALSE(MM_ValidateEntityLump(embedded_nul, 8).valid);
 }
 
 MM_TEST(spawn_rules_replace_path_filename_preserves_directory) {

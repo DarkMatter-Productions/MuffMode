@@ -2349,6 +2349,8 @@ function Assert-ReleasePackageContents {
         "rerelease\baseq2\muffmode-version.json",
         "rerelease\baseq2\muffmode.version",
         "rerelease\baseq2\CONFIGS_README.md",
+        "rerelease\baseq2\muffmode-map-cycle.example.txt",
+        "rerelease\baseq2\muffmode-map-pool.example.json",
         "rerelease\baseq2\server-base.cfg",
         "rerelease\baseq2\gt-FFA.cfg",
         "rerelease\baseq2\gt-DUEL.cfg",

@@ -5,12 +5,14 @@
 #include "core/debug_log.h"
 #include "muffmode/mm_command_contracts.h"
 #include "muffmode/mm_items_rules.h"
+#include "muffmode/mm_map_pool.h"
 #include "muffmode/mm_maps.h"
 #include "muffmode/mm_util.h"
 
 #include <algorithm>
 #include <array>
 #include <string_view>
+#include <utility>
 
 namespace muffmode::maps {
 int s_map_list_shuffle_modified = -1;
@@ -50,18 +52,24 @@ bool ContainsConfiguredMap(const char *mapname)
 	if (!IsSafeMapToken(mapname))
 		return false;
 
+	if (MM_StructuredMapPoolLoaded())
+		return MM_StructuredMapPoolContains(mapname);
+
 	return ForEachConfiguredMap([mapname](const char *map) {
-		return CStringEqualsI(map, mapname);
+		return MapTokensEqual(map, mapname);
 	});
 }
 
 std::vector<std::string> CollectConfiguredMaps()
 {
+	if (MM_StructuredMapPoolLoaded())
+		return MM_CollectStructuredMapPool();
+
 	std::vector<std::string> maps;
 
 	ForEachConfiguredMap([&maps](const char *map) {
 		const bool already_listed = std::any_of(maps.begin(), maps.end(), [map](const std::string &existing) {
-			return CStringEqualsI(existing.c_str(), map);
+			return MapTokensEqual(existing, map);
 		});
 
 		if (!already_listed)
@@ -75,7 +83,9 @@ std::vector<std::string> CollectConfiguredMaps()
 
 bool HasConfiguredMapSource()
 {
-	return CvarString(g_map_list)[0] || CvarString(g_map_pool)[0];
+	return MM_StructuredMapPoolLoaded() ||
+		CvarString(g_map_list)[0] ||
+		CvarString(g_map_pool)[0];
 }
 
 const char *ParseNextSafeMapToken(const char **text)
@@ -126,7 +136,7 @@ void MM_ShuffleMapList()
 	std::shuffle(values.begin(), values.end(), mt_rand);
 
 	// If the current map ended up at the front, push it to the end.
-	if (muffmode::CStringEqualsI(values[0].c_str(), level.mapname))
+	if (muffmode::maps::MapTokensEqual(values[0], level.mapname))
 		std::swap(values[0], values[values.size() - 1]);
 
 	const std::string joined = join_strings(values, " ");
@@ -136,12 +146,19 @@ void MM_ShuffleMapList()
 
 void MM_GametypeChangeMapFirst()
 {
+	MM_HandleMapPoolCvarChanges();
+
 	MuffModeLog("DEBUG", "SVCmd_GametypeChangeMapFirst_f: enter, g_map_list='%s', g_map_list_shuffle=%d",
 		muffmode::CvarString(g_map_list), muffmode::CvarInteger(g_map_list_shuffle));
 
+	std::string structured_map;
+	const bool has_structured_map =
+		MM_SelectStructuredNextMap(structured_map);
+
 	// This executes AFTER the gametype config has set the new g_map_list.
 	// Shuffle the list if shuffle is enabled (mode 1 or 2).
-	if (muffmode::CvarInteger(g_map_list_shuffle) >= 1)
+	if (!has_structured_map &&
+		muffmode::CvarInteger(g_map_list_shuffle) >= 1)
 	{
 		MM_ShuffleMapList();
 		if (muffmode::CvarInteger(g_map_list_shuffle) == 2)
@@ -151,10 +168,17 @@ void MM_GametypeChangeMapFirst()
 		}
 	}
 
-	const char *first_map = nullptr;
+	const char *first_map =
+		has_structured_map ? structured_map.c_str() : nullptr;
+	if (first_map) {
+		MuffModeLog(
+			"GAMETYPE",
+			"SVCmd_GametypeChangeMapFirst_f: selected structured-cycle map '%s'",
+			first_map);
+	}
 
 	// Try to get first map from g_map_list (now shuffled if enabled).
-	if (muffmode::CvarString(g_map_list)[0])
+	if (!first_map && muffmode::CvarString(g_map_list)[0])
 	{
 		const char *mlist = muffmode::CvarString(g_map_list);
 
@@ -196,6 +220,12 @@ void MM_GametypeChangeMapFirst()
 
 bool MM_TryBeginIntermissionFromMapList()
 {
+	std::string structured_map;
+	if (MM_SelectStructuredNextMap(structured_map)) {
+		BeginIntermission(CreateTargetChangeLevel(structured_map.c_str()));
+		return true;
+	}
+
 	if (!muffmode::CvarString(g_map_list)[0])
 		return false;
 
@@ -210,7 +240,7 @@ bool MM_TryBeginIntermissionFromMapList()
 		if (!map || !*map)
 			break;
 
-		if (muffmode::CStringEqualsI(map, level.mapname))
+		if (muffmode::maps::MapTokensEqual(map, level.mapname))
 		{
 			// It's in the list, go to the next one.
 			map = muffmode::maps::ParseNextSafeMapToken(&str);
@@ -273,6 +303,8 @@ bool MM_TryBeginIntermissionFromMapList()
 
 void MM_HandleMapShuffleCvarChange()
 {
+	MM_HandleMapPoolCvarChanges();
+
 	if (!g_map_list_shuffle)
 		return;
 
@@ -344,7 +376,10 @@ bool MM_MQ_Update()
 	}
 
 	auto it = std::remove_if(game.mapqueue.begin(), game.mapqueue.end(),
-		[](const std::string &s) { return !MM_IsSafeMapToken(s.c_str()); });
+		[](const std::string &s) {
+			return !MM_IsSafeMapToken(s.c_str()) ||
+				!muffmode::maps::ContainsConfiguredMap(s.c_str());
+		});
 	game.mapqueue.erase(it, game.mapqueue.end());
 
 	std::vector<std::string> clean_queue;
@@ -354,7 +389,9 @@ bool MM_MQ_Update()
 		if (clean_queue.size() >= MM_MAX_MAPQUEUE_ENTRIES)
 			break;
 		if (std::any_of(clean_queue.begin(), clean_queue.end(),
-			[&queued_map](const std::string &existing) { return muffmode::CStringEqualsI(existing.c_str(), queued_map.c_str()); }))
+			[&queued_map](const std::string &existing) {
+				return muffmode::maps::MapTokensEqual(existing, queued_map);
+			}))
 			continue;
 		clean_queue.push_back(queued_map);
 	}
@@ -422,7 +459,7 @@ bool MM_IsValidMyMapModifier(const char *modifier)
 bool MM_MapQueueContains(const char *mapname)
 {
 	return std::any_of(game.mapqueue.begin(), game.mapqueue.end(), [mapname](const std::string &queued_map) {
-		return muffmode::CStringEqualsI(queued_map.c_str(), mapname);
+		return muffmode::maps::MapTokensEqual(queued_map, mapname);
 	});
 }
 
@@ -431,6 +468,13 @@ std::string s_next_mapqueue_return;
 } // namespace muffmode::maps::queue
 
 namespace map_queue = muffmode::maps::queue;
+
+void MM_PruneMapQueueToConfiguredMaps()
+{
+	if (!deathmatch)
+		return;
+	map_queue::MM_MQ_Update();
+}
 
 int MM_MQ_Count()
 {
@@ -483,7 +527,11 @@ bool MM_MQ_Add(gentity_t *ent, const char *mapname)
 		return false;
 	}
 
-	game.mapqueue.push_back(mapname);
+	std::string normalized_map(mapname);
+	std::replace(
+		normalized_map.begin(), normalized_map.end(),
+		'\\', '/');
+	game.mapqueue.push_back(std::move(normalized_map));
 	return true;
 }
 
@@ -526,13 +574,49 @@ void MM_CmdMapList(gentity_t *ent)
 
 	const bool has_list = muffmode::CvarString(g_map_list)[0];
 	const bool has_pool = muffmode::CvarString(g_map_pool)[0];
+	const bool structured_pool = MM_StructuredMapPoolLoaded();
+	const bool structured_cycle = MM_StructuredMapCycleActive();
+
+	if (structured_pool) {
+		gi.LocClient_Print(
+			ent, PRINT_HIGH,
+			"Structured map pool: {} maps (use 'mappool [filter]' to list).\n",
+			MM_StructuredMapPoolCount());
+
+		if (structured_cycle) {
+			const std::vector<std::string> cycle =
+				MM_CollectStructuredMapCycle();
+			const std::string display = muffmode::TruncateWithEllipsis(
+				join_strings(cycle, " "),
+				map_queue::MAX_MAP_LIST_DISPLAY);
+			gi.LocClient_Print(
+				ent, PRINT_HIGH,
+				"Structured map cycle: {} maps ({} selection):\n{}\n",
+				cycle.size(),
+				g_maps_random && g_maps_random->integer
+					? "weighted random"
+					: "ordered",
+				display.c_str());
+		} else {
+			gi.LocClient_Print(
+				ent, PRINT_HIGH,
+				"No usable structured cycle; automatic rotation falls back to legacy g_map_list.\n");
+		}
+	}
 
 	if (has_list) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "Current map list (rotation):\n");
+		const char *heading = "Current map list (rotation):\n";
+		if (structured_cycle)
+			heading = "\nLegacy map list (rotation fallback):\n";
+		else if (structured_pool)
+			heading = "\nLegacy map list (active rotation fallback):\n";
+		gi.LocClient_Print(
+			ent, PRINT_HIGH,
+			"{}", heading);
 		map_queue::MM_PrintTruncatedMapList(ent);
 	}
 
-	if (has_pool) {
+	if (has_pool && !structured_pool) {
 		gi.LocClient_Print(ent, PRINT_HIGH, has_list ? "\nMap pool (votable):\n" : "Current map pool:\n");
 		map_queue::MM_PrintTruncatedMapPool(ent);
 	}
@@ -559,8 +643,14 @@ void MM_CmdMyMap(gentity_t *ent)
 	}
 
 	if (gi.argc() < 2) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "Add a map to the MyMap Queue.\nRecognized maps are:\n");
-		map_queue::MM_PrintTruncatedMapSource(ent);
+		if (MM_StructuredMapPoolLoaded()) {
+			gi.LocClient_Print(
+				ent, PRINT_HIGH,
+				"Add a map to the MyMap Queue. Use 'mappool [filter]' to list recognized maps.\n");
+		} else {
+			gi.LocClient_Print(ent, PRINT_HIGH, "Add a map to the MyMap Queue.\nRecognized maps are:\n");
+			map_queue::MM_PrintTruncatedMapSource(ent);
+		}
 
 		if (MM_MQ_Count()) {
 			gi.LocClient_Print(ent, PRINT_HIGH, "MyMap Queue => ");
@@ -576,7 +666,7 @@ void MM_CmdMyMap(gentity_t *ent)
 		}
 	}
 
-	if (muffmode::CStringEqualsI(gi.argv(1), level.mapname)) {
+	if (muffmode::maps::MapTokensEqual(gi.argv(1), level.mapname)) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "Cannot add current map to MyMap Queue.\n");
 		return;
 	}

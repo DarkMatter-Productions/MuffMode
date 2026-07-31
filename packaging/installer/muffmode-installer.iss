@@ -104,6 +104,12 @@
 #if FileExists(PackageRoot + "\rerelease\baseq2\CONFIGS_README.md") == 0
   #error PackageRoot is missing rerelease\baseq2\CONFIGS_README.md.
 #endif
+#if FileExists(PackageRoot + "\rerelease\baseq2\muffmode-map-cycle.example.txt") == 0
+  #error PackageRoot is missing rerelease\baseq2\muffmode-map-cycle.example.txt.
+#endif
+#if FileExists(PackageRoot + "\rerelease\baseq2\muffmode-map-pool.example.json") == 0
+  #error PackageRoot is missing rerelease\baseq2\muffmode-map-pool.example.json.
+#endif
 #if FileExists(PackageRoot + "\rerelease\baseq2\server-base.cfg") == 0
   #error PackageRoot is missing rerelease\baseq2\server-base.cfg.
 #endif
@@ -232,6 +238,8 @@
 #define PackageOriginalReadmeZtn2dm3Hash GetSHA256OfFile(PackageRoot + "\" + OriginalReadmesRelativePath + "\ztn2dm3-readme.txt")
 #define PackageOriginalReadmeZtn2dm5Hash GetSHA256OfFile(PackageRoot + "\" + OriginalReadmesRelativePath + "\ztn2dm5-readme.txt")
 #define PackageConfigReadmeHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\CONFIGS_README.md")
+#define PackageMapCycleExampleHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\muffmode-map-cycle.example.txt")
+#define PackageMapPoolExampleHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\muffmode-map-pool.example.json")
 #define PackageServerBaseHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\server-base.cfg")
 #define PackageGtFfaHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\gt-FFA.cfg")
 #define PackageGtDuelHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\gt-DUEL.cfg")
@@ -764,6 +772,10 @@ begin
   Result := ValidatePayloadFileIsNotReparsePoint(AddBackslash(Baseq2Dir) + 'muffmode-install-receipt.txt');
   if Result <> '' then Exit;
   Result := ValidatePayloadFileIsNotReparsePoint(AddBackslash(Baseq2Dir) + 'CONFIGS_README.md');
+  if Result <> '' then Exit;
+  Result := ValidatePayloadFileIsNotReparsePoint(AddBackslash(Baseq2Dir) + 'muffmode-map-cycle.example.txt');
+  if Result <> '' then Exit;
+  Result := ValidatePayloadFileIsNotReparsePoint(AddBackslash(Baseq2Dir) + 'muffmode-map-pool.example.json');
   if Result <> '' then Exit;
   Result := ValidatePayloadFileIsNotReparsePoint(AddBackslash(Baseq2Dir) + 'server-base.cfg');
   if Result <> '' then Exit;
@@ -2101,6 +2113,20 @@ begin
     Exit;
 
   Result := VerifyInstalledFileHash(
+    Baseq2Dir + 'muffmode-map-cycle.example.txt',
+    '{#PackageMapCycleExampleHash}',
+    'structured map-cycle example');
+  if Result <> '' then
+    Exit;
+
+  Result := VerifyInstalledFileHash(
+    Baseq2Dir + 'muffmode-map-pool.example.json',
+    '{#PackageMapPoolExampleHash}',
+    'structured map-pool example');
+  if Result <> '' then
+    Exit;
+
+  Result := VerifyInstalledFileHash(
     Baseq2Dir + 'server-base.cfg',
     '{#PackageServerBaseHash}',
     'base server config');
@@ -2465,6 +2491,8 @@ begin
     'EntityVenDm2SHA256: {#PackageEntityVenDm2Hash}' + #13#10 +
     'EntityZtn2dm5SHA256: {#PackageEntityZtn2dm5Hash}' + #13#10 +
     'ServerConfigGuideSHA256: {#PackageConfigReadmeHash}' + #13#10 +
+    'MapCycleExampleSHA256: {#PackageMapCycleExampleHash}' + #13#10 +
+    'MapPoolExampleSHA256: {#PackageMapPoolExampleHash}' + #13#10 +
     'ServerBaseConfigSHA256: {#PackageServerBaseHash}' + #13#10 +
     'GtFfaConfigSHA256: {#PackageGtFfaHash}' + #13#10 +
     'GtDuelConfigSHA256: {#PackageGtDuelHash}' + #13#10 +
