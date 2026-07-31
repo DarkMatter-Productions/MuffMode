@@ -152,6 +152,7 @@ cvar_t *g_arena_ammo_rockets;
 cvar_t *g_arena_ammo_cells;
 cvar_t *g_arena_ammo_slugs;
 cvar_t *g_arena_config;
+cvar_t *g_arena_legacy_idmap;
 cvar_t *g_arena_default_type;
 cvar_t *g_arena_health_protect;
 cvar_t *g_arena_armor_protect;
@@ -828,6 +829,7 @@ static void InitGame() {
 	g_arena_ammo_cells = gi.cvar("g_arena_ammo_cells", "150", CVAR_NOFLAGS);
 	g_arena_ammo_slugs = gi.cvar("g_arena_ammo_slugs", "50", CVAR_NOFLAGS);
 	g_arena_config = gi.cvar("g_arena_config", "arena.cfg", CVAR_LATCH);
+	g_arena_legacy_idmap = gi.cvar("g_arena_legacy_idmap", "0", CVAR_LATCH);
 	g_arena_default_type = gi.cvar("g_arena_default_type", "rocket", CVAR_NOFLAGS);
 	g_arena_health_protect = gi.cvar("g_arena_health_protect", "1", CVAR_NOFLAGS);
 	g_arena_armor_protect = gi.cvar("g_arena_armor_protect", "2", CVAR_NOFLAGS);
@@ -1915,7 +1917,10 @@ void CheckDMExitRules() {
 		return;
 	}
 
-	if (!level.num_playing_clients && noplayerstime->integer && level.time > level.no_players_time + gtime_t::from_min(noplayerstime->integer)) {
+	if (MM_ArenaUsesGenericNoPlayersTimeout(GT(GT_ARENA)) &&
+		!level.num_playing_clients && noplayerstime->integer &&
+		level.time > level.no_players_time +
+			gtime_t::from_min(noplayerstime->integer)) {
 		Match_End();
 		return;
 	}
@@ -2196,7 +2201,9 @@ void BeginIntermission(gentity_t *targ) {
 	// [Paril-KEX] update game level entry
 	G_UpdateLevelEntry();
 
-	if (G_IsValidStringPtr(level.changemap) && strstr(level.changemap, "*")) {
+	// A leading '*' is the engine's end-of-unit marker. Do not scan an
+	// untrusted map string without a bound before ExitLevel validates it.
+	if (G_IsValidStringPtr(level.changemap) && level.changemap[0] == '*') {
 		if (coop->integer) {
 			for (auto ec : active_clients()) {
 				// strip players of all keys between units
@@ -2415,32 +2422,37 @@ void ExitLevel() {
 		return;
 	}
 	
-	// Additional safety check: validate the pointer points to valid memory
-	// Check if it's a reasonable address (not perfect, but helps catch obvious corruption)
-	uintptr_t ptr_val = reinterpret_cast<uintptr_t>(level.changemap);
-	if (ptr_val < 0x1000 || ptr_val > 0x7FFFFFFFFFFF) {
-		gi.Com_ErrorFmt("Got invalid changemap pointer ({:#x}) when trying to exit level.", ptr_val);
+	// changemap comes from owned level/map state. Reject null-page sentinels,
+	// then keep every read inside the fixed engine path contract.
+	if (!G_IsValidStringPtr(level.changemap)) {
+		gi.Com_Error("Got invalid changemap pointer when trying to exit level.");
 		return;
 	}
-	
-	// Additional safety check for invalid map names - use strlen safely
-	size_t map_len = strlen(level.changemap);
-	if (map_len == 0 || map_len >= MAX_QPATH) {
+
+	size_t map_len = 0;
+	while (map_len < MAX_QPATH && level.changemap[map_len])
+		map_len++;
+	if (map_len == 0 || map_len == MAX_QPATH) {
 		gi.Com_ErrorFmt("Got invalid changemap length ({}) when trying to exit level.", map_len);
+		return;
+	}
+	const std::string_view changemap(level.changemap, map_len);
+	if (!muffmode::maps::IsSafeChangeLevelTokenText(changemap, MAX_QPATH)) {
+		gi.Com_ErrorFmt("Got unsafe changemap token when trying to exit level: {}", changemap);
 		return;
 	}
 
 	// for N64 mainly, but if we're directly changing to "victorXXX.pcx" then
 	// end game
-	size_t start_offset = (level.changemap[0] == '*' ? 1 : 0);
+	size_t start_offset = changemap.front() == '*' ? 1 : 0;
 
 	MuffModeLog("DEBUG", "ExitLevel: issuing gamemap command for '%s'", level.changemap);
 	if (map_len > (6 + start_offset) &&
-		!Q_strncasecmp(level.changemap + start_offset, "victor", 6) &&
-		!Q_strncasecmp(level.changemap + map_len - 4, ".pcx", 4))
-		gi.AddCommandString(G_Fmt("endgame \"{}\"\n", level.changemap + start_offset).data());
+		!Q_strncasecmp(changemap.data() + start_offset, "victor", 6) &&
+		!Q_strncasecmp(changemap.data() + map_len - 4, ".pcx", 4))
+		gi.AddCommandString(G_Fmt("endgame \"{}\"\n", changemap.substr(start_offset)).data());
 	else
-		gi.AddCommandString(G_Fmt("gamemap \"{}\"\n", level.changemap).data());
+		gi.AddCommandString(G_Fmt("gamemap \"{}\"\n", changemap).data());
 
 	MuffModeLog("DEBUG", "ExitLevel: complete");
 	level.changemap = nullptr;

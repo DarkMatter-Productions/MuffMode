@@ -2177,32 +2177,49 @@ static void Cmd_UnlockTeam_f(gentity_t *ent) {
 	MM_CmdUnlockTeam(ent);
 }
 
+// [MuffMode] These legacy RA commands remain registered for compatibility.
+// Their arena bodies return false outside MuffMode Arena, so make that state
+// explicit instead of silently accepting a command with no effect.
+static void Cmd_ArenaOnlyUnavailable_f(gentity_t *ent) {
+	if (!ent || !ent->client)
+		return;
+	gi.LocClient_Print(ent, PRINT_HIGH,
+		"{} is only available in MuffMode Arena.\n", gi.argv(0));
+}
+
 static void Cmd_TeamName_f(gentity_t *ent) {
-	MM_Arena_TeamNameCommand(ent);
+	if (!MM_Arena_TeamNameCommand(ent))
+		Cmd_ArenaOnlyUnavailable_f(ent);
 }
 
 static void Cmd_TeamKick_f(gentity_t *ent) {
-	MM_Arena_TeamKickCommand(ent);
+	if (!MM_Arena_TeamKickCommand(ent))
+		Cmd_ArenaOnlyUnavailable_f(ent);
 }
 
 static void Cmd_TeamMute_f(gentity_t *ent) {
-	MM_Arena_TeamMuteCommand(ent, true);
+	if (!MM_Arena_TeamMuteCommand(ent, true))
+		Cmd_ArenaOnlyUnavailable_f(ent);
 }
 
 static void Cmd_TeamUnmute_f(gentity_t *ent) {
-	MM_Arena_TeamMuteCommand(ent, false);
+	if (!MM_Arena_TeamMuteCommand(ent, false))
+		Cmd_ArenaOnlyUnavailable_f(ent);
 }
 
 static void Cmd_SpecInvite_f(gentity_t *ent) {
-	MM_Arena_SpectatorInviteCommand(ent, true);
+	if (!MM_Arena_SpectatorInviteCommand(ent, true))
+		Cmd_ArenaOnlyUnavailable_f(ent);
 }
 
 static void Cmd_SpecRevoke_f(gentity_t *ent) {
-	MM_Arena_SpectatorInviteCommand(ent, false);
+	if (!MM_Arena_SpectatorInviteCommand(ent, false))
+		Cmd_ArenaOnlyUnavailable_f(ent);
 }
 
 static void Cmd_SpecWho_f(gentity_t *ent) {
-	MM_Arena_SpecWhoCommand(ent);
+	if (!MM_Arena_SpecWhoCommand(ent))
+		Cmd_ArenaOnlyUnavailable_f(ent);
 }
 
 // [MuffMode] Admin team command bodies live in muffmode/mm_team

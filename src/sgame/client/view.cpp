@@ -1791,22 +1791,30 @@ void ClientEndServerFrame(gentity_t *ent) {
 
 	if (ent->client->menudirty && ent->client->menutime <= level.time) {
 		if (ent->client->menu) {
+			menu_hnd_t *menu = ent->client->menu;
 			P_Menu_Do_Update(ent);
-			gi.unicast(ent, true);
+			if (ent->client->menu == menu)
+				gi.unicast(ent, true);
 		}
-		ent->client->menutime = level.time;
+		// The dirty refresh already sent the current layout; schedule the next
+		// periodic refresh instead of sending it again below in the same frame.
+		ent->client->menutime = level.time + 3_sec;
 		ent->client->menudirty = false;
 	}
 
 	// if the scoreboard is up, update it
 	if (ent->client->showscores && ent->client->menutime <= level.time) {
 		if (ent->client->menu) {
+			menu_hnd_t *menu = ent->client->menu;
 			P_Menu_Do_Update(ent);
-			ent->client->menudirty = false;
+			if (ent->client->menu == menu) {
+				ent->client->menudirty = false;
+				gi.unicast(ent, false);
+			}
 		} else {
 			DeathmatchScoreboardMessage(GT(GT_ARENA) ? ent : e, e->enemy);
+			gi.unicast(ent, false);
 		}
-		gi.unicast(ent, false);
 		ent->client->menutime = level.time + 3_sec;
 	}
 

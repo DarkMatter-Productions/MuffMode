@@ -12,10 +12,10 @@ struct gentity_t;
 struct menu_hnd_t;
 enum team_t;
 
-// Rocket Arena is deliberately level-local.  The module discovers the RA2
+// MuffMode Arena is deliberately level-local. The module discovers the RA2
 // "arena" entity key after SpawnEntities, then owns one independent state
-// machine for every discovered arena. Classic RA reserves slot zero for the
-// lobby, leaving 31 playable slots.
+// machine for every discovered room. Classic RA reserves slot zero for the
+// lobby, leaving 31 playable rooms.
 inline constexpr int MM_MAX_ARENAS = MM_ARENA_MAP_MAX_ROOMS;
 
 enum class mm_arena_chat_scope_t : uint8_t {
@@ -50,12 +50,9 @@ void MM_Arena_OnClientBegin(gentity_t *ent);
 void MM_Arena_OnClientDisconnect(gentity_t *ent);
 void MM_Arena_OnDeath(gentity_t *victim, gentity_t *attacker);
 
-// Runs every discovered arena.  The boolean return values preserve the older
-// single-arena integration contract: RunFrame reports whether any arena has a
-// runnable pairing, UpdateRound reports whether this frame ended a round, and
-// CheckExitRules fully consumes GT_ARENA exit handling.
+// Runs every discovered room. RunFrame reports whether any room has a runnable
+// pairing, while CheckExitRules fully consumes GT_ARENA exit handling.
 bool MM_Arena_RunFrame();
-bool MM_Arena_UpdateRound();
 bool MM_Arena_CheckExitRules();
 
 // RA2 map discovery and spatial isolation.
@@ -63,6 +60,9 @@ int MM_Arena_Count();
 int MM_Arena_Id(const gentity_t *ent);
 const char *MM_Arena_Name(int arena_id);
 bool MM_Arena_ValidId(int arena_id);
+bool MM_Arena_UsesTaggedMap();
+// Available after map preflight, including while map entities are spawning.
+bool MM_Arena_MapRoomDeclared(int arena_id);
 bool MM_Arena_IsRunning(int arena_id);
 bool MM_Arena_IsPaused(int arena_id);
 bool MM_Arena_OrdnanceActive(int arena_id);
@@ -136,11 +136,9 @@ bool MM_Arena_ClientCanVote(const gclient_t *client);
 bool MM_Arena_SeriesActive(const gentity_t *ent);
 bool MM_Arena_GlobalVoteBlocked(const gentity_t *ent);
 bool MM_Arena_SameSquad(const gclient_t *first, const gclient_t *second);
-int MM_Arena_QueuePosition(const gclient_t *client);
 bool MM_Arena_GetSpawnLoadout(const gclient_t *client,
 	mm_arena_loadout_t &loadout);
 bool MM_Arena_FallingDamageEnabled(const gentity_t *ent);
-bool MM_Arena_FallingDamageEnabled(); // Compatibility: current frame/global caller.
 bool MM_Arena_ExcessiveEnabled(const gentity_t *ent);
 bool MM_Arena_InfiniteAmmoEnabled(const gentity_t *ent);
 bool MM_Arena_DamageScoringEnabled(const gentity_t *attacker);

@@ -479,7 +479,7 @@ void MM_ChangeGametype(gametype_t gt, bool force_cfg)
 				gi.cvar_forceset("g_nadefest", "0");
 		}
 
-		// Rocket Arena's RA3-compatible preset enables self-armor damage. Other
+		// MuffMode Arena's RA3-compatible preset enables self-armor damage. Other
 		// arena modes historically default to protected armor, so do not leak the
 		// Arena preset into CA/Strike/Red Rover when changing modes in-place.
 		if (old_gt == gametype_t::GT_ARENA && gt != gametype_t::GT_ARENA &&
@@ -684,7 +684,7 @@ void MM_GTSetLongName()
 		} else if (GT_RAW(GT_ARENA)) {
 			// Individual arenas own their mutators; global modification cvars
 			// must not rename the whole multi-arena session.
-			s = MM_Arena_Active() ? gt_long_name[GT_ARENA] : "Rocket Arena (inactive)";
+			s = MM_Arena_Active() ? "MuffMode Arena" : "MuffMode Arena (inactive)";
 		} else if (GT(GT_CTF)) {
 			if (g_instagib->integer) {
 				s = "Insta-CTF";

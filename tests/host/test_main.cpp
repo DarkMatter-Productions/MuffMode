@@ -8,6 +8,7 @@
 #include "muffmode/mm_freezetag_rules.h"
 #include "muffmode/mm_hud_stat_contracts.h"
 #include "muffmode/mm_horde_ai_rules.h"
+#include "muffmode/mm_items_rules.h"
 #include "muffmode/mm_lms_rules.h"
 #include "muffmode/mm_loc_parse.h"
 #include "muffmode/mm_maps.h"
@@ -18,6 +19,7 @@
 #include "muffmode/mm_spawn_rules.h"
 #include "muffmode/mm_time_format.h"
 #include "muffmode/mm_util.h"
+#include "muffmode/mm_vote_menu.h"
 
 #include <array>
 #include <cstdint>
@@ -145,6 +147,15 @@ MM_TEST(parse_bool_accepts_common_tokens_without_guessing) {
 	MM_CHECK_FALSE(MM_ParseBoolArg(" on"));
 }
 
+MM_TEST(item_touch_client_pickup_requires_playing_live_unfrozen_client) {
+	MM_CHECK(MM_ItemTouchClientMayPickup(true, 1, false));
+	MM_CHECK(MM_ItemTouchClientMayPickup(true, 100, false));
+	MM_CHECK_FALSE(MM_ItemTouchClientMayPickup(false, 100, false));
+	MM_CHECK_FALSE(MM_ItemTouchClientMayPickup(true, 0, false));
+	MM_CHECK_FALSE(MM_ItemTouchClientMayPickup(true, -1, false));
+	MM_CHECK_FALSE(MM_ItemTouchClientMayPickup(true, 100, true));
+}
+
 MM_TEST(parse_clamped_int_defaults_invalid_values_and_bounds_valid_numbers) {
 	MM_CHECK_EQ(MM_ParseClampedIntArgOrDefault("2", 7, 0, 3), 2);
 	MM_CHECK_EQ(MM_ParseClampedIntArgOrDefault("-4", 7, 0, 3), 0);
@@ -211,6 +222,43 @@ MM_TEST(map_tokens_reject_traversal_segments_and_unsafe_characters) {
 	MM_CHECK_FALSE(IsSafeMapTokenText("bad;map", 64));
 	MM_CHECK_FALSE(IsSafeMapTokenText("bad|map", 64));
 	MM_CHECK_FALSE(IsSafeMapTokenText(std::string(64, 'a'), 64));
+}
+
+MM_TEST(changelevel_tokens_allow_unit_markers_without_allowing_commands) {
+	using muffmode::maps::IsSafeChangeLevelTokenText;
+
+	MM_CHECK(IsSafeChangeLevelTokenText("base1", 64));
+	MM_CHECK(IsSafeChangeLevelTokenText("*base1", 64));
+	MM_CHECK(IsSafeChangeLevelTokenText("base1+unit_start", 64));
+	MM_CHECK(IsSafeChangeLevelTokenText("*victor1.pcx", 64));
+	MM_CHECK_FALSE(IsSafeChangeLevelTokenText("", 64));
+	MM_CHECK_FALSE(IsSafeChangeLevelTokenText("*", 64));
+	MM_CHECK_FALSE(IsSafeChangeLevelTokenText("**base1", 64));
+	MM_CHECK_FALSE(IsSafeChangeLevelTokenText("base1;quit", 64));
+	MM_CHECK_FALSE(IsSafeChangeLevelTokenText("base1\"\nquit", 64));
+	MM_CHECK_FALSE(IsSafeChangeLevelTokenText(std::string(64, 'a'), 64));
+}
+
+MM_TEST(map_vote_snapshot_refreshes_only_for_source_revision_changes) {
+	using muffmode::vote_menu::MapMenuSnapshotNeedsRefresh;
+	using muffmode::vote_menu::MapMenuSourceRevision;
+
+	int list_a = 0;
+	int list_b = 0;
+	int pool_a = 0;
+	int pool_b = 0;
+	const MapMenuSourceRevision original { &list_a, 7, &pool_a, 11 };
+
+	MM_CHECK(MapMenuSnapshotNeedsRefresh(false, original, original));
+	MM_CHECK_FALSE(MapMenuSnapshotNeedsRefresh(true, original, original));
+	MM_CHECK(MapMenuSnapshotNeedsRefresh(
+		true, original, { &list_a, 8, &pool_a, 11 }));
+	MM_CHECK(MapMenuSnapshotNeedsRefresh(
+		true, original, { &list_a, 7, &pool_a, 12 }));
+	MM_CHECK(MapMenuSnapshotNeedsRefresh(
+		true, original, { &list_b, 7, &pool_a, 11 }));
+	MM_CHECK(MapMenuSnapshotNeedsRefresh(
+		true, original, { &list_a, 7, &pool_b, 11 }));
 }
 
 MM_TEST(motd_filenames_reject_paths_devices_and_shell_metacharacters) {
@@ -416,67 +464,108 @@ MM_TEST(arena_menu_pagination_clamps_pages_and_keeps_every_item_reachable) {
 	MM_CHECK_EQ(last.last, 25);
 }
 
-MM_TEST(arena_map_contract_requires_explicit_complete_ra2_metadata) {
-	mm_arena_map_contract_t contract;
-	contract.syntax_valid = true;
-	contract.first_entity_is_worldspawn = true;
-	contract.world_arena_key_count = 1;
-	contract.world_arena_value_valid = true;
-	contract.declared_rooms = 2;
-	contract.has_lobby_point = true;
-	contract.fighter_starts[1] = 2;
-	contract.fighter_starts[2] = 4;
-	contract.named_intermissions[1] = true;
-	contract.named_intermissions[2] = true;
+MM_TEST(arena_queue_order_uses_team_id_as_a_stable_tiebreaker) {
+	MM_CHECK(MM_ArenaQueueKeyPrecedes(1, 250, 2, 1));
+	MM_CHECK_FALSE(MM_ArenaQueueKeyPrecedes(2, 1, 1, 250));
+	MM_CHECK(MM_ArenaQueueKeyPrecedes(7, 2, 7, 3));
+	MM_CHECK_FALSE(MM_ArenaQueueKeyPrecedes(7, 3, 7, 2));
+	MM_CHECK_FALSE(MM_ArenaQueueKeyPrecedes(7, 2, 7, 2));
+}
 
-	MM_CHECK(static_cast<bool>(MM_ArenaValidateMapContract(contract)));
+MM_TEST(arena_map_contract_profiles_tagged_multi_and_legacy_idmap) {
+	mm_arena_map_contract_t tagged;
+	tagged.syntax_valid = true;
+	tagged.first_entity_is_worldspawn = true;
+	tagged.world_arena_key_count = 1;
+	tagged.world_arena_value_valid = true;
+	tagged.declared_rooms = 2;
+	tagged.has_lobby_point = true;
+	// Both active sides respawn before the countdown. Named intermissions are
+	// optional, but each room needs two usable fighter-start entities.
+	tagged.fighter_starts[1] = 2;
+	tagged.fighter_starts[2] = 2;
 
-	auto invalid = contract;
+	const auto tagged_validation = MM_ArenaValidateMapContract(tagged);
+	MM_CHECK(static_cast<bool>(tagged_validation));
+	MM_CHECK_EQ(tagged_validation.profile,
+		mm_arena_map_profile_t::TaggedMulti);
+	MM_CHECK(MM_ArenaMapRoomDeclared(tagged_validation.profile,
+		tagged.declared_rooms, 1));
+	MM_CHECK(MM_ArenaMapRoomDeclared(tagged_validation.profile,
+		tagged.declared_rooms, 2));
+	MM_CHECK_FALSE(MM_ArenaMapRoomDeclared(tagged_validation.profile,
+		tagged.declared_rooms, 0));
+	MM_CHECK_FALSE(MM_ArenaMapRoomDeclared(tagged_validation.profile,
+		tagged.declared_rooms, 3));
+
+	auto invalid = tagged;
 	invalid.syntax_valid = false;
 	MM_CHECK_EQ(MM_ArenaValidateMapContract(invalid).error,
 		mm_arena_map_error_t::MalformedEntityLump);
 
-	invalid = contract;
+	invalid = tagged;
 	invalid.first_entity_is_worldspawn = false;
 	MM_CHECK_EQ(MM_ArenaValidateMapContract(invalid).error,
 		mm_arena_map_error_t::MissingWorldspawn);
 
-	invalid = contract;
+	invalid = tagged;
 	invalid.world_arena_key_count = 0;
 	MM_CHECK_EQ(MM_ArenaValidateMapContract(invalid).error,
 		mm_arena_map_error_t::MissingArenaKey);
 
-	invalid = contract;
+	invalid = tagged;
 	invalid.world_arena_key_count = 2;
 	MM_CHECK_EQ(MM_ArenaValidateMapContract(invalid).error,
 		mm_arena_map_error_t::DuplicateArenaKey);
 
-	invalid = contract;
-	invalid.declared_rooms = 0;
-	MM_CHECK_EQ(MM_ArenaValidateMapContract(invalid).error,
-		mm_arena_map_error_t::InvalidArenaCount);
+	invalid = tagged;
 	invalid.declared_rooms = MM_ARENA_MAP_MAX_ROOMS + 1;
 	MM_CHECK_EQ(MM_ArenaValidateMapContract(invalid).error,
 		mm_arena_map_error_t::InvalidArenaCount);
 
-	invalid = contract;
+	invalid = tagged;
 	invalid.has_lobby_point = false;
 	MM_CHECK_EQ(MM_ArenaValidateMapContract(invalid).error,
 		mm_arena_map_error_t::MissingLobbyPoint);
 
-	invalid = contract;
+	invalid = tagged;
 	invalid.fighter_starts[2] = 1;
 	const auto missing_starts = MM_ArenaValidateMapContract(invalid);
 	MM_CHECK_EQ(missing_starts.error,
 		mm_arena_map_error_t::MissingFighterStarts);
 	MM_CHECK_EQ(missing_starts.room, 2);
 
-	invalid = contract;
-	invalid.named_intermissions[1] = false;
-	const auto missing_view = MM_ArenaValidateMapContract(invalid);
-	MM_CHECK_EQ(missing_view.error,
-		mm_arena_map_error_t::MissingNamedIntermission);
-	MM_CHECK_EQ(missing_view.room, 1);
+	auto legacy = tagged;
+	legacy.declared_rooms = 0;
+	legacy.has_lobby_point = false;
+	legacy.idmap_fighter_starts = 2;
+	MM_CHECK(MM_ArenaMapUsesExplicitIdmap(legacy));
+	const auto legacy_validation = MM_ArenaValidateMapContract(legacy);
+	MM_CHECK(static_cast<bool>(legacy_validation));
+	MM_CHECK_EQ(legacy_validation.profile,
+		mm_arena_map_profile_t::LegacyIdmap);
+	MM_CHECK_FALSE(MM_ArenaMapRoomDeclared(legacy_validation.profile,
+		legacy.declared_rooms, 1));
+
+	invalid = legacy;
+	invalid.idmap_fighter_starts = 1;
+	const auto missing_idmap_start = MM_ArenaValidateMapContract(invalid);
+	MM_CHECK_EQ(missing_idmap_start.error,
+		mm_arena_map_error_t::MissingFighterStarts);
+	MM_CHECK_EQ(missing_idmap_start.room, 1);
+}
+
+MM_TEST(arena_map_contract_opt_in_allows_legacy_idmaps_without_a_world_key) {
+	mm_arena_map_contract_t contract;
+	contract.syntax_valid = true;
+	contract.first_entity_is_worldspawn = true;
+	contract.idmap_fighter_starts = 2;
+
+	MM_CHECK_EQ(MM_ArenaValidateMapContract(contract).error,
+		mm_arena_map_error_t::MissingArenaKey);
+	const auto opted_in = MM_ArenaValidateMapContract(contract, true);
+	MM_CHECK(static_cast<bool>(opted_in));
+	MM_CHECK_EQ(opted_in.profile, mm_arena_map_profile_t::LegacyIdmap);
 }
 
 MM_TEST(arena_effective_gametype_fails_closed_until_map_validation) {
@@ -490,7 +579,7 @@ MM_TEST(arena_effective_gametype_fails_closed_until_map_validation) {
 	MM_CHECK_EQ(MM_ArenaEffectiveGametype(duel, arena, ffa, true), duel);
 }
 
-MM_TEST(arena_map_contract_rejects_malformed_world_counts_without_clamping) {
+MM_TEST(arena_map_contract_rejects_out_of_range_or_malformed_world_counts) {
 	mm_arena_map_contract_t contract;
 	contract.syntax_valid = true;
 	contract.first_entity_is_worldspawn = true;
@@ -498,7 +587,7 @@ MM_TEST(arena_map_contract_rejects_malformed_world_counts_without_clamping) {
 	contract.has_lobby_point = true;
 
 	for (const int invalid_count : {
-		std::numeric_limits<int>::min(), -1, 0,
+		std::numeric_limits<int>::min(), -1,
 		MM_ARENA_MAP_MAX_ROOMS + 1, std::numeric_limits<int>::max()
 	}) {
 		contract.world_arena_value_valid = true;
@@ -726,6 +815,33 @@ MM_TEST(arena_deferred_proposals_layer_without_discarding_prior_changes) {
 	MM_CHECK_EQ(immediate.health, 100);
 }
 
+MM_TEST(arena_runtime_lifetimes_keep_room_and_team_ownership_scoped) {
+	MM_CHECK_FALSE(MM_ArenaUsesGenericNoPlayersTimeout(true));
+	MM_CHECK(MM_ArenaUsesGenericNoPlayersTimeout(false));
+
+	MM_CHECK(MM_ArenaDelayedActivatorValid(
+		true, true, 17, 17, 2, 2));
+	MM_CHECK_FALSE(MM_ArenaDelayedActivatorValid(
+		false, true, 17, 17, 2, 2));
+	MM_CHECK_FALSE(MM_ArenaDelayedActivatorValid(
+		true, false, 17, 17, 2, 2));
+	MM_CHECK_FALSE(MM_ArenaDelayedActivatorValid(
+		true, true, 17, 18, 2, 2));
+	MM_CHECK_FALSE(MM_ArenaDelayedActivatorValid(
+		true, true, 17, 17, 2, 3));
+	MM_CHECK(MM_ArenaDelayedActivatorValid(
+		true, true, 17, 17, 0, 0));
+	MM_CHECK_FALSE(MM_ArenaDelayedActivatorValid(
+		true, true, 17, 17, 0, 1));
+	MM_CHECK(MM_ArenaDelayedActivatorValid(
+		true, true, 17, 17, -1, 9));
+
+	MM_CHECK_EQ(MM_ArenaInvitesAfterMemberTransfer(0x07, 4, 5), 0x04);
+	MM_CHECK_EQ(MM_ArenaInvitesAfterMemberTransfer(0x03, 4, 0), 0x00);
+	MM_CHECK_EQ(MM_ArenaInvitesAfterMemberTransfer(0x07, 4, 4), 0x07);
+	MM_CHECK_EQ(MM_ArenaInvitesAfterMemberTransfer(0x07, 0, 5), 0x07);
+}
+
 MM_TEST(arena_spectator_invites_and_config_braces_follow_ra3_safety_rules) {
 	MM_CHECK_FALSE(MM_ArenaSpectatorInviteCommandAllowed(false));
 	MM_CHECK(MM_ArenaSpectatorInviteCommandAllowed(true));
@@ -744,6 +860,15 @@ MM_TEST(arena_spectator_invites_and_config_braces_follow_ra3_safety_rules) {
 	MM_CHECK(MM_ArenaConfigBracesBalanced(balanced));
 	MM_CHECK_FALSE(MM_ArenaConfigBracesBalanced(missing_close));
 	MM_CHECK_FALSE(MM_ArenaConfigBracesBalanced(stray_close));
+
+	// A following `key:` starts a new setting even when the previous native or
+	// RA2 assignment omitted its optional terminating semicolon.
+	MM_CHECK(MM_ArenaConfigStartsColonSetting(true, "health", ":"));
+	MM_CHECK(MM_ArenaConfigStartsColonSetting(false, "format", ":"));
+	MM_CHECK(MM_ArenaConfigStartsColonSetting(false, "maploop", ":"));
+	MM_CHECK_FALSE(MM_ArenaConfigStartsColonSetting(
+		false, "unknown_extension", ":"));
+	MM_CHECK_FALSE(MM_ArenaConfigStartsColonSetting(true, "health", "100"));
 }
 
 MM_TEST(arena_votes_use_ra3_expiry_and_unanimous_lock_thresholds) {
@@ -848,6 +973,70 @@ MM_TEST(arena_ra3_weapon_digits_and_names_map_to_q2re_roles) {
 	MM_CHECK_EQ(MM_ArenaWeaponFlagForName("railgun"), MM_ARENA_WEAPON_RAILGUN);
 	MM_CHECK_EQ(MM_ArenaWeaponFlagForName("hyperblaster"), MM_ARENA_WEAPON_PLASMA);
 	MM_CHECK_EQ(MM_ArenaWeaponFlagForName("bfg"), MM_ARENA_WEAPON_BFG);
+}
+
+MM_TEST(arena_ra2_and_ra3_weapon_lists_use_their_own_number_rows) {
+	MM_CHECK_EQ(MM_ArenaResolveConfigWeaponListFormat(false, false, ""),
+		mm_arena_weapon_list_format_t::RA2);
+	MM_CHECK_EQ(MM_ArenaResolveConfigWeaponListFormat(true, false, ""),
+		mm_arena_weapon_list_format_t::RA2);
+	MM_CHECK_EQ(MM_ArenaResolveConfigWeaponListFormat(false, true, ""),
+		mm_arena_weapon_list_format_t::RA3);
+	MM_CHECK_EQ(MM_ArenaResolveConfigWeaponListFormat(true, false, "ra3"),
+		mm_arena_weapon_list_format_t::RA3);
+	MM_CHECK_EQ(MM_ArenaResolveConfigWeaponListFormat(false, true, "ra2"),
+		mm_arena_weapon_list_format_t::RA2);
+	MM_CHECK_EQ(MM_ArenaResolveConfigWeaponListFormat(false, false, "native"),
+		mm_arena_weapon_list_format_t::RA3);
+
+	const auto ra2 = MM_ArenaParseWeaponList("2 3 4 5 6 7 8 9 0",
+		mm_arena_weapon_list_format_t::RA2);
+	MM_CHECK(ra2.valid);
+	MM_CHECK_FALSE(ra2.grapple);
+	MM_CHECK_EQ(ra2.mask,
+		static_cast<std::uint32_t>(
+			MM_ARENA_WEAPON_SHOTGUN |
+			MM_ARENA_WEAPON_MACHINEGUN |
+			MM_ARENA_WEAPON_GRENADE_LAUNCHER |
+			MM_ARENA_WEAPON_ROCKET_LAUNCHER |
+			MM_ARENA_WEAPON_PLASMA |
+			MM_ARENA_WEAPON_RAILGUN |
+			MM_ARENA_WEAPON_BFG));
+
+	const auto ra3 = MM_ArenaParseWeaponList("1234567890",
+		mm_arena_weapon_list_format_t::RA3);
+	MM_CHECK(ra3.valid);
+	MM_CHECK(ra3.grapple);
+	MM_CHECK_EQ(ra3.mask,
+		static_cast<std::uint32_t>(MM_ARENA_WEAPON_ALL));
+
+	const auto ra2_slot_one = MM_ArenaParseWeaponList("1",
+		mm_arena_weapon_list_format_t::RA2);
+	MM_CHECK_FALSE(ra2_slot_one.valid);
+	MM_CHECK_EQ(ra2_slot_one.mask, 0u);
+	MM_CHECK_FALSE(ra2_slot_one.grapple);
+
+	// Some stock RA2 rows omit the semicolon before `armor: 100`; even if a
+	// recovery parser presents that trailing token here, 100 is not a BFG row.
+	const auto ra2_missing_semicolon = MM_ArenaParseWeaponList(
+		"1 2 3 4 5 6 7 8 9 armor:100",
+		mm_arena_weapon_list_format_t::RA2);
+	MM_CHECK(ra2_missing_semicolon.valid);
+	MM_CHECK_EQ(ra2_missing_semicolon.mask,
+		static_cast<std::uint32_t>(
+			MM_ARENA_WEAPON_SHOTGUN |
+			MM_ARENA_WEAPON_MACHINEGUN |
+			MM_ARENA_WEAPON_GRENADE_LAUNCHER |
+			MM_ARENA_WEAPON_ROCKET_LAUNCHER |
+			MM_ARENA_WEAPON_PLASMA |
+			MM_ARENA_WEAPON_RAILGUN));
+	MM_CHECK_FALSE(ra2_missing_semicolon.grapple);
+
+	const auto ra3_zero = MM_ArenaParseWeaponList("0",
+		mm_arena_weapon_list_format_t::RA3);
+	MM_CHECK(ra3_zero.valid);
+	MM_CHECK_EQ(ra3_zero.mask, 0u);
+	MM_CHECK(ra3_zero.grapple);
 }
 
 MM_TEST(arena_stock_plasma_ammo_is_not_misparsed_or_user_votable) {

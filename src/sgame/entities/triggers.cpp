@@ -1358,15 +1358,23 @@ static TOUCH(trigger_teleport_touch) (gentity_t *self, gentity_t *other, const t
 	if (!other->client)
 		return;
 
+	// START_ON and targetname-controlled triggers must remain disabled even
+	// when their arena key would otherwise make them selectors.
+	if (self->delay)
+		return;
+
 	// [MuffMode] RA3-style positive arena trigger_teleports select an arena
 	// and enter its observer flow. Untagged/lobby/shared triggers retain
 	// vanilla spatial teleport behavior for RA2 map compatibility.
-	if (GT(GT_ARENA) && self->arena > 0) {
+	if (GT(GT_ARENA) && MM_Arena_UsesTaggedMap() && self->arena > 0 &&
+		MM_Arena_ValidId(self->arena)) {
 		MM_Arena_MoveTo(other, self->arena, true);
 		return;
 	}
 
-	if (self->delay)
+	// A targetless selector can outlive an arena gametype change. It no longer
+	// has a selector role and cannot be used as a spatial teleporter.
+	if (!self->target)
 		return;
 
 	dest = G_PickTarget(self->target);
@@ -1374,6 +1382,10 @@ static TOUCH(trigger_teleport_touch) (gentity_t *self, gentity_t *other, const t
 		gi.Com_Print("Teleport Destination not found!\n");
 		return;
 	}
+
+	// Match TeleportPlayer: a hook anchored in the source area must not keep
+	// pulling the client after the trigger moves them elsewhere.
+	Weapon_Grapple_DoReset(other->client);
 
 	if (other->movetype != MOVETYPE_FREECAM) {
 		gi.WriteByte(svc_temp_entity);

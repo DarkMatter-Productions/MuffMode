@@ -59,8 +59,8 @@ Use `ifstat` + configstrings instead (same pattern as `STAT_WARMUP_NOTICE` / `ST
 | `STAT_COUNTDOWN` | match | `yb -256 num` | Layout position (same on all clients) |
 | `STAT_HORDE_REMAINING` | `hud.cpp` | Horde right stack `num` | Horde only |
 | `STAT_SCORELIMIT` | `hud.cpp` | Horde: Wave between Lives and Monsters; coop: score limit | Horde reuses this slot (stats enum at `MAX_STATS`); DM match limit stays on `STAT_ROUND_NUMBER` |
-| `STAT_ARENA_ROLE` | `hud.cpp` / `MM_Arena_SetHudStats` | Strike/Rocket Arena top-right or CA/Freeze centre yt 48 | Per-client arena number/name, role, elimination, team, or line status via the primary POV configstring lane |
-| `STAT_MINISCORE_*` | `hud.cpp` | bottom corners | Team / FFA miniscore; Rocket Arena publishes the selected arena's red/blue series scores |
+| `STAT_ARENA_ROLE` | `hud.cpp` / `MM_Arena_SetHudStats` | Strike/MuffMode Arena top-right or CA/Freeze centre yt 48 | Per-client room number/name, role, elimination, team, or queue status via the primary POV configstring lane |
+| `STAT_MINISCORE_*` | `hud.cpp` | bottom corners | Team / FFA miniscore; MuffMode Arena publishes the selected room's red/blue series scores |
 
 Full contract comments: `src/sgame/muffmode/mm_hud_stat_contracts.h`.
 
@@ -70,9 +70,9 @@ Hook after notify; **currently empty**. Timer, warmup, centre line, and countdow
 
 Future MM-only polish (team border, etc.) belongs here and must not replace layout tokens.
 
-## Rocket Arena presentation
+## MuffMode Arena presentation
 
-Rocket Arena keeps its essential presentation in the vanilla-safe server layer. The server publishes each viewer's selected arena, role, team/elimination state, and line position through the existing arena-role stat/configstring contract, uses the normal red/blue miniscore fields for that arena's series, and emits an arena-local `svc_layout` scoreboard. A remote stock Q2RE client can therefore understand which room it is watching, who is fighting, the score, and who is next without `CG_DrawMuffModeHudEnhancements` or an Arena-specific cgame signal. Arena identity and room-local clock/countdown tokens sit outside the fighter-vitals `STAT_SHOW_STATUSBAR` gate, so lobby users, queued teams, coaches, and free observers retain that context without receiving combat HUD data.
+MuffMode Arena keeps its essential presentation in the vanilla-safe server layer. The server publishes each viewer's selected room, role, team/elimination state, and queue position through the existing arena-role stat/configstring contract, uses the normal red/blue miniscore fields for that room's series, and emits a room-local `svc_layout` scoreboard. A remote stock Q2RE client can therefore understand which room it is watching, who is fighting, the score, and who is next without `CG_DrawMuffModeHudEnhancements` or an Arena-specific cgame signal. Arena identity and room-local clock/countdown tokens sit outside the fighter-vitals `STAT_SHOW_STATUSBAR` gate, so lobby users, queued teams, coaches, and free observers retain that context without receiving combat HUD data.
 
 Arena role and score data must be generated for the actual viewer after any followed-player HUD stats are copied. The scoreboard, crosshair ID, and follow target must use the viewer's arena rather than global player lists; otherwise a spectator could expose another room's participants or state.
 
@@ -86,4 +86,4 @@ Arena role and score data must be generated for the actual viewer after any foll
 1. Restore vanilla Q2RE `game_x64.dll`.
 2. Connect to a MuffMode server.
 3. Confirm no `Com_Error` / client drop on HUD draw.
-4. Spot-check FFA, CA, Rocket Arena, Strike, Horde, LMS, RR — vitals, miniscore, timer (bottom-left), gametype stack, arena labels, and Rocket Arena queue/series scoreboard.
+4. Spot-check FFA, CA, MuffMode Arena, Strike, Horde, LMS, RR — vitals, miniscore, timer (bottom-left), gametype stack, room labels, and Arena queue/series scoreboard.

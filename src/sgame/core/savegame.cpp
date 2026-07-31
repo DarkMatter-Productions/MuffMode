@@ -1473,22 +1473,33 @@ void read_save_type_json(const Json::Value &json, void *data, const save_type_t 
 				str[len] = 0;
 			}
 		} else if (json.isArray()) {
-			if (type->count && json.size() >= type->count - 1)
+			if (type->count && json.size() >= type->count)
 				json_print_error(field, "static-length dynamic string overrun", false);
 			else {
 				size_t len = json.size();
-				char *str = *((char **)data) = (char *)gi.TagMalloc(type->count ? type->count : (len + 1), type->tag);
+				bool valid = true;
 
 				for (Json::Value::ArrayIndex i = 0; i < json.size(); i++) {
 					const Json::Value &chr = json[i];
 
-					if (!chr.isInt())
+					if (!chr.isInt()) {
 						json_print_error(field, "expected number", false);
-					else if (chr.asInt() < 0 || chr.asInt() > UINT8_MAX)
+						valid = false;
+					} else if (chr.asInt() < 0 || chr.asInt() > UINT8_MAX) {
 						json_print_error(field, "char out of range", false);
-
-					str[i] = chr.asInt();
+						valid = false;
+					}
 				}
+
+				if (!valid) {
+					*((char **)data) = nullptr;
+					return;
+				}
+
+				char *str = *((char **)data) = (char *)gi.TagMalloc(type->count ? type->count : (len + 1), type->tag);
+				auto *bytes = reinterpret_cast<unsigned char *>(str);
+				for (Json::Value::ArrayIndex i = 0; i < json.size(); i++)
+					bytes[i] = static_cast<unsigned char>(json[i].asInt());
 
 				str[len] = 0;
 			}
@@ -1504,23 +1515,32 @@ void read_save_type_json(const Json::Value &json, void *data, const save_type_t 
 				Q_strlcpy((char *)data, json.asCString(), dest_size);
 			}
 		} else if (json.isArray()) {
-			if (type->count && json.size() >= type->count - 1)
+			if (type->count && json.size() >= type->count)
 				json_print_error(field, "fixed length string overrun", false);
 			else {
-				Json::Value::ArrayIndex i;
+				bool valid = true;
 
-				for (i = 0; i < json.size(); i++) {
+				for (Json::Value::ArrayIndex i = 0; i < json.size(); i++) {
 					const Json::Value &chr = json[i];
 
-					if (!chr.isInt())
+					if (!chr.isInt()) {
 						json_print_error(field, "expected number", false);
-					else if (chr.asInt() < 0 || chr.asInt() > UINT8_MAX)
+						valid = false;
+					} else if (chr.asInt() < 0 || chr.asInt() > UINT8_MAX) {
 						json_print_error(field, "char out of range", false);
-
-					((char *)data)[i] = chr.asInt();
+						valid = false;
+					}
 				}
 
-				((char *)data)[i] = 0;
+				if (!valid) {
+					((char *)data)[0] = '\0';
+					return;
+				}
+
+				auto *bytes = reinterpret_cast<unsigned char *>(data);
+				for (Json::Value::ArrayIndex i = 0; i < json.size(); i++)
+					bytes[i] = static_cast<unsigned char>(json[i].asInt());
+				((char *)data)[json.size()] = 0;
 			}
 		} else
 			json_print_error(field, "expected string or array", false);
@@ -2477,7 +2497,7 @@ bool CanSave() {
 	// a mid-match save without serializing that graph would leave clients and
 	// entities referring to nonexistent room state.
 	if (GT(GT_ARENA)) {
-		gi.Com_Print("Can't savegame in Rocket Arena.\n");
+		gi.Com_Print("Can't savegame in MuffMode Arena.\n");
 		return false;
 	}
 

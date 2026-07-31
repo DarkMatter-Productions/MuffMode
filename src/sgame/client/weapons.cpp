@@ -21,7 +21,7 @@ static bool Weapon_ExcessiveEnabled(const gentity_t *ent) {
 }
 
 static bool Weapon_InstantSwitchEnabled(const gentity_t *ent) {
-	// Rocket Arena owns this setting per arena. Do not let the legacy global
+	// MuffMode Arena owns this setting per room. Do not let the legacy global
 	// cvar flatten differently configured rooms into one switch policy.
 	const bool fast_switch = GT(GT_ARENA) ?
 		MM_Arena_FastSwitchEnabled(ent) : g_instant_weapon_switch->integer != 0;
@@ -532,6 +532,10 @@ NoAmmoWeaponChange
 =================
 */
 void NoAmmoWeaponChange(gentity_t *ent, bool sound) {
+	// [MuffMode] This helper is also reached from map targets and lifecycle code.
+	if (!ent || !ent->client)
+		return;
+
 	if (sound) {
 		if (level.time >= ent->client->empty_click_sound) {
 			gi.sound(ent, CHAN_WEAPON, gi.soundindex("weapons/noammo.wav"), 1, ATTN_NORM, 0);
@@ -563,8 +567,10 @@ void NoAmmoWeaponChange(gentity_t *ent, bool sound) {
 	for (size_t i = 0; i < q_countof(no_ammo_order); i++) {
 		gitem_t *item = GetItemByIndex(no_ammo_order[i]);
 
-		if (!item)
+		if (!item) {
 			gi.Com_ErrorFmt("Invalid no ammo weapon switch weapon {}\n", (int32_t)no_ammo_order[i]);
+			continue;
+		}
 
 		if (RS(RS_Q3A) && item->id == IT_WEAPON_SSHOTGUN)
 			continue;
@@ -618,20 +624,22 @@ Weapon_AnimationTime
 ================
 */
 static inline gtime_t Weapon_AnimationTime(gentity_t *ent) {
+	const gitem_t *weapon = ent->client->pers.weapon;
+
 	if (Weapon_QuickSwitchEnabled(ent) && (gi.tick_rate >= 20) &&
 		(ent->client->weaponstate == WEAPON_ACTIVATING || ent->client->weaponstate == WEAPON_DROPPING))
 		ent->client->ps.gunrate = 20;
 	else
 		ent->client->ps.gunrate = 10;
 
-	if (RS(RS_Q3A) && ent->client->weaponstate == WEAPON_FIRING && ent->client->pers.weapon) {
-		if (ent->client->pers.weapon->id == IT_WEAPON_PLASMABEAM)
+	if (RS(RS_Q3A) && ent->client->weaponstate == WEAPON_FIRING && weapon) {
+		if (weapon->id == IT_WEAPON_PLASMABEAM)
 			ent->client->ps.gunrate = 20;
-		else if (ent->client->pers.weapon->id == IT_WEAPON_CHAINGUN)
+		else if (weapon->id == IT_WEAPON_CHAINGUN)
 			ent->client->ps.gunrate = 30;
 	}
 
-	if (ent->client->ps.gunframe != 0 && (!(ent->client->pers.weapon->flags & IF_NO_HASTE) || ent->client->weaponstate != WEAPON_FIRING)) {
+	if (weapon && ent->client->ps.gunframe != 0 && (!(weapon->flags & IF_NO_HASTE) || ent->client->weaponstate != WEAPON_FIRING)) {
 		if (is_haste)
 			ent->client->ps.gunrate *= 1.5;
 		if (Tech_ApplyTimeAccel(ent))

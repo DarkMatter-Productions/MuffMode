@@ -23,17 +23,40 @@ GRAPPLE
 */
 
 // self is grapple, not player
+static bool Weapon_Grapple_HasValidOwner(const gentity_t *self) {
+	return self && self->owner && self->owner->inuse && self->owner->client &&
+		self->owner->spawn_count == self->count;
+}
+
 static void Weapon_Grapple_Reset(gentity_t *self) {
-	if (!self || !self->owner->client || !self->owner->client->grapple_ent)
+	if (!self)
 		return;
 
-	gi.sound(self->owner, CHAN_WEAPON, gi.soundindex("weapons/grapple/grreset.wav"), GrappleSoundVolume(self->owner), ATTN_NORM, 0);
+	gentity_t *owner = self->owner;
+	if (!Weapon_Grapple_HasValidOwner(self)) {
+		G_FreeEntity(self);
+		return;
+	}
 
-	gclient_t *cl = self->owner->client;
+	if (owner->client->grapple_ent != self) {
+		// If the client already dropped its hook pointer, finish clearing the
+		// movement state this orphan represented. Do not disturb a newer hook.
+		if (owner && owner->client && !owner->client->grapple_ent) {
+			owner->client->grapple_release_time = level.time + 1_sec;
+			owner->client->grapple_state = GRAPPLE_STATE_FLY;
+			owner->flags &= ~FL_NO_KNOCKBACK;
+		}
+		G_FreeEntity(self);
+		return;
+	}
+
+	gi.sound(owner, CHAN_WEAPON, gi.soundindex("weapons/grapple/grreset.wav"), GrappleSoundVolume(owner), ATTN_NORM, 0);
+
+	gclient_t *cl = owner->client;
 	cl->grapple_ent = nullptr;
 	cl->grapple_release_time = level.time + 1_sec;
 	cl->grapple_state = GRAPPLE_STATE_FLY; // we're firing, not on hook
-	self->owner->flags &= ~FL_NO_KNOCKBACK;
+	owner->flags &= ~FL_NO_KNOCKBACK;
 	G_FreeEntity(self);
 }
 
@@ -43,6 +66,11 @@ void Weapon_Grapple_DoReset(gclient_t *cl) {
 }
 
 static TOUCH(Weapon_Grapple_Touch) (gentity_t *self, gentity_t *other, const trace_t &tr, bool other_touching_self) -> void {
+	if (!Weapon_Grapple_HasValidOwner(self) || !other) {
+		Weapon_Grapple_Reset(self);
+		return;
+	}
+
 	if (other == self->owner)
 		return;
 
@@ -110,6 +138,11 @@ static void Weapon_Grapple_DrawCable(gentity_t *self) {
 void Weapon_Grapple_Pull(gentity_t *self) {
 	vec3_t hookdir, v;
 	float  vlen;
+
+	if (!Weapon_Grapple_HasValidOwner(self)) {
+		Weapon_Grapple_Reset(self);
+		return;
+	}
 
 	if (self->owner->client->pers.weapon && self->owner->client->pers.weapon->id == IT_WEAPON_GRAPPLE &&
 		!(self->owner->client->newweapon || ((self->owner->client->latched_buttons | self->owner->client->buttons) & BUTTON_HOLSTER)) &&
@@ -198,7 +231,11 @@ static DIE(Weapon_Grapple_Die) (gentity_t *self, gentity_t *other, gentity_t *in
 		Weapon_Grapple_Reset(self);
 }
 
-static bool Weapon_Grapple_FireHook(gentity_t *self, const vec3_t &start, const vec3_t &dir, int damage, int speed, effects_t effect) {
+static bool Weapon_Grapple_FireHook(gentity_t *self, const vec3_t &start, const vec3_t &dir, int damage, float speed, effects_t effect) {
+	// [MuffMode] Engine-facing hook calls must not manufacture an ownerless grapple.
+	if (!self || !self->client)
+		return false;
+
 	gentity_t	*grapple;
 	trace_t	tr;
 	vec3_t	normalized = dir.normalized();
@@ -211,12 +248,13 @@ static bool Weapon_Grapple_FireHook(gentity_t *self, const vec3_t &start, const 
 	grapple->movetype = MOVETYPE_FLYMISSILE;
 	grapple->clipmask = MASK_PROJECTILE;
 	// [Paril-KEX]
-	if (self->client && !G_ShouldPlayersCollide(true))
+	if (!G_ShouldPlayersCollide(true))
 		grapple->clipmask &= ~CONTENTS_PLAYER;
 	grapple->solid = SOLID_BBOX;
 	grapple->s.effects |= effect;
 	grapple->s.modelindex = gi.modelindex("models/weapons/grapple/hook/tris.md2");
 	grapple->owner = self;
+	grapple->count = self->spawn_count;
 	grapple->touch = Weapon_Grapple_Touch;
 	grapple->dmg = damage;
 	grapple->flags |= FL_NO_KNOCKBACK | FL_NO_DAMAGE_EFFECTS;

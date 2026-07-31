@@ -60,12 +60,25 @@ static TOUCH(teleporter_touch) (gentity_t *self, gentity_t *other, const trace_t
 	if (!other->client)
 		return;
 
+	// [MuffMode] The pad can be removed independently through a killtarget.
+	// Retire its trigger instead of touching a freed or reused owner slot.
+	if (!self->owner || !self->owner->inuse || self->owner->spawn_count != self->count) {
+		G_FreeEntity(self);
+		return;
+	}
+
 	// [MuffMode] Positive RA2 arena teleporters are selectors, not spatial
 	// teleporters. Enter the arena as an observer; its menu owns joining.
-	if (GT(GT_ARENA) && self->arena > 0) {
+	if (GT(GT_ARENA) && MM_Arena_UsesTaggedMap() && self->arena > 0 &&
+		MM_Arena_ValidId(self->arena)) {
 		MM_Arena_MoveTo(other, self->arena, true);
 		return;
 	}
+
+	// A targetless selector can outlive an arena gametype change. It no longer
+	// has a valid selector role, but it also has no spatial destination.
+	if (!self->target)
+		return;
 
 	gentity_t *dest = G_FindByString<&gentity_t::targetname>(nullptr, self->target);
 	if (!dest) {
@@ -89,6 +102,7 @@ void SpawnTeleporterTrigger(gentity_t *ent, const TeleporterTriggerBounds &bound
 	trigger->solid = SOLID_TRIGGER;
 	trigger->target = ent->target;
 	trigger->owner = ent;
+	trigger->count = ent->spawn_count;
 	trigger->arena = ent->arena;
 	trigger->s.origin = ent->s.origin;
 	trigger->mins = bounds.mins;
@@ -143,7 +157,10 @@ void SP_misc_teleporter(gentity_t *ent)
 
 	// N64 has some of these for visual effects only. RA2 selector pads often
 	// omit target entirely; their positive arena key is the destination.
-	if (!ent->target && !(GT(GT_ARENA) && ent->arena > 0))
+	// Entity spawning precedes MM_Arena_Init, so use the preflight contract
+	// rather than the live room table for targetless RA2 selector pads.
+	if (!ent->target && !(GT(GT_ARENA) &&
+		MM_Arena_MapRoomDeclared(ent->arena)))
 		return;
 
 	SpawnTeleporterTrigger(ent, bounds);

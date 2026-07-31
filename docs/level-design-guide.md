@@ -71,7 +71,7 @@ Use `gametype` and `not_gametype` to include or exclude an entity for specific g
 | `freeze` | Freeze Tag |
 | `strike` | Capture Strike |
 | `rr` | Red Rover |
-| `lms` | Reserved Last Man Standing token |
+| `lms` | Last Man Standing |
 | `horde` | Horde Mode |
 | `ball` | Reserved ProBall token |
 | `instagib` | Instagib |

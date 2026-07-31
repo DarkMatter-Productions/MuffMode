@@ -158,7 +158,10 @@ function Assert-Command {
 function Assert-WindowsExecutableImage {
     param(
         [string]$Path,
-        [string]$Description
+        [string]$Description,
+        [UInt16[]]$AllowedMachines = @([UInt16]0x014c, [UInt16]0x8664, [UInt16]0xaa64),
+        [ValidateSet("Either", "Executable", "Dll")]
+        [string]$ImageKind = "Either"
     )
 
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
@@ -166,21 +169,82 @@ function Assert-WindowsExecutableImage {
     }
 
     $file = Get-Item -LiteralPath $Path
-    if ($file.Length -lt 2) {
+    if ($file.Length -lt 64) {
         throw "$Description is too small to be a Windows executable image: $Path"
     }
 
-    $buffer = New-Object byte[] 2
     $stream = [System.IO.File]::Open($file.FullName, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
+    $reader = $null
     try {
-        $bytesRead = $stream.Read($buffer, 0, $buffer.Length)
+        $reader = [System.IO.BinaryReader]::new($stream)
+        if ($reader.ReadUInt16() -ne 0x5a4d) {
+            throw "$Description does not have a valid DOS executable header: $Path"
+        }
+
+        $stream.Position = 0x3c
+        $peOffset = [Int64]$reader.ReadUInt32()
+        if ($peOffset -lt 0x40 -or $peOffset -gt ($file.Length - 24)) {
+            throw "$Description has an invalid or out-of-bounds PE header offset: $Path"
+        }
+
+        $stream.Position = $peOffset
+        if ($reader.ReadUInt32() -ne 0x00004550) {
+            throw "$Description does not have a valid PE signature: $Path"
+        }
+
+        $machine = $reader.ReadUInt16()
+        $sectionCount = $reader.ReadUInt16()
+        $reader.ReadUInt32() | Out-Null # TimeDateStamp
+        $reader.ReadUInt32() | Out-Null # PointerToSymbolTable
+        $reader.ReadUInt32() | Out-Null # NumberOfSymbols
+        $optionalHeaderSize = $reader.ReadUInt16()
+        $characteristics = $reader.ReadUInt16()
+
+        if ($AllowedMachines.Count -eq 0 -or $AllowedMachines -notcontains $machine) {
+            $actualMachine = "0x{0:X4}" -f $machine
+            $expectedMachines = ($AllowedMachines | ForEach-Object { "0x{0:X4}" -f $_ }) -join ", "
+            throw "$Description targets unsupported Windows machine $actualMachine (expected: $expectedMachines): $Path"
+        }
+
+        if ($sectionCount -eq 0) {
+            throw "$Description does not contain any PE sections: $Path"
+        }
+
+        if (($characteristics -band 0x0002) -eq 0) {
+            throw "$Description is not marked as an executable PE image: $Path"
+        }
+
+        $isDll = ($characteristics -band 0x2000) -ne 0
+        if ($ImageKind -eq "Dll" -and -not $isDll) {
+            throw "$Description is not marked as a PE DLL image: $Path"
+        }
+        if ($ImageKind -eq "Executable" -and $isDll) {
+            throw "$Description is marked as a PE DLL instead of an executable: $Path"
+        }
+
+        $optionalHeaderOffset = $peOffset + 24
+        $sectionTableOffset = $optionalHeaderOffset + [Int64]$optionalHeaderSize
+        $sectionTableEnd = $sectionTableOffset + ([Int64]$sectionCount * 40)
+        if ($optionalHeaderSize -lt 2 -or $sectionTableOffset -gt $file.Length -or $sectionTableEnd -gt $file.Length) {
+            throw "$Description has an out-of-bounds PE optional header or section table: $Path"
+        }
+
+        $stream.Position = $optionalHeaderOffset
+        $optionalHeaderMagic = $reader.ReadUInt16()
+        $expectedOptionalHeaderMagic = if ($machine -eq 0x014c) { 0x010b } else { 0x020b }
+        if ($optionalHeaderMagic -ne $expectedOptionalHeaderMagic) {
+            $actualMagic = "0x{0:X4}" -f $optionalHeaderMagic
+            $expectedMagic = "0x{0:X4}" -f $expectedOptionalHeaderMagic
+            throw "$Description has PE optional-header magic $actualMagic, expected $expectedMagic for its machine: $Path"
+        }
     }
     finally {
-        $stream.Dispose()
-    }
-
-    if ($bytesRead -ne 2 -or $buffer[0] -ne 0x4d -or $buffer[1] -ne 0x5a) {
-        throw "$Description is not a Windows PE executable image: $Path"
+        if ($null -ne $reader) {
+            $reader.Dispose()
+        }
+        else {
+            $stream.Dispose()
+        }
     }
 }
 
@@ -1126,7 +1190,7 @@ function New-DeterministicHtmlReadme {
       <div class="grid">
         <article class="card">
           <h3>Windows Installer</h3>
-          <p>Recommended for most Windows users. It detects Steam, Epic Games Store, GOG, and Xbox app / Microsoft Store installs, keeps an Other location option, verifies the copied files, writes an install receipt, and backs up an existing Muff Mode DLL when needed.</p>
+          <p>Recommended for most Windows users. It detects Steam, Epic Games Store, GOG, and Xbox app / Microsoft Store installs, keeps an Other location option, verifies the copied files, writes an install receipt, and backs up existing server configs and the Muff Mode DLL before replacing them.</p>
         </article>
         <article class="card">
           <h3>Zip Package</h3>
@@ -1156,8 +1220,8 @@ function New-DeterministicHtmlReadme {
         </article>
         <article class="card">
           <h3>Choose A Preset</h3>
-          <p>Run a mode config such as <code>exec gt-FFA.cfg</code>, <code>exec gt-DUEL.cfg</code>, <code>exec gt-ARENA.cfg</code>, or another packaged <code>gt-*.cfg</code>.</p>
-          <p><code>gt-ARENA.cfg</code> requires separately installed RA2-compatible maps and an RA2-only map list; RA2 assets are not bundled.</p>
+          <p>Run a mode config such as <code>exec gt-FFA.cfg</code>, <code>exec gt-DUEL.cfg</code>, <code>exec gt-LMS.cfg</code>, <code>exec gt-ARENA.cfg</code>, or another packaged <code>gt-*.cfg</code>.</p>
+          <p><code>gt-ARENA.cfg</code> supports separately installed RA2-compatible maps through MuffMode Arena Rooms; RA2 assets are not bundled.</p>
         </article>
         <article class="card">
           <h3>Check Your Setup</h3>
@@ -1170,7 +1234,7 @@ function New-DeterministicHtmlReadme {
       <div class="grid">
         <article class="card"><strong>Quick public games:</strong> FFA, Instagib, NadeFest, and Horde are easy drop-in choices.</article>
         <article class="card"><strong>Competitive matches:</strong> Duel, Rocket Arena, TDM, CTF, Clan Arena, and Capture Strike benefit most from a locked map pool and a known ruleset.</article>
-        <article class="card"><strong>Community nights:</strong> Red Rover, Capture Strike, Vampiric Damage, Weapons Frenzy, and Quad Hog change the rhythm without requiring a different install.</article>
+        <article class="card"><strong>Community nights:</strong> Last Man Standing offers round-based free-for-all elimination, while Red Rover, Capture Strike, Vampiric Damage, Weapons Frenzy, and Quad Hog change the rhythm without requiring a different install.</article>
       </div>
     </section>
     <section id="rulesets">
@@ -1561,7 +1625,7 @@ function Publish-UpdaterExecutable {
         throw "Expected updater executable was not found: $updaterExe"
     }
 
-    Assert-WindowsExecutableImage -Path $updaterExe -Description "Published MuffMode updater"
+    Assert-WindowsExecutableImage -Path $updaterExe -Description "Published MuffMode updater" -AllowedMachines @([UInt16]0x8664) -ImageKind Executable
     return $updaterExe
 }
 
@@ -1575,7 +1639,7 @@ function Resolve-ExistingUpdaterExecutable {
     if (-not (Test-Path -LiteralPath $updaterExe)) {
         throw "-SkipUpdaterBuild was supplied, but MuffModeUpdater.exe does not exist at $updaterExe."
     }
-    Assert-WindowsExecutableImage -Path $updaterExe -Description "Existing MuffMode updater"
+    Assert-WindowsExecutableImage -Path $updaterExe -Description "Existing MuffMode updater" -AllowedMachines @([UInt16]0x8664) -ImageKind Executable
     return $updaterExe
 }
 
@@ -1769,12 +1833,17 @@ function Get-HtmlReadmeLanguageSwitcherStyle {
 function Add-HtmlReadmeLanguageSwitcher {
     param(
         [string]$Html,
-        [string]$CurrentLanguageCode
+        [string]$CurrentLanguageCode,
+        [object[]]$Languages = @()
     )
 
-    $currentLanguage = Get-ReadmeLanguageEntries | Where-Object { $_.Code -eq $CurrentLanguageCode } | Select-Object -First 1
+    if ($Languages.Count -eq 0) {
+        $Languages = @(Get-ReadmeLanguageEntries)
+    }
+
+    $currentLanguage = $Languages | Where-Object { $_.Code -eq $CurrentLanguageCode } | Select-Object -First 1
     if (-not $currentLanguage) {
-        throw "Unknown README language code '$CurrentLanguageCode'."
+        throw "README language code '$CurrentLanguageCode' is not included in the generated package."
     }
 
     $htmlWithLanguage = Set-HtmlDocumentLanguage -Html $Html -HtmlLang $currentLanguage.HtmlLang
@@ -1798,7 +1867,7 @@ function Add-HtmlReadmeLanguageSwitcher {
     }
 
     $links = New-Object System.Collections.Generic.List[string]
-    foreach ($language in Get-ReadmeLanguageEntries) {
+    foreach ($language in $Languages) {
         $currentAttrs = if ($language.Code -eq $CurrentLanguageCode) { ' aria-current="page"' } else { "" }
         $links.Add("      <a href=`"$($language.PackageFileName)`" hreflang=`"$($language.HtmlLang)`" lang=`"$($language.HtmlLang)`"$currentAttrs>$(ConvertTo-HtmlText $language.NativeName)</a>")
     }
@@ -1965,6 +2034,7 @@ function Assert-TranslatedHtmlReadme {
         "gt-*.cfg",
         "gt-FFA.cfg",
         "gt-DUEL.cfg",
+        "gt-LMS.cfg",
         "gt-ARENA.cfg",
         "gt-HORDE.cfg",
         "g_gametype_cfg",
@@ -1993,17 +2063,32 @@ function New-TranslatedHtmlReadmes {
         [string]$OutputRoot
     )
 
+    $allLanguages = @(Get-ReadmeLanguageEntries)
+    $translationLanguages = @(Get-ReadmeTranslationLanguages)
+    $canGenerateTranslations =
+        (Test-GitHubCopilotCommand) -and (Test-ReleaseCopilotUserToken)
+    $packageLanguages = @(
+        if ($canGenerateTranslations) {
+            $allLanguages
+        }
+        else {
+            $allLanguages | Where-Object { $_.Code -eq "en" }
+        }
+    )
+
     Write-Step "Adding README language switcher"
     $sourceHtml = Get-Content -Raw -LiteralPath $SourcePath
-    $sourceHtml = Add-HtmlReadmeLanguageSwitcher -Html $sourceHtml -CurrentLanguageCode "en"
+    $sourceHtml = Add-HtmlReadmeLanguageSwitcher `
+        -Html $sourceHtml `
+        -CurrentLanguageCode "en" `
+        -Languages $packageLanguages
     Set-Content -LiteralPath $SourcePath -Value $sourceHtml -Encoding utf8
 
-    $translationLanguages = @(Get-ReadmeTranslationLanguages)
     if ($translationLanguages.Count -eq 0) {
         return @()
     }
 
-    if ((-not (Test-GitHubCopilotCommand)) -or (-not (Test-ReleaseCopilotUserToken))) {
+    if (-not $canGenerateTranslations) {
         if ($RequireCopilot) {
             if (-not (Test-GitHubCopilotCommand)) {
                 throw "GitHub Copilot CLI is required because -RequireCopilot was supplied, but 'copilot' was not found on PATH."
@@ -2032,7 +2117,7 @@ Critical preservation rules:
 - Set the root <html> lang attribute to "$($language.HtmlLang)".
 - Translate visible human prose and human-readable title/alt/aria text.
 - Do not translate or alter text inside <code>, <pre>, <kbd>, <samp>, <style>, or <script>.
-- Do not translate command names, cvar names, config names, ruleset tokens, gametype tokens, map filenames, DLL/EXE names, path fragments, aliases, binds, URLs, or file extensions. Examples include server-base.cfg, gt-*.cfg, gt-FFA.cfg, gt-DUEL.cfg, gt-ARENA.cfg, g_gametype_cfg, g_muffmode_debug, team auto, arena create, readyup, callvote, vote yes, vote no, alias +hook hook, alias -hook unhook, bind mouse2 +hook, doctor, q2re, mm, q3a, q2reb, q, qc, game_x64.dll, and MuffModeUpdater.exe.
+- Do not translate command names, cvar names, config names, ruleset tokens, gametype tokens, map filenames, DLL/EXE names, path fragments, aliases, binds, URLs, or file extensions. Examples include server-base.cfg, gt-*.cfg, gt-FFA.cfg, gt-DUEL.cfg, gt-LMS.cfg, gt-ARENA.cfg, g_gametype_cfg, g_muffmode_debug, team auto, arena create, readyup, callvote, vote yes, vote no, alias +hook hook, alias -hook unhook, bind mouse2 +hook, doctor, q2re, mm, q3a, q2reb, q, qc, game_x64.dll, and MuffModeUpdater.exe.
 - Preserve product and project names such as MuffMode, Muff Mode, Quake II, Quake II Rerelease, GitHub, Ko-fi, Steam, Epic Games Store, GOG, Xbox app, and Microsoft Store.
 - Keep the tone practical, concise, and friendly.
 
@@ -2044,7 +2129,10 @@ $sourceHtml
             Write-Step "Translating README.html to $($language.EnglishName)"
             $output = Invoke-GitHubCopilot -Prompt $prompt -Purpose "translating README.html to $($language.Code)"
             $translatedHtml = Convert-CopilotOutputToHtml $output
-            $translatedHtml = Add-HtmlReadmeLanguageSwitcher -Html $translatedHtml -CurrentLanguageCode $language.Code
+            $translatedHtml = Add-HtmlReadmeLanguageSwitcher `
+                -Html $translatedHtml `
+                -CurrentLanguageCode $language.Code `
+                -Languages $packageLanguages
             Set-Content -LiteralPath $outputPath -Value $translatedHtml -Encoding utf8
             Assert-TranslatedHtmlReadme -SourcePath $SourcePath -TranslatedPath $outputPath -Language $language
             $results.Add([pscustomobject]@{
@@ -2087,12 +2175,12 @@ Audience and scope:
 - This project is currently in $Channel channel. Make that release state visible but not alarming.
 - Include installation, first-use guidance, player usage, voting, common host setup, packaged server config usage, gametype overview, a player-focused ruleset guide, offhand hook bind, debugging pointer, package contents, and the changelog.
 - Explain that hosts should load server-base.cfg first, then a packaged gt-*.cfg preset such as gt-FFA.cfg, gt-DUEL.cfg, or gt-ARENA.cfg; g_gametype_cfg then auto-executes matching gametype configs on later mode changes.
-- Explain that gt-ARENA.cfg requires separately installed RA2-compatible maps and an RA2-only map rotation, and that RA2 assets are not bundled.
+- Explain that gt-ARENA.cfg supports separately installed RA2-compatible maps through MuffMode Arena Rooms, and that RA2 assets are not bundled.
 - Use docs/rulesets.md as the authoritative ruleset source. Make every ruleset's unique feel and tradeoffs clear, including Q3A's existing-asset weapon mappings, preserved double jumps, Super Shotgun removal, regular Shotgun Q3 specs, and shared-cell BFG ammo cost.
 - Include a compact "Included Custom Maps" section using the source map guide. Show map title, filename, release status, and good gametype fits, and link to the full Muff Mode Map Guide for history, original release dates, preserved original readmes/BSPs, separate remaster source-map links, and item registers.
 - Explain that original map readmes are included in the main installer/manual zip under rerelease/baseq2/docs/muffmode/maps/original-readmes, while source maps and original BSPs are published as separate supplemental release archives.
-- Explain that most Windows users can use the installer. Keep this concise: it detects Steam, Epic Games Store, GOG, and Xbox app / Microsoft Store installs, keeps an other-location choice available, verifies installed files, writes an install receipt, backs up an existing Muff Mode DLL when needed, and offers useful shortcuts. Also include the zip/manual extraction path for users who prefer it.
-- Do not describe Last Man Standing as an available mode; it is reserved/removed in the current build.
+- Explain that most Windows users can use the installer. Keep this concise: it detects Steam, Epic Games Store, GOG, and Xbox app / Microsoft Store installs, keeps an other-location choice available, verifies installed files, writes an install receipt, backs up existing server configs and the Muff Mode DLL before replacing them, and offers useful shortcuts. Also include the zip/manual extraction path for users who prefer it.
+- Describe Last Man Standing as an available round-based free-for-all elimination mode and mention its packaged gt-LMS.cfg preset.
 - Include elegant support buttons near the top for the authors: themuffinator at https://github.com/sponsors/themuffinator and ozy at https://ko-fi.com/ozy24. Frame donations as optional support that helps promote future development and offsets the real time, testing, tooling, and release costs involved in maintaining the mod.
 - Do not include build instructions, source compilation steps, contributor notes, GitHub badges, or repository development workflow.
 - Keep it polished, friendly, and practical. Avoid marketing fluff.
@@ -2161,11 +2249,14 @@ function Test-AllowedPackageRelativePath {
         return $false
     }
 
-    if (($normalized -split '\\') -contains '..') {
+    $segments = @($normalized -split '\\')
+    if ($segments.Count -eq 0 -or
+        @($segments | Where-Object { [string]::IsNullOrWhiteSpace($_) -or $_ -eq "." -or $_ -eq ".." }).Count -ne 0) {
         return $false
     }
 
-    foreach ($topLevelFile in @(
+    if ($segments.Count -eq 1) {
+        return @(
         "README.html",
         "README.de.html",
         "README.pl.html",
@@ -2179,31 +2270,70 @@ function Test-AllowedPackageRelativePath {
         "MuffModeUpdater.exe",
         "MuffMode.version",
         "VERSION"
-    )) {
-        if ([string]::Equals($normalized, $topLevelFile, [System.StringComparison]::OrdinalIgnoreCase)) {
-            return $true
-        }
+        ) -contains $segments[0]
     }
 
-    if (-not $normalized.StartsWith("rerelease\", [System.StringComparison]::OrdinalIgnoreCase)) {
+    if ($segments.Count -lt 3 -or
+        -not [string]::Equals($segments[0], "rerelease", [System.StringComparison]::OrdinalIgnoreCase)) {
         return $false
     }
 
     $expectedDll = "rerelease\baseq2\game_x64.dll"
-    $extension = [System.IO.Path]::GetExtension($normalized).ToLowerInvariant()
-    $blockedExecutableExtensions = @(".bat", ".cmd", ".com", ".dll", ".exe", ".hta", ".jar", ".js", ".lnk", ".msi", ".pif", ".ps1", ".scr", ".vbs", ".wsf")
-    if ($blockedExecutableExtensions -contains $extension) {
-        return [string]::Equals($normalized, $expectedDll, [System.StringComparison]::OrdinalIgnoreCase)
+    if ([string]::Equals($normalized, $expectedDll, [System.StringComparison]::OrdinalIgnoreCase)) {
+        return $true
     }
 
-    return $true
+    $extension = [System.IO.Path]::GetExtension($normalized).ToLowerInvariant()
+    if ([string]::Equals($segments[1], "maps", [System.StringComparison]::OrdinalIgnoreCase)) {
+        return $extension -in @(".bsp", ".ent")
+    }
+
+    if ([string]::Equals($segments[1], "bots", [System.StringComparison]::OrdinalIgnoreCase)) {
+        return $extension -eq ".nav"
+    }
+
+    if ([string]::Equals($segments[1], "baseq2", [System.StringComparison]::OrdinalIgnoreCase)) {
+        return $extension -in @(".cfg", ".json", ".md", ".txt", ".version")
+    }
+
+    return $false
+}
+
+function Test-AllowedPackageRelativeDirectory {
+    param([string]$RelativePath)
+
+    $normalized = $RelativePath.Replace('/', '\')
+    if ([string]::IsNullOrWhiteSpace($normalized) -or [System.IO.Path]::IsPathRooted($normalized)) {
+        return $false
+    }
+
+    $segments = @($normalized -split '\\')
+    if ($segments.Count -eq 0 -or
+        @($segments | Where-Object { [string]::IsNullOrWhiteSpace($_) -or $_ -eq "." -or $_ -eq ".." }).Count -ne 0 -or
+        -not [string]::Equals($segments[0], "rerelease", [System.StringComparison]::OrdinalIgnoreCase)) {
+        return $false
+    }
+
+    if ($segments.Count -eq 1) {
+        return $true
+    }
+
+    return $segments[1] -in @("baseq2", "bots", "maps")
 }
 
 function Assert-ReleasePackageContents {
-    param([string]$PackageRoot)
+    param(
+        [string]$PackageRoot,
+        [switch]$RequireLocalizedReadmes
+    )
 
     if (-not (Test-Path -LiteralPath $PackageRoot -PathType Container)) {
         throw "Release package root does not exist: $PackageRoot"
+    }
+
+    $packageRootItem = Get-Item -LiteralPath $PackageRoot -Force
+    if (($packageRootItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "Release package root must not be a reparse point: $PackageRoot"
     }
 
     $requiredFiles = @(
@@ -2226,6 +2356,8 @@ function Assert-ReleasePackageContents {
         "rerelease\baseq2\gt-CTF.cfg",
         "rerelease\baseq2\gt-CA.cfg",
         "rerelease\baseq2\gt-ARENA.cfg",
+        "rerelease\baseq2\gt-FT.cfg",
+        "rerelease\baseq2\gt-LMS.cfg",
         "rerelease\baseq2\gt-REDROVER.cfg",
         "rerelease\baseq2\gt-HORDE.cfg",
         "rerelease\baseq2\gt-INSTAGIB.cfg",
@@ -2262,7 +2394,7 @@ function Assert-ReleasePackageContents {
         "rerelease\maps\ztn2dm5.ent"
     )
 
-    if ((Test-GitHubCopilotCommand) -and (Test-ReleaseCopilotUserToken)) {
+    if ($RequireLocalizedReadmes) {
         $requiredFiles += @(
             "README.de.html",
             "README.pl.html",
@@ -2279,8 +2411,8 @@ function Assert-ReleasePackageContents {
         }
     }
 
-    Assert-WindowsExecutableImage -Path (Join-Path $PackageRoot "MuffModeUpdater.exe") -Description "Packaged MuffMode updater"
-    Assert-WindowsExecutableImage -Path (Join-Path $PackageRoot "rerelease\baseq2\game_x64.dll") -Description "Packaged game DLL"
+    Assert-WindowsExecutableImage -Path (Join-Path $PackageRoot "MuffModeUpdater.exe") -Description "Packaged MuffMode updater" -AllowedMachines @([UInt16]0x8664) -ImageKind Executable
+    Assert-WindowsExecutableImage -Path (Join-Path $PackageRoot "rerelease\baseq2\game_x64.dll") -Description "Packaged game DLL" -AllowedMachines @([UInt16]0x8664) -ImageKind Dll
 
     $fullPackageRoot = [System.IO.Path]::GetFullPath($PackageRoot)
     $separator = [System.IO.Path]::DirectorySeparatorChar.ToString()
@@ -2291,7 +2423,19 @@ function Assert-ReleasePackageContents {
         "$fullPackageRoot$separator"
     }
 
-    $files = @(Get-ChildItem -LiteralPath $PackageRoot -File -Recurse)
+    $directories = @(Get-ChildItem -LiteralPath $PackageRoot -Directory -Recurse -Force)
+    foreach ($directory in $directories) {
+        Assert-PathUnderDirectory -Path $directory.FullName -ParentPath $PackageRoot -Description "Release package directory"
+        $relativePath = $directory.FullName.Substring($packageRootPrefix.Length)
+        if (($directory.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "Release package contains a reparse-point directory: $relativePath"
+        }
+        if (-not (Test-AllowedPackageRelativeDirectory $relativePath)) {
+            throw "Release package contains an unexpected directory path for installed updater compatibility: $relativePath"
+        }
+    }
+
+    $files = @(Get-ChildItem -LiteralPath $PackageRoot -File -Recurse -Force)
     if ($files.Count -eq 0) {
         throw "Release package does not contain any files."
     }
@@ -2299,8 +2443,32 @@ function Assert-ReleasePackageContents {
     foreach ($file in $files) {
         Assert-PathUnderDirectory -Path $file.FullName -ParentPath $PackageRoot -Description "Release package file"
         $relativePath = $file.FullName.Substring($packageRootPrefix.Length)
+        if (($file.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "Release package contains a reparse-point file: $relativePath"
+        }
         if (-not (Test-AllowedPackageRelativePath $relativePath)) {
-            throw "Release package contains an unexpected or unsafe file path: $relativePath"
+            throw "Release package contains an unexpected file path for installed updater compatibility: $relativePath"
+        }
+        if ($file.Length -eq 0) {
+            throw "Release package contains an empty file that installed updater builds reject: $relativePath"
+        }
+    }
+}
+
+function Remove-EmptyReleaseAssetPlaceholders {
+    param([string]$PackageRoot)
+
+    # These tracked map-sidecar placeholders have never contained an override.
+    # Keep them in source history, but do not put zero-byte files into update
+    # ZIPs because already-installed updater builds reject empty entries.
+    foreach ($relativePath in @(
+        "rerelease\maps\rdemo1.dm2.ent",
+        "rerelease\maps\xdemo3.dm2.ent"
+    )) {
+        $path = Join-Path $PackageRoot $relativePath
+        if ((Test-Path -LiteralPath $path -PathType Leaf) -and
+            (Get-Item -LiteralPath $path -Force).Length -eq 0) {
+            Remove-Item -LiteralPath $path -Force
         }
     }
 }
@@ -2340,6 +2508,35 @@ function Copy-DirectoryContents {
 
     foreach ($item in $items) {
         Copy-Item -LiteralPath $item.FullName -Destination $DestinationPath -Recurse -Force
+    }
+}
+
+function Assert-ExistingUpdaterCompatiblePackageRoot {
+    param([string]$PackageRoot)
+
+    # Released updater builds accept only this exact root inventory. Keep the
+    # update ZIP compatible until a separately bootstrapped updater can safely
+    # replace itself.
+    $allowedRootFiles = @(
+        "CHANGELOG.md",
+        "LICENSE",
+        "MuffMode.version",
+        "MuffModeUpdater.exe",
+        "README.html",
+        "README.md",
+        "THIRD_PARTY_NOTICES.md",
+        "VERSION"
+    )
+
+    foreach ($entry in Get-ChildItem -LiteralPath $PackageRoot -Force) {
+        if ($entry.PSIsContainer) {
+            if ($entry.Name -ne "rerelease") {
+                throw "The updater package root contains an unsupported directory for existing updater builds: $($entry.Name)"
+            }
+        }
+        elseif ($allowedRootFiles -notcontains $entry.Name) {
+            throw "The updater package root contains an unsupported file for existing updater builds: $($entry.Name)"
+        }
     }
 }
 
@@ -2458,7 +2655,6 @@ function New-ReleasePackage {
         [string]$UpdaterPath,
         [string]$ChangelogPath,
         [string]$ReadmeHtmlPath,
-        [object[]]$TranslatedReadmes,
         [string]$OutputRoot,
         [string]$AssetRoot
     )
@@ -2475,6 +2671,7 @@ function New-ReleasePackage {
     New-Item -ItemType Directory -Force -Path $packageRoot | Out-Null
 
     Copy-ReleaseAssets -AssetRoot $AssetRoot -PackageRoot $packageRoot
+    Remove-EmptyReleaseAssetPlaceholders -PackageRoot $packageRoot
 
     $baseq2 = Join-Path $packageRoot "rerelease/baseq2"
     New-Item -ItemType Directory -Force -Path $baseq2 | Out-Null
@@ -2483,10 +2680,19 @@ function New-ReleasePackage {
     Copy-Item -LiteralPath (Resolve-RepoPath "LICENSE") -Destination (Join-Path $packageRoot "LICENSE") -Force
     Copy-Item -LiteralPath (Resolve-RepoPath "THIRD_PARTY_NOTICES.md") -Destination (Join-Path $packageRoot "THIRD_PARTY_NOTICES.md") -Force
     Copy-Item -LiteralPath $UpdaterPath -Destination (Join-Path $packageRoot "MuffModeUpdater.exe") -Force
-    Copy-Item -LiteralPath $ReadmeHtmlPath -Destination (Join-Path $packageRoot "README.html") -Force
-    foreach ($translatedReadme in @($TranslatedReadmes)) {
-        Copy-Item -LiteralPath $translatedReadme.Path -Destination (Join-Path $packageRoot $translatedReadme.PackageFileName) -Force
-    }
+    $englishLanguage = @(
+        Get-ReadmeLanguageEntries |
+            Where-Object { $_.Code -eq "en" }
+    )
+    $packageReadmeHtml = Get-Content -Raw -LiteralPath $ReadmeHtmlPath
+    $packageReadmeHtml = Add-HtmlReadmeLanguageSwitcher `
+        -Html $packageReadmeHtml `
+        -CurrentLanguageCode "en" `
+        -Languages $englishLanguage
+    Set-Content `
+        -LiteralPath (Join-Path $packageRoot "README.html") `
+        -Value $packageReadmeHtml `
+        -Encoding utf8
     Copy-Item -LiteralPath $ChangelogPath -Destination (Join-Path $packageRoot "CHANGELOG.md") -Force
     Copy-OriginalMapReadmesToPackage -PackageRoot $packageRoot
 
@@ -2505,6 +2711,7 @@ function New-ReleasePackage {
     Set-Content -LiteralPath (Join-Path $packageRoot "VERSION") -Value $TargetVersion -Encoding utf8
 
     Assert-ReleasePackageContents -PackageRoot $packageRoot
+    Assert-ExistingUpdaterCompatiblePackageRoot -PackageRoot $packageRoot
 
     $zipPath = Join-Path $outputRootAbs "$packageName.zip"
     if (Test-Path -LiteralPath $zipPath) {
@@ -2525,6 +2732,8 @@ function New-WindowsInstaller {
         [string]$TargetVersion,
         [string]$Channel,
         [string]$PackageRoot,
+        [string]$ReadmeHtmlPath,
+        [object[]]$TranslatedReadmes,
         [string]$OutputRoot,
         [string]$InstallerScript,
         [string]$InnoSetupCompiler
@@ -2534,7 +2743,46 @@ function New-WindowsInstaller {
     if (-not (Test-Path -LiteralPath $scriptPath)) {
         throw "Installer script was not found: $scriptPath"
     }
-    Assert-ReleasePackageContents -PackageRoot $PackageRoot
+
+    $hasTranslatedReadmes = @($TranslatedReadmes).Count -gt 0
+    if ($hasTranslatedReadmes) {
+        Copy-Item `
+            -LiteralPath $ReadmeHtmlPath `
+            -Destination (Join-Path $PackageRoot "README.html") `
+            -Force
+        foreach ($translatedReadme in @($TranslatedReadmes)) {
+            Copy-Item `
+                -LiteralPath $translatedReadme.Path `
+                -Destination (Join-Path $PackageRoot $translatedReadme.PackageFileName) `
+                -Force
+        }
+    }
+
+    Assert-ReleasePackageContents `
+        -PackageRoot $PackageRoot `
+        -RequireLocalizedReadmes:$hasTranslatedReadmes
+
+    $localizedReadmeNames = @(
+        Get-ReadmeTranslationLanguages |
+            ForEach-Object { $_.PackageFileName }
+    )
+    $presentLocalizedReadmes = @(
+        $localizedReadmeNames |
+            Where-Object {
+                Test-Path -LiteralPath (Join-Path $PackageRoot $_) -PathType Leaf
+            }
+    )
+    if ($presentLocalizedReadmes.Count -ne 0 -and
+        $presentLocalizedReadmes.Count -ne $localizedReadmeNames.Count) {
+        $missingLocalizedReadmes = @(
+            $localizedReadmeNames |
+                Where-Object { $presentLocalizedReadmes -notcontains $_ }
+        )
+        throw "Staged package has only part of the localized README set. Missing: $($missingLocalizedReadmes -join ', ')."
+    }
+    $includeLocalizedReadmes =
+        $localizedReadmeNames.Count -gt 0 -and
+        $presentLocalizedReadmes.Count -eq $localizedReadmeNames.Count
 
     $packageName = Get-ReleasePackageName -TargetVersion $TargetVersion -Channel $Channel
     $outputRootAbs = Resolve-FullPath $OutputRoot
@@ -2558,15 +2806,20 @@ function New-WindowsInstaller {
     }
 
     Write-Step "Creating Windows installer $installerPath"
-    $installerOutput = & $compiler `
-        "/DAppVersion=$TargetVersion" `
-        "/DChannel=$Channel" `
-        "/DReleaseLabel=$releaseLabel" `
-        "/DPackageRoot=$PackageRoot" `
-        "/DOutputDir=$outputRootAbs" `
-        "/DInstallerBaseName=$installerBaseName" `
-        "/DLauncherIconFile=$launcherIconFile" `
-        $scriptPath 2>&1
+    $installerArguments = @(
+        "/DAppVersion=$TargetVersion"
+        "/DChannel=$Channel"
+        "/DReleaseLabel=$releaseLabel"
+        "/DPackageRoot=$PackageRoot"
+        "/DOutputDir=$outputRootAbs"
+        "/DInstallerBaseName=$installerBaseName"
+        "/DLauncherIconFile=$launcherIconFile"
+    )
+    if ($includeLocalizedReadmes) {
+        $installerArguments += "/DIncludeLocalizedReadmes"
+    }
+    $installerArguments += $scriptPath
+    $installerOutput = & $compiler @installerArguments 2>&1
 
     $installerExitCode = $LASTEXITCODE
     @($installerOutput) | Set-Content -LiteralPath $installerLogPath -Encoding utf8
@@ -2579,7 +2832,7 @@ function New-WindowsInstaller {
         throw "Expected installer was not created: $installerPath"
     }
 
-    Assert-WindowsExecutableImage -Path $installerPath -Description "Generated Windows installer"
+    Assert-WindowsExecutableImage -Path $installerPath -Description "Generated Windows installer" -AllowedMachines @([UInt16]0x014c, [UInt16]0x8664) -ImageKind Executable
     Write-Host "Installer compiler log: $installerLogPath"
     return $installerPath
 }
@@ -2721,7 +2974,6 @@ try {
         -UpdaterPath $updaterPath `
         -ChangelogPath $releaseNotesPath `
         -ReadmeHtmlPath $readmeHtmlPath `
-        -TranslatedReadmes $translatedReadmes `
         -OutputRoot $OutputRoot `
         -AssetRoot $AssetRoot
 
@@ -2739,6 +2991,8 @@ try {
             -TargetVersion $targetVersion `
             -Channel $Channel `
             -PackageRoot $package.Root `
+            -ReadmeHtmlPath $readmeHtmlPath `
+            -TranslatedReadmes $translatedReadmes `
             -OutputRoot $OutputRoot `
             -InstallerScript $InstallerScript `
             -InnoSetupCompiler $InnoSetupCompiler

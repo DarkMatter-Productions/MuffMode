@@ -11,9 +11,9 @@ Use commands in the form `command [arg]`.
 | Command | Purpose |
 | --- | --- |
 | `admin` | Authenticate or use admin functionality, depending on server setup. |
-| `startmatch` | Force match start when warmup conditions apply. In Rocket Arena it targets the admin's selected room and bypasses that room's ready wait. |
-| `endmatch` | Force an active match to end. In Rocket Arena it aborts only the admin's selected room. |
-| `resetmatch` | Reset the match to warmup. In Rocket Arena it resets only the admin's selected room. |
+| `startmatch` | Force match start when warmup conditions apply. In MuffMode Arena it targets the admin's selected room and bypasses that room's ready wait. |
+| `endmatch` | Force an active match to end. In MuffMode Arena it aborts only the admin's selected room. |
+| `resetmatch` | Reset the match to warmup. In MuffMode Arena it resets only the admin's selected room. |
 | `map_restart` | Restart the current level/session and apply latched cvar changes. |
 | `setmap <map>` | Change to a map in the configured map list. |
 | `nextmap` | Force level change to the next map. |
@@ -24,8 +24,8 @@ Use commands in the form `command [arg]`.
 | `setteam <player> [auto\|red\|blue\|spectator]` | Inspect or force a player team change. |
 | `lockteam <red|blue>` | Lock a team from being joined. Captains can lock their own team. |
 | `unlockteam <red|blue>` | Unlock a team. Captains can unlock their own team. |
-| `readyall` | Force all players ready during ready-up warmup; in Rocket Arena, target the admin's selected room. |
-| `unreadyall` | Clear ready status during ready-up warmup; in Rocket Arena, target the admin's selected room. |
+| `readyall` | Force all players ready during ready-up warmup; in MuffMode Arena, target the admin's selected room. |
+| `unreadyall` | Clear ready status during ready-up warmup; in MuffMode Arena, target the admin's selected room. |
 | `vote <yes|no>` | Force-pass or fail a vote when used with admin authority. |
 | `forcevote` | Force the current vote result. |
 | `spawn <entity> [spawn_args]` | Spawn an entity without requiring cheats. |
@@ -48,47 +48,48 @@ The most useful player-facing commands are documented in the [Player Guide](play
 | Server info | `maplist`, `mapinfo`, `motd`, `players`, `stats` |
 | Spectating | `follow`, `follownext`, `followprev`, `followview`, `followkiller`, `followleader`, `followpowerup` |
 | Hook | `hook`, `unhook` |
-| Arena selection | `arena list`, `arena go`, `arena leave`, `arena status`, `arena settings` |
-| Arena teams and line | `arena line`, `arena queue`, `arena create`, `arena join`, `arena teamleave`, `arena ready` |
-| Arena chat | `say_arena`, `say_world`, `arena say`, `arena say_team`, `arena say_world` |
+| Arena rooms | `arena list`, `arena go`, `arena leave`, `arena status`, `arena settings` |
+| Room teams and queue | `arena line`, `arena queue`, `arena create`, `arena join`, `arena teamleave`, `arena ready` |
+| Room chat | `say_arena`, `say_world`, `arena say`, `arena say_team`, `arena say_world` |
 | Reconnect recovery | `ghost <code>` |
 | Captains | `captain`, `teamcaptain`, `teamname`, `teamlock`, `teamunlock`, `teamkick`, `teammute`, `teamunmute` |
 
-### Rocket Arena Commands
+### Arena Room Commands
 
-The `arena` dispatcher is available only while Rocket Arena is active on a
-validated RA2 map. Arena IDs are the positive numbers encoded by the map;
-arena 0 is the lobby. The normal Multiplayer menu exposes **Choose/Change
-Arena**, **Teams & Line**, and **Return to Lobby** without replacing its
-standard Follow, Player Config, Vote, Stats, Server, Match, and Admin entries.
-MuffMode's existing `team`, `captain`, `lockteam`, `unlockteam`, `ready`,
-`notready`, `readyup`, `readyteam`, `vote`, `time-out`, and `time-in` commands
-are arena-aware and are the canonical shortcuts. Convenience forms under
-`arena` use the same room-local state and shared command policies.
+The `arena` dispatcher is available only while the Arena gametype is active on
+a validated Arena-compatible map. Tagged multi-room maps use positive room IDs
+and reserve arena 0 for the lobby; a classic one-room idmap uses the legacy
+profile described below. The normal Multiplayer menu exposes **Browse Rooms**
+or **Change Room**, **Teams & Queue**, and **Return to Lobby** without
+replacing its standard Follow, Player Config, Vote, Stats, Server, Match, and
+Admin entries. MuffMode's existing `team`, `captain`, `lockteam`, `unlockteam`,
+`ready`, `notready`, `readyup`, `readyteam`, `vote`, `time-out`, and `time-in`
+commands are room-aware and remain the native shortcuts. Convenience forms
+under `arena` use the same room-local state and shared command policies.
 
 | Command | Purpose |
 | --- | --- |
-| `arena` | Show the selected arena's status/settings, or list rooms from the lobby. |
-| `arena list` | List every discovered arena, its name/type, population, and state. |
-| `arena go <id>` | Enter or observe a playable arena. RA2 selector teleporters and the join menu provide the same navigation. |
-| `arena leave` | Leave the current arena and return to the lobby. |
-| `arena status` / `arena settings` | Show the current arena state or its effective settings. |
-| `arena line [on\|off]` / `arena queue` | Join, leave, or inspect the Rocket Arena challenge line. |
-| `arena create [name]` | Create a logical team in the current arena. |
-| `arena join <team-id\|player\|red\|blue> [password]` | Join a named/logical team or a fixed red/blue side. |
-| `arena teamleave` | Leave the current logical team without leaving the arena. |
+| `arena` | Show the selected room's status/settings, or list rooms from the lobby. |
+| `arena list` | List every discovered room, its name/type, population, and state. |
+| `arena go <id>` | Enter or observe a playable room. Selector teleporters and the join menu provide the same navigation. |
+| `arena leave` | Leave the current room and return to the lobby. |
+| `arena status` / `arena settings` | Show the current room state or its effective settings. |
+| `arena line [on\|off]` / `arena queue` | Join or leave a Rocket Arena-type room's queue, or inspect that queue. `line` is retained as the historical command spelling. |
+| `arena create [name]` | Create a logical team in the current room. |
+| `arena join <team-id\|player\|red\|blue> [password]` | Join a named/logical team or a fixed red/blue side in the current room. |
+| `arena teamleave` | Leave the current logical team without leaving the room. |
 | `arena name <name>` / `arena captain [player]` | In competition mode, rename the team or inspect/transfer its captain role. |
 | `arena lock [password]` / `arena unlock` | In competition mode, control entry to the logical team. Administrators may explicitly override this restriction outside competition mode. Passwords are a MuffMode extension. |
 | `arena kick [player]` | In competition mode, list team members or let the captain remove one. |
-| `arena teammute` / `arena teamunmute` | In competition mode, the captain can restrict noncaptains to team chat or restore their arena/world chat. `arena mute` / `arena unmute` are aliases. |
+| `arena teammute` / `arena teamunmute` | In competition mode, the captain can restrict noncaptains to team chat or restore their room/world chat. `arena mute` / `arena unmute` are aliases. |
 | `arena invite <player>` / `arena revoke <player>` | In competition mode, grant or revoke access to a locked logical team. This is a MuffMode extension. |
-| `arena specinvite <player> [coach]` / `arena specrevoke <player>` | In competition mode, let any non-coach team member grant or revoke same-arena private spectating. Coaching is a MuffMode extension. |
+| `arena specinvite <player> [coach]` / `arena specrevoke <player>` | In competition mode, let any non-coach team member grant or revoke same-room private spectating. Coaching is a MuffMode extension. |
 | `arena coach <team\|player>` / `arena specwho` | In competition mode, choose a coached team or list the caller's team spectators/coaches and outstanding invitations. |
 | `arena ready [0\|1]` | In competition mode, toggle ready state or set it explicitly. |
-| `arena propose <key> <value>` / `arena vote <yes\|no>` | Start or answer an arena-local settings ballot. |
+| `arena propose <key> <value>` / `arena vote <yes\|no>` | Start or answer a room-local settings ballot. |
 | `arena timeout` / `arena timein` | Pause using the active side's competition allowance, or resume a timeout called by that same side. |
-| `arena say <message>` / `arena say_team <message>` / `arena say_world <message>` | Send arena, logical-team, or map-wide chat. |
-| `arena admin <arena> <setting\|reset\|start\|abort> [value]` | Administer one arena without changing the others. |
+| `arena say <message>` / `arena say_team <message>` / `arena say_world <message>` | Send room, logical-team, or map-wide chat. |
+| `arena admin <arena> <setting\|reset\|start\|abort> [value]` | Administer one room without changing the others. |
 
 The RA3-era commands `teamlock`, `teamunlock`, `teamcaptain`, `teamname`,
 `teamkick`, `teammute`, `teamunmute`, `specinvite`, `specrevoke`, `specwho`,
@@ -97,8 +98,8 @@ room-local operations when the client and engine forward those tokens to the
 game DLL. MuffMode's older `lockteam`, `unlockteam`, `captain`, `time-out`, and
 `time-in` spellings remain available and are the portable forms. Q2RE owns some
 client-console tokens locally, notably `timeout`; use `arena timeout` or
-`time-out` in that case. These aliases are conveniences, not an RA3
-compatibility contract.
+`time-out` in that case. These aliases preserve familiar input, but do not
+replace MuffMode's own team, room, and queue controls.
 
 `say_arena <message>` is the portable direct arena-chat command, including on
 KEX clients where the engine owns ordinary `say`. It becomes world chat in the
@@ -172,10 +173,11 @@ Use `callvote <command> [arg]` or `cv <command> [arg]`.
 | `6` | `ft` | Freeze Tag |
 | `7` | `strike` | Capture Strike |
 | `8` | `rr` | Red Rover |
+| `9` | `lms` | Last Man Standing |
 | `10` | `horde` | Horde Mode |
 | `12` | `instagib` | Instagib |
 | `13` | `nadefest` | NadeFest |
-| `14` | `arena` | Rocket Arena |
+| `14` | `arena` | Arena Rooms (Rocket Arena) |
 
 Value `11` (`ball`) is reserved or removed in the current build.
 
@@ -283,21 +285,21 @@ Deathmatch respawns use a WORR-style danger score instead of raw farthest-only m
 | `g_teamplay_force_balance` | `0` | Prevents joining over-stacked teams. |
 | `g_teamplay_item_drop_notice` | `1` | Announces item drops to teammates. |
 
-## Rocket Arena Cvars
+## Arena Room Cvars
 
-Rocket Arena supports 31 independent playable arenas plus arena 0, the lobby,
-on one map.
-These cvars form the global default layer; `arena.cfg` can override them by map
-and arena.
+Arena supports up to 31 independent playable rooms plus arena 0, the lobby, on
+a tagged map. These cvars form the global default layer; `arena.cfg` can
+override them by map and room.
 
 | Cvar | Default | Purpose |
 | --- | --- | --- |
 | `g_arena_config` | `arena.cfg` | Latched configuration file resolved beneath `basedir/baseq2`; missing files are harmless and reported before built-in/cvar defaults are used. |
+| `g_arena_legacy_idmap` | `0` | Latched compatibility switch for an otherwise untagged classic RA2 idmap. Explicit `worldspawn` `arena 0` uses the legacy profile without this switch; set `1` before the next map load only when importing untagged idmaps. In this one-room profile, any entity `arena` tags are treated as shared. |
 | `g_arena_default_type` | `rocket` | Default room type: `rocket`, `clan`, `rover`, or `practice`. |
 | `g_arena_players_per_team` | `1` | Default team size, clamped from `1` through half of `maxclients`. |
 | `g_arena_rounds` | `1` | Default room best-of length, normalized to an odd value from `1` through `99`. |
-| `g_arena_start_health` | `200` (`100` in `gt-ARENA.cfg`) | Shared arena-loadout starting-health default. The shipped Rocket Arena preset selects the classic 100-health value without changing Freeze Tag's default. |
-| `g_arena_start_armor` | `200` (`100` in `gt-ARENA.cfg`) | Shared arena-loadout armor; the Rocket Arena preset selects the RA3 value without changing Freeze Tag's default. |
+| `g_arena_start_health` | `200` (`100` in `gt-ARENA.cfg`) | Shared arena-loadout starting-health default. The shipped Arena preset selects the classic 100-health value without changing Freeze Tag's default. |
+| `g_arena_start_armor` | `200` (`100` in `gt-ARENA.cfg`) | Shared arena-loadout armor; the shipped Arena preset selects the traditional 100-armor value without changing Freeze Tag's default. |
 | `g_arena_health_protect` | `1` | Health protection: `0` damages all, `1` protects self and teammates, `2` protects teammates but permits self damage. |
 | `g_arena_armor_protect` | `2` | Armor protection using the same `0`/`1`/`2` modes. The default permits self-armor damage while protecting teammates. |
 | `g_arena_falling_damage` | `1` | Default falling-damage behavior. |
@@ -309,15 +311,15 @@ and arena.
 | `g_arena_ammo_cells` | `150` | Starting cells. |
 | `g_arena_ammo_slugs` | `50` | Starting slugs. |
 | `g_arena_fast_switch` | `1` | Enables accelerated weapon switching. |
-| `g_arena_grapple` | `0` | Grants the arena-scoped selectable Grapple and enables the offhand `+hook`; it is independent of the global grapple cvars. |
+| `g_arena_grapple` | `0` | Grants the room-scoped selectable Grapple and enables the offhand `+hook`; it is independent of the global grapple cvars. |
 | `g_arena_excessive` | `0` | Enables rapid fire, faster rockets, and infinite ammo with matching HUD reporting. |
-| `g_arena_rocket_speed` | `900` | Default RA3 rocket speed. |
-| `g_arena_competition` | `0` | Requires the per-arena ready/competition flow. |
+| `g_arena_rocket_speed` | `900` | Default room rocket speed. |
+| `g_arena_competition` | `0` | Requires the per-room ready/competition flow. |
 | `g_arena_unbalanced` | `0` | Allows unequal team sizes. |
-| `g_arena_lock` | `0` | Starts playable arenas locked to new entrants. |
+| `g_arena_lock` | `0` | Starts playable rooms locked to new entrants. |
 | `g_arena_lock_count` | `6` | Minimum eligible population for the unanimous special lock-arena proposal. It does not lock entry by itself. |
-| `g_arena_max_players` | `0` | Per-arena player cap; `0` uses the available server capacity. |
-| `g_arena_vote_time` | `30` | Seconds allowed for an arena-local proposal. |
+| `g_arena_max_players` | `0` | Per-room player cap; `0` uses the available server capacity. |
+| `g_arena_vote_time` | `30` | Seconds allowed for a room-local proposal. |
 | `g_arena_timeouts` | `3` | Competition timeouts available to each side. |
 
 Arena timeouts use the existing `g_dm_timeout_length` duration and
@@ -339,28 +341,39 @@ shipped `gt-ARENA.cfg` selects `60` seconds and a five-second time-in.
 | `128` | HyperBlaster (RA3 Plasma Gun role) |
 | `256` | BFG10K |
 
-The mask follows RA3's number-row order. An empty mask receives a Chainfist as
-a safety fallback; otherwise each bit is authoritative. Unsupported bits are
-discarded. In `arena.cfg`, RA3 weapon digit `0` independently enables the
-selectable/offhand Grapple. Each ammo value is clamped from `0` through `999`.
+The mask is MuffMode's native explicit loadout setting. An empty mask receives
+a Chainfist as a safety fallback; otherwise each bit is authoritative.
+Unsupported bits are discarded. The compact `weapons` input remains available
+for compatibility; its native and imported-RA2 number rows are documented
+below. Each ammo value is clamped from `0` through `999`.
 
-### RA2 map entity contract
+### Arena map profiles
 
-Classic RA2 maps set `worldspawn`'s explicit `arena` key to the declared arena
-count. MuffMode accepts strict integer counts from `1` through `31`; missing,
-zero, negative, duplicate, malformed, and out-of-range declarations do not
-activate Arena. Arena 0 is the lobby; positive values identify playable rooms.
-The lobby must have a finite usable start/destination. Every declared room
-must have at least two finite tagged `info_player_deathmatch` starts and one
-finite tagged `info_player_intermission` with a non-empty `message`.
-Arena-local spawns, observer positions, teleporters, and triggers carry the
-same `arena` key. `info_player_intermission` supplies the arena name through
-`message`.
+**Tagged multi-room is the preferred MuffMode map profile.** Set
+`worldspawn`'s explicit `arena` key to the number of playable rooms (`1`
+through `31`). Arena 0 is the lobby and needs a finite usable start or
+destination. Each declared positive room needs at least two finite tagged
+`info_player_deathmatch` starts so both active sides can spawn without sharing
+a point. Room-local spawns, observer positions,
+teleporters, and triggers carry the same positive `arena` key. A tagged
+`info_player_intermission` can supply a room name and observer view, but it is
+not required merely to activate a room. A positive tagged `misc_teleporter`
+acts as a room selector. Negative legacy values are shared/reserved markers,
+not lobby aliases.
+
+**Classic RA2 idmaps use a one-room compatibility profile.** An explicit
+`worldspawn` `arena` value of `0` selects that profile and uses the map's
+shared deathmatch-start pool as one room; in this profile arena 0 is a
+profile marker, not a lobby. A map with no `worldspawn` `arena` key is accepted
+as the same legacy profile only when `g_arena_legacy_idmap 1` is latched before
+the next map load. The cvar defaults to `0`, so ordinary untagged maps do not
+quietly become Arena maps. In either legacy route, entity `arena` tags are
+treated as shared inside the one virtual room; they do not create isolated
+subrooms.
+
 Classic RA2 observer views prefer a matching `misc_teleporter_dest` and fall
-back to a matching deathmatch start when no destination exists; modern tagged
-maps can use the intermission view and its `mangle`/angles. A positive tagged
-`misc_teleporter` acts as an arena selector. Negative legacy values are
-shared/reserved destinations, not lobby aliases.
+back to a matching deathmatch start when no destination exists; tagged maps
+can instead use an intermission view and its `mangle`/angles.
 
 As in the original RA2/RA3 map contract, playable rooms must occupy
 BSP-separated visibility/hearing regions. Room tags isolate server gameplay,
@@ -369,19 +382,20 @@ effects by PVS/PHS, so arbitrary arenas overlaid at the same coordinates are
 not a supported mapping pattern.
 
 Validation runs against the final entity lump before any entity is spawned and
-is checked again against the live entity set. Harmless legacy tags outside the
-declared range are ignored rather than creating rooms. If preflight validation
-fails, Arena remains inactive and the requested mode is treated as effective
-FFA; no room, loadout, isolation, spawn-filter, command, HUD, or Arena-menu
-hooks are enabled. A disagreement after entities have spawned hard-rejects the
-map instead of running a partially modified level. The shipped preset
-therefore leaves `g_map_list` empty: install your own RA2-compatible maps and
-configure an RA2-only rotation.
+is checked again against the live entity set. If preflight validation fails,
+Arena remains inactive and the requested mode is treated as effective FFA; no
+room, loadout, isolation, spawn-filter, command, HUD, or room-menu hooks are
+enabled. A disagreement after entities have spawned hard-rejects the map
+instead of running a partially modified level. The shipped preset leaves
+`g_map_list` empty: install your own Arena-compatible maps and configure an
+Arena rotation. It leaves the untagged-idmap compatibility switch at `0`; set
+`g_arena_legacy_idmap 1` only for a known rotation of untagged classic RA2
+idmaps.
 
 ### `arena.cfg` layers
 
 Settings resolve in this order: built-in defaults, global cvars and top-level
-file settings, matching map block, then matching numeric arena block. For
+file settings, matching map block, then matching numeric room block. For
 example:
 
 ```text
@@ -390,15 +404,15 @@ health 100
 armor 100
 type rocket
 
-map ra2map1 {
+map mm_arena_hub {
     rounds 3
 
-    arena 1 {
+    room 1 {
         type practice
         grapple 1
     }
 
-    arena 2 {
+    room 2 {
         type clan
         playersperteam 3
         competitionmode 1
@@ -407,8 +421,15 @@ map ra2map1 {
 ```
 
 `#` and `//` comments and quoted values are supported. Colons and semicolons
-from original RA2 files (`health: 100;`) are optional. Legacy RA2-style
-`ra2map1 { 1 { ... } }` blocks are accepted too.
+from original RA2 files (`health: 100;`) are optional. Native MuffMode configs
+make scopes explicit with `map <name>` and `room <id>`; `arena <id>` remains an
+accepted compatibility alias. Bare RA2-style `ra2map1 { 1 { ... } }` blocks
+and `maploop` are accepted as imported legacy syntax and are detected
+automatically. A top-level-only `arena.cfg` defaults to the legacy RA2 weapon
+row so unmodified old configs work; add `format: native;` (or `format: ra3;`)
+at its top when a global-only MuffMode config needs the RA3 shorthand row.
+`format: ra2;` makes that legacy intent explicit. Native `map`/`room` scopes
+are already unambiguous.
 Map rotation remains owned by MuffMode's existing `g_map_list`, `g_map_pool`,
 and `g_map_list_shuffle` settings; `arena.cfg` only resolves room rules.
 
@@ -421,7 +442,7 @@ Recognized aliases include `type`/`gametype`, `weapons`/`weaponmask`, and
 `unbalanced`, `lockcount`, `maxplayers`, `maxteams`/`max_teams`, `minping`,
 `maxping`, `votetries`, `armorprotect`, and `healthprotect`. Zero disables a
 player, team, or ping bound. `votetries` defaults to two unsuccessful proposal
-attempts per player per arena match; a successful room vote restores every
+attempts per player per room match; a successful room vote restores every
 player's allowance, while `0` disables player proposals.
 Stock RA3 `gametype: pickup` rooms resolve through the latest layered
 `defpickup` value (`clanarena` by default, with `redrover` supported), and
@@ -429,26 +450,31 @@ Stock RA3 `gametype: pickup` rooms resolve through the latest layered
 boolean `pickup 1`/`pickup 0` switch remains available; enabled fixed-team
 pickup rooms can fill the server capacity and use two teams.
 
-The RA3 `weapons:` list uses the original number-row digits: `1` Chainfist
-(Gauntlet), `2` Machinegun, `3` Shotgun, `4` Grenade Launcher, `5` Rocket
-Launcher, `6` Plasma Beam (Lightning Gun), `7` Railgun, `8` HyperBlaster
-(Plasma Gun), `9` BFG10K, and `0` grapple. `weaponmask` uses the bit values
-listed above.
+Prefer `weaponmask` for new MuffMode configs. In explicit native config
+syntax (or a global file marked `format: native;`), the `weapons:` shorthand
+retains the RA3 compatibility row: `1`
+Chainfist (Gauntlet), `2` Machinegun, `3` Shotgun, `4` Grenade Launcher, `5`
+Rocket Launcher, `6` Plasma Beam (Lightning Gun), `7` Railgun, `8`
+HyperBlaster (Plasma Gun), `9` BFG10K, and `0` grapple. Automatically imported
+legacy RA2 syntax instead uses the Quake II row: `2`/`3` select the compact
+Shotgun role (SG/SSG), `4`/`5` the Machinegun role (MG/Chaingun), `6` Grenade
+Launcher, `7` Rocket Launcher, `8` HyperBlaster, `9` Railgun, and `0` BFG10K.
+In that imported RA2 form, `1` is ignored and `0` is BFG10K, not grapple.
 `allow_voting_*` switches can independently permit or deny ballots for type,
 health/armor, team size, rounds, protection, weapons, falling damage,
 excessive, locking, competition mode, ping limits, and maximum logical teams.
 Original unseparated `allowvoting*` spellings are accepted as compatibility
-aliases. Matching the shipped RA3 policy, excessive and grapple ballots are
-disabled by default and must be enabled explicitly. Starting-ammo values are
-server configuration only and cannot be changed by a player ballot.
+aliases. The shipped policy disables excessive and grapple ballots by default;
+enable them explicitly when appropriate. Starting-ammo values are server
+configuration only and cannot be changed by a player ballot.
 
 Quake II uses one cell pool for the HyperBlaster/RA3 plasma role and BFG10K.
 When those weapons are enabled, the spawn reserve is therefore the largest of
 `cells`, `plasma`, and `bfgammo`.
 
-The optional `roundtimelimit` caps a round. Each arena evaluates that timer and
-its outcome independently; `gt-ARENA.cfg` leaves it at `0`, matching RA3's
-untimed default.
+The optional `roundtimelimit` caps a round. Each room evaluates that timer and
+its outcome independently; `gt-ARENA.cfg` leaves it at `0`, so room rounds are
+uncapped by default.
 
 ## Map And Rotation Cvars
 
@@ -470,9 +496,9 @@ untimed default.
 
 | Cvar | Default | Purpose |
 | --- | --- | --- |
-| `g_arena_start_armor` | `200` | Global Rocket Arena starting-armor default; also used by Freeze Tag when `g_freezetag_arena_loadout` is enabled. |
-| `g_arena_start_health` | `200` | Shared arena-loadout starting-health default; also used by Freeze Tag when `g_freezetag_arena_loadout` is enabled. `gt-ARENA.cfg` overrides it to `100` for Rocket Arena sessions. |
-| `g_arena_dmg_armor` | `0` | Legacy arena-loadout self-armor switch used outside multi-arena Rocket Arena; GT_ARENA uses each arena's independent `armorprotect` setting. |
+| `g_arena_start_armor` | `200` | Global MuffMode Arena starting-armor default; also used by Freeze Tag when `g_freezetag_arena_loadout` is enabled. |
+| `g_arena_start_health` | `200` | Shared arena-loadout starting-health default; also used by Freeze Tag when `g_freezetag_arena_loadout` is enabled. `gt-ARENA.cfg` overrides it to `100` for MuffMode Arena sessions. |
+| `g_arena_dmg_armor` | `0` | Legacy arena-loadout self-armor switch used outside multi-room MuffMode Arena; GT_ARENA uses each room's independent `armorprotect` setting. |
 | `g_coop_health_scaling` | `0` | Scales co-op health by player count. |
 | `g_corpse_sink_time` | `15` | Seconds before corpses sink and disappear. |
 | `g_damage_scale` | `1` | Global damage scale. |
@@ -575,8 +601,9 @@ When `g_gametype_cfg` is enabled, MuffMode executes a config named for the activ
 | Team Deathmatch | `gt-TDM.cfg` |
 | Capture the Flag | `gt-CTF.cfg` |
 | Clan Arena | `gt-CA.cfg` |
-| Rocket Arena | `gt-ARENA.cfg` |
+| Arena Rooms (Rocket Arena) | `gt-ARENA.cfg` |
 | Freeze Tag | `gt-FT.cfg` |
+| Last Man Standing | `gt-LMS.cfg` |
 | Capture Strike | `gt-STRIKE.cfg` |
 | Red Rover | `gt-REDROVER.cfg` |
 | Horde Mode | `gt-HORDE.cfg` |

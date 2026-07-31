@@ -60,6 +60,11 @@ inline constexpr int MM_ArenaEffectiveGametype(int requested,
 		? fallback_gametype : requested;
 }
 
+inline constexpr bool MM_ArenaUsesGenericNoPlayersTimeout(bool arena_active)
+{
+	return !arena_active;
+}
+
 enum class mm_arena_map_error_t : uint8_t {
 	None,
 	MalformedEntityLump,
@@ -68,9 +73,24 @@ enum class mm_arena_map_error_t : uint8_t {
 	DuplicateArenaKey,
 	InvalidArenaCount,
 	MissingLobbyPoint,
-	MissingFighterStarts,
-	MissingNamedIntermission
+	MissingFighterStarts
 };
+
+// TaggedMulti is the normal RA2 layout: every playable room has a positive
+// entity key. LegacyIdmap mirrors RA2's explicit worldspawn "arena" "0"
+// compatibility path, where the map supplies one shared set of DM starts.
+enum class mm_arena_map_profile_t : uint8_t {
+	None,
+	TaggedMulti,
+	LegacyIdmap
+};
+
+inline constexpr bool MM_ArenaMapRoomDeclared(
+	mm_arena_map_profile_t profile, int declared_rooms, int room)
+{
+	return profile == mm_arena_map_profile_t::TaggedMulti && room >= 1 &&
+		room <= declared_rooms;
+}
 
 struct mm_arena_map_contract_t {
 	bool syntax_valid = false;
@@ -79,6 +99,7 @@ struct mm_arena_map_contract_t {
 	bool world_arena_value_valid = false;
 	int declared_rooms = 0;
 	bool has_lobby_point = false;
+	uint16_t idmap_fighter_starts = 0;
 	std::array<uint16_t, MM_ARENA_MAP_MAX_ROOMS + 1> fighter_starts {};
 	std::array<bool, MM_ARENA_MAP_MAX_ROOMS + 1> named_intermissions {};
 };
@@ -86,6 +107,7 @@ struct mm_arena_map_contract_t {
 struct mm_arena_map_validation_t {
 	mm_arena_map_error_t error = mm_arena_map_error_t::None;
 	int room = 0;
+	mm_arena_map_profile_t profile = mm_arena_map_profile_t::None;
 
 	constexpr explicit operator bool() const
 	{
@@ -93,32 +115,54 @@ struct mm_arena_map_validation_t {
 	}
 };
 
-inline constexpr mm_arena_map_validation_t MM_ArenaValidateMapContract(
+inline constexpr bool MM_ArenaMapUsesExplicitIdmap(
 	const mm_arena_map_contract_t &contract)
+{
+	return contract.world_arena_key_count == 1 &&
+		contract.world_arena_value_valid && contract.declared_rooms == 0;
+}
+
+inline constexpr mm_arena_map_validation_t MM_ArenaValidateMapContract(
+	const mm_arena_map_contract_t &contract,
+	bool allow_untagged_idmap = false)
 {
 	if (!contract.syntax_valid)
 		return { mm_arena_map_error_t::MalformedEntityLump, 0 };
 	if (!contract.first_entity_is_worldspawn)
 		return { mm_arena_map_error_t::MissingWorldspawn, 0 };
+	if (contract.world_arena_key_count > 1)
+		return { mm_arena_map_error_t::DuplicateArenaKey, 0 };
+	if (contract.world_arena_key_count == 1 &&
+		!contract.world_arena_value_valid)
+		return { mm_arena_map_error_t::InvalidArenaCount, 0 };
+
+	const bool legacy_idmap = MM_ArenaMapUsesExplicitIdmap(contract) ||
+		(allow_untagged_idmap && contract.world_arena_key_count == 0);
+	if (legacy_idmap) {
+		// RA2 treats arena zero as its single-room idmap profile and ignores
+		// per-entity room tags. This retains compatibility with idmaps that
+		// reused a multi-room entity set without using its room separation.
+		if (contract.idmap_fighter_starts < 2)
+			return { mm_arena_map_error_t::MissingFighterStarts, 1 };
+		return { mm_arena_map_error_t::None, 0,
+			mm_arena_map_profile_t::LegacyIdmap };
+	}
+
 	if (contract.world_arena_key_count == 0)
 		return { mm_arena_map_error_t::MissingArenaKey, 0 };
-	if (contract.world_arena_key_count != 1)
-		return { mm_arena_map_error_t::DuplicateArenaKey, 0 };
-	if (!contract.world_arena_value_valid ||
-		contract.declared_rooms < 1 ||
+	if (contract.declared_rooms < 1 ||
 		contract.declared_rooms > MM_ARENA_MAP_MAX_ROOMS)
 		return { mm_arena_map_error_t::InvalidArenaCount, 0 };
 	if (!contract.has_lobby_point)
 		return { mm_arena_map_error_t::MissingLobbyPoint, 0 };
 	for (int room = 1; room <= contract.declared_rooms; room++) {
-		// Two starts are the minimum needed for a functional challenge and are
-		// present in every canonical RA2 room.
+		// Round setup respawns both active sides before the countdown. A single
+		// shared point would make the second spawn telefrag the first.
 		if (contract.fighter_starts[room] < 2)
 			return { mm_arena_map_error_t::MissingFighterStarts, room };
-		if (!contract.named_intermissions[room])
-			return { mm_arena_map_error_t::MissingNamedIntermission, room };
 	}
-	return {};
+	return { mm_arena_map_error_t::None, 0,
+		mm_arena_map_profile_t::TaggedMulti };
 }
 
 inline constexpr std::string_view MM_ArenaMapErrorText(
@@ -136,13 +180,11 @@ inline constexpr std::string_view MM_ArenaMapErrorText(
 	case mm_arena_map_error_t::DuplicateArenaKey:
 		return "worldspawn has duplicate arena keys";
 	case mm_arena_map_error_t::InvalidArenaCount:
-		return "worldspawn arena count must be an integer from 1 to 31";
+		return "worldspawn arena count must be an integer from 0 to 31 (0 is legacy idmap)";
 	case mm_arena_map_error_t::MissingLobbyPoint:
 		return "arena 0 has no usable lobby point";
 	case mm_arena_map_error_t::MissingFighterStarts:
-		return "playable arena has fewer than two fighter starts";
-	case mm_arena_map_error_t::MissingNamedIntermission:
-		return "playable arena has no named intermission";
+		return "playable room has fewer than two usable fighter starts";
 	}
 	return "unknown validation error";
 }
@@ -295,6 +337,14 @@ inline constexpr int MM_ArenaWinsNeeded(int best_of)
 	return (MM_ArenaNormalizeBestOf(best_of) / 2) + 1;
 }
 
+inline constexpr bool MM_ArenaQueueKeyPrecedes(std::uint32_t first_order,
+	std::uint16_t first_id, std::uint32_t second_order,
+	std::uint16_t second_id)
+{
+	return first_order < second_order ||
+		(first_order == second_order && first_id < second_id);
+}
+
 inline constexpr std::uint32_t MM_ArenaSanitizeWeaponMask(std::uint32_t mask)
 {
 	return mask & MM_ARENA_WEAPON_ALL;
@@ -304,6 +354,111 @@ inline constexpr std::uint32_t MM_ArenaWeaponFlagForDigit(char digit)
 {
 	return digit >= '1' && digit <= '9'
 		? std::uint32_t { 1 } << (digit - '1') : 0;
+}
+
+// RA2's `weapons:` list is Q2's weapon row, not RA3's Q3-style number row.
+// The two compact Q2RE roles intentionally combine SG/SSG and MG/Chaingun,
+// while preserving the meaningful launcher, HyperBlaster, rail, and BFG
+// choices from an imported RA2 config.
+inline constexpr std::uint32_t MM_ArenaWeaponFlagForRa2Digit(char digit)
+{
+	switch (digit) {
+	case '2':
+	case '3':
+		return MM_ARENA_WEAPON_SHOTGUN;
+	case '4':
+	case '5':
+		return MM_ARENA_WEAPON_MACHINEGUN;
+	case '6':
+		return MM_ARENA_WEAPON_GRENADE_LAUNCHER;
+	case '7':
+		return MM_ARENA_WEAPON_ROCKET_LAUNCHER;
+	case '8':
+		return MM_ARENA_WEAPON_PLASMA;
+	case '9':
+		return MM_ARENA_WEAPON_RAILGUN;
+	case '0':
+		return MM_ARENA_WEAPON_BFG;
+	default:
+		return 0;
+	}
+}
+
+enum class mm_arena_weapon_list_format_t : uint8_t {
+	RA3,
+	RA2
+};
+
+// A top-level-only `arena.cfg` is an RA2 convention and has no structural
+// marker of its own. Keep that compatibility default; native files can make
+// their format explicit, while `map`/`room` scopes identify themselves.
+inline constexpr mm_arena_weapon_list_format_t
+MM_ArenaResolveConfigWeaponListFormat(bool has_legacy_syntax,
+	bool has_native_syntax, std::string_view explicit_format)
+{
+	if (explicit_format == "ra2")
+		return mm_arena_weapon_list_format_t::RA2;
+	if (explicit_format == "ra3" || explicit_format == "native" ||
+		explicit_format == "muffmode")
+		return mm_arena_weapon_list_format_t::RA3;
+	if (has_legacy_syntax)
+		return mm_arena_weapon_list_format_t::RA2;
+	if (has_native_syntax)
+		return mm_arena_weapon_list_format_t::RA3;
+	return mm_arena_weapon_list_format_t::RA2;
+}
+
+struct mm_arena_weapon_list_t {
+	std::uint32_t mask = 0;
+	bool grapple = false;
+	bool valid = false;
+};
+
+inline constexpr mm_arena_weapon_list_t MM_ArenaParseWeaponList(
+	std::string_view value, mm_arena_weapon_list_format_t format)
+{
+	mm_arena_weapon_list_t result;
+	if (format == mm_arena_weapon_list_format_t::RA2) {
+		// RA2 tokenizes its row on whitespace, so `100` is not three weapon
+		// selectors. This matters when accepting real-world legacy configs that
+		// omitted a semicolon before the following `armor: 100` setting.
+		for (size_t begin = 0; begin < value.size();) {
+			while (begin < value.size() &&
+				(value[begin] == ' ' || value[begin] == '\t' ||
+					value[begin] == '\r' || value[begin] == '\n'))
+				begin++;
+			const size_t end = value.find_first_of(" \t\r\n", begin);
+			const size_t length = (end == std::string_view::npos
+				? value.size() : end) - begin;
+			if (length == 1) {
+				const std::uint32_t flag =
+					MM_ArenaWeaponFlagForRa2Digit(value[begin]);
+				if (flag) {
+					result.mask |= flag;
+					result.valid = true;
+				}
+			}
+			if (end == std::string_view::npos)
+				break;
+			begin = end + 1;
+		}
+		return result;
+	}
+	for (const char digit : value) {
+		if (digit < '0' || digit > '9')
+			continue;
+		if (digit == '0') {
+			result.grapple = true;
+			result.valid = true;
+			continue;
+		}
+		const std::uint32_t flag = MM_ArenaWeaponFlagForDigit(digit);
+		if (!flag)
+			continue;
+		result.mask |= flag;
+		result.valid = true;
+	}
+	return result;
 }
 
 inline constexpr std::uint32_t MM_ArenaWeaponFlagForName(
@@ -463,6 +618,29 @@ inline constexpr std::uint8_t MM_ArenaClearSpectatorInviteBits(
 	std::uint8_t invites)
 {
 	return static_cast<std::uint8_t>(invites & ~std::uint8_t { 0x03 });
+}
+
+inline constexpr std::uint8_t MM_ArenaInvitesAfterMemberTransfer(
+	std::uint8_t invites, std::uint16_t old_team, std::uint16_t new_team)
+{
+	return old_team != 0 && old_team != new_team
+		? MM_ArenaClearSpectatorInviteBits(invites) : invites;
+}
+
+inline constexpr bool MM_ArenaDelayedActivatorValid(bool inuse,
+	bool connected, std::int32_t scheduled_spawn_count,
+	std::int32_t current_spawn_count, int source_room, int current_room)
+{
+	return inuse && connected &&
+		scheduled_spawn_count == current_spawn_count &&
+		(source_room < 0 || source_room == current_room);
+}
+
+inline constexpr bool MM_ArenaConfigStartsColonSetting(
+	bool known_setting, std::string_view key, std::string_view next_token)
+{
+	return next_token == ":" &&
+		(known_setting || key == "format" || key == "maploop");
 }
 
 template <typename TokenRange>

@@ -177,10 +177,16 @@ void hunter_touch(gentity_t *self, gentity_t *other, const trace_t &tr, bool oth
 
 // =================
 // =================
-static THINK(sphere_think_explode) (gentity_t *self) -> void {
-	if (self->owner && self->owner->client && !(self->spawnflags & SF_DOPPELGANGER)) {
+static void sphere_clear_owner(gentity_t *self) {
+	if (!self || self->spawnflags.has(SF_DOPPELGANGER))
+		return;
+
+	if (self->owner && self->owner->client && self->owner->client->owned_sphere == self)
 		self->owner->client->owned_sphere = nullptr;
-	}
+}
+
+static THINK(sphere_think_explode) (gentity_t *self) -> void {
+	sphere_clear_owner(self);
 	BecomeExplosion1(self);
 }
 
@@ -207,6 +213,14 @@ static void sphere_fly(gentity_t *self) {
 	vec3_t dest, dir;
 
 	if (level.time >= gtime_t::from_sec(self->wait)) {
+		sphere_think_explode(self);
+		return;
+	}
+
+	// Doppelganger-fired spheres intentionally have no owner. If their target
+	// disappears, the think functions fall back here; retire the sphere instead
+	// of dereferencing a null owner while trying to resume orbiting.
+	if (!self->owner) {
 		sphere_think_explode(self);
 		return;
 	}
@@ -252,7 +266,7 @@ static void sphere_chase(gentity_t *self, int stupidChase) {
 		self->monsterinfo.saved_goal = dest;
 	} else if (!self->monsterinfo.saved_goal) {
 		dir = self->enemy->s.origin - self->s.origin;
-		dist = dir.normalize();
+		dir.normalize();
 		self->s.angles = vectoangles(dir);
 
 		// if lurking, hunter sphere uses lurking sound
@@ -277,7 +291,7 @@ static void sphere_chase(gentity_t *self, int stupidChase) {
 				self->s.sound = gi.soundindex("spheres/h_active.wav");
 		} else {
 			dir = self->enemy->s.origin - self->s.origin;
-			dist = dir.normalize();
+			dir.normalize();
 			self->s.angles = vectoangles(dir);
 
 			// if not moving, hunter sphere uses lurk sound
@@ -332,6 +346,8 @@ static void sphere_touch(gentity_t *self, gentity_t *other, const trace_t &tr, m
 	}
 
 	if (tr.surface && (tr.surface->flags & SURF_SKY)) {
+		// [MuffMode] Sky removal is silent, but must still release player ownership.
+		sphere_clear_owner(self);
 		G_FreeEntity(self);
 		return;
 	}
@@ -949,8 +965,10 @@ THINK(RespawnItem) (gentity_t *ent) -> void {
 		gentity_t	*master, *current;
 		int			count, choice;
 		
-		if (!ent->teammaster)
+		if (!ent->teammaster) {
 			gi.Com_ErrorFmt("{}: {}: bad teammaster", __FUNCTION__, *ent);
+			return;
+		}
 
 		master = ent->teammaster;
 		current = ent;
@@ -974,8 +992,19 @@ THINK(RespawnItem) (gentity_t *ent) -> void {
 			}
 			
 			choice = MM_PickRespawnItemTeamIndex(current_index, count);
-			for (count = 0, ent = master; count < choice; ent = ent->chain, count++)
+			if (choice < 0 || choice >= count) {
+				gi.Com_ErrorFmt("{}: {}: bad team item choice {} of {}",
+					__FUNCTION__, *current, choice, count);
+				return;
+			}
+			for (count = 0, ent = master; count < choice && ent;
+				ent = ent->chain, count++)
 				;
+			if (!ent) {
+				gi.Com_ErrorFmt("{}: {}: broken item team chain",
+					__FUNCTION__, *current);
+				return;
+			}
 		}
 	}
 
@@ -1130,7 +1159,6 @@ bool Pickup_Powerup(gentity_t *ent, gentity_t *other) {
 	if (g_quadhog->integer && ent->item->id == IT_POWERUP_QUAD) {
 		if (ent->item->use)
 			ent->item->use(other, ent->item);
-		G_FreeEntity(ent);
 		return true;
 	}
 	
@@ -1235,7 +1263,10 @@ bool Pickup_TimedItem(gentity_t *ent, gentity_t *other) {
 //======================================================================
 
 void Use_Defender(gentity_t *ent, gitem_t *item) {
-	if (ent->client && ent->client->owned_sphere) {
+	if (!ent || !ent->client || !item)
+		return;
+
+	if (ent->client->owned_sphere) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "$g_only_one_sphere_time");
 		return;
 	}
@@ -1246,7 +1277,10 @@ void Use_Defender(gentity_t *ent, gitem_t *item) {
 }
 
 void Use_Hunter(gentity_t *ent, gitem_t *item) {
-	if (ent->client && ent->client->owned_sphere) {
+	if (!ent || !ent->client || !item)
+		return;
+
+	if (ent->client->owned_sphere) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "$g_only_one_sphere_time");
 		return;
 	}
@@ -1257,7 +1291,10 @@ void Use_Hunter(gentity_t *ent, gitem_t *item) {
 }
 
 void Use_Vengeance(gentity_t *ent, gitem_t *item) {
-	if (ent->client && ent->client->owned_sphere) {
+	if (!ent || !ent->client || !item)
+		return;
+
+	if (ent->client->owned_sphere) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "$g_only_one_sphere_time");
 		return;
 	}
@@ -1268,9 +1305,12 @@ void Use_Vengeance(gentity_t *ent, gitem_t *item) {
 }
 
 bool Pickup_Sphere(gentity_t *ent, gentity_t *other) {
+	if (!ent || !ent->item || !other || !other->client)
+		return false;
+
 	int quantity;
 
-	if (other->client && other->client->owned_sphere) {
+	if (other->client->owned_sphere) {
 		//		gi.LocClient_Print(other, PRINT_HIGH, "$g_only_one_sphere_customer");
 		return false;
 	}
@@ -1742,7 +1782,6 @@ void Powerup_ApplyRegeneration(gentity_t *ent) {
 	gclient_t	*cl;
 	float		volume = 1.0;
 	bool		mod = (g_instagib->integer || GT(GT_INSTAGIB)) || (g_nadefest->integer || GT(GT_NADEFEST));
-	bool		no_health = mod || GTF(GTF_ARENA) || g_no_health->integer;
 
 	cl = ent->client;
 	if (!cl)
@@ -2145,9 +2184,10 @@ TOUCH(Touch_Item) (gentity_t *ent, gentity_t *other, const trace_t &tr, bool oth
 
 	if (!other->client)
 		return;
-	if (other->health < 1)
-		return; // dead people can't pickup
-	if (MM_FreezeTag_IsFrozen(other))
+	if (!MM_ItemTouchClientMayPickup(
+		ClientIsPlaying(other->client),
+		other->health,
+		MM_FreezeTag_IsFrozen(other)))
 		return;
 	if (!ent->item)
 		return;
@@ -2155,6 +2195,7 @@ TOUCH(Touch_Item) (gentity_t *ent, gentity_t *other, const trace_t &tr, bool oth
 		return; // not a grabbable item?
 
 	gitem_t *it = ent->item;
+	const int32_t item_spawn_count = ent->spawn_count;
 	const bool use_coop_instanced_items = coop->integer && P_UseCoopInstancedItems();
 	size_t player_index = 0;
 
@@ -2175,6 +2216,11 @@ TOUCH(Touch_Item) (gentity_t *ent, gentity_t *other, const trace_t &tr, bool oth
 	taken = it->pickup(ent, other);
 
 	ValidateSelectedItem(other);
+
+	// Pickup callbacks may remove their source. Never continue through a freed
+	// or same-frame-reused entity slot.
+	if (!ent->inuse || ent->spawn_count != item_spawn_count)
+		return;
 
 	if (taken) {
 		// flash the screen
@@ -2233,11 +2279,9 @@ TOUCH(Touch_Item) (gentity_t *ent, gentity_t *other, const trace_t &tr, bool oth
 				for (auto ec : active_clients()) {
 					if (other == ec)
 						continue;
-					if (ent == ec)
+					if (ClientIsPlaying(ec->client) && !OnSameTeam(other, ec))
 						continue;
-					if (ClientIsPlaying(ec->client) && !OnSameTeam(ent, ec))
-						continue;
-					if (!ClientIsPlaying(ec->client) && ec->client->follow_target && !OnSameTeam(ent, ec->client->follow_target))
+					if (!ClientIsPlaying(ec->client) && ec->client->follow_target && !OnSameTeam(other, ec->client->follow_target))
 						continue;
 
 					gi.WriteByte(svc_poi);
@@ -2265,12 +2309,16 @@ TOUCH(Touch_Item) (gentity_t *ent, gentity_t *other, const trace_t &tr, bool oth
 		// even a documented feature, relays were traditionally used for this)
 		const char *message_backup = nullptr;
 
-		if (deathmatch->integer || (coop->integer && P_UseCoopInstancedItems()))
+		const bool suppress_message = deathmatch->integer || (coop->integer && P_UseCoopInstancedItems());
+		if (suppress_message)
 			std::swap(message_backup, ent->message);
 
 		G_UseTargets(ent, other);
 
-		if (deathmatch->integer || (coop->integer && P_UseCoopInstancedItems()))
+		if (!ent->inuse || ent->spawn_count != item_spawn_count)
+			return;
+
+		if (suppress_message)
 			std::swap(message_backup, ent->message);
 
 		ent->spawnflags |= SPAWNFLAG_ITEM_TARGETS_USED;
@@ -2288,8 +2336,12 @@ TOUCH(Touch_Item) (gentity_t *ent, gentity_t *other, const trace_t &tr, bool oth
 			// if not dropped
 			else
 				should_remove = ent->spawnflags.has(SPAWNFLAG_ITEM_DROPPED | SPAWNFLAG_ITEM_DROPPED_PLAYER) || !(it->flags & IF_STAY_COOP);
-		} else
-			should_remove = !deathmatch->integer || ent->spawnflags.has(SPAWNFLAG_ITEM_DROPPED | SPAWNFLAG_ITEM_DROPPED_PLAYER);
+		} else {
+			const bool quad_hog_consumed =
+				deathmatch->integer && g_quadhog->integer && it->id == IT_POWERUP_QUAD;
+			should_remove = !deathmatch->integer || quad_hog_consumed ||
+				ent->spawnflags.has(SPAWNFLAG_ITEM_DROPPED | SPAWNFLAG_ITEM_DROPPED_PLAYER);
+		}
 
 		if (should_remove) {
 			if (ent->flags & FL_RESPAWN)

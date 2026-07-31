@@ -9,11 +9,19 @@ using Microsoft.Win32;
 
 namespace MuffMode.Updater;
 
+internal readonly record struct InstallSyncResult(bool SelfUpdateHandoffStarted);
+
 internal static partial class InstallationManager
 {
+    internal const string SingleInstanceMutexName = @"Local\DarkMatterProductions.MuffMode.Updater";
     private const string SettingsFileName = "updater-settings.json";
     private const string MarkerJsonFileName = "muffmode-version.json";
     private const string MarkerTextFileName = "muffmode.version";
+    private const string UpdaterExecutableFileName = "MuffModeUpdater.exe";
+    private const string SelfUpdateStagingDirectoryName = ".muffmode-updater-staging";
+    private const string ApplySelfUpdateArgument = "--muffmode-apply-self-update";
+    private const string CleanupSelfUpdateArgument = "--muffmode-cleanup-self-update";
+    private const string SelfUpdateReadyEventPrefix = @"Local\DarkMatterProductions.MuffMode.Updater.SelfUpdate.";
     private const int MaxPackageEntryCount = 40_000;
     private const int MaxPackageDirectoryCount = 20_000;
     private const int MaxPackageFileCount = 20_000;
@@ -30,13 +38,50 @@ internal static partial class InstallationManager
     private const int MaxSavedInstallPathCharacters = 4096;
     private const int MaxGameDllBackups = 20;
     private const ushort ImageFileMachineAmd64 = 0x8664;
+    private static readonly TimeSpan SelfUpdateReadyTimeout = TimeSpan.FromSeconds(20);
+    private static readonly TimeSpan SelfUpdateParentExitTimeout = TimeSpan.FromMinutes(2);
+    private static readonly TimeSpan SelfUpdateHelperExitTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan SelfUpdateDeleteRetryDelay = TimeSpan.FromMilliseconds(100);
     private static readonly TimeSpan TemporaryExtractionMaxAge = TimeSpan.FromDays(2);
     private static readonly TimeSpan MetadataTimestampFutureTolerance = TimeSpan.FromMinutes(10);
     private static readonly Encoding StrictUtf8Encoding = new UTF8Encoding(
         encoderShouldEmitUTF8Identifier: false,
         throwOnInvalidBytes: true);
 
-    private sealed record PackageInstallFile(string SourcePath, string RelativePath, string DestinationPath);
+    private sealed record TrustedPackageFile(long Length, string Sha256);
+    private sealed record PackageInstallFile(
+        string SourcePath,
+        string RelativePath,
+        string DestinationPath,
+        long ExpectedLength,
+        string ExpectedSha256);
+    private sealed record PendingSelfUpdate(
+        string InstallRoot,
+        string TargetPath,
+        string StagedPath,
+        string Token,
+        string ExpectedNewSha256,
+        string ExpectedOldSha256,
+        int ParentProcessId,
+        long ParentStartTimeUtcTicks);
+
+    private sealed class FileLockSet : IDisposable
+    {
+        private readonly List<FileStream> streams;
+
+        public FileLockSet(List<FileStream> streams)
+        {
+            this.streams = streams;
+        }
+
+        public void Dispose()
+        {
+            foreach (var stream in streams)
+            {
+                stream.Dispose();
+            }
+        }
+    }
 
     private static readonly HashSet<string> AllowedRootPackageFiles = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -44,8 +89,13 @@ internal static partial class InstallationManager
         "LICENSE",
         "MuffMode.version",
         "MuffModeUpdater.exe",
+        "README.bg.html",
+        "README.de.html",
+        "README.fr.html",
         "README.html",
+        "README.hu.html",
         "README.md",
+        "README.pl.html",
         "THIRD_PARTY_NOTICES.md",
         "VERSION"
     };
@@ -70,8 +120,10 @@ internal static partial class InstallationManager
         Path.Combine("rerelease", "baseq2", "gt-CTF.cfg"),
         Path.Combine("rerelease", "baseq2", "gt-DUEL.cfg"),
         Path.Combine("rerelease", "baseq2", "gt-FFA.cfg"),
+        Path.Combine("rerelease", "baseq2", "gt-FT.cfg"),
         Path.Combine("rerelease", "baseq2", "gt-HORDE.cfg"),
         Path.Combine("rerelease", "baseq2", "gt-INSTAGIB.cfg"),
+        Path.Combine("rerelease", "baseq2", "gt-LMS.cfg"),
         Path.Combine("rerelease", "baseq2", "gt-NADEFEST.cfg"),
         Path.Combine("rerelease", "baseq2", "gt-REDROVER.cfg"),
         Path.Combine("rerelease", "baseq2", "gt-STRIKE.cfg"),
@@ -98,8 +150,10 @@ internal static partial class InstallationManager
         Path.Combine("rerelease", "baseq2", "gt-CTF.cfg"),
         Path.Combine("rerelease", "baseq2", "gt-DUEL.cfg"),
         Path.Combine("rerelease", "baseq2", "gt-FFA.cfg"),
+        Path.Combine("rerelease", "baseq2", "gt-FT.cfg"),
         Path.Combine("rerelease", "baseq2", "gt-HORDE.cfg"),
         Path.Combine("rerelease", "baseq2", "gt-INSTAGIB.cfg"),
+        Path.Combine("rerelease", "baseq2", "gt-LMS.cfg"),
         Path.Combine("rerelease", "baseq2", "gt-NADEFEST.cfg"),
         Path.Combine("rerelease", "baseq2", "gt-REDROVER.cfg"),
         Path.Combine("rerelease", "baseq2", "gt-STRIKE.cfg"),
@@ -347,7 +401,7 @@ internal static partial class InstallationManager
         return new LocalInstallVersion(null, "Unknown / not installed by updater", "No MuffMode version marker found");
     }
 
-    public static async Task SyncReleaseToInstallAsync(
+    public static async Task<InstallSyncResult> SyncReleaseToInstallAsync(
         ReleaseInfo release,
         string zipPath,
         string installPath,
@@ -361,9 +415,9 @@ internal static partial class InstallationManager
         }
 
         EnsureSafeInstallRoot(normalizedInstallPath);
-        ValidateDownloadedArchive(zipPath);
-        ValidateDownloadedArchiveMatchesRelease(zipPath, release);
-        var packageSha256 = ComputeFileSha256(zipPath);
+        using var trustedArchiveStream = OpenTrustedDownloadedArchive(zipPath);
+        ValidateDownloadedArchiveMatchesRelease(trustedArchiveStream.Name, trustedArchiveStream.Length, release);
+        var packageSha256 = ComputeSeekableStreamSha256(trustedArchiveStream);
         ValidateGitHubAssetDigest(release.AssetDigest, packageSha256);
         var updaterTempRoot = Path.Combine(Path.GetTempPath(), "MuffModeUpdater");
         PrepareUpdaterTempRoot(updaterTempRoot);
@@ -371,12 +425,14 @@ internal static partial class InstallationManager
         var extractRoot = Path.Combine(updaterTempRoot, Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(extractRoot);
         EnsureDirectoryPathHasNoReparsePoints(extractRoot, "updater temporary extraction folder");
+        PendingSelfUpdate? pendingSelfUpdate = null;
+        var selfUpdateHandoffStarted = false;
 
         try
         {
             progress?.Report(new UpdaterProgress("Extracting release package...", 46));
-            await ExtractReleasePackageAsync(
-                zipPath,
+            var trustedPackageFiles = await ExtractReleasePackageAsync(
+                trustedArchiveStream,
                 extractRoot,
                 Path.GetFileNameWithoutExtension(release.AssetName),
                 cancellationToken);
@@ -384,9 +440,8 @@ internal static partial class InstallationManager
             var packageRoot = ResolvePackageRoot(extractRoot);
             EnsureSafePackageRoot(extractRoot, packageRoot);
             ValidateExtractionRootContents(extractRoot, packageRoot);
-            var packageMarker = ValidateReleasePackage(packageRoot, release, packageSha256);
-
-            var releaseFiles = EnumeratePackageFiles(packageRoot)
+            var releaseFiles = trustedPackageFiles.Keys
+                .Where(filePath => IsPathUnderRoot(packageRoot, filePath))
                 .Order(StringComparer.OrdinalIgnoreCase)
                 .ToList();
             if (releaseFiles.Count == 0)
@@ -394,8 +449,19 @@ internal static partial class InstallationManager
                 throw new InvalidOperationException("The downloaded release package did not contain any files to install.");
             }
 
+            ValidateExtractedFileInventory(packageRoot, trustedPackageFiles, releaseFiles);
+            using var trustedPackageLocks = LockTrustedPackageValidationFiles(packageRoot, trustedPackageFiles);
+            var packageMarker = ValidateReleasePackage(packageRoot, release, packageSha256, releaseFiles);
+
             var runningUpdaterPath = GetRunningUpdaterPath();
-            var installPlan = BuildInstallPlan(normalizedInstallPath, packageRoot, releaseFiles, runningUpdaterPath, progress);
+            var installPlan = BuildInstallPlan(
+                normalizedInstallPath,
+                packageRoot,
+                releaseFiles,
+                trustedPackageFiles,
+                runningUpdaterPath,
+                progress,
+                out var deferredUpdaterFile);
             if (installPlan.Count == 0)
             {
                 throw new InvalidOperationException("The downloaded release package did not contain any installable files.");
@@ -404,16 +470,29 @@ internal static partial class InstallationManager
             VerifyRequiredInstallPlanFiles(installPlan);
             EnsureGameProcessIsNotRunning(normalizedInstallPath);
             VerifyInstallPlanTargets(normalizedInstallPath, installPlan);
-            EnsureSufficientInstallDiskSpace(normalizedInstallPath, installPlan);
+            VerifyDeferredUpdaterTarget(normalizedInstallPath, deferredUpdaterFile, runningUpdaterPath);
+            EnsureSufficientInstallDiskSpace(normalizedInstallPath, installPlan, deferredUpdaterFile);
 
             cancellationToken.ThrowIfCancellationRequested();
             progress?.Report(new UpdaterProgress("Applying release package...", 49, CanCancel: false));
+            pendingSelfUpdate = StagePendingSelfUpdate(
+                normalizedInstallPath,
+                deferredUpdaterFile,
+                runningUpdaterPath,
+                progress);
+            var configBackupDirectory = BackupCurrentServerConfigs(normalizedInstallPath, installPlan, progress);
             var backupFileName = BackupCurrentGameDll(normalizedInstallPath, progress);
 
             for (var index = 0; index < installPlan.Count; index++)
             {
                 var installFile = installPlan[index];
-                CopyFileAtomically(normalizedInstallPath, installFile.SourcePath, installFile.DestinationPath, installFile.RelativePath);
+                CopyFileAtomically(
+                    normalizedInstallPath,
+                    installFile.SourcePath,
+                    installFile.DestinationPath,
+                    installFile.RelativePath,
+                    installFile.ExpectedLength,
+                    installFile.ExpectedSha256);
 
                 var percentage = 50 + (int)Math.Round((double)(index + 1) / installPlan.Count * 45);
                 progress?.Report(new UpdaterProgress($"Syncing {installFile.RelativePath}...", Math.Clamp(percentage, 50, 95), CanCancel: false));
@@ -422,11 +501,83 @@ internal static partial class InstallationManager
             VerifyInstallPlanApplied(installPlan);
             WriteInstalledMarker(normalizedInstallPath, release, packageMarker, packageSha256, installPlan, backupFileName);
             VerifyInstalledMarker(normalizedInstallPath, release, packageMarker, packageSha256, installPlan);
-            progress?.Report(new UpdaterProgress($"MuffMode {release.Version} installed.", 100, CanCancel: false));
+
+            if (pendingSelfUpdate is not null)
+            {
+                LaunchPendingSelfUpdate(pendingSelfUpdate);
+                selfUpdateHandoffStarted = true;
+                progress?.Report(new UpdaterProgress(
+                    $"MuffMode {release.Version} installed. Restarting with the updated updater...",
+                    100,
+                    CanCancel: false));
+                return new InstallSyncResult(SelfUpdateHandoffStarted: true);
+            }
+
+            var completionMessage = configBackupDirectory is null
+                ? $"MuffMode {release.Version} installed."
+                : $"MuffMode {release.Version} installed. Previous server configs are in {configBackupDirectory}.";
+            progress?.Report(new UpdaterProgress(completionMessage, 100, CanCancel: false));
+            return new InstallSyncResult(SelfUpdateHandoffStarted: false);
         }
         finally
         {
+            if (!selfUpdateHandoffStarted && pendingSelfUpdate is not null)
+            {
+                CleanupPendingSelfUpdateBestEffort(pendingSelfUpdate);
+            }
+
             TryDeleteDirectory(extractRoot);
+        }
+    }
+
+    public static bool IsSelfUpdateCleanupStartup(string[] args)
+    {
+        return args.Length > 0
+            && string.Equals(args[0], CleanupSelfUpdateArgument, StringComparison.Ordinal);
+    }
+
+    public static bool TryHandleSelfUpdateApplyStartup(string[] args, out int exitCode)
+    {
+        if (args.Length == 0
+            || !string.Equals(args[0], ApplySelfUpdateArgument, StringComparison.Ordinal))
+        {
+            exitCode = 0;
+            return false;
+        }
+
+        try
+        {
+            RunApplySelfUpdateCommand(args);
+            exitCode = 0;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            exitCode = 2;
+            UpdaterLog.WriteException("Deferred updater self-replacement helper failed.", ex);
+            return true;
+        }
+    }
+
+    public static bool TryHandleSelfUpdateCleanupStartup(string[] args, out int exitCode)
+    {
+        if (!IsSelfUpdateCleanupStartup(args))
+        {
+            exitCode = 0;
+            return false;
+        }
+
+        try
+        {
+            RunCleanupSelfUpdateCommand(args);
+            exitCode = 0;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            exitCode = 2;
+            UpdaterLog.WriteException("Deferred updater self-replacement cleanup failed.", ex);
+            return true;
         }
     }
 
@@ -526,7 +677,7 @@ internal static partial class InstallationManager
         }
     }
 
-    private static void ValidateDownloadedArchive(string zipPath)
+    private static FileStream OpenTrustedDownloadedArchive(string zipPath)
     {
         if (string.IsNullOrWhiteSpace(zipPath))
         {
@@ -564,24 +715,52 @@ internal static partial class InstallationManager
             throw new InvalidOperationException("The downloaded release package path points at a reparse point.");
         }
 
-        var length = new FileInfo(fullPath).Length;
-        if (length == 0)
+        FileStream stream;
+        try
         {
-            throw new InvalidOperationException("The downloaded release package was empty.");
+            // Denying write/delete sharing binds all validation and extraction to this
+            // exact archive, even when the updater is running elevated.
+            stream = new FileStream(
+                fullPath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.Read,
+                CopyBufferSize,
+                FileOptions.Asynchronous | FileOptions.SequentialScan);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw new IOException("The downloaded release package could not be locked for verification.", ex);
         }
 
-        if (length < MinPackageZipBytes)
+        try
         {
-            throw new InvalidOperationException($"The downloaded release package is smaller than the supported minimum of {MinPackageZipBytes / 1024 / 1024} MB.");
-        }
+            var length = stream.Length;
+            if (length == 0)
+            {
+                throw new InvalidOperationException("The downloaded release package was empty.");
+            }
 
-        if (length > MaxPackageUncompressedBytes)
+            if (length < MinPackageZipBytes)
+            {
+                throw new InvalidOperationException($"The downloaded release package is smaller than the supported minimum of {MinPackageZipBytes / 1024 / 1024} MB.");
+            }
+
+            if (length > MaxPackageUncompressedBytes)
+            {
+                throw new InvalidOperationException($"The downloaded release package is larger than the supported limit of {MaxPackageUncompressedBytes / 1024 / 1024} MB.");
+            }
+
+            return stream;
+        }
+        catch
         {
-            throw new InvalidOperationException($"The downloaded release package is larger than the supported limit of {MaxPackageUncompressedBytes / 1024 / 1024} MB.");
+            stream.Dispose();
+            throw;
         }
     }
 
-    private static void ValidateDownloadedArchiveMatchesRelease(string zipPath, ReleaseInfo release)
+    private static void ValidateDownloadedArchiveMatchesRelease(string zipPath, long actualLength, ReleaseInfo release)
     {
         var fileName = Path.GetFileName(zipPath);
         if (!string.Equals(fileName, release.AssetName, StringComparison.OrdinalIgnoreCase))
@@ -594,7 +773,6 @@ internal static partial class InstallationManager
             throw new InvalidOperationException("GitHub release metadata did not include a usable package size.");
         }
 
-        var actualLength = new FileInfo(zipPath).Length;
         if (actualLength != release.AssetSize.Value)
         {
             throw new InvalidOperationException($"The downloaded release package size ({actualLength:N0} bytes) did not match the selected GitHub asset size ({release.AssetSize.Value:N0} bytes).");
@@ -1103,26 +1281,98 @@ internal static partial class InstallationManager
         }
     }
 
+    private static void ValidateExtractedFileInventory(
+        string packageRoot,
+        IReadOnlyDictionary<string, TrustedPackageFile> trustedPackageFiles,
+        IReadOnlyList<string> releaseFiles)
+    {
+        var trustedPaths = releaseFiles
+            .Select(NormalizeFullPathForComparison)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var actualPaths = EnumeratePackageFiles(packageRoot)
+            .Select(NormalizeFullPathForComparison)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (!actualPaths.SetEquals(trustedPaths))
+        {
+            throw new InvalidOperationException("The extracted release package changed before it could be validated.");
+        }
+
+        foreach (var path in trustedPaths)
+        {
+            if (!trustedPackageFiles.ContainsKey(path))
+            {
+                throw new InvalidOperationException("The extracted release package inventory was incomplete.");
+            }
+        }
+    }
+
+    private static FileLockSet LockTrustedPackageValidationFiles(
+        string packageRoot,
+        IReadOnlyDictionary<string, TrustedPackageFile> trustedPackageFiles)
+    {
+        var relativePaths = new[]
+        {
+            UpdaterExecutableFileName,
+            "MuffMode.version",
+            "VERSION",
+            Path.Combine("rerelease", "baseq2", "game_x64.dll"),
+            Path.Combine("rerelease", "baseq2", MarkerJsonFileName),
+            Path.Combine("rerelease", "baseq2", MarkerTextFileName)
+        };
+        var streams = new List<FileStream>(relativePaths.Length);
+        try
+        {
+            foreach (var relativePath in relativePaths)
+            {
+                var path = NormalizeFullPathForComparison(Path.Combine(packageRoot, relativePath));
+                if (!trustedPackageFiles.TryGetValue(path, out var trustedFile))
+                {
+                    throw new InvalidOperationException($"The trusted release package inventory is missing required file: {relativePath}");
+                }
+
+                streams.Add(OpenVerifiedFileReadLock(
+                    path,
+                    trustedFile.Length,
+                    trustedFile.Sha256,
+                    $"release package file {relativePath}"));
+            }
+
+            return new FileLockSet(streams);
+        }
+        catch
+        {
+            foreach (var stream in streams)
+            {
+                stream.Dispose();
+            }
+
+            throw;
+        }
+    }
+
     private static IReadOnlyList<PackageInstallFile> BuildInstallPlan(
         string installPath,
         string packageRoot,
         IReadOnlyList<string> releaseFiles,
+        IReadOnlyDictionary<string, TrustedPackageFile> trustedPackageFiles,
         string? runningUpdaterPath,
-        IProgress<UpdaterProgress>? progress)
+        IProgress<UpdaterProgress>? progress,
+        out PackageInstallFile? deferredUpdaterFile)
     {
+        deferredUpdaterFile = null;
         var installPlan = new List<PackageInstallFile>(releaseFiles.Count);
         var destinationPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var sourcePath in releaseFiles)
         {
             var relativePath = Path.GetRelativePath(packageRoot, sourcePath);
             ValidatePackageSourceFile(sourcePath, relativePath);
-            var destinationPath = ResolveDestinationPath(installPath, relativePath);
-            if (IsRunningUpdaterDestination(destinationPath, runningUpdaterPath))
+            var sourceKey = NormalizeFullPathForComparison(sourcePath);
+            if (!trustedPackageFiles.TryGetValue(sourceKey, out var trustedFile))
             {
-                progress?.Report(new UpdaterProgress($"Skipping running updater executable: {relativePath}.", null, CanCancel: false));
-                continue;
+                throw new InvalidOperationException($"The install plan contains a file that was not derived from the trusted archive: {relativePath}");
             }
 
+            var destinationPath = ResolveDestinationPath(installPath, relativePath);
             EnsureSafeInstallWritePath(
                 installPath,
                 destinationPath,
@@ -1133,7 +1383,30 @@ internal static partial class InstallationManager
                 throw new InvalidOperationException($"The release package contains multiple files that resolve to the same install path: {relativePath}");
             }
 
-            installPlan.Add(new PackageInstallFile(sourcePath, relativePath, destinationPath));
+            var installFile = new PackageInstallFile(
+                sourcePath,
+                relativePath,
+                destinationPath,
+                trustedFile.Length,
+                trustedFile.Sha256);
+            if (IsRunningUpdaterDestination(destinationPath, runningUpdaterPath))
+            {
+                if (!string.Equals(relativePath, UpdaterExecutableFileName, StringComparison.OrdinalIgnoreCase)
+                    || deferredUpdaterFile is not null)
+                {
+                    throw new InvalidOperationException(
+                        $"The running updater matched an unexpected package destination: {relativePath}");
+                }
+
+                deferredUpdaterFile = installFile;
+                progress?.Report(new UpdaterProgress(
+                    $"Deferring replacement of the running updater executable: {relativePath}.",
+                    null,
+                    CanCancel: false));
+                continue;
+            }
+
+            installPlan.Add(installFile);
         }
 
         return installPlan;
@@ -1171,6 +1444,14 @@ internal static partial class InstallationManager
         {
             throw new IOException($"The release package source file became empty: {relativePath}");
         }
+
+        var sourceDirectory = Path.GetDirectoryName(sourcePath);
+        if (string.IsNullOrWhiteSpace(sourceDirectory))
+        {
+            throw new IOException($"The release package source file has no parent folder: {relativePath}");
+        }
+
+        EnsureDirectoryPathHasNoReparsePoints(sourceDirectory, $"release package source path {relativePath}");
     }
 
     private static void EnsureGameProcessIsNotRunning(string installPath)
@@ -1285,7 +1566,10 @@ internal static partial class InstallationManager
         }
     }
 
-    private static void EnsureSufficientInstallDiskSpace(string installPath, IReadOnlyList<PackageInstallFile> installPlan)
+    private static void EnsureSufficientInstallDiskSpace(
+        string installPath,
+        IReadOnlyList<PackageInstallFile> installPlan,
+        PackageInstallFile? deferredUpdaterFile)
     {
         try
         {
@@ -1304,10 +1588,18 @@ internal static partial class InstallationManager
             var requiredBytes = MinimumInstallFreeSpaceHeadroomBytes;
             foreach (var installFile in installPlan)
             {
-                requiredBytes = AddSaturating(requiredBytes, new FileInfo(installFile.SourcePath).Length);
+                requiredBytes = AddSaturating(requiredBytes, installFile.ExpectedLength);
             }
 
             requiredBytes = AddSaturating(requiredBytes, GetExistingGameDllLength(installPath));
+            requiredBytes = AddSaturating(requiredBytes, GetExistingServerConfigBackupLength(installPlan));
+            if (deferredUpdaterFile is not null)
+            {
+                var updaterBytes = deferredUpdaterFile.ExpectedLength;
+                requiredBytes = AddSaturating(requiredBytes, updaterBytes);
+                requiredBytes = AddSaturating(requiredBytes, updaterBytes);
+            }
+
             if (drive.AvailableFreeSpace < requiredBytes)
             {
                 throw new IOException(
@@ -1322,6 +1614,27 @@ internal static partial class InstallationManager
         {
             // Some virtual or removable locations do not expose drive statistics reliably.
         }
+    }
+
+    private static long GetExistingServerConfigBackupLength(IReadOnlyList<PackageInstallFile> installPlan)
+    {
+        var backupBytes = 0L;
+        foreach (var installFile in installPlan.Where(IsServerConfigInstallFile))
+        {
+            try
+            {
+                if (File.Exists(installFile.DestinationPath) && !IsReparsePoint(installFile.DestinationPath))
+                {
+                    backupBytes = AddSaturating(backupBytes, new FileInfo(installFile.DestinationPath).Length);
+                }
+            }
+            catch
+            {
+                // Target validation reports unsafe or inaccessible files before installation.
+            }
+        }
+
+        return backupBytes;
     }
 
     private static long GetExistingGameDllLength(string installPath)
@@ -1344,6 +1657,67 @@ internal static partial class InstallationManager
         using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
         var hash = SHA256.HashData(stream);
         return Convert.ToHexString(hash).ToLowerInvariant();
+    }
+
+    private static string ComputeSeekableStreamSha256(Stream stream)
+    {
+        if (!stream.CanSeek)
+        {
+            throw new InvalidOperationException("A trusted package stream must support seeking.");
+        }
+
+        var originalPosition = stream.Position;
+        try
+        {
+            stream.Position = 0;
+            return Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
+        }
+        finally
+        {
+            stream.Position = originalPosition;
+        }
+    }
+
+    private static FileStream OpenVerifiedFileReadLock(
+        string path,
+        long? expectedLength,
+        string expectedSha256,
+        string description)
+    {
+        if (!File.Exists(path) || IsReparsePoint(path))
+        {
+            throw new IOException($"The {description} is not a regular file.");
+        }
+
+        FileStream? stream = null;
+        try
+        {
+            stream = new FileStream(
+                path,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.Read,
+                CopyBufferSize,
+                FileOptions.SequentialScan);
+            if (expectedLength is { } length && stream.Length != length)
+            {
+                throw new IOException($"The {description} length did not match the trusted archive.");
+            }
+
+            var actualSha256 = ComputeSeekableStreamSha256(stream);
+            if (!string.Equals(actualSha256, expectedSha256, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new IOException($"The {description} hash did not match the trusted archive.");
+            }
+
+            stream.Position = 0;
+            return stream;
+        }
+        catch
+        {
+            stream?.Dispose();
+            throw;
+        }
     }
 
     private static void ValidateGitHubAssetDigest(string? assetDigest, string packageSha256)
@@ -1392,14 +1766,21 @@ internal static partial class InstallationManager
             : $"{value:N1} {units[unitIndex]}";
     }
 
-    private static async Task ExtractReleasePackageAsync(
-        string zipPath,
+    private static async Task<IReadOnlyDictionary<string, TrustedPackageFile>> ExtractReleasePackageAsync(
+        Stream trustedArchiveStream,
         string extractRoot,
         string expectedRootName,
         CancellationToken cancellationToken)
     {
-        using var archive = ZipFile.OpenRead(zipPath);
+        if (!trustedArchiveStream.CanSeek)
+        {
+            throw new InvalidOperationException("The trusted release package stream could not be rewound for extraction.");
+        }
+
+        trustedArchiveStream.Position = 0;
+        using var archive = new ZipArchive(trustedArchiveStream, ZipArchiveMode.Read, leaveOpen: true);
         var extractedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var trustedPackageFiles = new Dictionary<string, TrustedPackageFile>(StringComparer.OrdinalIgnoreCase);
         long totalUncompressedBytes = 0;
         var entryCount = 0;
         var directoryCount = 0;
@@ -1469,17 +1850,18 @@ internal static partial class InstallationManager
             try
             {
                 await using var source = entry.Open();
-                var bytesWritten = await CopyArchiveEntryToFileAsync(
+                var extractedFile = await CopyArchiveEntryToFileAsync(
                     source,
                     destinationPath,
                     MaxPackageUncompressedBytes - totalUncompressedBytes,
                     cancellationToken);
-                if (bytesWritten != entry.Length)
+                if (extractedFile.Length != entry.Length)
                 {
-                    throw new InvalidOperationException($"The release package entry {relativePath} extracted to {bytesWritten:N0} bytes, but the archive declared {entry.Length:N0} bytes.");
+                    throw new InvalidOperationException($"The release package entry {relativePath} extracted to {extractedFile.Length:N0} bytes, but the archive declared {entry.Length:N0} bytes.");
                 }
 
-                totalUncompressedBytes += bytesWritten;
+                totalUncompressedBytes += extractedFile.Length;
+                trustedPackageFiles.Add(destinationKey, extractedFile);
             }
             catch
             {
@@ -1489,9 +1871,11 @@ internal static partial class InstallationManager
 
             SetLastWriteTimeUtcBestEffort(destinationPath, entry.LastWriteTime.UtcDateTime);
         }
+
+        return trustedPackageFiles;
     }
 
-    private static async Task<long> CopyArchiveEntryToFileAsync(
+    private static async Task<TrustedPackageFile> CopyArchiveEntryToFileAsync(
         Stream source,
         string destinationPath,
         long maxBytes,
@@ -1506,6 +1890,7 @@ internal static partial class InstallationManager
             FileOptions.Asynchronous | FileOptions.SequentialScan);
 
         var buffer = new byte[CopyBufferSize];
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         long totalBytes = 0;
         while (true)
         {
@@ -1521,6 +1906,7 @@ internal static partial class InstallationManager
                 throw new InvalidOperationException($"The release package expands beyond the supported limit of {MaxPackageUncompressedBytes / 1024 / 1024} MB.");
             }
 
+            hash.AppendData(buffer, 0, bytesRead);
             await destination.WriteAsync(buffer.AsMemory(0, bytesRead), cancellationToken);
         }
 
@@ -1530,7 +1916,9 @@ internal static partial class InstallationManager
             throw new IOException($"The extracted release package file became a reparse point: {destinationPath}");
         }
 
-        return totalBytes;
+        return new TrustedPackageFile(
+            totalBytes,
+            Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant());
     }
 
     private static string NormalizeArchiveEntryPath(string entryPath)
@@ -1688,6 +2076,12 @@ internal static partial class InstallationManager
 
     private static void CreateDirectoryUnderInstallRoot(string installPath, string directoryPath, string failureMessage)
     {
+        if (AreSameFullPaths(installPath, directoryPath))
+        {
+            EnsureSafeInstallRoot(installPath);
+            return;
+        }
+
         EnsureSafeInstallWritePath(installPath, directoryPath, failureMessage);
         Directory.CreateDirectory(directoryPath);
         EnsureSafeInstallWritePath(installPath, directoryPath, failureMessage);
@@ -1751,7 +2145,11 @@ internal static partial class InstallationManager
         }
     }
 
-    private static void ValidatePeImage(string path, string description, ushort? expectedMachine)
+    private static void ValidatePeImage(
+        string path,
+        string description,
+        ushort? expectedMachine,
+        bool? expectedDll = null)
     {
         try
         {
@@ -1769,13 +2167,17 @@ internal static partial class InstallationManager
             }
 
             var peHeaderOffset = BitConverter.ToInt32(dosHeader[0x3C..0x40]);
-            if (peHeaderOffset < 64 || peHeaderOffset > stream.Length - 6)
+            const int coffHeaderBytes = 20;
+            const int sectionHeaderBytes = 40;
+            const ushort executableImageFlag = 0x0002;
+            const ushort dllFlag = 0x2000;
+            if (peHeaderOffset < 64 || peHeaderOffset > stream.Length - 4 - coffHeaderBytes)
             {
                 throw new InvalidOperationException($"The {description} has an invalid PE header offset.");
             }
 
             stream.Position = peHeaderOffset;
-            Span<byte> peHeader = stackalloc byte[6];
+            Span<byte> peHeader = stackalloc byte[4 + coffHeaderBytes];
             stream.ReadExactly(peHeader);
             if (peHeader[0] != (byte)'P'
                 || peHeader[1] != (byte)'E'
@@ -1789,6 +2191,92 @@ internal static partial class InstallationManager
             if (expectedMachine is { } requiredMachine && machine != requiredMachine)
             {
                 throw new InvalidOperationException($"The {description} has machine type 0x{machine:X4}; expected 0x{requiredMachine:X4}.");
+            }
+
+            var numberOfSections = BitConverter.ToUInt16(peHeader[6..8]);
+            if (numberOfSections is 0 or > 96)
+            {
+                throw new InvalidOperationException($"The {description} has an invalid PE section count.");
+            }
+
+            var optionalHeaderSize = BitConverter.ToUInt16(peHeader[20..22]);
+            var characteristics = BitConverter.ToUInt16(peHeader[22..24]);
+            if ((characteristics & executableImageFlag) == 0)
+            {
+                throw new InvalidOperationException($"The {description} is not marked as an executable PE image.");
+            }
+
+            var isDll = (characteristics & dllFlag) != 0;
+            if (expectedDll is { } requireDll && isDll != requireDll)
+            {
+                var expectedKind = requireDll ? "DLL" : "executable";
+                throw new InvalidOperationException($"The {description} is not marked as a Windows {expectedKind}.");
+            }
+
+            if (optionalHeaderSize < 64
+                || peHeaderOffset > stream.Length - 4 - coffHeaderBytes - optionalHeaderSize)
+            {
+                throw new InvalidOperationException($"The {description} has an invalid PE optional header.");
+            }
+
+            var optionalHeader = new byte[optionalHeaderSize];
+            stream.ReadExactly(optionalHeader);
+            var optionalMagic = BitConverter.ToUInt16(optionalHeader.AsSpan(0, 2));
+            if (optionalMagic != 0x010B && optionalMagic != 0x020B)
+            {
+                throw new InvalidOperationException($"The {description} has an unsupported PE optional-header format.");
+            }
+
+            if (machine == ImageFileMachineAmd64 && optionalMagic != 0x020B)
+            {
+                throw new InvalidOperationException($"The {description} is AMD64 but does not use the PE32+ format.");
+            }
+
+            var entryPoint = BitConverter.ToUInt32(optionalHeader.AsSpan(16, 4));
+            var sectionAlignment = BitConverter.ToUInt32(optionalHeader.AsSpan(32, 4));
+            var fileAlignment = BitConverter.ToUInt32(optionalHeader.AsSpan(36, 4));
+            var sizeOfImage = BitConverter.ToUInt32(optionalHeader.AsSpan(56, 4));
+            var sizeOfHeaders = BitConverter.ToUInt32(optionalHeader.AsSpan(60, 4));
+            if (sectionAlignment == 0
+                || fileAlignment == 0
+                || sizeOfImage == 0
+                || sizeOfHeaders == 0
+                || entryPoint >= sizeOfImage)
+            {
+                throw new InvalidOperationException($"The {description} has invalid PE image dimensions.");
+            }
+
+            var sectionTableOffset = (long)peHeaderOffset + 4 + coffHeaderBytes + optionalHeaderSize;
+            var sectionTableBytes = (long)numberOfSections * sectionHeaderBytes;
+            if (sectionTableOffset > stream.Length - sectionTableBytes
+                || sizeOfHeaders < sectionTableOffset + sectionTableBytes
+                || sizeOfHeaders > stream.Length)
+            {
+                throw new InvalidOperationException($"The {description} has an invalid PE section table.");
+            }
+
+            stream.Position = sectionTableOffset;
+            Span<byte> sectionHeader = stackalloc byte[sectionHeaderBytes];
+            for (var index = 0; index < numberOfSections; index++)
+            {
+                stream.ReadExactly(sectionHeader);
+                var virtualSize = BitConverter.ToUInt32(sectionHeader[8..12]);
+                var virtualAddress = BitConverter.ToUInt32(sectionHeader[12..16]);
+                var rawSize = BitConverter.ToUInt32(sectionHeader[16..20]);
+                var rawOffset = BitConverter.ToUInt32(sectionHeader[20..24]);
+                var mappedSize = Math.Max(virtualSize, rawSize);
+                if (mappedSize > 0
+                    && ((ulong)virtualAddress + mappedSize > sizeOfImage))
+                {
+                    throw new InvalidOperationException($"The {description} contains a section outside its declared image.");
+                }
+
+                if (rawSize > 0
+                    && (rawOffset < sizeOfHeaders
+                        || (ulong)rawOffset + rawSize > (ulong)stream.Length))
+                {
+                    throw new InvalidOperationException($"The {description} contains a section outside the file.");
+                }
             }
         }
         catch (IOException)
@@ -1815,38 +2303,51 @@ internal static partial class InstallationManager
 
     private static void ValidatePackageDirectories(string packageRoot)
     {
+        var pendingDirectories = new Queue<string>();
+        pendingDirectories.Enqueue(packageRoot);
         var directoryCount = 0;
-        foreach (var directoryPath in Directory.EnumerateDirectories(
-            packageRoot,
-            "*",
-            new EnumerationOptions
-            {
-                RecurseSubdirectories = true,
-                AttributesToSkip = 0,
-                IgnoreInaccessible = false
-            }))
+        while (pendingDirectories.Count > 0)
         {
-            directoryCount++;
-            if (directoryCount > MaxPackageDirectoryCount)
+            var parentDirectory = pendingDirectories.Dequeue();
+            EnsureDirectoryPathHasNoReparsePoints(parentDirectory, "release package directory");
+            foreach (var directoryPath in Directory.EnumerateDirectories(
+                parentDirectory,
+                "*",
+                new EnumerationOptions
+                {
+                    RecurseSubdirectories = false,
+                    AttributesToSkip = 0,
+                    IgnoreInaccessible = false
+                }))
             {
-                throw new InvalidOperationException($"The release package contains more than the supported limit of {MaxPackageDirectoryCount:N0} directories.");
-            }
+                directoryCount++;
+                if (directoryCount > MaxPackageDirectoryCount)
+                {
+                    throw new InvalidOperationException($"The release package contains more than the supported limit of {MaxPackageDirectoryCount:N0} directories.");
+                }
 
-            if (IsReparsePoint(directoryPath))
-            {
-                var relativePath = Path.GetRelativePath(packageRoot, directoryPath);
-                throw new InvalidOperationException($"The release package contains a reparse point directory: {relativePath}");
-            }
+                if (IsReparsePoint(directoryPath))
+                {
+                    var relativePath = Path.GetRelativePath(packageRoot, directoryPath);
+                    throw new InvalidOperationException($"The release package contains a reparse point directory: {relativePath}");
+                }
 
-            var directoryRelativePath = Path.GetRelativePath(packageRoot, directoryPath);
-            if (!IsAllowedPackageDirectoryPath(directoryRelativePath))
-            {
-                throw new InvalidOperationException($"The release package contains an unexpected directory path: {directoryRelativePath}");
+                var directoryRelativePath = Path.GetRelativePath(packageRoot, directoryPath);
+                if (!IsAllowedPackageDirectoryPath(directoryRelativePath))
+                {
+                    throw new InvalidOperationException($"The release package contains an unexpected directory path: {directoryRelativePath}");
+                }
+
+                pendingDirectories.Enqueue(directoryPath);
             }
         }
     }
 
-    private static InstalledVersionMarker ValidateReleasePackage(string packageRoot, ReleaseInfo release, string packageSha256)
+    private static InstalledVersionMarker ValidateReleasePackage(
+        string packageRoot,
+        ReleaseInfo release,
+        string packageSha256,
+        IReadOnlyList<string> trustedReleaseFiles)
     {
         ValidatePackageRootName(packageRoot, release);
         ValidatePackageDirectories(packageRoot);
@@ -1870,8 +2371,8 @@ internal static partial class InstallationManager
             throw new InvalidOperationException("The release package game_x64.dll is empty.");
         }
 
-        ValidatePeImage(packageDll, "release package game_x64.dll", ImageFileMachineAmd64);
-        ValidatePeImage(packageUpdater, "release package MuffModeUpdater.exe", expectedMachine: null);
+        ValidatePeImage(packageDll, "release package game_x64.dll", ImageFileMachineAmd64, expectedDll: true);
+        ValidatePeImage(packageUpdater, "release package MuffModeUpdater.exe", ImageFileMachineAmd64, expectedDll: false);
 
         if (TryReadDllFileVersion(packageDll, out var packageDllVersion)
             && packageDllVersion.CompareTo(release.Version) != 0)
@@ -1902,7 +2403,7 @@ internal static partial class InstallationManager
         ValidatePackageVersionMarker(packageRoot, Path.Combine(packageRoot, "MuffMode.version"), release.Version);
         ValidatePackageVersionMarker(packageRoot, Path.Combine(packageRoot, "VERSION"), release.Version);
 
-        var packageRelativePaths = EnumeratePackageFiles(packageRoot)
+        var packageRelativePaths = trustedReleaseFiles
             .Select(filePath => Path.GetRelativePath(packageRoot, filePath))
             .ToList();
         foreach (var relativePath in packageRelativePaths)
@@ -2379,7 +2880,887 @@ internal static partial class InstallationManager
         return string.Equals(destinationFullPath, runningFullPath, StringComparison.OrdinalIgnoreCase);
     }
 
-    private static void CopyFileAtomically(string installPath, string sourcePath, string destinationPath, string relativePath)
+    private static void VerifyDeferredUpdaterTarget(
+        string installRoot,
+        PackageInstallFile? deferredUpdaterFile,
+        string? runningUpdaterPath)
+    {
+        if (deferredUpdaterFile is null)
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(runningUpdaterPath)
+            || !string.Equals(
+                deferredUpdaterFile.RelativePath,
+                UpdaterExecutableFileName,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("The deferred updater replacement did not identify the running root updater.");
+        }
+
+        var expectedTargetPath = Path.Combine(installRoot, UpdaterExecutableFileName);
+        if (!AreSameFullPaths(deferredUpdaterFile.DestinationPath, expectedTargetPath)
+            || !AreSameFullPaths(deferredUpdaterFile.DestinationPath, runningUpdaterPath))
+        {
+            throw new InvalidOperationException("The deferred updater target did not match the running updater executable.");
+        }
+
+        EnsureSafeInstallWritePath(
+            installRoot,
+            deferredUpdaterFile.DestinationPath,
+            "The deferred updater target would write through an unsafe install path.");
+        if (!File.Exists(deferredUpdaterFile.DestinationPath)
+            || Directory.Exists(deferredUpdaterFile.DestinationPath)
+            || IsReparsePoint(deferredUpdaterFile.DestinationPath))
+        {
+            throw new InvalidOperationException("The running updater target is not a regular file.");
+        }
+
+        ValidatePackageSourceFile(deferredUpdaterFile.SourcePath, deferredUpdaterFile.RelativePath);
+        ValidatePeImage(deferredUpdaterFile.SourcePath, "deferred package MuffModeUpdater.exe", ImageFileMachineAmd64, expectedDll: false);
+        ValidatePeImage(deferredUpdaterFile.DestinationPath, "running MuffModeUpdater.exe", ImageFileMachineAmd64, expectedDll: false);
+    }
+
+    private static PendingSelfUpdate? StagePendingSelfUpdate(
+        string installRoot,
+        PackageInstallFile? deferredUpdaterFile,
+        string? runningUpdaterPath,
+        IProgress<UpdaterProgress>? progress)
+    {
+        if (deferredUpdaterFile is null)
+        {
+            return null;
+        }
+
+        VerifyDeferredUpdaterTarget(installRoot, deferredUpdaterFile, runningUpdaterPath);
+        var expectedNewSha256 = deferredUpdaterFile.ExpectedSha256;
+        var expectedOldSha256 = ComputeFileSha256(deferredUpdaterFile.DestinationPath);
+        if (string.Equals(expectedNewSha256, expectedOldSha256, StringComparison.OrdinalIgnoreCase))
+        {
+            progress?.Report(new UpdaterProgress(
+                "The running updater already matches the packaged updater.",
+                49,
+                CanCancel: false));
+            return null;
+        }
+
+        var token = Guid.NewGuid().ToString("N");
+        var stagingDirectory = GetSelfUpdateStagingDirectory(installRoot, token);
+        var stagedPath = GetSelfUpdateStagedPath(installRoot, token);
+        try
+        {
+            if (PathExists(stagingDirectory))
+            {
+                throw new InvalidOperationException("The updater self-replacement token directory was already occupied.");
+            }
+
+            CreateDirectoryUnderInstallRoot(
+                installRoot,
+                stagingDirectory,
+                "The updater self-replacement staging folder would write through an unsafe install path.");
+            ValidateSelfUpdatePathContract(
+                installRoot,
+                deferredUpdaterFile.DestinationPath,
+                stagedPath,
+                token);
+            CopyFileAtomically(
+                installRoot,
+                deferredUpdaterFile.SourcePath,
+                stagedPath,
+                "staged MuffModeUpdater.exe",
+                deferredUpdaterFile.ExpectedLength,
+                deferredUpdaterFile.ExpectedSha256);
+            using (OpenVerifiedFileReadLock(
+                stagedPath,
+                deferredUpdaterFile.ExpectedLength,
+                deferredUpdaterFile.ExpectedSha256,
+                "staged MuffModeUpdater.exe"))
+            {
+                ValidatePeImage(stagedPath, "staged MuffModeUpdater.exe", ImageFileMachineAmd64, expectedDll: false);
+            }
+
+            using var currentProcess = Process.GetCurrentProcess();
+            var currentProcessPath = GetRunningUpdaterPath();
+            if (string.IsNullOrWhiteSpace(currentProcessPath)
+                || !AreSameFullPaths(currentProcessPath, deferredUpdaterFile.DestinationPath))
+            {
+                throw new InvalidOperationException("The updater process path changed while preparing self-replacement.");
+            }
+
+            var pendingSelfUpdate = new PendingSelfUpdate(
+                installRoot,
+                deferredUpdaterFile.DestinationPath,
+                stagedPath,
+                token,
+                expectedNewSha256,
+                expectedOldSha256,
+                currentProcess.Id,
+                currentProcess.StartTime.ToUniversalTime().Ticks);
+            progress?.Report(new UpdaterProgress(
+                "Staged and verified the updated updater executable.",
+                49,
+                CanCancel: false));
+            return pendingSelfUpdate;
+        }
+        catch
+        {
+            CleanupStagedSelfUpdateBestEffort(installRoot, stagedPath, token);
+            throw;
+        }
+    }
+
+    private static void LaunchPendingSelfUpdate(PendingSelfUpdate pendingSelfUpdate)
+    {
+        ValidateSelfUpdatePathContract(
+            pendingSelfUpdate.InstallRoot,
+            pendingSelfUpdate.TargetPath,
+            pendingSelfUpdate.StagedPath,
+            pendingSelfUpdate.Token);
+        ValidateSelfUpdateHash(pendingSelfUpdate.ExpectedNewSha256, "new updater SHA-256");
+        ValidateSelfUpdateHash(pendingSelfUpdate.ExpectedOldSha256, "current updater SHA-256");
+        // Keep the verified staged image locked against write/delete until the
+        // child has loaded it and acknowledged the handoff.
+        using var stagedImageLock = OpenVerifiedFileReadLock(
+            pendingSelfUpdate.StagedPath,
+            expectedLength: null,
+            expectedSha256: pendingSelfUpdate.ExpectedNewSha256,
+            description: "staged updater");
+        ValidatePeImage(pendingSelfUpdate.StagedPath, "staged MuffModeUpdater.exe", ImageFileMachineAmd64, expectedDll: false);
+
+        var eventName = GetSelfUpdateReadyEventName(pendingSelfUpdate.Token);
+        using var readyEvent = new EventWaitHandle(
+            initialState: false,
+            EventResetMode.AutoReset,
+            eventName,
+            out var createdNew);
+        if (!createdNew)
+        {
+            throw new InvalidOperationException("Could not allocate a unique updater self-replacement handshake.");
+        }
+
+        var startInfo = new ProcessStartInfo(pendingSelfUpdate.StagedPath)
+        {
+            WorkingDirectory = pendingSelfUpdate.InstallRoot,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+        startInfo.ArgumentList.Add(ApplySelfUpdateArgument);
+        startInfo.ArgumentList.Add(pendingSelfUpdate.InstallRoot);
+        startInfo.ArgumentList.Add(pendingSelfUpdate.TargetPath);
+        startInfo.ArgumentList.Add(pendingSelfUpdate.StagedPath);
+        startInfo.ArgumentList.Add(pendingSelfUpdate.Token);
+        startInfo.ArgumentList.Add(pendingSelfUpdate.ExpectedNewSha256);
+        startInfo.ArgumentList.Add(pendingSelfUpdate.ExpectedOldSha256);
+        startInfo.ArgumentList.Add(pendingSelfUpdate.ParentProcessId.ToString());
+        startInfo.ArgumentList.Add(pendingSelfUpdate.ParentStartTimeUtcTicks.ToString());
+
+        using var helperProcess = Process.Start(startInfo)
+            ?? throw new InvalidOperationException("Could not start the updater self-replacement helper.");
+        var readyDeadline = DateTime.UtcNow + SelfUpdateReadyTimeout;
+        while (DateTime.UtcNow < readyDeadline)
+        {
+            if (readyEvent.WaitOne(TimeSpan.FromMilliseconds(100)))
+            {
+                return;
+            }
+
+            if (helperProcess.HasExited)
+            {
+                throw new InvalidOperationException(
+                    $"The updater self-replacement helper exited before handoff (exit code {helperProcess.ExitCode}).");
+            }
+        }
+
+        try
+        {
+            if (!helperProcess.HasExited)
+            {
+                helperProcess.Kill(entireProcessTree: true);
+            }
+        }
+        catch
+        {
+            // The exact helper process may have exited at the timeout boundary.
+        }
+
+        throw new TimeoutException("The updater self-replacement helper did not acknowledge the handoff.");
+    }
+
+    private static void RunApplySelfUpdateCommand(string[] args)
+    {
+        if (args.Length != 9)
+        {
+            throw new InvalidOperationException("The updater self-replacement helper arguments were incomplete.");
+        }
+
+        var installRoot = args[1];
+        var targetPath = args[2];
+        var stagedPath = args[3];
+        var token = args[4];
+        var expectedNewSha256 = args[5];
+        var expectedOldSha256 = args[6];
+        var parentProcessId = ParsePositiveProcessId(args[7], "parent process ID");
+        var parentStartTimeUtcTicks = ParsePositiveInt64(args[8], "parent process start time");
+
+        ValidateSelfUpdatePathContract(installRoot, targetPath, stagedPath, token);
+        ValidateSelfUpdateHash(expectedNewSha256, "new updater SHA-256");
+        ValidateSelfUpdateHash(expectedOldSha256, "current updater SHA-256");
+        ValidateCurrentProcessPath(stagedPath, "self-replacement helper");
+        ValidateRegularSelfUpdateFile(stagedPath, expectedNewSha256, "staged updater");
+        ValidatePeImage(stagedPath, "staged MuffModeUpdater.exe", ImageFileMachineAmd64, expectedDll: false);
+        ValidateRegularSelfUpdateFile(targetPath, expectedOldSha256, "running updater target");
+        ValidatePeImage(targetPath, "running MuffModeUpdater.exe", ImageFileMachineAmd64, expectedDll: false);
+
+        using var parentProcess = GetValidatedProcess(
+            parentProcessId,
+            parentStartTimeUtcTicks,
+            targetPath,
+            "updater parent");
+        using var readyEvent = EventWaitHandle.OpenExisting(GetSelfUpdateReadyEventName(token));
+        using var singleInstanceMutex = new Mutex(false, SingleInstanceMutexName);
+        var ownsSingleInstanceMutex = false;
+        var parentExited = false;
+        readyEvent.Set();
+        try
+        {
+            try
+            {
+                ownsSingleInstanceMutex = singleInstanceMutex.WaitOne(SelfUpdateParentExitTimeout);
+            }
+            catch (AbandonedMutexException)
+            {
+                ownsSingleInstanceMutex = true;
+            }
+
+            if (!ownsSingleInstanceMutex)
+            {
+                throw new TimeoutException("The self-replacement helper could not acquire the updater single-instance lock.");
+            }
+
+            if (!parentProcess.WaitForExit((int)SelfUpdateParentExitTimeout.TotalMilliseconds))
+            {
+                throw new TimeoutException("The updater parent process did not exit for self-replacement.");
+            }
+            parentExited = true;
+
+            ValidateSelfUpdatePathContract(installRoot, targetPath, stagedPath, token);
+            ValidateRegularSelfUpdateFile(stagedPath, expectedNewSha256, "staged updater");
+            ValidateRegularSelfUpdateFile(targetPath, expectedOldSha256, "updater target before replacement");
+            var backupPath = GetSelfUpdateBackupPath(installRoot, token);
+            CreateSelfUpdateBackup(
+                installRoot,
+                targetPath,
+                backupPath,
+                expectedOldSha256);
+
+            try
+            {
+                ReplaceUpdaterWithRetry(
+                    installRoot,
+                    stagedPath,
+                    targetPath,
+                    expectedNewSha256,
+                    expectedOldSha256);
+                ValidateRegularSelfUpdateFile(targetPath, expectedNewSha256, "updated updater target");
+                ValidatePeImage(targetPath, "updated MuffModeUpdater.exe", ImageFileMachineAmd64, expectedDll: false);
+
+                using var currentProcess = Process.GetCurrentProcess();
+                var restartInfo = new ProcessStartInfo(targetPath)
+                {
+                    WorkingDirectory = installRoot,
+                    UseShellExecute = false
+                };
+                restartInfo.ArgumentList.Add(CleanupSelfUpdateArgument);
+                restartInfo.ArgumentList.Add(installRoot);
+                restartInfo.ArgumentList.Add(targetPath);
+                restartInfo.ArgumentList.Add(stagedPath);
+                restartInfo.ArgumentList.Add(token);
+                restartInfo.ArgumentList.Add(expectedNewSha256);
+                restartInfo.ArgumentList.Add(expectedOldSha256);
+                restartInfo.ArgumentList.Add(currentProcess.Id.ToString());
+                restartInfo.ArgumentList.Add(currentProcess.StartTime.ToUniversalTime().Ticks.ToString());
+
+                using var restartedUpdater = Process.Start(restartInfo)
+                    ?? throw new InvalidOperationException("The updated updater could not be relaunched.");
+            }
+            catch (Exception replacementException)
+            {
+                try
+                {
+                    RestoreUpdaterFromBackup(
+                        installRoot,
+                        backupPath,
+                        targetPath,
+                        expectedOldSha256);
+                }
+                catch (Exception rollbackException)
+                {
+                    throw new AggregateException(
+                        "Updater self-replacement failed and the previous updater could not be restored.",
+                        replacementException,
+                        rollbackException);
+                }
+
+                if (ownsSingleInstanceMutex)
+                {
+                    singleInstanceMutex.ReleaseMutex();
+                    ownsSingleInstanceMutex = false;
+                }
+                TryRelaunchRecoveredUpdater(installRoot, targetPath, expectedOldSha256);
+                throw new InvalidOperationException(
+                    "Updater self-replacement failed; the previous updater was restored.",
+                    replacementException);
+            }
+        }
+        catch
+        {
+            if (parentExited && ownsSingleInstanceMutex)
+            {
+                singleInstanceMutex.ReleaseMutex();
+                ownsSingleInstanceMutex = false;
+                TryRelaunchRecoveredUpdater(installRoot, targetPath, expectedOldSha256);
+            }
+
+            throw;
+        }
+        finally
+        {
+            if (ownsSingleInstanceMutex)
+            {
+                singleInstanceMutex.ReleaseMutex();
+            }
+        }
+    }
+
+    private static void RunCleanupSelfUpdateCommand(string[] args)
+    {
+        if (args.Length != 9)
+        {
+            throw new InvalidOperationException("The updater self-replacement cleanup arguments were incomplete.");
+        }
+
+        var installRoot = args[1];
+        var targetPath = args[2];
+        var stagedPath = args[3];
+        var token = args[4];
+        var expectedNewSha256 = args[5];
+        var expectedOldSha256 = args[6];
+        var helperProcessId = ParsePositiveProcessId(args[7], "helper process ID");
+        var helperStartTimeUtcTicks = ParsePositiveInt64(args[8], "helper process start time");
+
+        ValidateSelfUpdatePathContract(installRoot, targetPath, stagedPath, token);
+        ValidateSelfUpdateHash(expectedNewSha256, "new updater SHA-256");
+        ValidateSelfUpdateHash(expectedOldSha256, "previous updater SHA-256");
+        ValidateCurrentProcessPath(targetPath, "updated updater");
+        ValidateRegularSelfUpdateFile(targetPath, expectedNewSha256, "updated updater target");
+        ValidatePeImage(targetPath, "updated MuffModeUpdater.exe", ImageFileMachineAmd64, expectedDll: false);
+        ValidateRegularSelfUpdateFile(stagedPath, expectedNewSha256, "staged updater helper");
+        ValidatePeImage(stagedPath, "staged MuffModeUpdater.exe", ImageFileMachineAmd64, expectedDll: false);
+        var backupPath = GetSelfUpdateBackupPath(installRoot, token);
+        ValidateRegularSelfUpdateFile(backupPath, expectedOldSha256, "previous updater backup");
+        ValidatePeImage(backupPath, "previous MuffModeUpdater.exe backup", ImageFileMachineAmd64, expectedDll: false);
+        WaitForValidatedHelperExit(
+            helperProcessId,
+            helperStartTimeUtcTicks,
+            stagedPath);
+        DeleteStagedSelfUpdateFiles(installRoot, stagedPath, backupPath, token);
+        UpdaterLog.WriteInfo("Completed deferred updater self-replacement and removed its staged helper and rollback copy.");
+    }
+
+    private static void CreateSelfUpdateBackup(
+        string installRoot,
+        string targetPath,
+        string backupPath,
+        string expectedOldSha256)
+    {
+        EnsureSafeInstallWritePath(
+            installRoot,
+            backupPath,
+            "The updater rollback copy would write through an unsafe install path.");
+        if (PathExists(backupPath))
+        {
+            throw new InvalidOperationException("The updater rollback-copy path was already occupied.");
+        }
+
+        CopyFileAtomically(
+            installRoot,
+            targetPath,
+            backupPath,
+            "previous MuffModeUpdater.exe rollback copy",
+            expectedLength: null,
+            expectedSha256: expectedOldSha256);
+        ValidateRegularSelfUpdateFile(backupPath, expectedOldSha256, "previous updater rollback copy");
+        ValidatePeImage(backupPath, "previous MuffModeUpdater.exe rollback copy", ImageFileMachineAmd64, expectedDll: false);
+    }
+
+    private static void ReplaceUpdaterWithRetry(
+        string installRoot,
+        string stagedPath,
+        string targetPath,
+        string expectedNewSha256,
+        string expectedOldSha256)
+    {
+        for (var attempt = 0; attempt < 50; attempt++)
+        {
+            ValidateRegularSelfUpdateFile(targetPath, expectedOldSha256, "updater target before replacement");
+            try
+            {
+                CopyFileAtomically(
+                    installRoot,
+                    stagedPath,
+                    targetPath,
+                    UpdaterExecutableFileName,
+                    expectedLength: null,
+                    expectedSha256: expectedNewSha256);
+                return;
+            }
+            catch (Exception ex) when (
+                attempt < 49
+                && ex is IOException or UnauthorizedAccessException)
+            {
+                Thread.Sleep(SelfUpdateDeleteRetryDelay);
+            }
+        }
+
+        throw new IOException("The updater target could not be replaced after bounded retries.");
+    }
+
+    private static void RestoreUpdaterFromBackup(
+        string installRoot,
+        string backupPath,
+        string targetPath,
+        string expectedOldSha256)
+    {
+        if (File.Exists(targetPath)
+            && !IsReparsePoint(targetPath)
+            && string.Equals(
+                ComputeFileSha256(targetPath),
+                expectedOldSha256,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            ValidatePeImage(targetPath, "restored MuffModeUpdater.exe", ImageFileMachineAmd64, expectedDll: false);
+            return;
+        }
+
+        ValidateRegularSelfUpdateFile(backupPath, expectedOldSha256, "previous updater rollback copy");
+        for (var attempt = 0; attempt < 50; attempt++)
+        {
+            try
+            {
+                CopyFileAtomically(
+                    installRoot,
+                    backupPath,
+                    targetPath,
+                    "restored MuffModeUpdater.exe",
+                    expectedLength: null,
+                    expectedSha256: expectedOldSha256);
+                ValidateRegularSelfUpdateFile(targetPath, expectedOldSha256, "restored updater target");
+                ValidatePeImage(targetPath, "restored MuffModeUpdater.exe", ImageFileMachineAmd64, expectedDll: false);
+                return;
+            }
+            catch (Exception ex) when (
+                attempt < 49
+                && ex is IOException or UnauthorizedAccessException)
+            {
+                Thread.Sleep(SelfUpdateDeleteRetryDelay);
+            }
+        }
+
+        throw new IOException("The previous updater could not be restored after bounded retries.");
+    }
+
+    private static void TryRelaunchRecoveredUpdater(
+        string installRoot,
+        string targetPath,
+        string expectedOldSha256)
+    {
+        try
+        {
+            ValidateRegularSelfUpdateFile(targetPath, expectedOldSha256, "restored updater target");
+            ValidatePeImage(targetPath, "restored MuffModeUpdater.exe", ImageFileMachineAmd64, expectedDll: false);
+            using var recoveredUpdater = Process.Start(new ProcessStartInfo(targetPath)
+            {
+                WorkingDirectory = installRoot,
+                UseShellExecute = false
+            });
+        }
+        catch (Exception ex)
+        {
+            UpdaterLog.WriteException("The previous updater was restored but could not be relaunched automatically.", ex);
+        }
+    }
+
+    private static void WaitForValidatedHelperExit(
+        int helperProcessId,
+        long helperStartTimeUtcTicks,
+        string stagedPath)
+    {
+        Process? helperProcess;
+        try
+        {
+            helperProcess = Process.GetProcessById(helperProcessId);
+        }
+        catch (ArgumentException)
+        {
+            return;
+        }
+
+        using (helperProcess)
+        {
+            if (helperProcess.HasExited)
+            {
+                return;
+            }
+
+            try
+            {
+                ValidateProcessIdentity(
+                    helperProcess,
+                    helperStartTimeUtcTicks,
+                    stagedPath,
+                    "self-replacement helper");
+            }
+            catch when (helperProcess.HasExited)
+            {
+                return;
+            }
+
+            if (!helperProcess.WaitForExit((int)SelfUpdateHelperExitTimeout.TotalMilliseconds))
+            {
+                throw new TimeoutException("The updater self-replacement helper did not exit.");
+            }
+        }
+    }
+
+    private static Process GetValidatedProcess(
+        int processId,
+        long expectedStartTimeUtcTicks,
+        string expectedPath,
+        string description)
+    {
+        Process process;
+        try
+        {
+            process = Process.GetProcessById(processId);
+        }
+        catch (ArgumentException ex)
+        {
+            throw new InvalidOperationException($"The {description} process was not running.", ex);
+        }
+
+        try
+        {
+            if (process.HasExited)
+            {
+                throw new InvalidOperationException($"The {description} process had already exited.");
+            }
+
+            ValidateProcessIdentity(process, expectedStartTimeUtcTicks, expectedPath, description);
+            return process;
+        }
+        catch
+        {
+            process.Dispose();
+            throw;
+        }
+    }
+
+    private static void ValidateProcessIdentity(
+        Process process,
+        long expectedStartTimeUtcTicks,
+        string expectedPath,
+        string description)
+    {
+        if (process.Id == Environment.ProcessId)
+        {
+            throw new InvalidOperationException($"The {description} process ID referred to the current process.");
+        }
+
+        var actualStartTimeUtcTicks = process.StartTime.ToUniversalTime().Ticks;
+        if (actualStartTimeUtcTicks != expectedStartTimeUtcTicks)
+        {
+            throw new InvalidOperationException($"The {description} process ID was reused or did not match its start time.");
+        }
+
+        var actualPath = TryGetProcessExecutablePath(process);
+        if (string.IsNullOrWhiteSpace(actualPath) || !AreSameFullPaths(actualPath, expectedPath))
+        {
+            throw new InvalidOperationException($"The {description} executable path did not match the expected updater path.");
+        }
+    }
+
+    private static void ValidateCurrentProcessPath(string expectedPath, string description)
+    {
+        var currentProcessPath = GetRunningUpdaterPath();
+        if (string.IsNullOrWhiteSpace(currentProcessPath)
+            || !AreSameFullPaths(currentProcessPath, expectedPath))
+        {
+            throw new InvalidOperationException($"The {description} was not running from its expected path.");
+        }
+    }
+
+    private static void ValidateSelfUpdatePathContract(
+        string installRoot,
+        string targetPath,
+        string stagedPath,
+        string token)
+    {
+        ValidateSelfUpdateToken(token);
+        var normalizedInstallRoot = ResolveInstallRoot(installRoot);
+        if (normalizedInstallRoot is null || !AreSameFullPaths(normalizedInstallRoot, installRoot))
+        {
+            throw new InvalidOperationException("The updater self-replacement install root was invalid.");
+        }
+
+        EnsureSafeInstallRoot(normalizedInstallRoot);
+        var expectedTargetPath = Path.Combine(normalizedInstallRoot, UpdaterExecutableFileName);
+        var expectedStagedPath = GetSelfUpdateStagedPath(normalizedInstallRoot, token);
+        if (!AreSameFullPaths(targetPath, expectedTargetPath)
+            || !AreSameFullPaths(stagedPath, expectedStagedPath))
+        {
+            throw new InvalidOperationException("The updater self-replacement paths did not match the narrow install-root contract.");
+        }
+
+        EnsureSafeInstallWritePath(
+            normalizedInstallRoot,
+            targetPath,
+            "The updater self-replacement target path was unsafe.");
+        EnsureSafeInstallWritePath(
+            normalizedInstallRoot,
+            stagedPath,
+            "The updater self-replacement staged path was unsafe.");
+        if (Directory.Exists(targetPath) || Directory.Exists(stagedPath))
+        {
+            throw new InvalidOperationException("An updater self-replacement file path pointed at a directory.");
+        }
+    }
+
+    private static void ValidateRegularSelfUpdateFile(
+        string path,
+        string expectedSha256,
+        string description)
+    {
+        if (!File.Exists(path) || Directory.Exists(path) || IsReparsePoint(path))
+        {
+            throw new InvalidOperationException($"The {description} was not a regular file.");
+        }
+
+        if (!string.Equals(ComputeFileSha256(path), expectedSha256, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"The {description} did not match its expected SHA-256.");
+        }
+    }
+
+    private static void ValidateSelfUpdateToken(string token)
+    {
+        if (!Guid.TryParseExact(token, "N", out _))
+        {
+            throw new InvalidOperationException("The updater self-replacement token was invalid.");
+        }
+    }
+
+    private static void ValidateSelfUpdateHash(string value, string description)
+    {
+        if (value.Length != 64 || value.Any(character => !Uri.IsHexDigit(character)))
+        {
+            throw new InvalidOperationException($"The {description} was invalid.");
+        }
+    }
+
+    private static int ParsePositiveProcessId(string value, string description)
+    {
+        if (value.Length == 0
+            || value.Any(character => character < '0' || character > '9')
+            || !int.TryParse(value, out var result)
+            || result <= 0)
+        {
+            throw new InvalidOperationException($"The updater self-replacement {description} was invalid.");
+        }
+
+        return result;
+    }
+
+    private static long ParsePositiveInt64(string value, string description)
+    {
+        if (value.Length == 0
+            || value.Any(character => character < '0' || character > '9')
+            || !long.TryParse(value, out var result)
+            || result <= 0)
+        {
+            throw new InvalidOperationException($"The updater self-replacement {description} was invalid.");
+        }
+
+        return result;
+    }
+
+    private static bool AreSameFullPaths(string firstPath, string secondPath)
+    {
+        return string.Equals(
+            NormalizeFullPathForComparison(firstPath),
+            NormalizeFullPathForComparison(secondPath),
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string GetSelfUpdateStagingRoot(string installRoot)
+    {
+        return Path.Combine(installRoot, SelfUpdateStagingDirectoryName);
+    }
+
+    private static string GetSelfUpdateStagingDirectory(string installRoot, string token)
+    {
+        ValidateSelfUpdateToken(token);
+        return Path.Combine(GetSelfUpdateStagingRoot(installRoot), token);
+    }
+
+    private static string GetSelfUpdateStagedPath(string installRoot, string token)
+    {
+        return Path.Combine(GetSelfUpdateStagingDirectory(installRoot, token), UpdaterExecutableFileName);
+    }
+
+    private static string GetSelfUpdateBackupPath(string installRoot, string token)
+    {
+        return Path.Combine(
+            GetSelfUpdateStagingDirectory(installRoot, token),
+            "PreviousMuffModeUpdater.exe");
+    }
+
+    private static string GetSelfUpdateReadyEventName(string token)
+    {
+        ValidateSelfUpdateToken(token);
+        return SelfUpdateReadyEventPrefix + token;
+    }
+
+    private static void DeleteStagedSelfUpdateFiles(
+        string installRoot,
+        string stagedPath,
+        string backupPath,
+        string token)
+    {
+        ValidateSelfUpdatePathContract(
+            installRoot,
+            Path.Combine(installRoot, UpdaterExecutableFileName),
+            stagedPath,
+            token);
+        var expectedBackupPath = GetSelfUpdateBackupPath(installRoot, token);
+        if (!AreSameFullPaths(backupPath, expectedBackupPath))
+        {
+            throw new InvalidOperationException("The updater rollback-copy path did not match its token directory.");
+        }
+        EnsureSafeInstallWritePath(
+            installRoot,
+            backupPath,
+            "The updater rollback-copy path was unsafe during cleanup.");
+        DeleteSelfUpdateFileWithRetry(stagedPath, "staged updater helper");
+        DeleteSelfUpdateFileWithRetry(backupPath, "previous updater rollback copy");
+        DeleteEmptySelfUpdateStagingDirectory(installRoot, token);
+    }
+
+    private static void DeleteSelfUpdateFileWithRetry(string path, string description)
+    {
+        for (var attempt = 0; attempt < 50; attempt++)
+        {
+            if (!File.Exists(path))
+            {
+                return;
+            }
+
+            if (IsReparsePoint(path) || Directory.Exists(path))
+            {
+                throw new InvalidOperationException($"The {description} became unsafe before cleanup.");
+            }
+
+            try
+            {
+                File.Delete(path);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                if (attempt == 49)
+                {
+                    throw;
+                }
+
+                Thread.Sleep(SelfUpdateDeleteRetryDelay);
+            }
+        }
+
+        if (File.Exists(path))
+        {
+            throw new IOException($"The {description} could not be removed.");
+        }
+    }
+
+    private static void CleanupPendingSelfUpdateBestEffort(PendingSelfUpdate pendingSelfUpdate)
+    {
+        CleanupStagedSelfUpdateBestEffort(
+            pendingSelfUpdate.InstallRoot,
+            pendingSelfUpdate.StagedPath,
+            pendingSelfUpdate.Token);
+    }
+
+    private static void CleanupStagedSelfUpdateBestEffort(
+        string installRoot,
+        string stagedPath,
+        string token)
+    {
+        try
+        {
+            ValidateSelfUpdatePathContract(
+                installRoot,
+                Path.Combine(installRoot, UpdaterExecutableFileName),
+                stagedPath,
+                token);
+            if (File.Exists(stagedPath) && !IsReparsePoint(stagedPath))
+            {
+                File.Delete(stagedPath);
+            }
+
+            DeleteEmptySelfUpdateStagingDirectory(installRoot, token);
+        }
+        catch
+        {
+            // A failed install must not broaden cleanup beyond its exact staged helper.
+        }
+    }
+
+    private static void DeleteEmptySelfUpdateStagingDirectory(string installRoot, string token)
+    {
+        var stagingRoot = GetSelfUpdateStagingRoot(installRoot);
+        var stagingDirectory = GetSelfUpdateStagingDirectory(installRoot, token);
+        EnsureSafeInstallWritePath(
+            installRoot,
+            stagingDirectory,
+            "The updater self-replacement staging folder was unsafe during cleanup.");
+        if (!Directory.Exists(stagingDirectory) || IsReparsePoint(stagingDirectory))
+        {
+            return;
+        }
+
+        if (!Directory.EnumerateFileSystemEntries(stagingDirectory).Any())
+        {
+            Directory.Delete(stagingDirectory, recursive: false);
+        }
+
+        EnsureSafeInstallWritePath(
+            installRoot,
+            stagingRoot,
+            "The updater self-replacement staging root was unsafe during cleanup.");
+        if (Directory.Exists(stagingRoot)
+            && !IsReparsePoint(stagingRoot)
+            && !Directory.EnumerateFileSystemEntries(stagingRoot).Any())
+        {
+            Directory.Delete(stagingRoot, recursive: false);
+        }
+    }
+
+    private static void CopyFileAtomically(
+        string installPath,
+        string sourcePath,
+        string destinationPath,
+        string relativePath,
+        long? expectedLength = null,
+        string? expectedSha256 = null)
     {
         ValidatePackageSourceFile(sourcePath, relativePath);
         var destinationDirectory = Path.GetDirectoryName(destinationPath);
@@ -2402,8 +3783,24 @@ internal static partial class InstallationManager
 
         try
         {
-            CopyFileContentsWithFlush(sourcePath, temporaryPath);
-            VerifyCopiedFileLength(sourcePath, temporaryPath, "Copied package file length did not match the source file.");
+            var copiedFile = CopyFileContentsWithFlush(sourcePath, temporaryPath);
+            var trustedLength = expectedLength ?? copiedFile.Length;
+            var trustedSha256 = expectedSha256 ?? copiedFile.Sha256;
+            if (copiedFile.Length != trustedLength
+                || !string.Equals(copiedFile.Sha256, trustedSha256, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new IOException($"Package file changed before it could be installed: {relativePath}");
+            }
+
+            using (OpenVerifiedFileReadLock(
+                temporaryPath,
+                trustedLength,
+                trustedSha256,
+                $"temporary package file {relativePath}"))
+            {
+                // Verify the staged bytes immediately before the atomic replace.
+            }
+
             SetLastWriteTimeUtcBestEffort(temporaryPath, File.GetLastWriteTimeUtc(sourcePath));
             ReplaceTemporaryFile(temporaryPath, destinationPath);
             if (IsReparsePoint(destinationPath))
@@ -2411,7 +3808,14 @@ internal static partial class InstallationManager
                 throw new IOException($"Installed package file became a reparse point: {relativePath}");
             }
 
-            VerifyCopiedFileLength(sourcePath, destinationPath, "Installed package file length did not match the source file.");
+            using (OpenVerifiedFileReadLock(
+                destinationPath,
+                trustedLength,
+                trustedSha256,
+                $"installed package file {relativePath}"))
+            {
+                // Bind the committed destination to the bytes copied from the source handle.
+            }
         }
         catch
         {
@@ -2423,7 +3827,7 @@ internal static partial class InstallationManager
 
     private static void CopyFileWithVerification(string sourcePath, string destinationPath)
     {
-        CopyFileContentsWithFlush(sourcePath, destinationPath);
+        var copiedFile = CopyFileContentsWithFlush(sourcePath, destinationPath);
         try
         {
             if (IsReparsePoint(destinationPath))
@@ -2431,8 +3835,14 @@ internal static partial class InstallationManager
                 throw new IOException("Backup file became a reparse point.");
             }
 
-            VerifyCopiedFileLength(sourcePath, destinationPath, "Backup file length did not match the source game DLL.");
-            VerifyCopiedFileHash(sourcePath, destinationPath, Path.GetFileName(destinationPath));
+            using (OpenVerifiedFileReadLock(
+                destinationPath,
+                copiedFile.Length,
+                copiedFile.Sha256,
+                $"backup file {Path.GetFileName(destinationPath)}"))
+            {
+                // The backup must match the exact source-handle snapshot.
+            }
         }
         catch
         {
@@ -2441,7 +3851,7 @@ internal static partial class InstallationManager
         }
     }
 
-    private static void CopyFileContentsWithFlush(string sourcePath, string destinationPath)
+    private static TrustedPackageFile CopyFileContentsWithFlush(string sourcePath, string destinationPath)
     {
         if (!File.Exists(sourcePath) || IsReparsePoint(sourcePath))
         {
@@ -2463,18 +3873,26 @@ internal static partial class InstallationManager
             CopyBufferSize,
             FileOptions.SequentialScan | FileOptions.WriteThrough);
 
-        source.CopyTo(destination, CopyBufferSize);
-        destination.Flush(flushToDisk: true);
-    }
-
-    private static void VerifyCopiedFileLength(string sourcePath, string destinationPath, string failureMessage)
-    {
-        var sourceLength = new FileInfo(sourcePath).Length;
-        var destinationLength = new FileInfo(destinationPath).Length;
-        if (sourceLength != destinationLength)
+        var buffer = new byte[CopyBufferSize];
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        long totalBytes = 0;
+        while (true)
         {
-            throw new IOException($"{failureMessage} Expected {sourceLength:N0} bytes, wrote {destinationLength:N0} bytes.");
+            var bytesRead = source.Read(buffer, 0, buffer.Length);
+            if (bytesRead == 0)
+            {
+                break;
+            }
+
+            hash.AppendData(buffer, 0, bytesRead);
+            destination.Write(buffer, 0, bytesRead);
+            totalBytes += bytesRead;
         }
+
+        destination.Flush(flushToDisk: true);
+        return new TrustedPackageFile(
+            totalBytes,
+            Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant());
     }
 
     private static void VerifyInstallPlanApplied(IReadOnlyList<PackageInstallFile> installPlan)
@@ -2491,21 +3909,14 @@ internal static partial class InstallationManager
                 throw new IOException($"Installed file became a reparse point: {installFile.RelativePath}");
             }
 
-            VerifyCopiedFileLength(
-                installFile.SourcePath,
+            using (OpenVerifiedFileReadLock(
                 installFile.DestinationPath,
-                $"Installed file verification failed for {installFile.RelativePath}.");
-            VerifyCopiedFileHash(installFile.SourcePath, installFile.DestinationPath, installFile.RelativePath);
-        }
-    }
-
-    private static void VerifyCopiedFileHash(string sourcePath, string destinationPath, string relativePath)
-    {
-        var sourceHash = ComputeFileSha256(sourcePath);
-        var destinationHash = ComputeFileSha256(destinationPath);
-        if (!sourceHash.Equals(destinationHash, StringComparison.OrdinalIgnoreCase))
-        {
-            throw new IOException($"Installed file hash verification failed for {relativePath}.");
+                installFile.ExpectedLength,
+                installFile.ExpectedSha256,
+                $"installed package file {installFile.RelativePath}"))
+            {
+                // Keep each destination stable while verifying the trusted archive hash.
+            }
         }
     }
 
@@ -2631,6 +4042,131 @@ internal static partial class InstallationManager
         {
             // Attribute restoration is best-effort after a failed replace.
         }
+    }
+
+    private static string? BackupCurrentServerConfigs(
+        string installPath,
+        IReadOnlyList<PackageInstallFile> installPlan,
+        IProgress<UpdaterProgress>? progress)
+    {
+        var configsToBackup = installPlan
+            .Where(IsServerConfigInstallFile)
+            .Where(installFile => File.Exists(installFile.DestinationPath))
+            .Where(installFile => !FileMatchesTrustedSnapshot(
+                installFile.DestinationPath,
+                installFile.ExpectedLength,
+                installFile.ExpectedSha256))
+            .ToList();
+        if (configsToBackup.Count == 0)
+        {
+            return null;
+        }
+
+        var backupRoot = Path.Combine(GetBaseq2Path(installPath), "MuffModeBackups");
+        EnsureSafeInstallWritePath(
+            installPath,
+            Path.Combine(backupRoot, "server-configs.backup-check"),
+            "The MuffMode server-config backup folder would write through an unsafe install path.");
+        CreateDirectoryUnderInstallRoot(
+            installPath,
+            backupRoot,
+            "The MuffMode server-config backup folder would write through an unsafe install path.");
+
+        var timestamp = DateTimeOffset.Now.ToString("yyyyMMdd-HHmmss");
+        var backupDirectory = GetUniqueConfigBackupDirectory(backupRoot, timestamp);
+        CreateDirectoryUnderInstallRoot(
+            installPath,
+            backupDirectory,
+            "The MuffMode server-config backup folder would write through an unsafe install path.");
+
+        foreach (var installFile in configsToBackup)
+        {
+            var backupPath = Path.Combine(backupDirectory, Path.GetFileName(installFile.DestinationPath));
+            EnsureSafeInstallWritePath(
+                installPath,
+                backupPath,
+                $"The MuffMode server-config backup would write through an unsafe install path: {installFile.RelativePath}");
+            CopyFileWithVerification(installFile.DestinationPath, backupPath);
+            SetLastWriteTimeUtcBestEffort(backupPath, File.GetLastWriteTimeUtc(installFile.DestinationPath));
+        }
+
+        progress?.Report(new UpdaterProgress(
+            $"Backed up {configsToBackup.Count} modified server config(s) to {backupDirectory}.",
+            49,
+            CanCancel: false));
+        return backupDirectory;
+    }
+
+    private static bool IsServerConfigInstallFile(PackageInstallFile installFile)
+    {
+        var relativeDirectory = Path.GetDirectoryName(installFile.RelativePath);
+        if (!string.Equals(
+                relativeDirectory,
+                Path.Combine("rerelease", "baseq2"),
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var fileName = Path.GetFileName(installFile.RelativePath);
+        return string.Equals(fileName, "server-base.cfg", StringComparison.OrdinalIgnoreCase)
+            || (fileName.StartsWith("gt-", StringComparison.OrdinalIgnoreCase)
+                && fileName.EndsWith(".cfg", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool FileMatchesTrustedSnapshot(string path, long expectedLength, string expectedSha256)
+    {
+        try
+        {
+            if (!File.Exists(path)
+                || IsReparsePoint(path)
+                || new FileInfo(path).Length != expectedLength)
+            {
+                return false;
+            }
+
+            return string.Equals(
+                ComputeFileSha256(path),
+                expectedSha256,
+                StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    private static string GetUniqueConfigBackupDirectory(string backupRoot, string timestamp)
+    {
+        var backupDirectory = Path.Combine(backupRoot, $"server-configs.before-muffmode-{timestamp}");
+        if (!PathExists(backupDirectory))
+        {
+            return backupDirectory;
+        }
+
+        for (var index = 2; index < 100; index++)
+        {
+            var indexedBackupDirectory = Path.Combine(
+                backupRoot,
+                $"server-configs.before-muffmode-{timestamp}-{index}");
+            if (!PathExists(indexedBackupDirectory))
+            {
+                return indexedBackupDirectory;
+            }
+        }
+
+        for (var attempt = 0; attempt < 10; attempt++)
+        {
+            var randomBackupDirectory = Path.Combine(
+                backupRoot,
+                $"server-configs.before-muffmode-{timestamp}-{Guid.NewGuid():N}");
+            if (!PathExists(randomBackupDirectory))
+            {
+                return randomBackupDirectory;
+            }
+        }
+
+        throw new IOException("Could not allocate a unique MuffMode server-config backup folder.");
     }
 
     private static string? BackupCurrentGameDll(string installPath, IProgress<UpdaterProgress>? progress)
@@ -2919,7 +4455,7 @@ internal static partial class InstallationManager
         long totalBytes = 0;
         foreach (var installFile in installPlan)
         {
-            totalBytes = AddSaturating(totalBytes, new FileInfo(installFile.SourcePath).Length);
+            totalBytes = AddSaturating(totalBytes, installFile.ExpectedLength);
         }
 
         return totalBytes;
@@ -2930,19 +4466,14 @@ internal static partial class InstallationManager
         var manifest = new StringBuilder();
         foreach (var installFile in installPlan.OrderBy(file => file.RelativePath, StringComparer.OrdinalIgnoreCase))
         {
-            if (!File.Exists(installFile.SourcePath) || IsReparsePoint(installFile.SourcePath))
-            {
-                throw new IOException($"The install manifest could not hash package file: {installFile.RelativePath}");
-            }
-
             var normalizedRelativePath = installFile.RelativePath
                 .Replace(Path.DirectorySeparatorChar, '/')
                 .Replace(Path.AltDirectorySeparatorChar, '/');
             manifest.Append(normalizedRelativePath);
             manifest.Append('\0');
-            manifest.Append(new FileInfo(installFile.SourcePath).Length);
+            manifest.Append(installFile.ExpectedLength);
             manifest.Append('\0');
-            manifest.Append(ComputeFileSha256(installFile.SourcePath));
+            manifest.Append(installFile.ExpectedSha256);
             manifest.Append('\n');
         }
 
@@ -3161,19 +4692,37 @@ internal static partial class InstallationManager
     {
         try
         {
-            foreach (var entry in Directory.EnumerateFileSystemEntries(
-                path,
-                "*",
-                new EnumerationOptions
-                {
-                    RecurseSubdirectories = true,
-                    AttributesToSkip = 0,
-                    IgnoreInaccessible = false
-                }))
+            var pendingDirectories = new Queue<string>();
+            pendingDirectories.Enqueue(path);
+            var entryCount = 0;
+            while (pendingDirectories.Count > 0)
             {
-                if (IsReparsePoint(entry))
+                var directory = pendingDirectories.Dequeue();
+                if (IsReparsePoint(directory))
                 {
                     return true;
+                }
+
+                foreach (var entry in Directory.EnumerateFileSystemEntries(
+                    directory,
+                    "*",
+                    new EnumerationOptions
+                    {
+                        RecurseSubdirectories = false,
+                        AttributesToSkip = 0,
+                        IgnoreInaccessible = false
+                    }))
+                {
+                    entryCount++;
+                    if (entryCount > MaxPackageEntryCount || IsReparsePoint(entry))
+                    {
+                        return true;
+                    }
+
+                    if (Directory.Exists(entry))
+                    {
+                        pendingDirectories.Enqueue(entry);
+                    }
                 }
             }
 

@@ -151,7 +151,28 @@ gentity_t *G_PickTarget(const char *targetname) {
 	return choice[irandom(num_choices)];
 }
 
+static gentity_t *G_ResolveDelayedActivator(gentity_t *ent) {
+	if (!ent || !ent->activator)
+		return nullptr;
+
+	gentity_t *activator = ent->activator;
+	const bool has_client = activator->client != nullptr;
+	const bool connected =
+		!has_client || activator->client->pers.connected;
+	const bool arena_client = GT(GT_ARENA) && has_client;
+	const int source_room = arena_client ? ent->arena : -1;
+	const int current_room = arena_client ? MM_Arena_Id(activator) : -1;
+	if (!MM_ArenaDelayedActivatorValid(activator->inuse, connected,
+		ent->count, activator->spawn_count, source_room, current_room))
+		return nullptr;
+
+	return activator;
+}
+
 static THINK(Think_Delay) (gentity_t *ent) -> void {
+	// Keep firing the source room's environmental targets, but do not pass a
+	// disconnected, reused, or cross-room client to player-specific callbacks.
+	ent->activator = G_ResolveDelayedActivator(ent);
 	G_UseTargets(ent, ent->activator);
 	G_FreeEntity(ent);
 }
@@ -256,6 +277,7 @@ void G_UseTargets(gentity_t *ent, gentity_t *activator) {
 		t->nextthink = level.time + gtime_t::from_sec(ent->delay);
 		t->think = Think_Delay;
 		t->activator = activator;
+		t->count = activator ? activator->spawn_count : 0;
 		if (!activator)
 			gi.Com_PrintFmt("{}: {} with no activator.\n", __FUNCTION__, *t);
 		t->message = ent->message;

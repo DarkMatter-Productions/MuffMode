@@ -2,19 +2,26 @@ namespace MuffMode.Updater;
 
 internal static class Program
 {
-    private const string SingleInstanceMutexName = @"Local\DarkMatterProductions.MuffMode.Updater";
+    private static readonly TimeSpan SelfUpdateCleanupMutexTimeout = TimeSpan.FromSeconds(30);
 
     [STAThread]
-    private static void Main()
+    private static int Main(string[] args)
     {
+        if (InstallationManager.TryHandleSelfUpdateApplyStartup(args, out var selfUpdateExitCode))
+        {
+            return selfUpdateExitCode;
+        }
+
+        var selfUpdateCleanup = InstallationManager.IsSelfUpdateCleanupStartup(args);
         ApplicationConfiguration.Initialize();
-        using var singleInstanceMutex = new Mutex(false, SingleInstanceMutexName);
+        using var singleInstanceMutex = new Mutex(false, InstallationManager.SingleInstanceMutexName);
         var ownsMutex = false;
         try
         {
             try
             {
-                ownsMutex = singleInstanceMutex.WaitOne(TimeSpan.Zero);
+                ownsMutex = singleInstanceMutex.WaitOne(
+                    selfUpdateCleanup ? SelfUpdateCleanupMutexTimeout : TimeSpan.Zero);
             }
             catch (AbandonedMutexException)
             {
@@ -23,12 +30,25 @@ internal static class Program
 
             if (!ownsMutex)
             {
+                if (selfUpdateCleanup)
+                {
+                    UpdaterLog.WriteInfo("The updated updater could not acquire the single-instance lock for staged-helper cleanup.");
+                    return 2;
+                }
+
                 MessageBox.Show(
                     "Muff Mode Updater is already running.",
                     "Muff Mode Updater",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information);
-                return;
+                return 0;
+            }
+
+            if (selfUpdateCleanup
+                && InstallationManager.TryHandleSelfUpdateCleanupStartup(args, out selfUpdateExitCode)
+                && selfUpdateExitCode != 0)
+            {
+                return selfUpdateExitCode;
             }
 
             Application.Run(new MainForm());
@@ -40,5 +60,7 @@ internal static class Program
                 singleInstanceMutex.ReleaseMutex();
             }
         }
+
+        return 0;
     }
 }

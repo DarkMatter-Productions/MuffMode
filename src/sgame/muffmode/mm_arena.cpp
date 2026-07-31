@@ -38,10 +38,22 @@ namespace muffmode::arena {
 constexpr int kMaxLogicalTeams = 255;
 constexpr int kMaxConfigBytes = 1024 * 1024;
 constexpr int kMaxConfigTokens = 32768;
-constexpr int kMenuRows = 20;
+constexpr int kMaxConfigNesting = 32;
+constexpr int kMenuRows = MENU_MAX_ROWS;
+constexpr int kMenuFirstContentRow = 4;
+constexpr int kTeamPrimaryActionRow = 10;
+constexpr int kTeamQueueActionRow = 11;
+constexpr int kTeamRoomsActionRow = 12;
+constexpr int kMenuPreviousRow = 14;
+constexpr int kMenuNextRow = 15;
+constexpr int kMenuFooterSpacerRow = 16;
+constexpr int kMenuReturnRow = 17;
 constexpr uint8_t kInviteSpectator = 1u << 0;
 constexpr uint8_t kInviteCoach = 1u << 1;
 constexpr uint8_t kInviteMember = 1u << 2;
+
+// Queue order is only rendered by this module's HUD.
+static int QueuePosition(const gclient_t *client);
 
 struct LogicalTeam {
 	bool valid = false;
@@ -106,6 +118,19 @@ struct ConfigOp {
 	int arena_id = 0;
 	std::string key;
 	std::string value;
+	mm_arena_weapon_list_format_t weapon_format =
+		mm_arena_weapon_list_format_t::RA3;
+};
+
+enum class ConfigTokenError : uint8_t {
+	None,
+	UnterminatedQuote,
+	TooManyTokens
+};
+
+struct ConfigTokens {
+	std::vector<std::string> values;
+	ConfigTokenError error = ConfigTokenError::None;
 };
 
 struct MenuState {
@@ -123,14 +148,13 @@ std::array<int16_t, MAX_CLIENTS> s_rover_respawn_arena {};
 std::array<bool, MAX_CLIENTS> s_practice_respawn_pending {};
 std::array<int16_t, MAX_CLIENTS> s_practice_respawn_arena {};
 int s_arena_count = 0;
-bool s_classic_ra2_map = false;
 bool s_map_active = false;
 mm_arena_map_contract_t s_map_contract {};
 mm_arena_map_validation_t s_map_validation {
 	mm_arena_map_error_t::MissingArenaKey, 0
 };
+mm_arena_map_profile_t s_map_profile = mm_arena_map_profile_t::None;
 bool s_internal_team_change = false;
-bool s_ended_round_this_frame = false;
 bool s_had_human_participant = false;
 gtime_t s_level_started {};
 
@@ -184,7 +208,14 @@ void AddContractEntity(mm_arena_map_contract_t &contract, bool first,
 		return;
 	}
 
-	if (!arena_value_valid || !ParseFiniteOrigin(origin))
+	if (!ParseFiniteOrigin(origin))
+		return;
+	if (classname && !std::strcmp(classname, "info_player_deathmatch")) {
+		if (contract.idmap_fighter_starts !=
+			std::numeric_limits<uint16_t>::max())
+			contract.idmap_fighter_starts++;
+	}
+	if (!arena_value_valid)
 		return;
 	if (arena_id == 0 && IsLobbyPointClass(classname))
 		contract.has_lobby_point = true;
@@ -273,18 +304,25 @@ mm_arena_map_contract_t LiveMapContract()
 {
 	mm_arena_map_contract_t contract = s_map_contract;
 	contract.has_lobby_point = false;
+	contract.idmap_fighter_starts = 0;
 	contract.fighter_starts.fill(0);
 	contract.named_intermissions.fill(false);
 
 	for (size_t i = 1; i < globals.num_entities; i++) {
 		const gentity_t *ent = &g_entities[i];
-		if (!ent->inuse || !ent->classname ||
+		if (!ent->inuse || !ent->classname)
+			continue;
+		if (
 			!std::isfinite(ent->s.origin.x) ||
 			!std::isfinite(ent->s.origin.y) ||
 			!std::isfinite(ent->s.origin.z))
 			continue;
 		if (ent->arena == 0 && IsLobbyPointClass(ent->classname))
 			contract.has_lobby_point = true;
+		if (!std::strcmp(ent->classname, "info_player_deathmatch") &&
+			contract.idmap_fighter_starts !=
+				std::numeric_limits<uint16_t>::max())
+			contract.idmap_fighter_starts++;
 		if (ent->arena < 1 || ent->arena > MM_ARENA_MAP_MAX_ROOMS)
 			continue;
 		if (!std::strcmp(ent->classname, "info_player_deathmatch")) {
@@ -303,6 +341,16 @@ mm_arena_map_contract_t LiveMapContract()
 bool IsArenaGametype()
 {
 	return MM_Arena_Active();
+}
+
+bool IsLegacyIdmap()
+{
+	return s_map_profile == mm_arena_map_profile_t::LegacyIdmap;
+}
+
+bool IsTaggedMultiMap()
+{
+	return s_map_profile == mm_arena_map_profile_t::TaggedMulti;
 }
 
 bool IsConnected(const gentity_t *ent)
@@ -647,7 +695,9 @@ uint32_t VoteFlagForSetting(std::string_view key)
 }
 
 bool ApplySetting(mm_arena_settings_t &settings, std::string_view raw_key,
-	std::string_view raw_value, int max_clients)
+	std::string_view raw_value, int max_clients,
+	mm_arena_weapon_list_format_t weapon_format =
+		mm_arena_weapon_list_format_t::RA3)
 {
 	const std::string key = Lower(raw_key);
 	const std::string value = Lower(raw_value);
@@ -699,22 +749,13 @@ bool ApplySetting(mm_arena_settings_t &settings, std::string_view raw_key,
 				MM_ArenaSanitizeWeaponMask(static_cast<uint32_t>(number));
 			return true;
 		}
-		uint32_t mask = 0;
-		bool saw_weapon_number = false;
-		bool grapple = false;
-		for (char c : value) {
-			if (c >= '0' && c <= '9') {
-				saw_weapon_number = true;
-				if (c == '0')
-					grapple = true;
-				else
-					mask |= MM_ArenaWeaponFlagForDigit(c);
-			}
-		}
-		if (!saw_weapon_number)
+		const mm_arena_weapon_list_t parsed =
+			MM_ArenaParseWeaponList(value, weapon_format);
+		if (!parsed.valid)
 			return false;
-		settings.weapon_mask = MM_ArenaSanitizeWeaponMask(mask);
-		settings.grapple = grapple;
+		settings.weapon_mask = MM_ArenaSanitizeWeaponMask(parsed.mask);
+		if (weapon_format == mm_arena_weapon_list_format_t::RA3)
+			settings.grapple = parsed.grapple;
 		return true;
 	}
 	if (MM_ArenaSettingIsAmmo(key)) {
@@ -1008,12 +1049,13 @@ bool IsSafeConfigName(const char *name)
 	return std::strcmp(name, ".") != 0 && std::strcmp(name, "..") != 0;
 }
 
-std::vector<std::string> TokenizeConfig(const std::string &text)
+ConfigTokens TokenizeConfig(const std::string &text)
 {
-	std::vector<std::string> tokens;
+	ConfigTokens result;
+	std::vector<std::string> &tokens = result.values;
 	tokens.reserve(std::min<size_t>(text.size() / 6, kMaxConfigTokens));
 
-	for (size_t i = 0; i < text.size() && tokens.size() < kMaxConfigTokens;) {
+	for (size_t i = 0; i < text.size();) {
 		const unsigned char c = static_cast<unsigned char>(text[i]);
 		if (std::isspace(c)) {
 			i++;
@@ -1025,6 +1067,10 @@ std::vector<std::string> TokenizeConfig(const std::string &text)
 				i++;
 			continue;
 		}
+		if (tokens.size() >= kMaxConfigTokens) {
+			result.error = ConfigTokenError::TooManyTokens;
+			break;
+		}
 		if (text[i] == '{' || text[i] == '}' ||
 			text[i] == ':' || text[i] == ';') {
 			tokens.emplace_back(1, text[i++]);
@@ -1033,14 +1079,22 @@ std::vector<std::string> TokenizeConfig(const std::string &text)
 		if (text[i] == '"') {
 			i++;
 			std::string token;
-			while (i < text.size() && text[i] != '"') {
+			bool closed = false;
+			while (i < text.size()) {
+				if (text[i] == '"') {
+					i++;
+					closed = true;
+					break;
+				}
 				if (text[i] == '\\' && i + 1 < text.size() &&
 					(text[i + 1] == '"' || text[i + 1] == '\\'))
 					i++;
 				token.push_back(text[i++]);
 			}
-			if (i < text.size())
-				i++;
+			if (!closed) {
+				result.error = ConfigTokenError::UnterminatedQuote;
+				break;
+			}
 			tokens.push_back(std::move(token));
 			continue;
 		}
@@ -1053,48 +1107,137 @@ std::vector<std::string> TokenizeConfig(const std::string &text)
 		if (i > begin)
 			tokens.emplace_back(text.substr(begin, i - begin));
 	}
-	return tokens;
+	return result;
 }
 
-void ParseConfigBlock(const std::vector<std::string> &tokens, size_t &cursor,
-	std::vector<ConfigOp> &ops, bool map_matches, int arena_id, int specificity)
+const char *ConfigTokenErrorText(ConfigTokenError error)
 {
-	while (cursor < tokens.size()) {
-		std::string token = tokens[cursor++];
-		if (token == "}")
-			return;
-		const std::string lowered = Lower(token);
+	switch (error) {
+	case ConfigTokenError::None:
+		return "valid";
+	case ConfigTokenError::UnterminatedQuote:
+		return "unterminated quote";
+	case ConfigTokenError::TooManyTokens:
+		return "too many tokens";
+	}
+	return "invalid token stream";
+}
 
-		if (lowered == "map" && cursor < tokens.size()) {
-			const std::string map_name = tokens[cursor++];
-			if (cursor < tokens.size() && tokens[cursor] == "{") {
-				cursor++;
-				ParseConfigBlock(tokens, cursor, ops,
-					!Q_strcasecmp(map_name.c_str(), level.mapname), 0, 1);
+mm_arena_weapon_list_format_t DetectConfigWeaponListFormat(
+	const std::vector<std::string> &tokens)
+{
+	int depth = 0;
+	bool has_legacy_syntax = false;
+	bool has_native_syntax = false;
+	std::string explicit_format;
+	for (size_t i = 0; i < tokens.size(); i++) {
+		const std::string lowered = Lower(tokens[i]);
+		if (tokens[i] == "{") {
+			depth++;
+			continue;
+		}
+		if (tokens[i] == "}") {
+			depth = std::max(0, depth - 1);
+			continue;
+		}
+		if (depth != 0)
+			continue;
+		if (lowered == "format" && i + 1 < tokens.size()) {
+			const size_t value = tokens[i + 1] == ":" ? i + 2 : i + 1;
+			if (value < tokens.size())
+				explicit_format = Lower(tokens[value]);
+			continue;
+		}
+		if (lowered == "maploop") {
+			has_legacy_syntax = true;
+			continue;
+		}
+		if (lowered == "map" && i + 2 < tokens.size() &&
+			tokens[i + 2] == "{") {
+			has_native_syntax = true;
+			depth++;
+			i += 2;
+			continue;
+		}
+		if ((lowered == "room" || lowered == "arena") && i + 2 < tokens.size() &&
+			tokens[i + 2] == "{") {
+			int room = 0;
+			if (ParseInt(tokens[i + 1], room)) {
+				has_native_syntax = true;
+				depth++;
+				i += 2;
 			}
 			continue;
 		}
+		if (i + 1 >= tokens.size() || tokens[i + 1] != "{")
+			continue;
+		// A bare top-level map or numeric room block is an RA2 import. MuffMode
+		// native grammar always makes scopes explicit with `map` and `room`.
+		if (lowered != "global" && lowered != "default" &&
+			lowered != "defaults")
+			has_legacy_syntax = true;
+	}
+	return MM_ArenaResolveConfigWeaponListFormat(has_legacy_syntax,
+		has_native_syntax, explicit_format);
+}
 
-		if (lowered == "arena" && cursor + 1 < tokens.size()) {
+bool ParseConfigBlock(const std::vector<std::string> &tokens, size_t &cursor,
+	std::vector<ConfigOp> &ops, bool map_matches, int arena_id, int specificity,
+	bool legacy_ra2_syntax, int depth)
+{
+	if (depth > kMaxConfigNesting)
+		return false;
+	while (cursor < tokens.size()) {
+		std::string token = tokens[cursor++];
+		if (token == "}")
+			return true;
+		const std::string lowered = Lower(token);
+
+		if (lowered == "map") {
+			if (cursor >= tokens.size())
+				return false;
+			const std::string &map_name = tokens[cursor++];
+			if (cursor >= tokens.size() || tokens[cursor] != "{")
+				return false;
+			cursor++;
+			if (!ParseConfigBlock(tokens, cursor, ops,
+				!Q_strcasecmp(map_name.c_str(), level.mapname), 0, 1,
+				false, depth + 1))
+				return false;
+			continue;
+		}
+
+		if (lowered == "arena" || lowered == "room") {
+			if (cursor + 1 >= tokens.size())
+				return false;
 			int selected = 0;
-			if (ParseInt(tokens[cursor], selected) && tokens[cursor + 1] == "{") {
-				cursor += 2;
-				ParseConfigBlock(tokens, cursor, ops, map_matches, selected, 2);
-				continue;
-			}
+			if (!ParseInt(tokens[cursor], selected) ||
+				tokens[cursor + 1] != "{")
+				return false;
+			cursor += 2;
+			if (!ParseConfigBlock(tokens, cursor, ops, map_matches, selected,
+				2, false, depth + 1))
+				return false;
+			continue;
 		}
 
 		if (cursor < tokens.size() && tokens[cursor] == "{") {
 			cursor++;
 			int numeric = 0;
-			if (ParseInt(token, numeric))
-				ParseConfigBlock(tokens, cursor, ops, map_matches, numeric, 2);
-			else if (lowered == "global" || lowered == "default" ||
-				lowered == "defaults")
-				ParseConfigBlock(tokens, cursor, ops, true, 0, 0);
-			else
-				ParseConfigBlock(tokens, cursor, ops,
-					!Q_strcasecmp(token.c_str(), level.mapname), 0, 1);
+			if (ParseInt(token, numeric)) {
+				if (!ParseConfigBlock(tokens, cursor, ops, map_matches, numeric,
+					2, true, depth + 1))
+					return false;
+			} else if (lowered == "global" || lowered == "default" ||
+				lowered == "defaults") {
+				if (!ParseConfigBlock(tokens, cursor, ops, true, 0, 0,
+					legacy_ra2_syntax, depth + 1))
+					return false;
+			} else if (!ParseConfigBlock(tokens, cursor, ops,
+				!Q_strcasecmp(token.c_str(), level.mapname), 0, 1,
+				true, depth + 1)) {
+				return false;
+			}
 			continue;
 		}
 
@@ -1121,6 +1264,17 @@ void ParseConfigBlock(const std::vector<std::string> &tokens, size_t &cursor,
 			cursor = colon + 1;
 			while (cursor < tokens.size() && tokens[cursor] != ";" &&
 				tokens[cursor] != "}") {
+				// Several shipped RA2 rows omit the terminating semicolon before
+				// the next setting, and native syntax also documents semicolons
+				// as optional. Recover at every known `key:` boundary so one
+				// value cannot absorb the remaining assignments in the block.
+				if (cursor + 1 < tokens.size()) {
+					const std::string boundary_key = Lower(tokens[cursor]);
+					if (MM_ArenaConfigStartsColonSetting(
+						IsConfigSettingName(boundary_key), boundary_key,
+						tokens[cursor + 1]))
+						break;
+				}
 				if (!value.empty())
 					value.push_back(' ');
 				value += tokens[cursor++];
@@ -1148,8 +1302,12 @@ void ParseConfigBlock(const std::vector<std::string> &tokens, size_t &cursor,
 		if (value.empty())
 			continue;
 		if (map_matches)
-			ops.push_back({ specificity, arena_id, std::move(key), std::move(value) });
+			ops.push_back({ specificity, arena_id, std::move(key),
+				std::move(value), legacy_ra2_syntax
+					? mm_arena_weapon_list_format_t::RA2
+					: mm_arena_weapon_list_format_t::RA3 });
 	}
+	return true;
 }
 
 void LoadArenaConfig(const mm_arena_settings_t &base)
@@ -1166,7 +1324,7 @@ void LoadArenaConfig(const mm_arena_settings_t &base)
 
 	const char *config_name = s_config ? s_config->string : "arena.cfg";
 	if (!IsSafeConfigName(config_name)) {
-		gi.Com_PrintFmt("Rocket Arena: rejecting unsafe config name \"{}\".\n",
+		gi.Com_PrintFmt("MuffMode Arena: rejecting unsafe config name \"{}\".\n",
 			config_name ? config_name : "");
 		finalize_defaults();
 		return;
@@ -1180,63 +1338,108 @@ void LoadArenaConfig(const mm_arena_settings_t &base)
 	FILE *file = std::fopen(path.c_str(), "rb");
 	if (!file) {
 		gi.Com_PrintFmt(
-			"Rocket Arena: could not open config {}; using defaults.\n", path);
+			"MuffMode Arena: could not open config {}; using defaults.\n", path);
 		finalize_defaults();
 		return;
 	}
 
-	std::fseek(file, 0, SEEK_END);
-	const long length = std::ftell(file);
-	std::rewind(file);
-	if (length <= 0 || length > kMaxConfigBytes) {
+	if (std::fseek(file, 0, SEEK_END) != 0) {
 		std::fclose(file);
-		gi.Com_PrintFmt("Rocket Arena: ignoring invalid config size for {}.\n", path);
+		gi.Com_PrintFmt("MuffMode Arena: could not seek config {}; using defaults.\n",
+			path);
+		finalize_defaults();
+		return;
+	}
+	const long length = std::ftell(file);
+	if (length <= 0 || length > kMaxConfigBytes ||
+		std::fseek(file, 0, SEEK_SET) != 0) {
+		std::fclose(file);
+		gi.Com_PrintFmt("MuffMode Arena: ignoring invalid config size for {}.\n",
+			path);
 		finalize_defaults();
 		return;
 	}
 
 	std::string text(static_cast<size_t>(length), '\0');
 	const size_t read = std::fread(text.data(), 1, text.size(), file);
+	const bool read_failed = read != text.size() || std::ferror(file) != 0;
 	std::fclose(file);
-	text.resize(read);
+	if (read_failed) {
+		gi.Com_PrintFmt("MuffMode Arena: could not read config {}; using defaults.\n",
+			path);
+		finalize_defaults();
+		return;
+	}
 
-	const auto tokens = TokenizeConfig(text);
-	if (!MM_ArenaConfigBracesBalanced(tokens)) {
+	const ConfigTokens tokenized = TokenizeConfig(text);
+	if (tokenized.error != ConfigTokenError::None) {
 		gi.Com_PrintFmt(
-			"Rocket Arena: rejecting config with unbalanced braces: {}.\n",
+			"MuffMode Arena: rejecting config with {}: {}.\n",
+			ConfigTokenErrorText(tokenized.error), path);
+		finalize_defaults();
+		return;
+	}
+	if (!MM_ArenaConfigBracesBalanced(tokenized.values)) {
+		gi.Com_PrintFmt(
+			"MuffMode Arena: rejecting config with unbalanced braces: {}.\n",
 			path);
 		finalize_defaults();
 		return;
 	}
 	std::vector<ConfigOp> ops;
 	size_t cursor = 0;
-	ParseConfigBlock(tokens, cursor, ops, true, 0, 0);
+	const mm_arena_weapon_list_format_t config_weapon_format =
+		DetectConfigWeaponListFormat(tokenized.values);
+	if (!ParseConfigBlock(tokenized.values, cursor, ops, true, 0, 0,
+		config_weapon_format == mm_arena_weapon_list_format_t::RA2, 0)) {
+		gi.Com_PrintFmt(
+			"MuffMode Arena: rejecting config with a malformed scope or excessive nesting: {}.\n",
+			path);
+		finalize_defaults();
+		return;
+	}
 
+	size_t ignored_legacy_maploops = 0;
 	for (int pass = 0; pass <= 2; pass++) {
 		for (const ConfigOp &op : ops) {
 			if (op.specificity != pass)
 				continue;
+			const std::string op_key = Lower(op.key);
+			if (op_key == "format")
+				continue;
+			// MuffMode already owns map rotation. Accept RA2's directive while
+			// making its deliberately non-portable behavior visible to hosts.
+			if (op_key == "maploop") {
+				ignored_legacy_maploops++;
+				continue;
+			}
 			if (pass == 2) {
 				Arena *arena = FindArena(op.arena_id);
 				if (arena)
 					ApplySetting(arena->defaults, op.key, op.value,
-						static_cast<int>(game.maxclients));
+						static_cast<int>(game.maxclients), op.weapon_format);
 				continue;
 			}
 			for (int id = 1; id <= s_arena_count; id++)
 				ApplySetting(s_arenas[id].defaults, op.key, op.value,
-					static_cast<int>(game.maxclients));
+					static_cast<int>(game.maxclients), op.weapon_format);
 		}
 	}
 
 	finalize_defaults();
-	gi.Com_PrintFmt("Rocket Arena: loaded {} layered settings from {}.\n",
+	if (ignored_legacy_maploops) {
+		gi.Com_PrintFmt(
+			"MuffMode Arena: ignored {} legacy maploop directive{} in {}; use g_map_list for rotation.\n",
+			ignored_legacy_maploops,
+			ignored_legacy_maploops == 1 ? "" : "s", path);
+	}
+	gi.Com_PrintFmt("MuffMode Arena: loaded {} layered settings from {}.\n",
 		ops.size(), path);
 }
 
 void DiscoverArenas()
 {
-	s_arena_count = s_map_contract.declared_rooms;
+	s_arena_count = IsLegacyIdmap() ? 1 : s_map_contract.declared_rooms;
 
 	for (int id = 1; id <= s_arena_count; id++) {
 		Arena &arena = s_arenas[id];
@@ -1249,9 +1452,6 @@ void DiscoverArenas()
 		const gentity_t *ent = &g_entities[i];
 		if (!ent->inuse || !ent->classname)
 			continue;
-		if (ent->arena > 0 &&
-			!std::strcmp(ent->classname, "misc_teleporter"))
-			s_classic_ra2_map = true;
 		if (!ent->message ||
 			std::strcmp(ent->classname, "info_player_intermission"))
 			continue;
@@ -1351,6 +1551,20 @@ void ClearSpectatorInvites(LogicalTeam &team)
 {
 	for (uint8_t &invite : team.invites)
 		invite = MM_ArenaClearSpectatorInviteBits(invite);
+}
+
+void ReassignRoverLogicalTeam(gentity_t *ent, uint16_t new_team)
+{
+	if (!ent || !ent->client)
+		return;
+
+	const uint16_t old_team = ent->client->resp.arena_team_id;
+	if (LogicalTeam *team = FindTeam(old_team)) {
+		for (uint8_t &invite : team->invites)
+			invite = MM_ArenaInvitesAfterMemberTransfer(
+				invite, old_team, new_team);
+	}
+	ent->client->resp.arena_team_id = new_team;
 }
 
 void ProjectRole(gentity_t *ent, mm_arena_role_t role, team_t side,
@@ -1691,8 +1905,8 @@ void PrepareRound(Arena &arena)
 				participants[static_cast<size_t>(irandom(static_cast<int>(i)))]);
 		for (size_t i = 0; i < participants.size(); i++) {
 			const bool red = (i & 1u) == 0;
-			participants[i]->client->resp.arena_team_id =
-				red ? arena.fixed_red : arena.fixed_blue;
+			ReassignRoverLogicalTeam(participants[i],
+				red ? arena.fixed_red : arena.fixed_blue);
 			participants[i]->client->resp.arena_late_join = false;
 			MM_ResetClientScoring(participants[i]->client);
 		}
@@ -1769,7 +1983,6 @@ void BeginFight(Arena &arena)
 
 void EndRound(Arena &arena, mm_arena_round_result_t result)
 {
-	s_ended_round_this_frame = true;
 	FreezeFighters(arena, true);
 
 	if (result == mm_arena_round_result_t::Draw) {
@@ -1809,7 +2022,6 @@ void EndRound(Arena &arena, mm_arena_round_result_t result)
 
 void EndRoverRound(Arena &arena, bool time_expired)
 {
-	s_ended_round_this_frame = true;
 	FreezeFighters(arena, true);
 
 	int best_score = std::numeric_limits<int>::min();
@@ -1940,8 +2152,8 @@ void ProcessRoverTransfers(Arena &arena)
 		s_rover_pending_arena[client_num] = 0;
 		if (!IsConnected(ent) || ent->client->resp.arena_id != arena.id)
 			continue;
-		ent->client->resp.arena_team_id =
-			side == TEAM_RED ? arena.fixed_red : arena.fixed_blue;
+		ReassignRoverLogicalTeam(ent,
+			side == TEAM_RED ? arena.fixed_red : arena.fixed_blue);
 		ent->client->resp.arena_side = side;
 		SetRoleField(ent->client, mm_arena_role_t::Fighter);
 		ent->client->resp.arena_late_join = false;
@@ -2413,7 +2625,8 @@ void LeaveTeam(gentity_t *ent, bool to_lobby, bool silent,
 	DestroyEmptyTeams(transfer_destination);
 	if (!silent)
 		gi.Client_Print(ent, PRINT_HIGH,
-			to_lobby ? "You left Rocket Arena.\n" : "You left your Arena team.\n");
+			to_lobby ? "You returned to Arena Rooms.\n" :
+				"You left your room team.\n");
 	P_Menu_Dirty();
 }
 
@@ -3039,7 +3252,7 @@ bool ArenaEntryLocked(const gentity_t *ent, const Arena &arena)
 
 void PrintArenaList(gentity_t *ent)
 {
-	gi.Client_Print(ent, PRINT_HIGH, "Rocket Arena arenas:\n");
+	gi.Client_Print(ent, PRINT_HIGH, "MuffMode Arena Rooms:\n");
 	for (int id = 1; id <= s_arena_count; id++) {
 		const Arena &arena = s_arenas[id];
 		const std::string line = fmt::format(
@@ -3123,7 +3336,7 @@ void PrintLine(gentity_t *ent, const Arena &arena)
 	});
 	int queue = 0;
 	for (const LogicalTeam *team : teams) {
-		const char *position = "";
+		const char *position;
 		std::string dynamic_position;
 		if (team->id == arena.active_red)
 			position = "Champion";
@@ -3353,6 +3566,11 @@ int EffectiveEntityArena(const gentity_t *ent)
 		return 0;
 	if (ent->client)
 		return ent->client->resp.arena_id;
+	// RA2 idmaps deliberately share every map entity, regardless of the
+	// optional arena key authored on it. MuffMode keeps players' room state
+	// distinct above, but treats the one virtual room's map as fully shared.
+	if (IsLegacyIdmap())
+		return 1;
 	if (ent->arena != 0)
 		return ent->arena;
 	ent = SpatialOwner(ent);
@@ -3362,7 +3580,7 @@ int EffectiveEntityArena(const gentity_t *ent)
 		return ent->client->resp.arena_id;
 	if (ent->arena != 0)
 		return ent->arena;
-	return 0;
+	return IsLegacyIdmap() ? 1 : 0;
 }
 
 gentity_t *RandomPoint(const std::vector<gentity_t *> &points)
@@ -3419,7 +3637,7 @@ const char *RoleLabel(const gclient_t *client)
 	switch (Role(client)) {
 	case mm_arena_role_t::Lobby: return "LOBBY";
 	case mm_arena_role_t::Observer: return "OBSERVER";
-	case mm_arena_role_t::Queued: return "IN LINE";
+	case mm_arena_role_t::Queued: return "QUEUED";
 	case mm_arena_role_t::Fighter:
 		return client && client->eliminated ? "ELIMINATED" : "FIGHTER";
 	case mm_arena_role_t::Coach: return "COACH";
@@ -3488,8 +3706,8 @@ void ToggleLineFromMenu(gentity_t *ent)
 		TEAM_SPECTATOR, false);
 	gi.Client_Print(ent, PRINT_HIGH,
 		ent->client->resp.arena_line_enabled
-			? "You entered the arena line.\n"
-			: "You left the arena line.\n");
+			? "You joined the queue.\n"
+			: "You left the queue.\n");
 	P_Menu_Dirty();
 }
 
@@ -3548,7 +3766,7 @@ void SelectMenu(gentity_t *ent, menu_hnd_t *menu)
 std::string CompactMenuLabel(std::string_view prefix,
 	std::string_view name, std::string_view suffix)
 {
-	constexpr size_t max_length = 26;
+	constexpr size_t max_length = MENU_MAX_LINE_CHARS;
 	const std::string clean_prefix = SafeText(prefix, max_length);
 	const std::string clean_suffix = SafeText(suffix, max_length);
 	const size_t fixed_length = clean_prefix.size() + clean_suffix.size();
@@ -3565,9 +3783,8 @@ std::string CompactMenuLabel(std::string_view prefix,
 void SetMenuEntry(menu_t &entry, std::string_view text, int align,
 	void (*select)(gentity_t *, menu_hnd_t *) = nullptr)
 {
-	Q_strlcpy(entry.text, SafeText(text, 26).c_str(), sizeof(entry.text));
-	entry.align = align;
-	entry.SelectFunc = select;
+	const std::string safe_text = SafeText(text);
+	P_Menu_UpdateEntry(&entry, safe_text.c_str(), align, select);
 }
 
 void PopulateMenu(gentity_t *ent, menu_t *entries, MenuState &state)
@@ -3579,26 +3796,28 @@ void PopulateMenu(gentity_t *ent, menu_t *entries, MenuState &state)
 		state.actions[row] = 0;
 	}
 
-	SetMenuEntry(entries[0], "*Rocket Arena", MENU_ALIGN_CENTER);
-	Q_strlcpy(entries[1].text,
-		"\35\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36"
-		"\36\36\36\36\36\36\36\36\37", sizeof(entries[1].text));
-	entries[1].align = MENU_ALIGN_CENTER;
+	SetMenuEntry(entries[0], "*MuffMode Arena", MENU_ALIGN_CENTER);
+	const char *level_name = g_entities[0].message
+		? g_entities[0].message : level.mapname;
+	SetMenuEntry(entries[1], fmt::format("*{}", level_name),
+		MENU_ALIGN_CENTER);
 
 	if (state.rooms) {
-		constexpr int page_size = 13;
+		constexpr int page_size =
+			kMenuPreviousRow - kMenuFirstContentRow;
 		const mm_arena_page_range_t range = MM_ArenaPageRange(
 			s_arena_count, state.page, page_size);
 		state.page = range.page;
 		SetMenuEntry(entries[2],
-			fmt::format("Arenas {}-{} / {}", range.first + 1,
+			fmt::format("Arena Rooms {}-{} / {}", range.first + 1,
 				range.last, s_arena_count), MENU_ALIGN_CENTER);
 
 		const int current_arena = IsConnected(ent)
 			? ent->client->resp.arena_id : 0;
 		const bool roster_locked = FighterRosterLocked(ent);
-		int row = 3;
-		for (int id = range.first + 1; id <= range.last && row <= 15;
+		int row = kMenuFirstContentRow;
+		for (int id = range.first + 1;
+			id <= range.last && row < kMenuPreviousRow;
 			id++, row++) {
 			const Arena &arena = s_arenas[id];
 			const int population = ArenaPopulation(id);
@@ -3627,14 +3846,15 @@ void PopulateMenu(gentity_t *ent, menu_t *entries, MenuState &state)
 				state.actions[row] = id;
 		}
 		if (range.page > 0) {
-			SetMenuEntry(entries[16], "< Previous", MENU_ALIGN_LEFT,
+			SetMenuEntry(entries[kMenuPreviousRow], "< Previous",
+				MENU_ALIGN_LEFT,
 				SelectMenu);
-			state.actions[16] = -100 - (range.page - 1);
+			state.actions[kMenuPreviousRow] = -100 - (range.page - 1);
 		}
 		if (range.page + 1 < range.page_count) {
-			SetMenuEntry(entries[17], "Next >", MENU_ALIGN_LEFT,
+			SetMenuEntry(entries[kMenuNextRow], "Next >", MENU_ALIGN_LEFT,
 				SelectMenu);
-			state.actions[17] = -100 - (range.page + 1);
+			state.actions[kMenuNextRow] = -100 - (range.page + 1);
 		}
 	} else {
 		Arena *arena = IsConnected(ent) ? ArenaFor(ent->client) : nullptr;
@@ -3659,7 +3879,8 @@ void PopulateMenu(gentity_t *ent, menu_t *entries, MenuState &state)
 			}
 		}
 
-		constexpr int team_page_size = 10;
+		constexpr int team_page_size =
+			kTeamPrimaryActionRow - kMenuFirstContentRow;
 		const mm_arena_page_range_t range = MM_ArenaPageRange(
 			static_cast<int>(team_ids.size()), state.page, team_page_size);
 		state.page = range.page;
@@ -3671,12 +3892,13 @@ void PopulateMenu(gentity_t *ent, menu_t *entries, MenuState &state)
 			CompactMenuLabel({}, arena->name, header_suffix),
 			MENU_ALIGN_CENTER);
 		const bool roster_locked = FighterRosterLocked(ent);
-		int row = 3;
+		int row = kMenuFirstContentRow;
 		if (practice) {
 			SetMenuEntry(entries[row++], "Practice: no teams",
 				MENU_ALIGN_LEFT);
 		} else {
-			for (int index = range.first; index < range.last && row <= 12;
+			for (int index = range.first;
+				index < range.last && row < kTeamPrimaryActionRow;
 				index++, row++) {
 				const LogicalTeam &team =
 					s_teams[team_ids[static_cast<size_t>(index)]];
@@ -3725,55 +3947,53 @@ void PopulateMenu(gentity_t *ent, menu_t *entries, MenuState &state)
 		const bool coaching = has_team &&
 			Role(ent->client) == mm_arena_role_t::Coach;
 		if (!practice && !MM_ArenaUsesFixedTeams(arena->settings.type)) {
-			SetMenuEntry(entries[13],
+			SetMenuEntry(entries[kTeamPrimaryActionRow],
 				coaching ? "Stop Coaching" :
 					(has_team ? "Leave Team" :
 						(roster_locked ? "Create Team (locked)" :
 							"Create Team")),
 				MENU_ALIGN_LEFT, roster_locked ? nullptr : SelectMenu);
 			if (!roster_locked)
-				state.actions[13] = has_team ? -2 : -1;
+				state.actions[kTeamPrimaryActionRow] = has_team ? -2 : -1;
 		} else if (!practice && has_team) {
-			SetMenuEntry(entries[13],
+			SetMenuEntry(entries[kTeamPrimaryActionRow],
 				coaching ? "Stop Coaching" :
 					(roster_locked ? "Leave Team (locked)" : "Leave Team"),
 				MENU_ALIGN_LEFT, roster_locked ? nullptr : SelectMenu);
 			if (!roster_locked)
-				state.actions[13] = -2;
+				state.actions[kTeamPrimaryActionRow] = -2;
 		}
 		if (!practice && has_team &&
 			Role(ent->client) != mm_arena_role_t::Coach) {
-			SetMenuEntry(entries[14],
-				roster_locked ? "Team Line (locked)" :
+			SetMenuEntry(entries[kTeamQueueActionRow],
+				roster_locked ? "Queue (locked)" :
 					(ent->client->resp.arena_line_enabled
-						? "Leave Line" : "Join Line"),
+						? "Leave Queue" : "Join Queue"),
 				MENU_ALIGN_LEFT, roster_locked ? nullptr : SelectMenu);
 			if (!roster_locked)
-				state.actions[14] = -4;
+				state.actions[kTeamQueueActionRow] = -4;
 		}
-		SetMenuEntry(entries[15],
-			roster_locked ? "Return Lobby (locked)" : "Return to Lobby",
+		SetMenuEntry(entries[kTeamRoomsActionRow],
+			roster_locked ? "Arena Rooms (locked)" : "Return to Arena Rooms",
 			MENU_ALIGN_LEFT, roster_locked ? nullptr : SelectMenu);
 		if (!roster_locked)
-			state.actions[15] = -3;
+			state.actions[kTeamRoomsActionRow] = -3;
 		if (range.page > 0) {
-			SetMenuEntry(entries[16], "< Previous", MENU_ALIGN_LEFT,
+			SetMenuEntry(entries[kMenuPreviousRow], "< Previous",
+				MENU_ALIGN_LEFT,
 				SelectMenu);
-			state.actions[16] = -100 - (range.page - 1);
+			state.actions[kMenuPreviousRow] = -100 - (range.page - 1);
 		}
 		if (range.page + 1 < range.page_count) {
-			SetMenuEntry(entries[17], "Next >", MENU_ALIGN_LEFT,
+			SetMenuEntry(entries[kMenuNextRow], "Next >", MENU_ALIGN_LEFT,
 				SelectMenu);
-			state.actions[17] = -100 - (range.page + 1);
+			state.actions[kMenuNextRow] = -100 - (range.page + 1);
 		}
 	}
 
-	SetMenuEntry(entries[18], "Move: navigate  Attack: select",
-		MENU_ALIGN_CENTER);
-	Q_strlcpy(entries[19].text, "$g_pc_return",
-		sizeof(entries[19].text));
-	entries[19].align = MENU_ALIGN_LEFT;
-	entries[19].SelectFunc = ReturnToJoinMenu;
+	static_assert(kMenuFooterSpacerRow + 1 == kMenuReturnRow);
+	SetMenuEntry(entries[kMenuReturnRow], "$g_pc_return", MENU_ALIGN_LEFT,
+		ReturnToJoinMenu);
 }
 
 } // namespace muffmode::arena
@@ -3787,18 +4007,29 @@ void MM_Arena_PreflightMap(const char *mapname, const char *entity_lump)
 	arena::s_map_validation = {
 		mm_arena_map_error_t::MissingArenaKey, 0
 	};
+	arena::s_map_profile = mm_arena_map_profile_t::None;
 
 	if (!g_gametype || !GT_RAW(GT_ARENA))
 		return;
 
 	arena::s_map_contract = arena::ParseMapContract(entity_lump);
+	const bool allow_untagged_idmap = g_arena_legacy_idmap &&
+		g_arena_legacy_idmap->integer != 0;
 	arena::s_map_validation =
-		MM_ArenaValidateMapContract(arena::s_map_contract);
+		MM_ArenaValidateMapContract(arena::s_map_contract,
+			allow_untagged_idmap);
+	arena::s_map_profile = arena::s_map_validation.profile;
 	arena::s_map_active = static_cast<bool>(arena::s_map_validation);
 
 	if (arena::s_map_active) {
+		if (arena::IsLegacyIdmap()) {
+			gi.Com_PrintFmt(
+				"MuffMode Arena: validated {} as a legacy RA2 idmap (one room).\n",
+				mapname ? mapname : "<unnamed>");
+			return;
+		}
 		gi.Com_PrintFmt(
-			"Rocket Arena: validated {} with {} playable arena{}.\n",
+			"MuffMode Arena: validated {} with {} playable room{}.\n",
 			mapname ? mapname : "<unnamed>",
 			arena::s_map_contract.declared_rooms,
 			arena::s_map_contract.declared_rooms == 1 ? "" : "s");
@@ -3807,11 +4038,13 @@ void MM_Arena_PreflightMap(const char *mapname, const char *entity_lump)
 
 	const int room = arena::s_map_validation.room;
 	gi.Com_PrintFmt(
-		"Rocket Arena inactive on {}: {}{}. "
-		"Load an RA2-compatible map with an explicit worldspawn arena key.\n",
+		"MuffMode Arena inactive on {}: {}{}. {}\n",
 		mapname ? mapname : "<unnamed>",
 		MM_ArenaMapErrorText(arena::s_map_validation.error),
-		room > 0 ? fmt::format(" (arena {})", room) : std::string {});
+		room > 0 ? fmt::format(" (room {})", room) : std::string {},
+		arena::s_map_validation.error == mm_arena_map_error_t::MissingArenaKey
+			? "Add an explicit worldspawn arena key, or enable g_arena_legacy_idmap for RA2 idmaps."
+			: "Load an Arena-compatible map with a valid worldspawn contract.");
 }
 
 bool MM_Arena_Active()
@@ -3830,9 +4063,7 @@ void MM_Arena_Init()
 	arena::s_practice_respawn_pending.fill(false);
 	arena::s_practice_respawn_arena.fill(0);
 	arena::s_arena_count = 0;
-	arena::s_classic_ra2_map = false;
 	arena::s_internal_team_change = false;
-	arena::s_ended_round_this_frame = false;
 	arena::s_had_human_participant = false;
 	arena::s_level_started = level.time;
 
@@ -3842,19 +4073,23 @@ void MM_Arena_Init()
 	if (!world || world->arena != arena::s_map_contract.declared_rooms) {
 		arena::s_map_active = false;
 		gi.Com_ErrorFmt(
-			"Rocket Arena: live worldspawn disagrees with the validated map "
+			"MuffMode Arena: live worldspawn disagrees with the validated map "
 			"contract for {}.\n", level.mapname);
 		return;
 	}
-	const mm_arena_map_validation_t live_validation =
-		MM_ArenaValidateMapContract(arena::LiveMapContract());
-	if (!live_validation) {
+	const mm_arena_map_validation_t live_validation = MM_ArenaValidateMapContract(
+		arena::LiveMapContract(), g_arena_legacy_idmap &&
+			g_arena_legacy_idmap->integer != 0);
+	if (!live_validation || live_validation.profile != arena::s_map_profile) {
 		arena::s_map_active = false;
+		const std::string problem = !live_validation
+			? std::string(MM_ArenaMapErrorText(live_validation.error))
+			: "map profile disagrees with preflight";
 		gi.Com_ErrorFmt(
-			"Rocket Arena: live entity validation failed on {}: {}{}.\n",
-			level.mapname, MM_ArenaMapErrorText(live_validation.error),
+			"MuffMode Arena: live entity validation failed on {}: {}{}.\n",
+			level.mapname, problem,
 			live_validation.room > 0
-				? fmt::format(" (arena {})", live_validation.room)
+				? fmt::format(" (room {})", live_validation.room)
 				: std::string {});
 		return;
 	}
@@ -3898,7 +4133,7 @@ void MM_Arena_Init()
 	for (item_id_t item : weapons)
 		PrecacheItem(GetItemByIndex(item));
 
-	gi.Com_PrintFmt("Rocket Arena: initialized {} arena{}.\n",
+	gi.Com_PrintFmt("MuffMode Arena: initialized {} room{}.\n",
 		arena::s_arena_count, arena::s_arena_count == 1 ? "" : "s");
 }
 
@@ -4064,7 +4299,6 @@ bool MM_Arena_RunFrame()
 {
 	if (!arena::IsArenaGametype())
 		return true;
-	arena::s_ended_round_this_frame = false;
 	bool runnable = false;
 	for (int id = 1; id <= arena::s_arena_count; id++) {
 		arena::TickArena(arena::s_arenas[id]);
@@ -4077,11 +4311,6 @@ bool MM_Arena_RunFrame()
 	return runnable;
 }
 
-bool MM_Arena_UpdateRound()
-{
-	return arena::IsArenaGametype() && arena::s_ended_round_this_frame;
-}
-
 bool MM_Arena_CheckExitRules()
 {
 	if (!arena::IsArenaGametype())
@@ -4090,7 +4319,7 @@ bool MM_Arena_CheckExitRules()
 		return true;
 	if (timelimit && timelimit->value > 0 &&
 		level.time >= arena::s_level_started + gtime_t::from_min(timelimit->value)) {
-		QueueIntermission("Rocket Arena timelimit hit.", false, false);
+		QueueIntermission("MuffMode Arena timelimit hit.", false, false);
 		return true;
 	}
 	if (arena::s_had_human_participant &&
@@ -4105,7 +4334,8 @@ bool MM_Arena_CheckExitRules()
 			}
 		}
 		if (!human)
-			QueueIntermission("No human Arena players remaining.", true, false);
+			QueueIntermission("No human MuffMode Arena players remaining.", true,
+				false);
 	}
 	return true;
 }
@@ -4129,6 +4359,17 @@ const char *MM_Arena_Name(int arena_id)
 bool MM_Arena_ValidId(int arena_id)
 {
 	return arena::IsArenaGametype() && arena::FindArena(arena_id) != nullptr;
+}
+
+bool MM_Arena_UsesTaggedMap()
+{
+	return arena::IsArenaGametype() && arena::IsTaggedMultiMap();
+}
+
+bool MM_Arena_MapRoomDeclared(int arena_id)
+{
+	return arena::IsArenaGametype() && MM_ArenaMapRoomDeclared(
+		arena::s_map_profile, arena::s_map_contract.declared_rooms, arena_id);
 }
 
 bool MM_Arena_IsRunning(int arena_id)
@@ -4166,6 +4407,8 @@ bool MM_Arena_SpawnAllowed(const gentity_t *player, const gentity_t *spot)
 	if (!player || !player->client || !spot)
 		return false;
 	const int desired = player->client->resp.arena_id;
+	if (arena::IsLegacyIdmap())
+		return desired >= 0 && desired <= 1;
 	const int spot_arena = arena::EffectiveEntityArena(spot);
 	if (desired <= 0)
 		return spot_arena == 0;
@@ -4179,13 +4422,14 @@ gentity_t *MM_Arena_SelectSpawnPoint(gentity_t *player, bool spectator)
 	std::vector<gentity_t *> primary;
 	std::vector<gentity_t *> secondary;
 	std::vector<gentity_t *> fallback;
+	std::vector<gentity_t *> last_resort;
 	for (size_t i = 1; i < globals.num_entities; i++) {
 		gentity_t *spot = &g_entities[i];
 		if (!spot->inuse || !spot->classname)
 			continue;
 		if (!MM_Arena_SpawnAllowed(player, spot))
 			continue;
-		if (!spectator) {
+		if (!spectator && !arena::IsLegacyIdmap()) {
 			const bool red_start =
 				!std::strcmp(spot->classname, "info_player_team_red");
 			const bool blue_start =
@@ -4196,25 +4440,23 @@ gentity_t *MM_Arena_SelectSpawnPoint(gentity_t *player, bool spectator)
 				continue;
 			}
 		}
-		if (spectator && !std::strcmp(spot->classname, "misc_teleporter_dest"))
-			primary.push_back(spot); // RA2 observer destinations.
+		if (spectator && arena::IsLegacyIdmap() &&
+			!std::strcmp(spot->classname, "info_player_deathmatch"))
+			primary.push_back(spot); // RA2 idmap observer placement.
+		else if (spectator && !arena::IsLegacyIdmap() &&
+			!std::strcmp(spot->classname, "misc_teleporter_dest"))
+			primary.push_back(spot); // RA2 room observer destinations.
 		else if (spectator &&
-			!std::strcmp(spot->classname, "info_player_intermission")) {
-			if (arena::s_classic_ra2_map)
-				fallback.push_back(spot);
-			else
-				secondary.push_back(spot); // RA3 observer cameras.
-		}
+			!std::strcmp(spot->classname, "info_player_intermission"))
+			secondary.push_back(spot); // Named room view when no primary exists.
 		else if (!std::strcmp(spot->classname, "info_player_deathmatch")) {
 			if (!spectator)
 				secondary.push_back(spot);
-			else if (arena::s_classic_ra2_map)
-				secondary.push_back(spot); // RA2 idarena fallback.
 			else
-				fallback.push_back(spot);
+				fallback.push_back(spot); // RA2 idmap observer fallback.
 		} else if (spectator &&
 			!std::strcmp(spot->classname, "info_player_start"))
-			secondary.push_back(spot); // Minimal validated arena-0 lobby.
+			last_resort.push_back(spot); // Minimal arena-0 lobby fallback.
 	}
 	if (!spectator) {
 		if (gentity_t *point = arena::FarthestPoint(primary, player))
@@ -4235,7 +4477,9 @@ gentity_t *MM_Arena_SelectSpawnPoint(gentity_t *player, bool spectator)
 		return point;
 	if (gentity_t *point = arena::FarthestPoint(secondary, player))
 		return point;
-	return arena::FarthestPoint(fallback, player);
+	if (gentity_t *point = arena::FarthestPoint(fallback, player))
+		return point;
+	return arena::FarthestPoint(last_resort, player);
 }
 
 bool MM_Arena_CanUseEntity(const gentity_t *player, const gentity_t *target)
@@ -4605,15 +4849,15 @@ bool MM_Arena_TeamCommand(gentity_t *ent)
 			arena::FindTeam(ent->client->resp.arena_team_id, 0);
 		if (!a)
 			gi.Client_Print(ent, PRINT_HIGH,
-				"You are in the Rocket Arena lobby.\n");
+				"You are in the Arena Rooms lobby.\n");
 		else if (team)
 			gi.Client_Print(ent, PRINT_HIGH,
-				fmt::format("Arena {}: {} | Team: {} | {}\n",
+				fmt::format("Room {}: {} | Team: {} | {}\n",
 					a->id, a->name, team->name,
 					arena::RoleLabel(ent->client)).c_str());
 		else
 			gi.Client_Print(ent, PRINT_HIGH,
-				fmt::format("Arena {}: {} | {}\n", a->id, a->name,
+				fmt::format("Room {}: {} | {}\n", a->id, a->name,
 					arena::RoleLabel(ent->client)).c_str());
 		return true;
 	}
@@ -4656,7 +4900,7 @@ bool MM_Arena_TeamCommand(gentity_t *ent)
 		if (!MM_ArenaUsesFixedTeams(a->settings.type)) {
 			gi.Client_Print(ent, PRINT_HIGH,
 				"Red and Blue are match sides here; use `arena create` or "
-				"`arena join` for Rocket Arena teams.\n");
+				"`arena join` for room teams.\n");
 			return true;
 		}
 		if (arena::LogicalTeam *team = arena::FindTeam(
@@ -4703,11 +4947,11 @@ bool MM_Arena_SetTeamCommand(gentity_t *ent)
 			arena::FindTeam(target->client->resp.arena_team_id, 0);
 		if (!a)
 			gi.Client_Print(ent, PRINT_HIGH,
-				fmt::format("{} is in the Rocket Arena lobby.\n",
+				fmt::format("{} is in the Arena Rooms lobby.\n",
 					target->client->resp.netname).c_str());
 		else
 			gi.Client_Print(ent, PRINT_HIGH,
-				fmt::format("{} is in Arena {} ({}){}{}.\n",
+				fmt::format("{} is in Room {} ({}){}{}.\n",
 					target->client->resp.netname, a->id, a->name,
 					team ? ", team " : "",
 					team ? team->name : "").c_str());
@@ -4781,7 +5025,7 @@ bool MM_Arena_SetTeamCommand(gentity_t *ent)
 		gi.LocBroadcast_Print(PRINT_HIGH,
 			"[ADMIN]: Moved {} to {}.\n", target->client->resp.netname,
 			a ? (team ? team->name.c_str() : a->name.c_str()) :
-				"the Rocket Arena lobby");
+				"the Arena Rooms lobby");
 	}
 	return true;
 }
@@ -5215,19 +5459,18 @@ void MM_Arena_Cmd(gentity_t *ent)
 	if (!arena::IsArenaGametype()) {
 		if (g_gametype && GT_RAW(GT_ARENA))
 			gi.Client_Print(ent, PRINT_HIGH,
-				"Rocket Arena is inactive: this map is not "
-				"RA2-compatible. Load a map with a valid worldspawn "
-				"arena contract.\n");
+				"MuffMode Arena is inactive: this map is not "
+				"RA2-compatible. Load a map with a valid RA2 arena contract.\n");
 		else
 			gi.Client_Print(ent, PRINT_HIGH,
-				"The arena command is only available in Rocket Arena.\n");
+				"The arena command is only available in MuffMode Arena.\n");
 		return;
 	}
 	const int argc = gi.argc();
 	const std::string sub = arena::Lower(argc >= 2 ? gi.argv(1) : "status");
 	arena::Arena *a = arena::ArenaFor(ent->client);
 
-	if (sub == "list" || sub == "arenas") {
+	if (sub == "list" || sub == "arenas" || sub == "rooms") {
 		arena::PrintArenaList(ent);
 		return;
 	}
@@ -5254,27 +5497,32 @@ void MM_Arena_Cmd(gentity_t *ent)
 			arena::PrintArenaList(ent);
 		return;
 	}
-	if (sub == "line" && a) {
+	if (sub == "line" || (sub == "queue" && argc >= 3)) {
+		if (!a) {
+			gi.Client_Print(ent, PRINT_HIGH,
+				"Enter a room before changing queue status.\n");
+			return;
+		}
 		if (a->settings.type == mm_arena_type_t::Practice) {
 			gi.Client_Print(ent, PRINT_HIGH,
-				"Practice is always active and has no team line.\n");
+				"Practice is always active and has no team queue.\n");
 			return;
 		}
 		if (arena::Role(ent->client) == mm_arena_role_t::Coach) {
 			gi.Client_Print(ent, PRINT_HIGH,
-				"Coaches must leave coaching before joining a team line.\n");
+				"Coaches must leave coaching before joining the queue.\n");
 			return;
 		}
 		if (arena::FighterRosterLocked(ent)) {
 			gi.Client_Print(ent, PRINT_HIGH,
-				"You cannot change line status during an active match.\n");
+				"You cannot change queue status during an active match.\n");
 			return;
 		}
 		if (argc >= 3) {
 			const auto enabled = MM_ParseBoolArg(gi.argv(2));
 			if (!enabled) {
 				gi.Client_Print(ent, PRINT_HIGH,
-					"Usage: arena line [on|off]\n");
+					"Usage: arena queue [on|off] (line is an alias)\n");
 				return;
 			}
 			ent->client->resp.arena_line_enabled = *enabled;
@@ -5287,7 +5535,7 @@ void MM_Arena_Cmd(gentity_t *ent)
 			TEAM_SPECTATOR, false);
 		gi.Client_Print(ent, PRINT_HIGH,
 			ent->client->resp.arena_line_enabled
-				? "You entered the arena line.\n" : "You left the arena line.\n");
+				? "You joined the queue.\n" : "You left the queue.\n");
 		return;
 	}
 	if (sub == "queue" || sub == "teams") {
@@ -5494,8 +5742,13 @@ void MM_Arena_Cmd(gentity_t *ent)
 	}
 	if (sub == "admin" && ent->client->sess.admin) {
 		int id = 0;
-		if (argc < 4 || !arena::ParseInt(gi.argv(2), id) ||
-			!(a = arena::FindArena(id))) {
+		if (argc < 4 || !arena::ParseInt(gi.argv(2), id)) {
+			gi.Client_Print(ent, PRINT_HIGH,
+				"Usage: arena admin <arena> <setting|reset|start|abort> [value]\n");
+			return;
+		}
+		a = arena::FindArena(id);
+		if (!a) {
 			gi.Client_Print(ent, PRINT_HIGH,
 				"Usage: arena admin <arena> <setting|reset|start|abort> [value]\n");
 			return;
@@ -5522,7 +5775,8 @@ void MM_Arena_Cmd(gentity_t *ent)
 	}
 
 	gi.Client_Print(ent, PRINT_HIGH,
-		"arena: list, go, status, create, join, teamleave, line, leave\n"
+		"arena: rooms, go, status, create, join, teamleave, queue, leave\n"
+		"legacy aliases: list, arenas, line\n"
 		"match: ready, propose, vote, timeout, timein\n"
 		"team: name, lock, captain, invite, coach, kick\n");
 }
@@ -5590,8 +5844,8 @@ void MM_Arena_ScoreboardMessage(gentity_t *viewer, gentity_t *)
 		? arena::ArenaForConst(viewer->client) : nullptr;
 	if (!a) {
 		arena::AppendLayout(layout,
-			fmt::format("xv 0 yv -48 cstring2 \"Rocket Arena on {}\" "
-				"xv 0 yv -36 cstring \"Select an arena\" ",
+			fmt::format("xv 0 yv -48 cstring2 \"MuffMode Arena on {}\" "
+				"xv 0 yv -36 cstring \"Select an Arena Room\" ",
 				arena::SafeText(level.level_name)));
 		int y = -18;
 		for (int id = 1; id <= arena::s_arena_count && id <= 16; id++, y += 9) {
@@ -5696,7 +5950,7 @@ void MM_Arena_SetHudStats(gentity_t *ent)
 	const arena::Arena *a = arena::ArenaForConst(ent->client);
 	std::string text;
 	if (!a) {
-		text = "ROCKET ARENA LOBBY";
+		text = "MUFFMODE ARENA LOBBY";
 		ent->client->ps.stats[STAT_MINISCORE_FIRST_SCORE] = -999;
 		ent->client->ps.stats[STAT_MINISCORE_SECOND_SCORE] = -999;
 		ent->client->ps.stats[STAT_MINISCORE_FIRST_PIC] = 0;
@@ -5707,7 +5961,7 @@ void MM_Arena_SetHudStats(gentity_t *ent)
 		text = fmt::format("A{} {} | {}", a->id, arena::SafeText(a->name, 22),
 			arena::RoleLabel(ent->client));
 		if (arena::Role(ent->client) == mm_arena_role_t::Queued)
-			text += fmt::format(" #{}", MM_Arena_QueuePosition(ent->client));
+			text += fmt::format(" #{}", arena::QueuePosition(ent->client));
 		if (a->settings.type == mm_arena_type_t::RedRover ||
 			a->settings.type == mm_arena_type_t::Practice) {
 			std::vector<gentity_t *> leaders;
@@ -5842,30 +6096,31 @@ bool MM_Arena_SameSquad(const gclient_t *first, const gclient_t *second)
 	return MM_Arena_SameTeam(first, second);
 }
 
-int MM_Arena_QueuePosition(const gclient_t *client)
+namespace muffmode::arena {
+
+static int QueuePosition(const gclient_t *client)
 {
-	const arena::Arena *a = arena::ArenaForConst(client);
-	const arena::LogicalTeam *own =
-		client ? arena::FindTeam(client->resp.arena_team_id, 0) : nullptr;
+	const Arena *a = ArenaForConst(client);
+	const LogicalTeam *own =
+		client ? FindTeam(client->resp.arena_team_id, 0) : nullptr;
 	if (!a || !own || own->id == a->active_red || own->id == a->active_blue)
 		return 0;
-	std::vector<const arena::LogicalTeam *> teams;
-	for (uint16_t id = 1; id <= arena::kMaxLogicalTeams; id++) {
-		const arena::LogicalTeam &team = arena::s_teams[id];
+	if (own->fixed || !TeamEligible(*a, own->id))
+		return 0;
+	int position = 1;
+	for (uint16_t id = 1; id <= kMaxLogicalTeams; id++) {
+		const LogicalTeam &team = s_teams[id];
 		if (team.valid && !team.fixed && team.arena_id == a->id &&
 			team.id != a->active_red && team.id != a->active_blue &&
-			arena::TeamEligible(*a, team.id))
-			teams.push_back(&team);
+			team.id != own->id && TeamEligible(*a, team.id) &&
+			MM_ArenaQueueKeyPrecedes(team.queue_order, team.id,
+				own->queue_order, own->id))
+			position++;
 	}
-	std::sort(teams.begin(), teams.end(),
-		[](const arena::LogicalTeam *x, const arena::LogicalTeam *y) {
-			return x->queue_order < y->queue_order;
-		});
-	for (size_t i = 0; i < teams.size(); i++)
-		if (teams[i]->id == own->id)
-			return static_cast<int>(i + 1);
-	return 0;
+	return position;
 }
+
+} // namespace muffmode::arena
 
 bool MM_Arena_GetSpawnLoadout(const gclient_t *client,
 	mm_arena_loadout_t &loadout)
@@ -5903,13 +6158,6 @@ bool MM_Arena_FallingDamageEnabled(const gentity_t *ent)
 		? arena::ArenaForConst(ent->client) : nullptr;
 	return a ? a->settings.falling_damage :
 		(g_arena_falling_damage && g_arena_falling_damage->integer != 0);
-}
-
-bool MM_Arena_FallingDamageEnabled()
-{
-	if (!arena::IsArenaGametype())
-		return false;
-	return g_arena_falling_damage && g_arena_falling_damage->integer != 0;
 }
 
 bool MM_Arena_ExcessiveEnabled(const gentity_t *ent)

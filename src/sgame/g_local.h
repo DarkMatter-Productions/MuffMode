@@ -234,7 +234,7 @@ enum gtf_t {
 
 extern int _gt[GT_NUM_GAMETYPES];
 
-// [MuffMode] Selecting Rocket Arena is not enough to activate its gameplay.
+// [MuffMode] Selecting MuffMode Arena is not enough to activate its gameplay.
 // Until the current entity lump passes the RA2 map contract, all normal
 // gameplay queries see FFA while registration/configuration code can use
 // GT_RAW to inspect the requested cvar value.
@@ -296,7 +296,7 @@ constexpr const char *gt_long_name[GT_NUM_GAMETYPES] = {
 	"ProBall",
 	"Instagib",
 	"NadeFest",
-	"Rocket Arena"
+	"MuffMode Arena"
 };
 
 typedef enum {
@@ -2443,6 +2443,7 @@ extern cvar_t *g_arena_ammo_rockets;
 extern cvar_t *g_arena_ammo_cells;
 extern cvar_t *g_arena_ammo_slugs;
 extern cvar_t *g_arena_config;
+extern cvar_t *g_arena_legacy_idmap;
 extern cvar_t *g_arena_default_type;
 extern cvar_t *g_arena_health_protect;
 extern cvar_t *g_arena_armor_protect;

@@ -44,7 +44,7 @@ int ContentLimit(int num_entries)
 
 void SetText(menu_t &entry, std::string_view text)
 {
-	muffmode::CopyString(entry.text, text);
+	P_Menu_SetText(&entry, text);
 }
 
 void SetText(menu_t *entry, std::string_view text)
@@ -59,6 +59,8 @@ bool CopyHostPlayerName(char *value, size_t value_size)
 		return false;
 
 	value[0] = '\0';
+	if (muffmode::CvarEnabled(g_dedicated))
+		return false;
 	if (!g_entities || game.maxclients <= 0 || !g_entities[1].client)
 		return false;
 
@@ -122,7 +124,6 @@ void Open(gentity_t *ent);
 
 namespace muffmode::menu::info {
 void ReturnToMain(gentity_t *ent, menu_hnd_t *p);
-void OpenFollowCamera(gentity_t *ent, menu_hnd_t *p);
 void OpenHost(gentity_t *ent, menu_hnd_t *p);
 void OpenServer(gentity_t *ent, menu_hnd_t *p);
 }
@@ -331,6 +332,7 @@ const menu_t settings_menu_template[] = {
 	{ "", MENU_ALIGN_LEFT, nullptr },
 	{ "$g_pc_return", MENU_ALIGN_LEFT, menu::info::ReturnToMain }
 };
+static_assert(std::size(settings_menu_template) == MENU_MAX_ROWS);
 
 void OpenSettings(gentity_t *ent, menu_hnd_t *p)
 {
@@ -410,6 +412,7 @@ menu_t admin_menu[] = {
 	{ "", MENU_ALIGN_LEFT, nullptr },
 	{ "$g_pc_return", MENU_ALIGN_LEFT, menu::info::ReturnToMain }
 };
+static_assert(std::size(admin_menu) == MENU_MAX_ROWS);
 
 void Open(gentity_t *ent, menu_hnd_t *p)
 {
@@ -473,6 +476,7 @@ const menu_t match_stats_menu[] = {
 	{ "", MENU_ALIGN_LEFT, nullptr },
 	{ "$g_pc_return", MENU_ALIGN_LEFT, menu::info::ReturnToMain }
 };
+static_assert(std::size(match_stats_menu) == MENU_MAX_ROWS);
 
 void Update(gentity_t *ent)
 {
@@ -496,13 +500,12 @@ void Update(gentity_t *ent)
 		static_cast<uint32_t>(MS_Value(ent->client, MSTAT_DEATHS_TOTAL)),
 	};
 	MenuWriter writer{ entries, num_entries };
-	std::array<char, MAX_INFO_VALUE> value = {};
-	menu::CopyHostPlayerName(value);
 
 	writer.Add("Player Stats for Match");
+	writer.Add("");
 
-	if (value[0])
-		writer.Add(G_Fmt("{}", value.data()).data());
+	if (ent->client->resp.netname[0])
+		writer.Add(ent->client->resp.netname);
 
 	writer.Add(menu::kBreaker);
 
@@ -583,20 +586,19 @@ constexpr std::array<const char *, 4> kSkinChoices = {
 
 const menu_t kPlayerConfigMenuTemplate[] = {
 	{ "*Player Config", MENU_ALIGN_CENTER, nullptr },
-	{ "\35\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\37", MENU_ALIGN_CENTER, nullptr },
+	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "*Choose a section", MENU_ALIGN_LEFT, nullptr },
 	{ "Display & Audio", MENU_ALIGN_LEFT, OpenDisplay },
 	{ "Spectator & Follow", MENU_ALIGN_LEFT, OpenSpectator },
 	{ "Skin Overrides", MENU_ALIGN_LEFT, OpenSkins },
 	{ "", MENU_ALIGN_LEFT, nullptr },
 	{ "*Changes save automatically", MENU_ALIGN_CENTER, nullptr },
-	{ "Move: navigate  Attack: select", MENU_ALIGN_CENTER, nullptr },
 	{ "$g_pc_return", MENU_ALIGN_LEFT, menu::info::ReturnToMain }
 };
 
 const menu_t kDisplayMenuTemplate[] = {
 	{ "*Display & Audio", MENU_ALIGN_CENTER, nullptr },
-	{ "\35\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\37", MENU_ALIGN_CENTER, nullptr },
+	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_LEFT, ToggleShowId },
 	{ "", MENU_ALIGN_LEFT, ToggleTimer },
 	{ "", MENU_ALIGN_LEFT, ToggleMatchInfo },
@@ -612,7 +614,7 @@ const menu_t kDisplayMenuTemplate[] = {
 
 const menu_t kSpectatorMenuTemplate[] = {
 	{ "*Spectator & Follow", MENU_ALIGN_CENTER, nullptr },
-	{ "\35\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\37", MENU_ALIGN_CENTER, nullptr },
+	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_LEFT, ToggleFollowView },
 	{ "", MENU_ALIGN_LEFT, ToggleFollowKiller },
 	{ "", MENU_ALIGN_LEFT, ToggleFollowLeader },
@@ -626,7 +628,7 @@ const menu_t kSpectatorMenuTemplate[] = {
 
 const menu_t kSkinMenuTemplate[] = {
 	{ "*Skin Overrides", MENU_ALIGN_CENTER, nullptr },
-	{ "\35\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\37", MENU_ALIGN_CENTER, nullptr },
+	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_LEFT, CycleEnemySkin },
 	{ "", MENU_ALIGN_LEFT, CycleTeamSkin },
 	{ "", MENU_ALIGN_LEFT, nullptr },
@@ -937,51 +939,48 @@ void ToggleReady(gentity_t *ent, menu_hnd_t *)
 	MM_ToggleReadyUp(ent);
 }
 
-constexpr int kGametypeName = 0;
-constexpr int kLevel = 1;
-constexpr int kMatch = 2;
+constexpr int kHostname = 0;
+constexpr int kGametypeName = 1;
+constexpr int kLevel = 2;
+constexpr int kMatch = 3;
 
-constexpr int kTeamsJoinRed = 4;
-constexpr int kTeamsJoinBlue = 5;
-constexpr int kTeamsFollow = 8;
-constexpr int kTeamsReadyUp = 9;
-constexpr int kTeamsPlayerSettings = 11;
-constexpr int kTeamsCallVote = 12;
-constexpr int kTeamsPlayerStats = 13;
-constexpr int kTeamsAdmin = 16;
+constexpr int kTeamsJoinRed = 5;
+constexpr int kTeamsJoinBlue = 6;
+constexpr int kTeamsReadyUp = 8;
+constexpr int kTeamsPlayerSettings = 9;
+constexpr int kTeamsCallVote = 10;
+constexpr int kTeamsPlayerStats = 11;
+constexpr int kTeamsAdmin = 14;
 
-constexpr int kFreeJoin = 4;
-constexpr int kFreeArenaLobby = 5;
-constexpr int kFreeSpectate = 6;
-constexpr int kFreeFollow = 8;
-constexpr int kFreeReadyUp = 9;
-constexpr int kFreePlayerSettings = 11;
-constexpr int kFreeCallVote = 12;
-constexpr int kFreePlayerStats = 13;
-constexpr int kFreeAdmin = 16;
+constexpr int kFreeJoin = 5;
+constexpr int kFreeArenaLobby = 6;
+constexpr int kFreeSpectate = 7;
+constexpr int kFreeReadyUp = 8;
+constexpr int kFreePlayerSettings = 9;
+constexpr int kFreeCallVote = 10;
+constexpr int kFreePlayerStats = 11;
+constexpr int kFreeAdmin = 14;
 
-constexpr int kGameMod = 18;
-constexpr int kNotice = 19;
+constexpr int kGameMod = 16;
+constexpr int kNotice = 17;
 
 const menu_t kTeamsMenuTemplate[] = {
 	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_CENTER, nullptr },
-	{ "\35\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\37", MENU_ALIGN_CENTER, nullptr },
+	{ "", MENU_ALIGN_CENTER, nullptr },
+	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "$g_pc_join_red_team", MENU_ALIGN_LEFT, JoinRed },
 	{ "$g_pc_join_blue_team", MENU_ALIGN_LEFT, JoinBlue },
 	{ "Spectate", MENU_ALIGN_LEFT, JoinSpectator },
-	{ "", MENU_ALIGN_LEFT, nullptr },
-	{ "Follow Player", MENU_ALIGN_LEFT, menu::info::OpenFollowCamera },
 	{ "", MENU_ALIGN_LEFT, nullptr },  // Ready Up (set dynamically)
-	{ "", MENU_ALIGN_LEFT, nullptr },
 	{ "Player Config", MENU_ALIGN_LEFT, menu::player_settings::Open },
 	{ "Call a Vote", MENU_ALIGN_LEFT, ::G_Menu_CallVote },
 	{ "Player Stats", MENU_ALIGN_LEFT, menu::stats::Open },
 	{ "Server Info", MENU_ALIGN_LEFT, menu::info::OpenHost },
 	{ "Match Info", MENU_ALIGN_LEFT, menu::info::OpenServer },
 	{ "", MENU_ALIGN_LEFT, nullptr },
-	{ "Move: navigate  Attack: select", MENU_ALIGN_CENTER, nullptr },
+	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_CENTER, nullptr }
 };
@@ -990,41 +989,29 @@ const menu_t kFreeMenuTemplate[] = {
 	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_CENTER, nullptr },
-	{ "\35\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\37", MENU_ALIGN_CENTER, nullptr },
+	{ "", MENU_ALIGN_CENTER, nullptr },
+	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "Join Game", MENU_ALIGN_LEFT, JoinFree },
 	{ "", MENU_ALIGN_LEFT, nullptr },
 	{ "Spectate", MENU_ALIGN_LEFT, JoinSpectator },
-	{ "", MENU_ALIGN_LEFT, nullptr },
-	{ "Follow Player", MENU_ALIGN_LEFT, menu::info::OpenFollowCamera },
 	{ "", MENU_ALIGN_LEFT, nullptr },  // Ready Up (set dynamically)
-	{ "", MENU_ALIGN_LEFT, nullptr },
 	{ "Player Config", MENU_ALIGN_LEFT, menu::player_settings::Open },
 	{ "Call a Vote", MENU_ALIGN_LEFT, ::G_Menu_CallVote },
 	{ "Player Stats", MENU_ALIGN_LEFT, menu::stats::Open },
 	{ "Server Info", MENU_ALIGN_LEFT, menu::info::OpenHost },
 	{ "Match Info", MENU_ALIGN_LEFT, menu::info::OpenServer },
 	{ "", MENU_ALIGN_LEFT, nullptr },
-	{ "Move: navigate  Attack: select", MENU_ALIGN_CENTER, nullptr },
+	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_CENTER, nullptr }
 };
 
-static_assert(std::size(kTeamsMenuTemplate) == 20);
-static_assert(std::size(kFreeMenuTemplate) == 20);
+static_assert(std::size(kTeamsMenuTemplate) == MENU_MAX_ROWS);
+static_assert(std::size(kFreeMenuTemplate) == MENU_MAX_ROWS);
 
 } // namespace muffmode::menu::join
 
 namespace muffmode::menu::info {
-
-const menu_t kNoFollowMenuTemplate[] = {
-	{ "", MENU_ALIGN_CENTER, nullptr },
-	{ "", MENU_ALIGN_CENTER, nullptr },
-	{ "", MENU_ALIGN_CENTER, nullptr },
-	{ "", MENU_ALIGN_CENTER, nullptr },
-	{ "No players to follow", MENU_ALIGN_LEFT, nullptr },
-	{ "", MENU_ALIGN_CENTER, nullptr },
-	{ "$g_pc_return", MENU_ALIGN_LEFT, ReturnToMain }
-};
 
 const menu_t kHostMenuTemplate[] = {
 	{ "", MENU_ALIGN_CENTER, nullptr },
@@ -1068,39 +1055,8 @@ const menu_t kServerMenuTemplate[] = {
 	{ "$g_pc_return", MENU_ALIGN_LEFT, ReturnToMain }
 };
 
-void UpdateNoFollow(gentity_t *ent)
-{
-	menu_t *entries = nullptr;
-	int num_entries = 0;
-	if (!menu::GetEntries(ent, &entries, &num_entries) || menu::ContentLimit(num_entries) < 3)
-		return;
-
-	menu::SetGamemodName(&entries[0]);
-	menu::SetGametypeName(&entries[1]);
-	menu::SetLevelName(&entries[2]);
-}
-
-void OpenFollowCamera(gentity_t *ent, menu_hnd_t *)
-{
-	if (!menu::HasClient(ent))
-		return;
-
-	SetTeam(ent, TEAM_SPECTATOR, false, false, false);
-
-	if (ent->client->follow_target) {
-		FreeFollower(ent);
-		P_Menu_Close(ent);
-		return;
-	}
-
-	GetFollowTarget(ent);
-
-	P_Menu_Close(ent);
-	if (ent->client->follow_target)
-		return;
-
-	P_Menu_Open(ent, kNoFollowMenuTemplate, -1, muffmode::CountAsInt(kNoFollowMenuTemplate), nullptr, UpdateNoFollow);
-}
+static_assert(std::size(kHostMenuTemplate) == MENU_MAX_ROWS);
+static_assert(std::size(kServerMenuTemplate) == MENU_MAX_ROWS);
 
 void ReturnToMain(gentity_t *ent, menu_hnd_t *)
 {
@@ -1120,38 +1076,30 @@ void UpdateHost(gentity_t *ent)
 		return;
 	const int content_limit = menu::ContentLimit(num_entries);
 
-	int		i = 0;
+	for (int row = 0; row < content_limit; row++)
+		menu::SetText(entries[row], "");
 
+	menu::SetText(entries[0], "*Server Info");
+	int i = 2;
 	const char *server_name = muffmode::CvarString(hostname);
-	if (server_name[0] && i + 2 < content_limit) {
-		menu::SetText(entries[i], "Server Name:");
-		i++;
-		menu::SetText(entries[i], server_name);
-		i++;
+	if (server_name[0] && i < content_limit) {
+		menu::SetText(entries[i], G_Fmt("Server: {}", server_name).data());
 		i++;
 	}
 
-	if (i + 2 < content_limit) {
+	if (i < content_limit) {
 		std::array<char, MAX_INFO_VALUE> value = {};
-
 		if (menu::CopyHostPlayerName(value)) {
-			menu::SetText(entries[i], "Host:");
-			i++;
-			menu::SetText(entries[i], value.data());
-			i++;
+			menu::SetText(entries[i], G_Fmt("Host: {}", value.data()).data());
 			i++;
 		}
 	}
 
-	if (game.motd.size() && i < content_limit) {
-		menu::SetText(entries[i], "Message of the Day:");
+	if (game.motd.size() && i + 2 < content_limit) {
 		i++;
-		// 26 char line width
-		// 9 lines
-		// = 234
-
-		if (i < content_limit)
-			menu::SetText(entries[i], G_Fmt("{}", game.motd.c_str()).data());
+		menu::SetText(entries[i], "*Message of the Day");
+		i++;
+		menu::SetText(entries[i], game.motd.c_str());
 	}
 }
 
@@ -1174,6 +1122,9 @@ void UpdateServer(gentity_t *ent)
 	if (content_limit < 3)
 		return;
 
+	for (int row = 0; row < content_limit; row++)
+		menu::SetText(entries[row], "");
+
 	int		i = 0;
 	bool	limits = false;
 	const bool global_modifiers = notGT(GT_ARENA);
@@ -1181,11 +1132,8 @@ void UpdateServer(gentity_t *ent)
 	bool	items = ItemSpawnsEnabled();
 	int		scorelimit = GT_ScoreLimit();
 	
-	menu::SetText(entries[i], "Match Info");
-	i++;
-
-	menu::SetText(entries[i], menu::kBreaker);
-	i++;
+	menu::SetText(entries[i], "*Match Info");
+	i += 2;
 
 	menu::SetText(entries[i], level.gametype_name);
 	i++;
@@ -1286,7 +1234,7 @@ void UpdateServer(gentity_t *ent)
 		if (i >= content_limit) return;
 		menu::SetText(entries[i], "infinite ammo");
 		i++;
-	} else if (g_infinite_ammo->integer && !infiniteammo) {
+	} else if (global_modifiers && g_infinite_ammo->integer) {
 		if (i >= content_limit) return;
 		menu::SetText(entries[i], "infinite ammo");
 		i++;
@@ -1425,8 +1373,10 @@ void UpdateGameRules(gentity_t *ent)
 
 	int		i = 0;
 
-	menu::SetText(entries[i], "Game Rules"); i++;
-	menu::SetText(entries[i], menu::kBreaker); i++;
+	for (int row = 0; row < menu::ContentLimit(num_entries); row++)
+		menu::SetText(entries[row], "");
+
+	menu::SetText(entries[i], "*Game Rules"); i += 2;
 	menu::SetText(entries[i], G_Fmt("{}", level.gametype_name).data()); i++;
 }
 
@@ -1483,28 +1433,29 @@ void Update(gentity_t *ent)
 		if (arena_id > 0 && MM_Arena_ValidId(arena_id)) {
 			const bool roster_locked = MM_Arena_RosterLocked(ent);
 			const std::string room_label = muffmode::TruncateWithEllipsis(
-				G_Fmt("Arena {}: {}", arena_id, MM_Arena_Name(arena_id)), 26);
+				G_Fmt("Room {}: {}", arena_id, MM_Arena_Name(arena_id)),
+				MENU_MAX_LINE_CHARS);
 			menu::SetText(entries[kMatch], room_label);
 
 			menu::SetText(entries[kFreeJoin], roster_locked
-				? "Change Arena (locked)" : "Change Arena");
+				? "Change Room (locked)" : "Change Room");
 			entries[kFreeJoin].SelectFunc =
 				roster_locked ? nullptr : OpenArenaRooms;
 			if (MM_Arena_UsesTeams(ent)) {
-				menu::SetText(entries[kFreeArenaLobby], "Teams & Line");
+				menu::SetText(entries[kFreeArenaLobby], "Teams & Queue");
 				entries[kFreeArenaLobby].SelectFunc = OpenArenaTeams;
 			} else {
 				menu::SetText(entries[kFreeArenaLobby], "");
 				entries[kFreeArenaLobby].SelectFunc = nullptr;
 			}
 			menu::SetText(entries[kFreeSpectate], roster_locked
-				? "Return Lobby (locked)" : "Return to Lobby");
+				? "Arena Rooms (locked)" : "Return to Arena Rooms");
 			entries[kFreeSpectate].SelectFunc =
 				roster_locked ? nullptr : ReturnArenaLobby;
 		} else {
-			menu::SetText(entries[kMatch], "Arena Lobby");
+			menu::SetText(entries[kMatch], "Arena Rooms");
 			menu::SetText(entries[kFreeJoin],
-				G_Fmt("Choose Arena ({})", MM_Arena_Count()));
+				G_Fmt("Choose Room ({})", MM_Arena_Count()));
 			entries[kFreeJoin].SelectFunc = OpenArenaRooms;
 			menu::SetText(entries[kFreeArenaLobby], "");
 			entries[kFreeArenaLobby].SelectFunc = nullptr;
@@ -1587,13 +1538,7 @@ void Update(gentity_t *ent)
 		}
 	}
 
-	int index = teams ? kTeamsFollow : kFreeFollow;
-	if (ent->client->follow_target)
-		menu::SetText(entries[index], "Stop Following");
-	else
-		menu::SetText(entries[index], "Follow Player");
-
-	index = teams ? kTeamsReadyUp : kFreeReadyUp;
+	int index = teams ? kTeamsReadyUp : kFreeReadyUp;
 	if (arena_active && MM_Arena_CanToggleReady(ent)) {
 		menu::SetText(entries[index],
 			ent->client->resp.ready ? "Not Ready" : "Ready Up");
@@ -1607,6 +1552,7 @@ void Update(gentity_t *ent)
 		entries[index].SelectFunc = nullptr;
 	}
 
+	menu::SetHostName(entries + kHostname);
 	menu::SetGametypeName(entries + kGametypeName);
 	menu::SetLevelName(entries + kLevel);
 
@@ -1666,9 +1612,12 @@ void Open(gentity_t *ent)
 		else
 			team = brandom() ? TEAM_RED : TEAM_BLUE;
 
-		P_Menu_Open(ent, kTeamsMenuTemplate, team, muffmode::CountAsInt(kTeamsMenuTemplate), nullptr, Update);
+		const int initial_row =
+			team == TEAM_BLUE ? kTeamsJoinBlue : kTeamsJoinRed;
+		P_Menu_Open(ent, kTeamsMenuTemplate, initial_row,
+			muffmode::CountAsInt(kTeamsMenuTemplate), nullptr, Update);
 	} else {
-		P_Menu_Open(ent, kFreeMenuTemplate, arena_active ? kFreeJoin : TEAM_FREE,
+		P_Menu_Open(ent, kFreeMenuTemplate, kFreeJoin,
 			muffmode::CountAsInt(kFreeMenuTemplate), nullptr, Update);
 	}
 }

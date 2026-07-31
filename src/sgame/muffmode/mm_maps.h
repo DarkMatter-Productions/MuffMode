@@ -48,6 +48,18 @@ inline bool IsSafeMapTokenText(std::string_view mapname, size_t max_qpath) noexc
 	return is_safe_segment(mapname.substr(segment_start));
 }
 
+inline bool IsSafeChangeLevelTokenText(std::string_view changemap, size_t max_qpath) noexcept
+{
+	// A leading '*' is the engine's legitimate end-of-unit marker. Keep it
+	// out of the map token itself so no other '*' can reach AddCommandString.
+	if (changemap.empty() || changemap.size() >= max_qpath)
+		return false;
+	if (changemap.front() == '*')
+		changemap.remove_prefix(1);
+
+	return IsSafeMapTokenText(changemap, max_qpath);
+}
+
 // Typed helpers for internal MuffMode systems that need the sanitized map pool/list.
 std::vector<std::string> CollectConfiguredMaps();
 bool ContainsConfiguredMap(const char *mapname);

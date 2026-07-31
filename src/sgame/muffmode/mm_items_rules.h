@@ -7,10 +7,16 @@
 
 struct gentity_t;
 struct gitem_t;
+struct gtime_t;
 enum item_id_t : int32_t;
 enum item_flags_t : uint32_t;
 
 // [MuffMode] Ruleset-specific item pickup, respawn, inhibit, and autoswitch rules.
+inline bool MM_ItemTouchClientMayPickup(bool client_playing, int health, bool frozen)
+{
+	return client_playing && health >= 1 && !frozen;
+}
+
 void MM_GetItemInhibitMode(item_flags_t flags, bool &add, bool &subtract);
 void MM_ClearItemInhibitFlags();
 

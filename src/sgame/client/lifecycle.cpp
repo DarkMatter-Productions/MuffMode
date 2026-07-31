@@ -1734,6 +1734,13 @@ void ClientDisconnect(gentity_t *ent) {
 		gi.unlinkentity(ent);
 		ent->s.modelindex = 0;
 		ent->solid = SOLID_NOT;
+		// End this client-entity lifetime explicitly. Client slots are not passed
+		// through G_FreeEntity, so delayed callbacks need the same generation
+		// change before a later connection can reuse the slot.
+		if (ent->spawn_count == std::numeric_limits<int32_t>::max())
+			ent->spawn_count = std::numeric_limits<int32_t>::min();
+		else
+			ent->spawn_count++;
 		ent->inuse = false;
 		ent->sv.init = false;
 		ent->classname = "disconnected";
