@@ -7,6 +7,7 @@
 #include "muffmode/mm_arena.h"
 #include "muffmode/mm_captain.h"
 #include "muffmode/mm_gametype.h"
+#include "muffmode/mm_map_pool.h"
 #include "muffmode/mm_maps.h"
 #include "muffmode/mm_match.h"
 #include "muffmode/mm_parse.h"
@@ -201,11 +202,13 @@ void MM_UpdateActiveVote()
 
 bool MM_IsMapValidImpl(const char *mapname)
 {
+	MM_HandleMapPoolCvarChanges();
 	return muffmode::maps::ContainsConfiguredMap(mapname);
 }
 
 void MM_PrintAvailableMaps(gentity_t *ent)
 {
+	MM_HandleMapPoolCvarChanges();
 	std::vector<std::string> all_maps = muffmode::maps::CollectConfiguredMaps();
 
 	if (all_maps.empty())
@@ -597,16 +600,18 @@ void MM_VotePassMap()
 		level.vote_state.arg.c_str(), (int)level.vote_state.arg.length(),
 		(void *)level.vote_state.arg.c_str());
 
-	if (!MM_IsSafeMapToken(level.vote_state.arg.c_str()) ||
-		level.vote_state.arg.length() >= sizeof(level.nextmap) ||
-		!muffmode::maps::ContainsConfiguredMap(level.vote_state.arg.c_str()))
+	MM_HandleMapPoolCvarChanges();
+	std::string resolved_map;
+	if (!muffmode::maps::ResolveConfiguredMap(
+			level.vote_state.arg.c_str(), resolved_map) ||
+		resolved_map.size() >= sizeof(level.nextmap))
 	{
 		gi.LocBroadcast_Print(PRINT_HIGH, "Map vote failed: map is no longer available.\n");
 		vote::MM_MarkExecutingVoteFailed();
 		return;
 	}
 
-	muffmode::CopyString(level.nextmap, level.vote_state.arg);
+	muffmode::CopyString(level.nextmap, resolved_map);
 	MuffModeLog("DEBUG", "Vote_Pass_Map: queuing gamemap for '%s'", level.nextmap);
 	gi.AddCommandString(G_Fmt("gamemap \"{}\"\n", level.nextmap).data());
 }

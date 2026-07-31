@@ -8,6 +8,9 @@ This project uses [VERSION](../VERSION) as the release version source of truth. 
 
 The release script is [scripts/release.ps1](../scripts/release.ps1). It builds a beta zip package shaped like the `muffmode-0.22.15-beta.zip` release asset, plus a Windows installer asset:
 
+Run it with PowerShell 7 (`pwsh`). The script enforces that prerequisite before
+doing version, build, or packaging work.
+
 ```text
 muffmode-<version>-beta/
   README.html

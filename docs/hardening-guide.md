@@ -1,5 +1,9 @@
 # MuffMode Hardening Guide
 
+Run the PowerShell gates in PowerShell 7 (`pwsh`); the push verifier enforces
+this up front so its JSON and staged-asset checks cannot fail late under
+Windows PowerShell 5.1.
+
 [README](../README.md) | [Build Guide](build-guide.md) | [Build Matrix](build-matrix.md) | [Release Process](release-process.md)
 
 This guide is the contributor-facing entrypoint for robustness checks. Run the same scripts locally that CI runs.
@@ -30,11 +34,13 @@ Use `-IncludeAnalysis` and `-IncludeSanitizers` for slower local parity with the
 
 ```powershell
 ./scripts/ci/check-generated-artifacts.ps1
+./scripts/ci/check-map-pool-examples.ps1
 ./scripts/ci/check-changelog.ps1
 ./scripts/ci/check-test-assets.ps1 -RepoOnly
 ./scripts/ci/check-dependency-inventory.ps1
 ./scripts/ci/check-regression-corpus.ps1
 ./scripts/ci/run-host-tests.ps1 -Configuration Release -Platform x64
+./scripts/ci/run-updater-tests.ps1 -Configuration Release
 ./scripts/ci/build-msbuild.ps1 -Configuration Release -Platform x64 -TreatWarningsAsErrors -BinaryLog
 ```
 
@@ -63,12 +69,13 @@ AddressSanitizer is the blocking sanitizer build on the Windows/MSBuild path. Un
 
 ## Tests And Fuzzing
 
-Host tests cover parser helpers, command argument contracts, vote/config parsing, Red Rover rules, scoreboard footer safety, and fake import boundaries.
+Host tests cover parser helpers, command argument contracts, vote/config parsing, Red Rover rules, scoreboard footer safety, and fake import boundaries. The dependency-free updater harness exercises exact-hash obsolete-file removal, preservation cases, path containment, and deferred self-update cleanup wiring.
 
 Regression and fuzz corpora live under `docs-dev/test-assets/` and `tests/fuzz/`.
 
 ```powershell
 ./scripts/ci/run-host-tests.ps1 -Configuration Release -Platform x64
+./scripts/ci/run-updater-tests.ps1 -Configuration Release
 ./scripts/ci/check-regression-corpus.ps1
 ./scripts/ci/build-fuzz-targets.ps1 -AllowUnsupported
 ```

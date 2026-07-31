@@ -1,3 +1,5 @@
+#requires -Version 7.0
+
 [CmdletBinding()]
 param(
     [ValidateSet("auto", "major", "minor", "patch", "latch")]
@@ -2375,7 +2377,7 @@ function Assert-ReleasePackageContents {
         "rerelease\baseq2\docs\muffmode\maps\original-readmes\ztn2dm2-readme.txt",
         "rerelease\baseq2\docs\muffmode\maps\original-readmes\ztn2dm3-readme.txt",
         "rerelease\baseq2\docs\muffmode\maps\original-readmes\ztn2dm5-readme.txt",
-        "rerelease\maps\mm-aerowalk.bsp",
+        "rerelease\maps\mm-aerow.bsp",
         "rerelease\maps\mm-coldzero.bsp",
         "rerelease\maps\mm-crucible.bsp",
         "rerelease\maps\mm-kmachine.bsp",
@@ -2714,6 +2716,10 @@ function New-ReleasePackage {
 
     Assert-ReleasePackageContents -PackageRoot $packageRoot
     Assert-ExistingUpdaterCompatiblePackageRoot -PackageRoot $packageRoot
+
+    Write-Step "Validating staged map-pool and BSP assets"
+    & (Resolve-RepoPath "scripts/ci/check-map-pool-examples.ps1") `
+        -PackageRoot $packageRoot
 
     $zipPath = Join-Path $outputRootAbs "$packageName.zip"
     if (Test-Path -LiteralPath $zipPath) {

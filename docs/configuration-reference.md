@@ -513,8 +513,11 @@ set g_maps_repeat_delay "1800"
 ```
 
 Only safe leaf filenames are accepted for these two cvars; paths and traversal
-segments are rejected. Map identifiers inside the files may use safe
-subdirectories such as `q64/dm1`.
+segments are rejected. Pool identifiers are portable lowercase ASCII BSP stems
+with forward slashes, so safe subdirectories such as `q64/dm1` work on both
+case-sensitive and Windows hosts. Do not add `maps/`, `.bsp`, cinematic/demo
+suffixes, Windows device names, or engine map-command markers such as `+` and
+`$`.
 
 The JSON root must contain a `maps` array. Each usable entry requires a safe
 `bsp` string and at least one true mode flag:
@@ -540,7 +543,7 @@ Supported fields are:
 
 | Field | Required | Meaning |
 | --- | --- | --- |
-| `bsp` | yes | Safe map identifier, without `.bsp`. Duplicate identifiers are matched case-insensitively and the first valid entry wins. |
+| `bsp` | yes | Canonical lowercase ASCII map identifier with forward slashes and without `maps/` or `.bsp`. Player lookups remain case/slash-insensitive; duplicate identifiers keep the first valid entry. |
 | `dm`, `tdm`, `ctf`, `duel`, `arena` | one or more | Boolean mode-suitability flags. CTF and Arena always require their matching flags. Duel/TDM tags are preferred when present, with generic `dm` maps used as fallback at every eligibility tier. |
 | `title` | no | Display title; defaults to `bsp`. |
 | `episode` | no | Display/filter grouping such as `baseq2`, `rogue`, or `muffmode`. |
@@ -549,11 +552,12 @@ Supported fields are:
 | `custom`, `custom_textures`, `custom_sounds` | no | Catalog metadata. Either asset flag also marks the entry as custom. |
 
 The cycle is an ordered whitespace-separated list of `bsp` identifiers from
-the pool. It accepts `//` line comments and `/* ... */` block comments,
-removes case-insensitive duplicates, and ignores safe names not found in the
-pool. With `g_maps_random 0`, the order determines the next eligible map. With
-`g_maps_random 1`, the cycle is the eligible set and `popular` supplies the
-only extra weighting.
+the pool. It accepts an optional UTF-8 BOM, `//` line comments, and `/* ... */`
+block comments, removes case/slash-insensitive duplicates, and ignores safe
+names not found in the pool. Stray or unterminated block-comment delimiters
+fail the cycle instead of being guessed. With `g_maps_random 0`, the order
+determines the next eligible map. With `g_maps_random 1`, the cycle is the
+eligible set and `popular` supplies the only extra weighting.
 
 Selection uses the requested raw gametype, so a transition into Arena can
 choose an `arena`-tagged map before that mode becomes effective. It first
@@ -563,6 +567,12 @@ the repeat delay and then player bounds, but it always excludes the current
 map. If no other compatible cycle entry remains, normal legacy `g_map_list`
 transition handling continues.
 
+An explicit gametype change is the one exception to next-map ordering: ordered
+selection begins at the first compatible cycle entry, matching the legacy
+"first map after the new gametype config" behavior. That path may reload the
+current map when it is the first compatible entry; random selection still
+chooses from the eligible set.
+
 The structured and legacy systems interoperate as follows:
 
 | Structured state | Voting and MyMap source | Automatic rotation |
@@ -571,16 +581,26 @@ The structured and legacy systems interoperate as follows:
 | Valid pool, but no valid cycle | Structured pool | Legacy `g_map_list` |
 | Valid pool and cycle | Structured pool | Structured cycle, then legacy `g_map_list` if no eligible map can be selected |
 
-Malformed roots and oversized inputs fail closed. Invalid individual pool
-entries and unusable cycle tokens are skipped with bounded diagnostics; a pool
-with no usable multiplayer entries or a cycle with no recognized entries
-fails. Once a structured snapshot is active, a failed live reload keeps that
-complete last-known-good snapshot. On the first load, a valid pool is still
-published if its configured cycle is invalid, so structured voting/MyMap works
-while legacy `g_map_list` handles rotation; if the pool itself is invalid,
-both uses remain legacy. Clearing `g_maps_cycle_file` disables only the
-structured cycle. Clearing `g_maps_pool_file` disables the structured system
-immediately and returns both voting and rotation to legacy sources.
+Legacy fallback entries use the same safe BSP-stem identity rules as cycle
+entries, while retaining case-insensitive and slash-insensitive matching.
+Unsafe or non-map tokens are ignored instead of being sent to the engine.
+
+Malformed roots, unsupported root properties, and oversized inputs fail
+closed. Unsupported entry properties invalidate that entry so misspelled
+settings cannot silently change policy. Invalid individual pool entries and
+unusable cycle tokens are skipped with bounded diagnostics; a pool with no
+usable multiplayer entries or a cycle with no recognized entries fails.
+Titles and episodes must be well-formed UTF-8 without terminal, line-breaking,
+or bidirectional display controls. Once a structured snapshot is active, a
+failed live reload keeps that complete last-known-good snapshot. If a full
+pool-and-cycle transaction fails, a later cycle change or `load_mapcycle`
+retries the full transaction rather than combining the old pool with a new
+cycle. On the first load, a valid pool is still published if its configured
+cycle is invalid, so structured voting/MyMap works while legacy `g_map_list`
+handles rotation; if the pool itself is invalid, both uses remain legacy.
+Clearing `g_maps_cycle_file` disables only the structured cycle. Clearing
+`g_maps_pool_file` disables the structured system immediately and returns both
+voting and rotation to legacy sources, including during a match timeout.
 
 Players can inspect the active catalog with `mappool [filter]` and the active
 cycle with `mapcycle [filter]`. Filters match map identifiers, titles, and

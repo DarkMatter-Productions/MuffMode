@@ -94,8 +94,9 @@ state. After editing, an authenticated in-game admin can run `load_mappool`
 console, use `sv load_mappool` or `sv load_mapcycle`.
 
 The feature is deliberately optional. With no valid structured pool,
-`g_map_pool` and `g_map_list` behave as before. A valid pool without a valid
-cycle supplies voting/MyMap choices while `g_map_list` still rotates maps.
+the safe BSP-stem entries in `g_map_pool` and `g_map_list` remain active as
+the legacy fallback. A valid pool without a valid cycle supplies voting/MyMap
+choices while `g_map_list` still rotates maps.
 Even with an active cycle, an impossible mode selection falls through to
 `g_map_list`. Failed live reloads preserve an existing last-known-good
 snapshot. If the first pool load succeeds but its configured cycle fails, the

@@ -84,6 +84,7 @@ inline bool IsSafeChangeLevelTokenText(std::string_view changemap, size_t max_qp
 // Typed helpers for internal MuffMode systems that need the sanitized map pool/list.
 std::vector<std::string> CollectConfiguredMaps();
 bool ContainsConfiguredMap(const char *mapname);
+bool ResolveConfiguredMap(const char *mapname, std::string &resolved);
 
 } // namespace muffmode::maps
 

@@ -11,6 +11,24 @@ namespace MuffMode.Updater;
 
 internal readonly record struct InstallSyncResult(bool SelfUpdateHandoffStarted);
 
+internal enum ObsoleteFileCleanupDisposition
+{
+    Removed,
+    Absent,
+    PreservedDirectory,
+    PreservedReparsePoint,
+    PreservedLengthMismatch,
+    PreservedHashMismatch,
+    PreservedChanged,
+    PreservedUnsafeOrInaccessible,
+    RemovalFailed
+}
+
+internal readonly record struct ObsoleteFileCleanupOutcome(
+    ObsoleteFileCleanupDisposition Disposition,
+    long? ActualLength = null,
+    Exception? Error = null);
+
 internal static partial class InstallationManager
 {
     internal const string SingleInstanceMutexName = @"Local\DarkMatterProductions.MuffMode.Updater";
@@ -18,6 +36,10 @@ internal static partial class InstallationManager
     private const string MarkerJsonFileName = "muffmode-version.json";
     private const string MarkerTextFileName = "muffmode.version";
     private const string UpdaterExecutableFileName = "MuffModeUpdater.exe";
+    private const string ObsoleteAerowalkMapRelativePath = @"rerelease\maps\mm-aerowalk.bsp";
+    private const long ObsoleteAerowalkMapLength = 761_416;
+    private const string ObsoleteAerowalkMapSha256 =
+        "8fd4ab55fe63e3ac4f0fa0f117c64a5d4610a386979750a6cb09e361b1d37904";
     private const string SelfUpdateStagingDirectoryName = ".muffmode-updater-staging";
     private const string ApplySelfUpdateArgument = "--muffmode-apply-self-update";
     private const string CleanupSelfUpdateArgument = "--muffmode-cleanup-self-update";
@@ -505,6 +527,7 @@ internal static partial class InstallationManager
             VerifyInstallPlanApplied(installPlan);
             WriteInstalledMarker(normalizedInstallPath, release, packageMarker, packageSha256, installPlan, backupFileName);
             VerifyInstalledMarker(normalizedInstallPath, release, packageMarker, packageSha256, installPlan);
+            CleanupObsoleteAerowalkMapBestEffort(normalizedInstallPath);
 
             if (pendingSelfUpdate is not null)
             {
@@ -3268,7 +3291,16 @@ internal static partial class InstallationManager
             helperProcessId,
             helperStartTimeUtcTicks,
             stagedPath);
-        DeleteStagedSelfUpdateFiles(installRoot, stagedPath, backupPath, token);
+        try
+        {
+            DeleteStagedSelfUpdateFiles(installRoot, stagedPath, backupPath, token);
+        }
+        finally
+        {
+            // The map migration is independent of staged-helper cleanup. Attempt it
+            // even if a locked helper or rollback file must be handled on a later run.
+            CleanupObsoleteAerowalkMapBestEffort(installRoot);
+        }
         UpdaterLog.WriteInfo("Completed deferred updater self-replacement and removed its staged helper and rollback copy.");
     }
 
@@ -4137,6 +4169,135 @@ internal static partial class InstallationManager
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             return false;
+        }
+    }
+
+    private static void CleanupObsoleteAerowalkMapBestEffort(string installPath)
+    {
+        var outcome = CleanupObsoleteFileBestEffort(
+            installPath,
+            ObsoleteAerowalkMapRelativePath,
+            ObsoleteAerowalkMapLength,
+            ObsoleteAerowalkMapSha256);
+
+        switch (outcome.Disposition)
+        {
+            case ObsoleteFileCleanupDisposition.Removed:
+                UpdaterLog.WriteInfo(
+                    $"Removed verified obsolete map payload: {ObsoleteAerowalkMapRelativePath}");
+                break;
+            case ObsoleteFileCleanupDisposition.Absent:
+                UpdaterLog.WriteInfo(
+                    $"Obsolete map cleanup was not needed; file is absent: {ObsoleteAerowalkMapRelativePath}");
+                break;
+            case ObsoleteFileCleanupDisposition.PreservedDirectory:
+                UpdaterLog.WriteInfo(
+                    $"Preserved obsolete map path because it is a directory: {ObsoleteAerowalkMapRelativePath}");
+                break;
+            case ObsoleteFileCleanupDisposition.PreservedReparsePoint:
+                UpdaterLog.WriteInfo(
+                    $"Preserved obsolete map path because it is a reparse point: {ObsoleteAerowalkMapRelativePath}");
+                break;
+            case ObsoleteFileCleanupDisposition.PreservedLengthMismatch:
+                UpdaterLog.WriteInfo(
+                    $"Preserved differently sized map at {ObsoleteAerowalkMapRelativePath} " +
+                    $"(found {outcome.ActualLength} bytes; obsolete payload is {ObsoleteAerowalkMapLength} bytes).");
+                break;
+            case ObsoleteFileCleanupDisposition.PreservedHashMismatch:
+                UpdaterLog.WriteInfo(
+                    $"Preserved differently hashed map at {ObsoleteAerowalkMapRelativePath}.");
+                break;
+            case ObsoleteFileCleanupDisposition.PreservedChanged:
+                UpdaterLog.WriteInfo(
+                    $"Preserved map because it changed during obsolete-file validation: {ObsoleteAerowalkMapRelativePath}");
+                break;
+            case ObsoleteFileCleanupDisposition.RemovalFailed:
+                UpdaterLog.WriteInfo(
+                    $"Obsolete map cleanup did not remove the path: {ObsoleteAerowalkMapRelativePath}");
+                break;
+            case ObsoleteFileCleanupDisposition.PreservedUnsafeOrInaccessible:
+                UpdaterLog.WriteException(
+                    $"Could not safely clean up obsolete map payload {ObsoleteAerowalkMapRelativePath}; continuing without removal.",
+                    outcome.Error ?? new IOException("The obsolete map cleanup failed without an exception detail."));
+                break;
+        }
+    }
+
+    internal static ObsoleteFileCleanupOutcome CleanupObsoleteFileBestEffort(
+        string installPath,
+        string relativePath,
+        long expectedLength,
+        string expectedSha256)
+    {
+        try
+        {
+            var obsoletePath = ResolvePathUnderRoot(
+                installPath,
+                relativePath,
+                "The obsolete-file cleanup path escaped the selected Quake 2 folder.");
+
+            // Detect a direct link before the general write-path validator rejects it,
+            // allowing callers to distinguish this safe preservation case.
+            if (IsReparsePoint(obsoletePath))
+            {
+                return new(ObsoleteFileCleanupDisposition.PreservedReparsePoint);
+            }
+
+            EnsureSafeInstallWritePath(
+                installPath,
+                obsoletePath,
+                "The obsolete-file cleanup path traversed a reparse point or escaped the selected Quake 2 folder.");
+
+            if (Directory.Exists(obsoletePath))
+            {
+                return new(ObsoleteFileCleanupDisposition.PreservedDirectory);
+            }
+
+            if (!File.Exists(obsoletePath))
+            {
+                return new(ObsoleteFileCleanupDisposition.Absent);
+            }
+
+            if (IsReparsePoint(obsoletePath))
+            {
+                return new(ObsoleteFileCleanupDisposition.PreservedReparsePoint);
+            }
+
+            var actualLength = new FileInfo(obsoletePath).Length;
+            if (actualLength != expectedLength)
+            {
+                return new(
+                    ObsoleteFileCleanupDisposition.PreservedLengthMismatch,
+                    ActualLength: actualLength);
+            }
+
+            var actualSha256 = ComputeFileSha256(obsoletePath);
+            if (!string.Equals(actualSha256, expectedSha256, StringComparison.OrdinalIgnoreCase))
+            {
+                return new(ObsoleteFileCleanupDisposition.PreservedHashMismatch);
+            }
+
+            // Revalidate immediately before deletion so a changed path or file is
+            // preserved rather than being treated as the shipped obsolete payload.
+            EnsureSafeInstallWritePath(
+                installPath,
+                obsoletePath,
+                "The obsolete-file cleanup path became unsafe before deletion.");
+            if (!FileMatchesTrustedSnapshot(obsoletePath, expectedLength, expectedSha256))
+            {
+                return new(ObsoleteFileCleanupDisposition.PreservedChanged);
+            }
+
+            File.Delete(obsoletePath);
+            return File.Exists(obsoletePath) || Directory.Exists(obsoletePath)
+                ? new(ObsoleteFileCleanupDisposition.RemovalFailed)
+                : new(ObsoleteFileCleanupDisposition.Removed);
+        }
+        catch (Exception ex)
+        {
+            return new(
+                ObsoleteFileCleanupDisposition.PreservedUnsafeOrInaccessible,
+                Error: ex);
         }
     }
 

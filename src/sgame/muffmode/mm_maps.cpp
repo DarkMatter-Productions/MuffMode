@@ -19,7 +19,10 @@ int s_map_list_shuffle_modified = -1;
 
 bool IsSafeMapToken(std::string_view mapname)
 {
-	return IsSafeMapTokenText(mapname, MAX_QPATH);
+	// Player/configured map identities must name a BSP stem. Keep engine
+	// transition syntax and state-file extensions confined to the dedicated
+	// changelevel parser instead of allowing them through the legacy fallback.
+	return map_pool::IsSafeStructuredMapIdentifier(mapname, MAX_QPATH);
 }
 
 bool IsSafeMapToken(const char *mapname)
@@ -60,6 +63,27 @@ bool ContainsConfiguredMap(const char *mapname)
 	});
 }
 
+bool ResolveConfiguredMap(const char *mapname, std::string &resolved)
+{
+	if (!IsSafeMapToken(mapname)) {
+		resolved.clear();
+		return false;
+	}
+
+	if (MM_StructuredMapPoolLoaded())
+		return MM_ResolveStructuredMapName(mapname, resolved);
+
+	const bool found = ForEachConfiguredMap([&](const char *configured) {
+		if (!MapTokensEqual(configured, mapname))
+			return false;
+		resolved = configured;
+		return true;
+	});
+	if (!found)
+		resolved.clear();
+	return found;
+}
+
 std::vector<std::string> CollectConfiguredMaps()
 {
 	if (MM_StructuredMapPoolLoaded())
@@ -83,9 +107,10 @@ std::vector<std::string> CollectConfiguredMaps()
 
 bool HasConfiguredMapSource()
 {
-	return MM_StructuredMapPoolLoaded() ||
-		CvarString(g_map_list)[0] ||
-		CvarString(g_map_pool)[0];
+	if (MM_StructuredMapPoolLoaded())
+		return true;
+
+	return ForEachConfiguredMap([](const char *) { return true; });
 }
 
 const char *ParseNextSafeMapToken(const char **text)
@@ -153,7 +178,7 @@ void MM_GametypeChangeMapFirst()
 
 	std::string structured_map;
 	const bool has_structured_map =
-		MM_SelectStructuredNextMap(structured_map);
+		MM_SelectStructuredCycleStartMap(structured_map);
 
 	// This executes AFTER the gametype config has set the new g_map_list.
 	// Shuffle the list if shuffle is enabled (mode 1 or 2).
@@ -303,8 +328,6 @@ bool MM_TryBeginIntermissionFromMapList()
 
 void MM_HandleMapShuffleCvarChange()
 {
-	MM_HandleMapPoolCvarChanges();
-
 	if (!g_map_list_shuffle)
 		return;
 
@@ -355,7 +378,7 @@ const mymap_modifier_t *MM_FindMyMapModifier(const char *name)
 
 void MM_MQ_Clear()
 {
-	if (!deathmatch)
+	if (!deathmatch || !deathmatch->integer)
 		return;
 
 	game.mapqueue.clear();
@@ -363,7 +386,7 @@ void MM_MQ_Clear()
 
 bool MM_MQ_Update()
 {
-	if (!deathmatch)
+	if (!deathmatch || !deathmatch->integer)
 		return false;
 
 	if (!muffmode::CvarInteger(g_allow_mymap))
@@ -375,28 +398,26 @@ bool MM_MQ_Update()
 		return false;
 	}
 
-	auto it = std::remove_if(game.mapqueue.begin(), game.mapqueue.end(),
-		[](const std::string &s) {
-			return !MM_IsSafeMapToken(s.c_str()) ||
-				!muffmode::maps::ContainsConfiguredMap(s.c_str());
-		});
-	game.mapqueue.erase(it, game.mapqueue.end());
-
 	std::vector<std::string> clean_queue;
 	clean_queue.reserve(std::min(game.mapqueue.size(), MM_MAX_MAPQUEUE_ENTRIES));
 
 	for (const auto &queued_map : game.mapqueue) {
 		if (clean_queue.size() >= MM_MAX_MAPQUEUE_ENTRIES)
 			break;
+		std::string resolved_map;
+		if (!muffmode::maps::ResolveConfiguredMap(
+				queued_map.c_str(), resolved_map)) {
+			continue;
+		}
 		if (std::any_of(clean_queue.begin(), clean_queue.end(),
-			[&queued_map](const std::string &existing) {
-				return muffmode::maps::MapTokensEqual(existing, queued_map);
+			[&resolved_map](const std::string &existing) {
+				return muffmode::maps::MapTokensEqual(existing, resolved_map);
 			}))
 			continue;
-		clean_queue.push_back(queued_map);
+		clean_queue.push_back(std::move(resolved_map));
 	}
 
-	if (clean_queue.size() != game.mapqueue.size())
+	if (clean_queue != game.mapqueue)
 		game.mapqueue.swap(clean_queue);
 
 	return true;
@@ -471,15 +492,16 @@ namespace map_queue = muffmode::maps::queue;
 
 void MM_PruneMapQueueToConfiguredMaps()
 {
-	if (!deathmatch)
+	if (!deathmatch || !deathmatch->integer)
 		return;
 	map_queue::MM_MQ_Update();
 }
 
 int MM_MQ_Count()
 {
-	if (!deathmatch)
+	if (!deathmatch || !deathmatch->integer)
 		return 0;
+	MM_HandleMapPoolCvarChanges();
 
 	if (!muffmode::CvarInteger(g_allow_mymap))
 		return 0;
@@ -495,7 +517,7 @@ bool MM_MQ_Add(gentity_t *ent, const char *mapname)
 	if (!ent || !ent->client)
 		return false;
 
-	if (!deathmatch)
+	if (!deathmatch || !deathmatch->integer)
 		return false;
 
 	if (!muffmode::CvarInteger(g_allow_mymap))
@@ -506,10 +528,13 @@ bool MM_MQ_Add(gentity_t *ent, const char *mapname)
 		return false;
 	}
 
+	MM_HandleMapPoolCvarChanges();
+
 	if (!muffmode::maps::HasConfiguredMapSource())
 		return false;
 
-	if (!muffmode::maps::ContainsConfiguredMap(mapname)) {
+	std::string resolved_map;
+	if (!muffmode::maps::ResolveConfiguredMap(mapname, resolved_map)) {
 		gi.Client_Print(ent, PRINT_HIGH, "Selected map is either invalid or not in pool/list.\n");
 		return false;
 	}
@@ -517,7 +542,7 @@ bool MM_MQ_Add(gentity_t *ent, const char *mapname)
 	if (!map_queue::MM_MQ_Update())
 		return false;
 
-	if (map_queue::MM_MapQueueContains(mapname)) {
+	if (map_queue::MM_MapQueueContains(resolved_map.c_str())) {
 		gi.Client_Print(ent, PRINT_HIGH, "Selected map is already in queue.\n");
 		return false;
 	}
@@ -527,30 +552,27 @@ bool MM_MQ_Add(gentity_t *ent, const char *mapname)
 		return false;
 	}
 
-	std::string normalized_map(mapname);
-	std::replace(
-		normalized_map.begin(), normalized_map.end(),
-		'\\', '/');
-	game.mapqueue.push_back(std::move(normalized_map));
+	game.mapqueue.push_back(std::move(resolved_map));
 	return true;
 }
 
 const char *MM_MQ_Go_Next()
 {
-	if (!deathmatch)
+	if (!deathmatch || !deathmatch->integer)
 		return nullptr;
+	MM_HandleMapPoolCvarChanges();
 
 	if (!map_queue::MM_MQ_Update())
 		return nullptr;
 
-	for (size_t i = 0; i < game.mapqueue.size();) {
-		if (!MM_IsSafeMapToken(game.mapqueue[i].c_str())) {
-			game.mapqueue.erase(game.mapqueue.begin() + i);
+	while (!game.mapqueue.empty()) {
+		if (!MM_IsSafeMapToken(game.mapqueue.front().c_str())) {
+			game.mapqueue.erase(game.mapqueue.begin());
 			continue;
 		}
 
-		map_queue::s_next_mapqueue_return = game.mapqueue[i];
-		game.mapqueue.erase(game.mapqueue.begin() + i);
+		map_queue::s_next_mapqueue_return = game.mapqueue.front();
+		game.mapqueue.erase(game.mapqueue.begin());
 		return map_queue::s_next_mapqueue_return.c_str();
 	}
 
@@ -566,6 +588,7 @@ void MM_CmdMapList(gentity_t *ent)
 		gi.LocClient_Print(ent, PRINT_HIGH, "Usage: {}\n", gi.argv(0));
 		return;
 	}
+	MM_HandleMapPoolCvarChanges();
 
 	if (!muffmode::maps::HasConfiguredMapSource()) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "No map list or pool set.\n");
@@ -631,6 +654,7 @@ void MM_CmdMyMap(gentity_t *ent)
 {
 	if (!ent || !ent->client)
 		return;
+	MM_HandleMapPoolCvarChanges();
 
 	if (!muffmode::CvarInteger(g_allow_mymap)) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "MyMap is disabled.\n");
@@ -666,7 +690,9 @@ void MM_CmdMyMap(gentity_t *ent)
 		}
 	}
 
-	if (muffmode::maps::MapTokensEqual(gi.argv(1), level.mapname)) {
+	std::string resolved_map;
+	if (muffmode::maps::ResolveConfiguredMap(gi.argv(1), resolved_map) &&
+		muffmode::maps::MapTokensEqual(resolved_map, level.mapname)) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "Cannot add current map to MyMap Queue.\n");
 		return;
 	}

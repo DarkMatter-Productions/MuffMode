@@ -17,7 +17,6 @@
 #include <memory>
 #include <optional>
 #include <random>
-#include <sstream>
 #include <unordered_map>
 #include <utility>
 
@@ -54,6 +53,7 @@ struct map_snapshot_t {
 struct map_runtime_state_t {
 	bool initialized = false;
 	bool has_seen_spawn = false;
+	bool pool_reload_pending = false;
 	map_snapshot_t snapshot;
 	std::unordered_map<std::string, int64_t> last_played_seconds;
 	uint64_t revision = 0;
@@ -66,13 +66,14 @@ struct map_runtime_state_t {
 map_runtime_state_t s_state;
 uint64_t s_process_revision = 0;
 
-enum class load_outcome_t {
+enum class load_outcome_t : uint8_t {
 	disabled,
 	success,
 	failure
 };
 
 struct file_read_result_t {
+	bool attempted = false;
 	bool success = false;
 	std::string text;
 	std::string source;
@@ -123,7 +124,7 @@ std::string OneLine(std::string_view text, size_t max_length = 320)
 		if (output.size() >= max_length)
 			break;
 		const unsigned char uch = static_cast<unsigned char>(ch);
-		output.push_back(uch < 0x20 || uch == 0x7f ? ' ' : ch);
+		output.push_back(uch < 0x20 || uch >= 0x7f ? ' ' : ch);
 	}
 	if (text.size() > output.size() && output.size() >= 3) {
 		output.resize(output.size() - 3);
@@ -152,8 +153,13 @@ file_read_result_t ReadFromEngineFilesystem(
 {
 	file_read_result_t result;
 	const filesystem_api_v1_t *fs = GetFilesystemApi();
-	if (!fs || !fs->OpenFile || !fs->CloseFile || !fs->ReadFile)
+	if (!fs)
 		return result;
+	result.attempted = true;
+	if (!fs->OpenFile || !fs->CloseFile || !fs->ReadFile) {
+		result.error = "engine filesystem extension is incomplete";
+		return result;
+	}
 
 	const std::string owned_filename(filename);
 	int handle = 0;
@@ -161,6 +167,16 @@ file_read_result_t ReadFromEngineFilesystem(
 	if (length < 0 || !handle) {
 		if (handle)
 			fs->CloseFile(handle);
+		const char *detail = nullptr;
+		if (length < 0 && fs->ErrorString &&
+			length >= std::numeric_limits<int>::min() &&
+			length <= std::numeric_limits<int>::max()) {
+			detail = fs->ErrorString(static_cast<int>(length));
+		}
+		result.error = detail && detail[0]
+			? fmt::format("could not open {} through the engine filesystem: {}",
+				filename, OneLine(detail))
+			: fmt::format("could not open {} through the engine filesystem", filename);
 		return result;
 	}
 
@@ -218,6 +234,7 @@ file_read_result_t ReadFromLooseBaseq2(
 	size_t max_bytes)
 {
 	file_read_result_t result;
+	result.attempted = true;
 
 	try {
 		cvar_t *basedir_cvar = gi.cvar("basedir", ".", CVAR_NOFLAGS);
@@ -281,21 +298,29 @@ file_read_result_t ReadConfiguredFile(
 {
 	file_read_result_t vfs_result =
 		ReadFromEngineFilesystem(filename, max_bytes);
-	if (vfs_result.success || !vfs_result.error.empty())
+	if (vfs_result.attempted)
 		return vfs_result;
 	return ReadFromLooseBaseq2(filename, max_bytes);
 }
 
-bool IsSafeDisplayText(std::string_view value, size_t max_bytes)
+constexpr std::array<std::string_view, 14> SUPPORTED_ENTRY_PROPERTIES = {{
+	"bsp", "title", "episode", "min", "max",
+	"dm", "tdm", "ctf", "duel", "arena", "popular",
+	"custom", "custom_textures", "custom_sounds"
+}};
+
+std::optional<std::string> FirstUnsupportedEntryProperty(
+	const Json::Value &object)
 {
-	if (value.size() > max_bytes)
-		return false;
-	for (char ch : value) {
-		const unsigned char uch = static_cast<unsigned char>(ch);
-		if (uch < 0x20 || uch == 0x7f)
-			return false;
+	for (const std::string &name : object.getMemberNames()) {
+		if (std::find(
+				SUPPORTED_ENTRY_PROPERTIES.begin(),
+				SUPPORTED_ENTRY_PROPERTIES.end(),
+				name) == SUPPORTED_ENTRY_PROPERTIES.end()) {
+			return name;
+		}
 	}
-	return true;
+	return std::nullopt;
 }
 
 bool ReadOptionalBool(
@@ -358,7 +383,7 @@ bool ReadOptionalDisplayString(
 	const std::string parsed = field.asString();
 	if (!IsSafeDisplayText(parsed, max_bytes)) {
 		error = fmt::format(
-			"'{}' contains control characters or exceeds {} bytes",
+			"'{}' is malformed UTF-8, contains unsafe display controls, or exceeds {} bytes",
 			name, max_bytes);
 		return false;
 	}
@@ -461,9 +486,10 @@ pool_load_result_t LoadPoolCandidate()
 		return result;
 	}
 
-	if (!root.isObject() || !root.isMember("maps") || !root["maps"].isArray()) {
+	if (!root.isObject() || root.size() != 1 ||
+		!root.isMember("maps") || !root["maps"].isArray()) {
 		result.error = fmt::format(
-			"{} must contain a root 'maps' array",
+			"{} must contain only a root 'maps' array",
 			OneLine(file.source));
 		return result;
 	}
@@ -487,17 +513,25 @@ pool_load_result_t LoadPoolCandidate()
 			AddDiagnostic(result, i, {}, "entry must be an object");
 			continue;
 		}
+		if (const std::optional<std::string> unsupported =
+			FirstUnsupportedEntryProperty(object)) {
+			AddDiagnostic(
+				result, i, {},
+				fmt::format("unsupported property '{}'", OneLine(*unsupported, 80)));
+			continue;
+		}
 		if (!object.isMember("bsp") || !object["bsp"].isString()) {
 			AddDiagnostic(result, i, {}, "missing required string 'bsp'");
 			continue;
 		}
 
 		std::string bsp = object["bsp"].asString();
-		if (!muffmode::maps::IsSafeMapTokenText(bsp, MAX_QPATH)) {
-			AddDiagnostic(result, i, bsp, "unsafe or overlong map identifier");
+		if (!IsCanonicalStructuredMapIdentifier(bsp, MAX_QPATH)) {
+			AddDiagnostic(
+				result, i, bsp,
+				"identifier must be a canonical lowercase ASCII BSP stem without engine map-command syntax");
 			continue;
 		}
-		std::replace(bsp.begin(), bsp.end(), '\\', '/');
 
 		std::string error;
 		map_entry_t entry;
@@ -558,22 +592,41 @@ pool_load_result_t LoadPoolCandidate()
 
 		entry.custom =
 			entry.custom || entry.custom_textures || entry.custom_sounds;
+		if (entry.title.empty())
+			entry.title = entry.bsp;
+		entry.search_text_folded.reserve(
+			entry.bsp.size() + entry.title.size() + entry.episode.size() + 2);
+		for (std::string_view field : {
+			std::string_view(entry.bsp),
+			std::string_view(entry.title),
+			std::string_view(entry.episode)}) {
+			if (!entry.search_text_folded.empty())
+				entry.search_text_folded.push_back('\0');
+			for (char ch : field)
+				entry.search_text_folded.push_back(AsciiLower(ch));
+		}
 
-		std::string key = CanonicalMapKey(entry.bsp);
-		if (candidate.index.find(key) != candidate.index.end()) {
+		entry.canonical_bsp = CanonicalMapKey(entry.bsp);
+		if (candidate.index.find(entry.canonical_bsp) != candidate.index.end()) {
 			result.duplicate_entries++;
 			continue;
 		}
 
 		const size_t index = candidate.pool.size();
-		candidate.index.emplace(std::move(key), index);
+		candidate.index.emplace(entry.canonical_bsp, index);
 		candidate.pool.push_back(std::move(entry));
 	}
 
 	if (candidate.pool.empty()) {
 		result.error = fmt::format(
-			"{} contains no usable unique multiplayer maps",
-			OneLine(file.source));
+			"{} contains no usable unique multiplayer maps ({} non-multiplayer, {} invalid, {} duplicates){}",
+			OneLine(file.source),
+			result.ignored_non_multiplayer,
+			result.invalid_entries,
+			result.duplicate_entries,
+			result.diagnostics.empty()
+				? ""
+				: fmt::format("; first issue: {}", result.diagnostics.front()));
 		return result;
 	}
 
@@ -645,8 +698,11 @@ cycle_load_result_t LoadCycleCandidate(const map_snapshot_t &pool)
 
 	if (result.cycle.empty()) {
 		result.error = fmt::format(
-			"{} contains no maps recognized by the structured pool",
-			OneLine(file.source));
+			"{} contains no maps recognized by the structured pool ({} unmatched, {} invalid, {} duplicates)",
+			OneLine(file.source),
+			result.unmatched_tokens,
+			result.invalid_tokens,
+			result.duplicate_tokens);
 		return result;
 	}
 
@@ -682,6 +738,24 @@ void PublishSnapshot(map_snapshot_t snapshot)
 	s_state.cached_selection.clear();
 	PruneRuntimeHistory();
 	MM_PruneMapQueueToConfiguredMaps();
+}
+
+bool DisablePublishedCycle() noexcept
+{
+	if (!s_state.snapshot.cycle_loaded &&
+		s_state.snapshot.cycle_filename.empty() &&
+		s_state.snapshot.cycle.empty()) {
+		return false;
+	}
+
+	s_state.snapshot.cycle_loaded = false;
+	s_state.snapshot.cycle_filename.clear();
+	s_state.snapshot.cycle.clear();
+	s_process_revision = NextRevision(s_process_revision);
+	s_state.revision = s_process_revision;
+	s_state.cached_context.clear();
+	s_state.cached_selection.clear();
+	return true;
 }
 
 void LogPoolSuccess(
@@ -778,10 +852,9 @@ std::vector<size_t> BuildCandidates(
 		if (index >= s_state.snapshot.pool.size())
 			continue;
 		const map_entry_t &entry = s_state.snapshot.pool[index];
-		const std::string key = CanonicalMapKey(entry.bsp);
 		if (!HasMode(entry.modes, required_mode))
 			continue;
-		if (exclude_current && key == current_key)
+		if (exclude_current && entry.canonical_bsp == current_key)
 			continue;
 		if (enforce_player_bounds &&
 			((entry.min_players > 0 && player_count < entry.min_players) ||
@@ -789,7 +862,8 @@ std::vector<size_t> BuildCandidates(
 			continue;
 		}
 		if (enforce_cooldown && repeat_delay > 0) {
-			const auto played = s_state.last_played_seconds.find(key);
+			const auto played =
+				s_state.last_played_seconds.find(entry.canonical_bsp);
 			if (played != s_state.last_played_seconds.end() &&
 				now - played->second < repeat_delay) {
 				continue;
@@ -808,7 +882,8 @@ std::vector<size_t> BuildPreferredCandidates(
 	int repeat_delay,
 	std::string_view current_key,
 	bool enforce_player_bounds,
-	bool enforce_cooldown)
+	bool enforce_cooldown,
+	bool exclude_current)
 {
 	std::vector<size_t> candidates = BuildCandidates(
 		modes.preferred,
@@ -818,7 +893,7 @@ std::vector<size_t> BuildPreferredCandidates(
 		current_key,
 		enforce_player_bounds,
 		enforce_cooldown,
-		true);
+		exclude_current);
 	if (candidates.empty() && modes.fallback != MAP_MODE_NONE) {
 		candidates = BuildCandidates(
 			modes.fallback,
@@ -828,7 +903,7 @@ std::vector<size_t> BuildPreferredCandidates(
 			current_key,
 			enforce_player_bounds,
 			enforce_cooldown,
-			true);
+			exclude_current);
 	}
 	return candidates;
 }
@@ -846,7 +921,7 @@ size_t ChooseSequentialCandidate(
 	for (size_t i = 0; i < s_state.snapshot.cycle.size(); i++) {
 		const size_t index = s_state.snapshot.cycle[i];
 		if (index < s_state.snapshot.pool.size() &&
-			CanonicalMapKey(s_state.snapshot.pool[index].bsp) == current_key) {
+			s_state.snapshot.pool[index].canonical_bsp == current_key) {
 			current_position = i;
 			break;
 		}
@@ -867,66 +942,118 @@ size_t ChooseSequentialCandidate(
 
 size_t ChooseRandomCandidate(const std::vector<size_t> &candidates)
 {
-	std::vector<double> weights;
-	weights.reserve(candidates.size());
+	size_t total_weight = candidates.size();
 	for (size_t index : candidates) {
-		weights.push_back(
-			index < s_state.snapshot.pool.size() &&
-				s_state.snapshot.pool[index].popular
-			? 2.0
-			: 1.0);
+		if (index < s_state.snapshot.pool.size() &&
+			s_state.snapshot.pool[index].popular) {
+			total_weight++;
+		}
 	}
 
-	std::discrete_distribution<size_t> distribution(
-		weights.begin(), weights.end());
-	return candidates[distribution(mt_rand)];
+	std::uniform_int_distribution<size_t> distribution(0, total_weight - 1);
+	size_t choice = distribution(mt_rand);
+	for (size_t index : candidates) {
+		const size_t weight =
+			index < s_state.snapshot.pool.size() &&
+				s_state.snapshot.pool[index].popular
+			? 2
+			: 1;
+		if (choice < weight)
+			return index;
+		choice -= weight;
+	}
+	return candidates.back();
 }
 
-std::optional<std::string> CommandFilter(gentity_t *ent)
+struct command_filter_t {
+	std::string display;
+	std::string folded;
+	std::array<size_t, MAX_FILTER_BYTES> prefix = {};
+};
+
+std::optional<command_filter_t> CommandFilter(gentity_t *ent)
 {
 	std::string filter;
 	for (int i = 1; i < gi.argc(); i++) {
-		const char *arg = gi.argv(i);
-		if (!arg || !arg[0])
+		const char *raw_arg = gi.argv(i);
+		if (!raw_arg || !raw_arg[0])
 			continue;
-		if (!filter.empty())
-			filter.push_back(' ');
-		filter += arg;
-		if (filter.size() > MAX_FILTER_BYTES) {
+		const std::string_view arg(raw_arg);
+		const size_t separator = filter.empty() ? 0 : 1;
+		const size_t remaining = MAX_FILTER_BYTES - filter.size();
+		if (separator > remaining || arg.size() > remaining - separator) {
 			gi.LocClient_Print(
 				ent, PRINT_HIGH,
 				"Map filter is too long (maximum {} bytes).\n",
 				MAX_FILTER_BYTES);
 			return std::nullopt;
 		}
+		if (separator)
+			filter.push_back(' ');
+		filter.append(arg);
 	}
-	return filter;
+	if (!IsSafeDisplayText(filter, MAX_FILTER_BYTES)) {
+		gi.LocClient_Print(
+			ent, PRINT_HIGH,
+			"Map filter contains malformed or unsafe display text.\n");
+		return std::nullopt;
+	}
+
+	command_filter_t result;
+	result.display = std::move(filter);
+	result.folded = AsciiFold(result.display);
+	for (size_t i = 1, matched = 0; i < result.folded.size(); i++) {
+		while (matched > 0 && result.folded[i] != result.folded[matched])
+			matched = result.prefix[matched - 1];
+		if (result.folded[i] == result.folded[matched])
+			matched++;
+		result.prefix[i] = matched;
+	}
+	return result;
 }
 
-bool EntryMatchesFilter(const map_entry_t &entry, std::string_view raw_filter)
+bool ContainsFilter(
+	std::string_view folded_haystack,
+	const command_filter_t &filter) noexcept
 {
-	if (raw_filter.empty())
+	if (filter.folded.empty())
 		return true;
 
-	const std::string filter = AsciiFold(raw_filter);
-	if (filter == "dm")
+	size_t matched = 0;
+	for (char ch : folded_haystack) {
+		while (matched > 0 && ch != filter.folded[matched])
+			matched = filter.prefix[matched - 1];
+		if (ch == filter.folded[matched])
+			matched++;
+		if (matched == filter.folded.size())
+			return true;
+	}
+	return false;
+}
+
+bool EntryMatchesFilter(
+	const map_entry_t &entry,
+	const command_filter_t &filter)
+{
+	if (filter.folded.empty())
+		return true;
+
+	if (filter.folded == "dm")
 		return HasMode(entry.modes, MAP_MODE_DM);
-	if (filter == "tdm")
+	if (filter.folded == "tdm")
 		return HasMode(entry.modes, MAP_MODE_TDM);
-	if (filter == "ctf")
+	if (filter.folded == "ctf")
 		return HasMode(entry.modes, MAP_MODE_CTF);
-	if (filter == "duel")
+	if (filter.folded == "duel")
 		return HasMode(entry.modes, MAP_MODE_DUEL);
-	if (filter == "arena")
+	if (filter.folded == "arena")
 		return HasMode(entry.modes, MAP_MODE_ARENA);
-	if (filter == "popular")
+	if (filter.folded == "popular")
 		return entry.popular;
-	if (filter == "custom")
+	if (filter.folded == "custom")
 		return entry.custom;
 
-	return AsciiFold(entry.bsp).find(filter) != std::string::npos ||
-		AsciiFold(entry.title).find(filter) != std::string::npos ||
-		AsciiFold(entry.episode).find(filter) != std::string::npos;
+	return ContainsFilter(entry.search_text_folded, filter);
 }
 
 std::string ModeLabels(map_mode_flags_t modes)
@@ -958,7 +1085,7 @@ void FlushPrintChunk(gentity_t *ent, std::string &chunk)
 void PrintEntries(
 	gentity_t *ent,
 	const std::vector<size_t> &indices,
-	std::string_view filter,
+	const command_filter_t &filter,
 	std::string_view heading)
 {
 	if (!IsUsableClient(ent))
@@ -1008,12 +1135,12 @@ void PrintEntries(
 			printed, matches);
 		return;
 	}
-	if (!filter.empty()) {
+	if (!filter.display.empty()) {
 		gi.LocClient_Print(
 			ent, PRINT_HIGH,
 			"{} map{} matched '{}'.\n",
 			matches, matches == 1 ? "" : "s",
-			std::string(filter).c_str());
+			filter.display.c_str());
 	} else {
 		gi.LocClient_Print(
 			ent, PRINT_HIGH,
@@ -1035,10 +1162,12 @@ void MM_InitMapPoolSystem()
 	map_pool::pool_load_result_t pool_result =
 		map_pool::LoadPoolCandidate();
 	if (pool_result.outcome == map_pool::load_outcome_t::disabled) {
+		map_pool::s_state.pool_reload_pending = false;
 		map_pool::UpdateModifiedSnapshots();
 		return;
 	}
 	if (pool_result.outcome == map_pool::load_outcome_t::failure) {
+		map_pool::s_state.pool_reload_pending = true;
 		gi.Com_PrintFmt(
 			"MuffMode map pool unavailable: {}. Using legacy g_map_pool/g_map_list.\n",
 			map_pool::OneLine(pool_result.error));
@@ -1065,6 +1194,7 @@ void MM_InitMapPoolSystem()
 			: nullptr,
 		nullptr);
 	map_pool::PublishSnapshot(std::move(pool_result.snapshot));
+	map_pool::s_state.pool_reload_pending = false;
 	map_pool::UpdateModifiedSnapshots();
 }
 
@@ -1081,6 +1211,7 @@ bool MM_ReloadMapPool(gentity_t *ent)
 
 	if (pool_result.outcome == map_pool::load_outcome_t::disabled) {
 		map_pool::PublishSnapshot({});
+		map_pool::s_state.pool_reload_pending = false;
 		gi.Com_Print(
 			"MuffMode structured map pool disabled; legacy map configuration is active.\n");
 		map_pool::ReportToClient(
@@ -1089,12 +1220,27 @@ bool MM_ReloadMapPool(gentity_t *ent)
 		return true;
 	}
 	if (pool_result.outcome == map_pool::load_outcome_t::failure) {
+		map_pool::s_state.pool_reload_pending = true;
+		const bool cycle_disabled_by_config =
+			!g_maps_cycle_file || !g_maps_cycle_file->string ||
+			!g_maps_cycle_file->string[0];
+		const bool cycle_was_disabled =
+			cycle_disabled_by_config && map_pool::DisablePublishedCycle();
+		if (cycle_was_disabled) {
+			gi.Com_Print(
+				"MuffMode structured map cycle disabled despite the failed pool reload; legacy g_map_list rotation is active.\n");
+		}
+		std::string_view retained_state =
+			"Legacy map configuration remains active.";
+		if (map_pool::s_state.snapshot.pool_loaded) {
+			retained_state = cycle_disabled_by_config
+				? "The last-known-good pool remains active with its structured cycle disabled."
+				: "The last-known-good pool remains active.";
+		}
 		const std::string message = fmt::format(
 			"Map-pool reload failed: {}. {}",
 			map_pool::OneLine(pool_result.error),
-			map_pool::s_state.snapshot.pool_loaded
-				? "The last-known-good pool remains active."
-				: "Legacy map configuration remains active.");
+			retained_state);
 		gi.Com_PrintFmt("MuffMode {}.\n", message);
 		map_pool::ReportToClient(ent, message);
 		return false;
@@ -1109,8 +1255,10 @@ bool MM_ReloadMapPool(gentity_t *ent)
 				map_pool::OneLine(cycle_result.error));
 			map_pool::LogPoolSuccess(pool_result, nullptr, ent);
 			map_pool::PublishSnapshot(std::move(pool_result.snapshot));
+			map_pool::s_state.pool_reload_pending = false;
 			return true;
 		}
+		map_pool::s_state.pool_reload_pending = true;
 
 		const std::string message = fmt::format(
 			"Map-pool reload was not published because its cycle failed: {}. {}",
@@ -1134,21 +1282,46 @@ bool MM_ReloadMapPool(gentity_t *ent)
 			: nullptr,
 		ent);
 	map_pool::PublishSnapshot(std::move(pool_result.snapshot));
+	map_pool::s_state.pool_reload_pending = false;
 	return true;
 }
 
 bool MM_ReloadMapCycle(gentity_t *ent)
 {
+	map_pool::s_state.cycle_file_modified =
+		g_maps_cycle_file ? g_maps_cycle_file->modified_count : -1;
 	const int pool_modified =
 		g_maps_pool_file ? g_maps_pool_file->modified_count : -1;
-	if (pool_modified != map_pool::s_state.pool_file_modified) {
+	const bool pool_disabled =
+		!g_maps_pool_file || !g_maps_pool_file->string ||
+		!g_maps_pool_file->string[0];
+	if (pool_disabled &&
+		pool_modified != map_pool::s_state.pool_file_modified) {
+		return MM_ReloadMapPool(ent);
+	}
+
+	const bool cycle_disabled =
+		!g_maps_cycle_file || !g_maps_cycle_file->string ||
+		!g_maps_cycle_file->string[0];
+	if (cycle_disabled) {
+		map_pool::DisablePublishedCycle();
+		gi.Com_Print(
+			"MuffMode structured map cycle disabled; legacy g_map_list rotation is active.\n");
+		map_pool::ReportToClient(
+			ent,
+			"Structured map cycle disabled; legacy g_map_list rotation is active.");
+		if (pool_modified != map_pool::s_state.pool_file_modified)
+			return MM_ReloadMapPool(ent);
+		return true;
+	}
+
+	if (map_pool::s_state.pool_reload_pending ||
+		pool_modified != map_pool::s_state.pool_file_modified) {
 		// A cycle is resolved to indices in the currently published pool.
 		// Process a pending pool change transactionally before attempting a
 		// cycle-only reload so this command cannot acknowledge and strand it.
 		return MM_ReloadMapPool(ent);
 	}
-	map_pool::s_state.cycle_file_modified =
-		g_maps_cycle_file ? g_maps_cycle_file->modified_count : -1;
 	if (!map_pool::s_state.snapshot.pool_loaded) {
 		gi.Com_Print(
 			"MuffMode map-cycle reload skipped: no structured map pool is loaded.\n");
@@ -1161,16 +1334,7 @@ bool MM_ReloadMapCycle(gentity_t *ent)
 	map_pool::cycle_load_result_t cycle_result =
 		map_pool::LoadCycleCandidate(map_pool::s_state.snapshot);
 	if (cycle_result.outcome == map_pool::load_outcome_t::disabled) {
-		map_pool::map_snapshot_t snapshot = map_pool::s_state.snapshot;
-		snapshot.cycle_loaded = false;
-		snapshot.cycle_filename.clear();
-		snapshot.cycle.clear();
-		map_pool::PublishSnapshot(std::move(snapshot));
-		gi.Com_Print(
-			"MuffMode structured map cycle disabled; legacy g_map_list rotation is active.\n");
-		map_pool::ReportToClient(
-			ent,
-			"Structured map cycle disabled; legacy g_map_list rotation is active.");
+		map_pool::DisablePublishedCycle();
 		return true;
 	}
 	if (cycle_result.outcome == map_pool::load_outcome_t::failure) {
@@ -1216,12 +1380,30 @@ void MM_HandleMapPoolCvarChanges()
 		g_maps_pool_file ? g_maps_pool_file->modified_count : -1;
 	const int cycle_modified =
 		g_maps_cycle_file ? g_maps_cycle_file->modified_count : -1;
-	if (pool_modified != map_pool::s_state.pool_file_modified) {
+	map_pool::reload_context_t reload_context;
+	reload_context.pool_reload_pending =
+		map_pool::s_state.pool_reload_pending;
+	reload_context.pool_disabled =
+		!g_maps_pool_file || !g_maps_pool_file->string ||
+		!g_maps_pool_file->string[0];
+	reload_context.cycle_disabled =
+		!g_maps_cycle_file || !g_maps_cycle_file->string ||
+		!g_maps_cycle_file->string[0];
+	switch (map_pool::ResolveReloadAction(
+		pool_modified,
+		map_pool::s_state.pool_file_modified,
+		cycle_modified,
+		map_pool::s_state.cycle_file_modified,
+		reload_context)) {
+	case map_pool::reload_action_t::pool:
 		MM_ReloadMapPool(nullptr);
-		return;
-	}
-	if (cycle_modified != map_pool::s_state.cycle_file_modified)
+		break;
+	case map_pool::reload_action_t::cycle:
 		MM_ReloadMapCycle(nullptr);
+		break;
+	case map_pool::reload_action_t::none:
+		break;
+	}
 }
 
 void MM_RecordStructuredMapPlayed()
@@ -1291,6 +1473,28 @@ bool MM_StructuredMapPoolContains(const char *mapname)
 		map_pool::s_state.snapshot.index.end();
 }
 
+bool MM_ResolveStructuredMapName(
+	const char *mapname,
+	std::string &resolved)
+{
+	if (!mapname || !MM_IsSafeMapToken(mapname) ||
+		!MM_StructuredMapPoolLoaded()) {
+		resolved.clear();
+		return false;
+	}
+
+	const std::string key = map_pool::CanonicalMapKey(mapname);
+	resolved.clear();
+	const auto found = map_pool::s_state.snapshot.index.find(key);
+	if (found == map_pool::s_state.snapshot.index.end() ||
+		found->second >= map_pool::s_state.snapshot.pool.size()) {
+		return false;
+	}
+
+	resolved = map_pool::s_state.snapshot.pool[found->second].bsp;
+	return true;
+}
+
 std::vector<std::string> MM_CollectStructuredMapPool()
 {
 	std::vector<std::string> maps;
@@ -1311,14 +1515,17 @@ std::vector<std::string> MM_CollectStructuredMapCycle()
 	return maps;
 }
 
-bool MM_SelectStructuredNextMap(std::string &mapname)
+static bool MM_SelectStructuredMap(
+	std::string &mapname,
+	bool cycle_start)
 {
 	mapname.clear();
 	MM_HandleMapPoolCvarChanges();
-	if (!MM_StructuredMapCycleActive() ||
-		!MM_IsSafeMapToken(level.mapname)) {
+	if (!MM_StructuredMapCycleActive())
 		return false;
-	}
+	const bool current_map_safe = MM_IsSafeMapToken(level.mapname);
+	if (!cycle_start && !current_map_safe)
+		return false;
 
 	const int gametype = map_pool::RequestedGametype();
 	const int repeat_delay = clamp(
@@ -1328,10 +1535,12 @@ bool MM_SelectStructuredNextMap(std::string &mapname)
 		static_cast<int>(level.num_playing_human_clients);
 	const bool random_selection =
 		g_maps_random && g_maps_random->integer != 0;
-	const std::string current_key =
-		map_pool::CanonicalMapKey(level.mapname);
+	const std::string current_key = current_map_safe
+		? map_pool::CanonicalMapKey(level.mapname)
+		: std::string();
 	const std::string context = fmt::format(
-		"{}:{}:{}:{}:{}:{}",
+		"{}:{}:{}:{}:{}:{}:{}",
+		cycle_start ? "start" : "next",
 		current_key,
 		gametype,
 		map_pool::s_state.revision,
@@ -1355,7 +1564,8 @@ bool MM_SelectStructuredNextMap(std::string &mapname)
 		candidates = map_pool::BuildPreferredCandidates(
 			modes, player_count, now, repeat_delay, current_key,
 			relaxation.enforce_player_bounds,
-			relaxation.enforce_cooldown);
+			relaxation.enforce_cooldown,
+			!cycle_start);
 		if (!candidates.empty())
 			break;
 	}
@@ -1364,7 +1574,9 @@ bool MM_SelectStructuredNextMap(std::string &mapname)
 
 	const size_t selected = random_selection
 		? map_pool::ChooseRandomCandidate(candidates)
-		: map_pool::ChooseSequentialCandidate(candidates, current_key);
+		: cycle_start
+			? candidates.front()
+			: map_pool::ChooseSequentialCandidate(candidates, current_key);
 	if (selected >= map_pool::s_state.snapshot.pool.size())
 		return false;
 
@@ -1379,11 +1591,22 @@ bool MM_SelectStructuredNextMap(std::string &mapname)
 	return true;
 }
 
+bool MM_SelectStructuredNextMap(std::string &mapname)
+{
+	return MM_SelectStructuredMap(mapname, false);
+}
+
+bool MM_SelectStructuredCycleStartMap(std::string &mapname)
+{
+	return MM_SelectStructuredMap(mapname, true);
+}
+
 void MM_CmdMapPool(gentity_t *ent)
 {
 	if (!map_pool::IsUsableClient(ent))
 		return;
-	const std::optional<std::string> filter = map_pool::CommandFilter(ent);
+	MM_HandleMapPoolCvarChanges();
+	const auto filter = map_pool::CommandFilter(ent);
 	if (!filter)
 		return;
 	if (!MM_StructuredMapPoolLoaded()) {
@@ -1408,7 +1631,8 @@ void MM_CmdMapCycle(gentity_t *ent)
 {
 	if (!map_pool::IsUsableClient(ent))
 		return;
-	const std::optional<std::string> filter = map_pool::CommandFilter(ent);
+	MM_HandleMapPoolCvarChanges();
+	const auto filter = map_pool::CommandFilter(ent);
 	if (!filter)
 		return;
 	if (!MM_StructuredMapCycleActive()) {

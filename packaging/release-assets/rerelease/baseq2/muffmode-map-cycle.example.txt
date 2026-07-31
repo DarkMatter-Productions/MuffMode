@@ -22,5 +22,5 @@ q64/dm1 q64/dm2 q64/dm3 q64/dm4 q64/dm5
 q64/dm6 q64/dm7 q64/dm8 q64/dm9 q64/dm10
 
 // Maps included with MuffMode releases
-mm-aerowalk mm-coldzero mm-crucible mm-kmachine mm-powertrip
+mm-aerow mm-coldzero mm-crucible mm-kmachine mm-powertrip
 mm-rage mm-railgun101 mm-reclamation mm-recycler

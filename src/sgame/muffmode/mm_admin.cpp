@@ -6,6 +6,7 @@
 #include "muffmode/mm_arena.h"
 #include "muffmode/mm_command_contracts.h"
 #include "muffmode/mm_gametype.h"
+#include "muffmode/mm_map_pool.h"
 #include "muffmode/mm_maps.h"
 #include "muffmode/mm_match.h"
 #include "muffmode/mm_util.h"
@@ -369,18 +370,21 @@ void MM_CmdSetMap(gentity_t *ent)
 		return;
 	}
 
-	if (!MM_IsMapValid(gi.argv(1)))
+	MM_HandleMapPoolCvarChanges();
+	std::string resolved_map;
+	if (!muffmode::maps::ResolveConfiguredMap(gi.argv(1), resolved_map))
 	{
 		gi.Client_Print(ent, PRINT_HIGH, "Map name is not valid.\n");
 		return;
 	}
 
-	if (!admin::MM_AdminQueueGamemap(gi.argv(1))) {
+	if (!admin::MM_AdminQueueGamemap(resolved_map.c_str())) {
 		gi.Client_Print(ent, PRINT_HIGH, "Map name is not safe to queue.\n");
 		return;
 	}
 
-	gi.LocBroadcast_Print(PRINT_HIGH, "[ADMIN]: Changing map to {}\n", gi.argv(1));
+	gi.LocBroadcast_Print(
+		PRINT_HIGH, "[ADMIN]: Changing map to {}\n", resolved_map.c_str());
 }
 
 // [MuffMode] Admin match-control and session command bodies (moved from sgame/core/commands.cpp).

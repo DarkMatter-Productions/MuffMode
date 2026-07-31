@@ -543,6 +543,7 @@ constexpr int kMapMenuFirstItem = 2;
 
 static MapMenuSourceRevision CurrentMapMenuSourceRevision()
 {
+	MM_HandleMapPoolCvarChanges();
 	return {
 		g_map_list,
 		g_map_list ? g_map_list->modified_count : 0,

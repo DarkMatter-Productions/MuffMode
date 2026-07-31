@@ -35,8 +35,8 @@ For the optional structured map system, copy the two `muffmode-map-*.example`
 files to new leaf filenames in this folder, then set `g_maps_pool_file` and
 `g_maps_cycle_file` to those copies. Keeping the operator-owned copies
 separate prevents a later package update from replacing local map choices.
-Without these cvars, existing `g_map_pool` and `g_map_list` behavior is
-unchanged.
+Without these cvars, safe BSP-stem entries in the existing `g_map_pool` and
+`g_map_list` remain the active legacy source.
 
 Before using or making `arena` votable, install Arena-compatible maps you are
 licensed to host and configure an Arena map list in `gt-ARENA.cfg`. Tagged

@@ -1,3 +1,5 @@
+#requires -Version 7.0
+
 [CmdletBinding()]
 param(
     [ValidateSet("Debug", "Release")]
@@ -18,6 +20,7 @@ param(
     [switch]$SkipLocalGates,
     [switch]$SkipVcpkgSetup,
     [switch]$SkipHostTests,
+    [switch]$SkipUpdaterTests,
     [switch]$SkipBuild,
     [switch]$IncludeAnalysis,
     [switch]$IncludeSanitizers,
@@ -527,6 +530,15 @@ if (-not $SkipLocalGates) {
     }
     else {
         Write-Warning "Skipping host tests by request."
+    }
+
+    if (-not $SkipUpdaterTests) {
+        Invoke-RepoScript -Name "Run updater cleanup tests" -Action {
+            & (Join-Path $repoRoot "scripts\ci\run-updater-tests.ps1") -Configuration $Configuration
+        }
+    }
+    else {
+        Write-Warning "Skipping updater tests by request."
     }
 
     if (-not $SkipVcpkgSetup) {

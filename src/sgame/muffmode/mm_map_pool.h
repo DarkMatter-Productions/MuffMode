@@ -6,7 +6,6 @@
 #include "muffmode/mm_maps.h"
 
 #include <array>
-#include <cctype>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -42,6 +41,106 @@ inline std::string AsciiFold(std::string_view value)
 	return folded;
 }
 
+inline bool AsciiEqualsI(std::string_view lhs, std::string_view rhs) noexcept
+{
+	if (lhs.size() != rhs.size())
+		return false;
+	for (size_t i = 0; i < lhs.size(); i++)
+		if (AsciiLower(lhs[i]) != AsciiLower(rhs[i]))
+			return false;
+	return true;
+}
+
+inline bool IsWellFormedUtf8(std::string_view value) noexcept
+{
+	for (size_t i = 0; i < value.size();) {
+		const uint8_t lead = static_cast<uint8_t>(value[i]);
+		if (lead <= 0x7f) {
+			i++;
+			continue;
+		}
+
+		size_t length = 0;
+		uint32_t codepoint = 0;
+		if (lead >= 0xc2 && lead <= 0xdf) {
+			length = 2;
+			codepoint = lead & 0x1f;
+		} else if (lead >= 0xe0 && lead <= 0xef) {
+			length = 3;
+			codepoint = lead & 0x0f;
+		} else if (lead >= 0xf0 && lead <= 0xf4) {
+			length = 4;
+			codepoint = lead & 0x07;
+		} else {
+			return false;
+		}
+
+		if (length > value.size() - i)
+			return false;
+		for (size_t j = 1; j < length; j++) {
+			const uint8_t continuation =
+				static_cast<uint8_t>(value[i + j]);
+			if ((continuation & 0xc0) != 0x80)
+				return false;
+			codepoint = (codepoint << 6) | (continuation & 0x3f);
+		}
+
+		const uint32_t minimum = length == 2 ? 0x80u :
+			length == 3 ? 0x800u : 0x10000u;
+		if (codepoint < minimum || codepoint > 0x10ffffu ||
+			(codepoint >= 0xd800u && codepoint <= 0xdfffu)) {
+			return false;
+		}
+		i += length;
+	}
+	return true;
+}
+
+inline bool IsSafeDisplayText(
+	std::string_view value,
+	size_t max_bytes) noexcept
+{
+	if (value.size() > max_bytes || !IsWellFormedUtf8(value))
+		return false;
+
+	for (size_t i = 0; i < value.size(); i++) {
+		const uint8_t byte = static_cast<uint8_t>(value[i]);
+		if (byte < 0x20 || byte == 0x7f)
+			return false;
+		// Reject the UTF-8 encodings of C1 controls, line separators and bidi
+		// controls so catalog metadata cannot inject or reorder terminal/UI text.
+		if (byte == 0xc2 && i + 1 < value.size()) {
+			const uint8_t next = static_cast<uint8_t>(value[i + 1]);
+			if (next >= 0x80 && next <= 0x9f)
+				return false;
+		}
+		if (byte == 0xe2 && i + 2 < value.size() &&
+			static_cast<uint8_t>(value[i + 1]) == 0x80) {
+			const uint8_t last = static_cast<uint8_t>(value[i + 2]);
+			if ((last >= 0x8b && last <= 0x8f) ||
+				(last >= 0xaa && last <= 0xae) ||
+				last == 0xa8 || last == 0xa9)
+				return false;
+		}
+		if (byte == 0xe2 && i + 2 < value.size() &&
+			static_cast<uint8_t>(value[i + 1]) == 0x81) {
+			const uint8_t last = static_cast<uint8_t>(value[i + 2]);
+			if (last >= 0xa6 && last <= 0xa9)
+				return false;
+		}
+		if (byte == 0xd8 && i + 1 < value.size() &&
+			static_cast<uint8_t>(value[i + 1]) == 0x9c) {
+			return false;
+		}
+		if (byte == 0xef && i + 2 < value.size() &&
+			static_cast<uint8_t>(value[i + 1]) == 0xbb &&
+			static_cast<uint8_t>(value[i + 2]) == 0xbf) {
+			return false;
+		}
+	}
+	return true;
+}
+
 inline std::string CanonicalMapKey(std::string_view value)
 {
 	std::string key;
@@ -49,6 +148,86 @@ inline std::string CanonicalMapKey(std::string_view value)
 	for (char ch : value)
 		key.push_back(muffmode::maps::CanonicalMapTokenChar(ch));
 	return key;
+}
+
+inline bool HasEngineMapStateExtension(std::string_view value) noexcept
+{
+	constexpr std::array<std::string_view, 5> EXTENSIONS = {
+		".bsp", ".cin", ".dm2", ".pcx", ".png"
+	};
+	for (std::string_view extension : EXTENSIONS) {
+		if (value.size() >= extension.size() &&
+			AsciiEqualsI(value.substr(value.size() - extension.size()), extension)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+inline bool IsWindowsReservedPathSegment(std::string_view segment) noexcept
+{
+	const std::string_view stem = segment.substr(0, segment.find('.'));
+	if (AsciiEqualsI(stem, "con") || AsciiEqualsI(stem, "prn") ||
+		AsciiEqualsI(stem, "aux") || AsciiEqualsI(stem, "nul")) {
+		return true;
+	}
+	if (stem.size() != 4 || stem[3] < '1' || stem[3] > '9')
+		return false;
+	return AsciiEqualsI(stem.substr(0, 3), "com") ||
+		AsciiEqualsI(stem.substr(0, 3), "lpt");
+}
+
+inline bool IsSafeStructuredMapIdentifier(
+	std::string_view value,
+	size_t max_qpath) noexcept
+{
+	if (!muffmode::maps::IsSafeMapTokenText(value, max_qpath) ||
+		HasEngineMapStateExtension(value) || value.front() == '!' ||
+		value.find('+') != std::string_view::npos ||
+		value.find('$') != std::string_view::npos) {
+		return false;
+	}
+
+	// Map-command identities are ASCII. Display metadata remains fully UTF-8.
+	for (char ch : value) {
+		const uint8_t byte = static_cast<uint8_t>(ch);
+		if (byte < 0x21 || byte > 0x7e)
+			return false;
+	}
+
+	if (value.size() > 5 && AsciiEqualsI(value.substr(0, 4), "maps") &&
+		(value[4] == '/' || value[4] == '\\')) {
+		return false;
+	}
+
+	size_t segment_start = 0;
+	while (segment_start < value.size()) {
+		const size_t separator = value.find_first_of("/\\", segment_start);
+		const size_t segment_end = separator == std::string::npos
+			? value.size()
+			: separator;
+		const std::string_view segment(
+			value.data() + segment_start,
+			segment_end - segment_start);
+		if (segment.back() == '.' || IsWindowsReservedPathSegment(segment))
+			return false;
+		if (separator == std::string::npos)
+			break;
+		segment_start = separator + 1;
+	}
+	return true;
+}
+
+inline bool IsCanonicalStructuredMapIdentifier(
+	std::string_view value,
+	size_t max_qpath) noexcept
+{
+	if (!IsSafeStructuredMapIdentifier(value, max_qpath))
+		return false;
+	for (char ch : value)
+		if (muffmode::maps::CanonicalMapTokenChar(ch) != ch)
+			return false;
+	return true;
 }
 
 inline bool IsSafeConfigLeaf(std::string_view value, size_t max_length = 128) noexcept
@@ -68,34 +247,13 @@ inline bool IsSafeConfigLeaf(std::string_view value, size_t max_length = 128) no
 			return false;
 	}
 
-	const std::string_view stem = value.substr(0, value.find('.'));
-	auto stem_equals = [stem](std::string_view reserved) {
-		if (stem.size() != reserved.size())
-			return false;
-		for (size_t i = 0; i < stem.size(); i++)
-			if (AsciiLower(stem[i]) != reserved[i])
-				return false;
-		return true;
-	};
+	return !IsWindowsReservedPathSegment(value);
+}
 
-	if (stem_equals("con") || stem_equals("prn") ||
-		stem_equals("aux") || stem_equals("nul")) {
-		return false;
-	}
-	if (stem.size() == 4 && stem[3] >= '1' && stem[3] <= '9') {
-		const bool com =
-			AsciiLower(stem[0]) == 'c' &&
-			AsciiLower(stem[1]) == 'o' &&
-			AsciiLower(stem[2]) == 'm';
-		const bool lpt =
-			AsciiLower(stem[0]) == 'l' &&
-			AsciiLower(stem[1]) == 'p' &&
-			AsciiLower(stem[2]) == 't';
-		if (com || lpt)
-			return false;
-	}
-
-	return true;
+inline bool IsAsciiWhitespace(char value) noexcept
+{
+	return value == ' ' || value == '\t' || value == '\r' ||
+		value == '\n' || value == '\v' || value == '\f';
 }
 
 struct cycle_parse_result_t {
@@ -115,6 +273,12 @@ inline cycle_parse_result_t ParseCycleText(
 	size_t max_tokens = MAX_CYCLE_TOKENS)
 {
 	cycle_parse_result_t result;
+	if (text.size() >= 3 &&
+		static_cast<uint8_t>(text[0]) == 0xef &&
+		static_cast<uint8_t>(text[1]) == 0xbb &&
+		static_cast<uint8_t>(text[2]) == 0xbf) {
+		text.remove_prefix(3);
+	}
 	std::unordered_set<std::string> seen;
 	std::string token;
 	token.reserve(max_qpath);
@@ -132,7 +296,7 @@ inline cycle_parse_result_t ParseCycleText(
 		}
 
 		if (token_too_long ||
-			!muffmode::maps::IsSafeMapTokenText(token, max_qpath)) {
+			!IsSafeStructuredMapIdentifier(token, max_qpath)) {
 			result.invalid_tokens++;
 		} else {
 			std::string key = CanonicalMapKey(token);
@@ -179,9 +343,12 @@ inline cycle_parse_result_t ParseCycleText(
 				continue;
 			}
 		}
+		if (ch == '*' && i + 1 < text.size() && text[i + 1] == '/') {
+			result.error = "cycle has an unexpected block-comment terminator";
+			return result;
+		}
 
-		const unsigned char uch = static_cast<unsigned char>(ch);
-		if (std::isspace(uch)) {
+		if (IsAsciiWhitespace(ch)) {
 			if (!finish_token())
 				return result;
 			continue;
@@ -267,8 +434,46 @@ constexpr std::array<selection_relaxation_t, 3> SELECTION_RELAXATIONS = {{
 	{ false, false }
 }};
 
+enum class reload_action_t : uint8_t {
+	none,
+	pool,
+	cycle
+};
+
+struct reload_context_t {
+	bool pool_reload_pending = false;
+	bool pool_disabled = false;
+	bool cycle_disabled = false;
+};
+
+inline reload_action_t ResolveReloadAction(
+	int pool_modified,
+	int attempted_pool_modified,
+	int cycle_modified,
+	int attempted_cycle_modified,
+	reload_context_t context = {}) noexcept
+{
+	// Disabling the complete structured system takes priority when both source
+	// cvars are cleared together.
+	if (pool_modified != attempted_pool_modified && context.pool_disabled)
+		return reload_action_t::pool;
+	// Clearing the cycle is generation-independent: it can safely disable an
+	// LKG cycle even when a newer pool transaction is still invalid.
+	if (cycle_modified != attempted_cycle_modified && context.cycle_disabled)
+		return reload_action_t::cycle;
+	if (pool_modified != attempted_pool_modified)
+		return reload_action_t::pool;
+	if (cycle_modified != attempted_cycle_modified)
+		return context.pool_reload_pending
+			? reload_action_t::pool
+			: reload_action_t::cycle;
+	return reload_action_t::none;
+}
+
 struct map_entry_t {
 	std::string bsp;
+	std::string canonical_bsp;
+	std::string search_text_folded;
 	std::string title;
 	std::string episode;
 	int min_players = 0;
@@ -296,9 +501,11 @@ size_t MM_StructuredMapPoolCount();
 size_t MM_StructuredMapCycleCount();
 uint64_t MM_MapPoolRevision();
 bool MM_StructuredMapPoolContains(const char *mapname);
+bool MM_ResolveStructuredMapName(const char *mapname, std::string &resolved);
 std::vector<std::string> MM_CollectStructuredMapPool();
 std::vector<std::string> MM_CollectStructuredMapCycle();
 bool MM_SelectStructuredNextMap(std::string &mapname);
+bool MM_SelectStructuredCycleStartMap(std::string &mapname);
 
 // Player/admin command bodies.
 void MM_CmdMapPool(gentity_t *ent);

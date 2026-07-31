@@ -1794,6 +1794,9 @@ An end of match condition has been reached
 */
 void Match_End() {
 	gentity_t *ent;
+	// [MuffMode] Publish or reject pending map-source changes before the
+	// higher-priority MyMap queue is validated and consumed.
+	MM_HandleMapPoolCvarChanges();
 
 	level.match_state = matchst_t::MATCH_ENDED;
 	level.match_state_timer = 0_sec;
@@ -2611,6 +2614,9 @@ static inline void G_RunFrame_(bool main_loop) {
 
 	muffmode::combat_heatmap::RunFrame();
 	MM_Ghost_RunFrame();
+	// [MuffMode] Keep structured map sources current even while timeout logic
+	// skips GT_Changes and the rest of the normal cvar polling path.
+	MM_HandleMapPoolCvarChanges();
 
 	if (level.timeout_in_place > 0_ms) {
 		int t = (level.timeout_in_place).seconds<int>() + 1;

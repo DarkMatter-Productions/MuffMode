@@ -152,8 +152,8 @@
 #if FileExists(PackageRoot + "\rerelease\baseq2\gt-STRIKE.cfg") == 0
   #error PackageRoot is missing rerelease\baseq2\gt-STRIKE.cfg.
 #endif
-#if FileExists(PackageRoot + "\" + MapsRelativePath + "\mm-aerowalk.bsp") == 0
-  #error PackageRoot is missing rerelease\maps\mm-aerowalk.bsp.
+#if FileExists(PackageRoot + "\" + MapsRelativePath + "\mm-aerow.bsp") == 0
+  #error PackageRoot is missing rerelease\maps\mm-aerow.bsp.
 #endif
 #if FileExists(PackageRoot + "\" + MapsRelativePath + "\mm-coldzero.bsp") == 0
   #error PackageRoot is missing rerelease\maps\mm-coldzero.bsp.
@@ -254,7 +254,7 @@
 #define PackageGtInstagibHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\gt-INSTAGIB.cfg")
 #define PackageGtNadefestHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\gt-NADEFEST.cfg")
 #define PackageGtStrikeHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\gt-STRIKE.cfg")
-#define PackageMapAerowalkHash GetSHA256OfFile(PackageRoot + "\" + MapsRelativePath + "\mm-aerowalk.bsp")
+#define PackageMapAerowalkHash GetSHA256OfFile(PackageRoot + "\" + MapsRelativePath + "\mm-aerow.bsp")
 #define PackageMapColdzeroHash GetSHA256OfFile(PackageRoot + "\" + MapsRelativePath + "\mm-coldzero.bsp")
 #define PackageMapCrucibleHash GetSHA256OfFile(PackageRoot + "\" + MapsRelativePath + "\mm-crucible.bsp")
 #define PackageMapKmachineHash GetSHA256OfFile(PackageRoot + "\" + MapsRelativePath + "\mm-kmachine.bsp")
@@ -359,6 +359,8 @@ const
   MAX_GAME_DLL_BACKUP_BYTES = 134217728;
   MAX_VERSION_MARKER_BACKUP_BYTES = 1048576;
   MAX_BACKUP_NAME_ATTEMPTS = 1000;
+  OBSOLETE_AEROWALK_MAP_BYTES = 761416;
+  OBSOLETE_AEROWALK_MAP_SHA256 = '8fd4ab55fe63e3ac4f0fa0f117c64a5d4610a386979750a6cb09e361b1d37904';
 
 var
   StorePage: TInputOptionWizardPage;
@@ -900,6 +902,98 @@ begin
     Result := True;
   except
     Log('Could not calculate SHA256 for: ' + FileName);
+  end;
+end;
+
+procedure CleanupObsoleteAerowalkMap();
+var
+  ObsoleteFile: String;
+  UnsafePath: String;
+  Attributes: DWORD;
+  Size: Int64;
+  ActualHash: String;
+begin
+  ObsoleteFile := AddBackslash(WizardDirValue) + '{#MapsRelativePath}\mm-aerowalk.bsp';
+
+  try
+    Attributes := GetFileAttributesW(ObsoleteFile);
+    if Attributes = $FFFFFFFF then
+    begin
+      Log('Obsolete Aerowalk map is not present or its attributes are unavailable; no cleanup attempted: ' + ObsoleteFile);
+      Exit;
+    end;
+
+    if (Attributes and FILE_ATTRIBUTE_DIRECTORY) <> 0 then
+    begin
+      Log('Preserving obsolete Aerowalk path because it is not a regular file: ' + ObsoleteFile);
+      Exit;
+    end;
+
+    if (Attributes and FILE_ATTRIBUTE_REPARSE_POINT) <> 0 then
+    begin
+      Log('Preserving obsolete Aerowalk map because it is a reparse point: ' + ObsoleteFile);
+      Exit;
+    end;
+
+    UnsafePath := FindReparsePointOnExistingPath(ObsoleteFile);
+    if UnsafePath <> '' then
+    begin
+      Log('Preserving obsolete Aerowalk map because its path traverses a reparse point: ' + UnsafePath);
+      Exit;
+    end;
+
+    if not FileSize64(ObsoleteFile, Size) then
+    begin
+      Log('Preserving obsolete Aerowalk map because its length could not be measured safely: ' + ObsoleteFile);
+      Exit;
+    end;
+
+    if Size <> OBSOLETE_AEROWALK_MAP_BYTES then
+    begin
+      Log('Preserving obsolete Aerowalk map because its length does not match the known invalid payload: ' + ObsoleteFile);
+      Exit;
+    end;
+
+    if not TryGetFileSha256(ObsoleteFile, ActualHash) then
+    begin
+      Log('Preserving obsolete Aerowalk map because its SHA256 could not be calculated: ' + ObsoleteFile);
+      Exit;
+    end;
+
+    if ActualHash <> OBSOLETE_AEROWALK_MAP_SHA256 then
+    begin
+      Log('Preserving obsolete Aerowalk map because its SHA256 does not match the known invalid payload: ' + ObsoleteFile);
+      Exit;
+    end;
+
+    { Recheck the path immediately before deletion so a newly introduced reparse point is never followed. }
+    UnsafePath := FindReparsePointOnExistingPath(ObsoleteFile);
+    Attributes := GetFileAttributesW(ObsoleteFile);
+    if (UnsafePath <> '') or (Attributes = $FFFFFFFF) or
+      ((Attributes and FILE_ATTRIBUTE_DIRECTORY) <> 0) or
+      ((Attributes and FILE_ATTRIBUTE_REPARSE_POINT) <> 0) then
+    begin
+      Log('Preserving obsolete Aerowalk map because its path or file type changed during cleanup: ' + ObsoleteFile);
+      Exit;
+    end;
+
+    if (not FileSize64(ObsoleteFile, Size)) or
+      (Size <> OBSOLETE_AEROWALK_MAP_BYTES) or
+      (not TryGetFileSha256(ObsoleteFile, ActualHash)) or
+      (ActualHash <> OBSOLETE_AEROWALK_MAP_SHA256) then
+    begin
+      Log('Preserving obsolete Aerowalk map because it changed immediately before deletion: ' + ObsoleteFile);
+      Exit;
+    end;
+
+    if DeleteFile(ObsoleteFile) then
+      Log('Removed the exact known invalid obsolete Aerowalk map after validating its replacement: ' + ObsoleteFile)
+    else
+      Log('Could not remove the exact known invalid obsolete Aerowalk map; installation will continue: ' + ObsoleteFile);
+  except
+    Log(
+      'Unexpected error while checking the obsolete Aerowalk map; preserving it and continuing installation (' +
+      GetExceptionMessage + '): ' + ObsoleteFile);
   end;
 end;
 
@@ -2198,7 +2292,7 @@ var
 begin
   MapsDir := AddBackslash(WizardDirValue) + '{#MapsRelativePath}\';
 
-  Result := VerifyInstalledFileHash(MapsDir + 'mm-aerowalk.bsp', '{#PackageMapAerowalkHash}', 'Aerowalk map BSP');
+  Result := VerifyInstalledFileHash(MapsDir + 'mm-aerow.bsp', '{#PackageMapAerowalkHash}', 'Aerowalk map BSP');
   if Result <> '' then Exit;
   Result := VerifyInstalledFileHash(MapsDir + 'mm-coldzero.bsp', '{#PackageMapColdzeroHash}', 'Cold Zero map BSP');
   if Result <> '' then Exit;
@@ -2585,6 +2679,7 @@ begin
       Abort;
     end;
 
+    CleanupObsoleteAerowalkMap();
     WriteInstallReceipt();
 
     if (LastBackupFile <> '') or (LastConfigBackupDir <> '') then

@@ -250,6 +250,65 @@ MM_TEST(map_pool_config_filenames_are_bounded_safe_leaves) {
 	MM_CHECK_FALSE(IsSafeConfigLeaf(std::string(128, 'a'), 128));
 }
 
+MM_TEST(structured_map_identifiers_match_engine_and_windows_path_semantics) {
+	using muffmode::map_pool::IsCanonicalStructuredMapIdentifier;
+	using muffmode::map_pool::IsSafeStructuredMapIdentifier;
+
+	MM_CHECK(IsSafeStructuredMapIdentifier("q2dm1", 64));
+	MM_CHECK(IsSafeStructuredMapIdentifier("q64/q2dm1", 64));
+	MM_CHECK(IsSafeStructuredMapIdentifier("Q64\\Q2DM1", 64));
+	MM_CHECK(IsSafeStructuredMapIdentifier("glug!", 64));
+	MM_CHECK(IsSafeStructuredMapIdentifier("maps", 64));
+	MM_CHECK(IsSafeStructuredMapIdentifier("map.v2", 64));
+	MM_CHECK(IsCanonicalStructuredMapIdentifier("q2dm1", 64));
+	MM_CHECK(IsCanonicalStructuredMapIdentifier("q64/q2dm1", 64));
+
+	MM_CHECK_FALSE(IsCanonicalStructuredMapIdentifier("Q2DM1", 64));
+	MM_CHECK_FALSE(IsCanonicalStructuredMapIdentifier("q64\\q2dm1", 64));
+	MM_CHECK_FALSE(IsSafeStructuredMapIdentifier("maps/q2dm1", 64));
+	MM_CHECK_FALSE(IsSafeStructuredMapIdentifier("MAPS\\Q2DM1", 64));
+	MM_CHECK_FALSE(IsSafeStructuredMapIdentifier("q2dm1.bsp", 64));
+	MM_CHECK_FALSE(IsSafeStructuredMapIdentifier("q2dm1.CIN", 64));
+	MM_CHECK_FALSE(IsSafeStructuredMapIdentifier("q2dm1.dm2", 64));
+	MM_CHECK_FALSE(IsSafeStructuredMapIdentifier("q2dm1.pcx", 64));
+	MM_CHECK_FALSE(IsSafeStructuredMapIdentifier("q2dm1.png", 64));
+	MM_CHECK_FALSE(IsSafeStructuredMapIdentifier("q2dm1+base1", 64));
+	MM_CHECK_FALSE(IsSafeStructuredMapIdentifier("q2dm1$start", 64));
+	MM_CHECK_FALSE(IsSafeStructuredMapIdentifier("!q2dm1", 64));
+	MM_CHECK_FALSE(IsSafeStructuredMapIdentifier("foo./bar", 64));
+	MM_CHECK_FALSE(IsSafeStructuredMapIdentifier("con", 64));
+	MM_CHECK_FALSE(IsSafeStructuredMapIdentifier("folder/nul.txt", 64));
+	MM_CHECK_FALSE(IsSafeStructuredMapIdentifier("com1/q2dm1", 64));
+	MM_CHECK_FALSE(IsSafeStructuredMapIdentifier(
+		std::string("q2dm1\xc3\xa9", 7), 64));
+}
+
+MM_TEST(map_pool_display_text_requires_safe_well_formed_utf8) {
+	using muffmode::map_pool::IsSafeDisplayText;
+	using muffmode::map_pool::IsWellFormedUtf8;
+
+	const std::string accented("Cold Z\xc3\xa9ro", 10);
+	const std::string emoji("Map \xf0\x9f\x97\xba", 8);
+	MM_CHECK(IsWellFormedUtf8(accented));
+	MM_CHECK(IsWellFormedUtf8(emoji));
+	MM_CHECK(IsSafeDisplayText(accented, 32));
+	MM_CHECK(IsSafeDisplayText(emoji, 32));
+	MM_CHECK(IsSafeDisplayText("", 0));
+
+	MM_CHECK_FALSE(IsWellFormedUtf8(std::string("\xc0\xaf", 2)));
+	MM_CHECK_FALSE(IsWellFormedUtf8(std::string("\xed\xa0\x80", 3)));
+	MM_CHECK_FALSE(IsWellFormedUtf8(std::string("\xf4\x90\x80\x80", 4)));
+	MM_CHECK_FALSE(IsWellFormedUtf8(std::string("\xe2\x82", 2)));
+	MM_CHECK_FALSE(IsWellFormedUtf8(std::string("\x80", 1)));
+	MM_CHECK_FALSE(IsSafeDisplayText("line\nbreak", 32));
+	MM_CHECK_FALSE(IsSafeDisplayText(std::string("\xc2\x85", 2), 32));
+	MM_CHECK_FALSE(IsSafeDisplayText(std::string("\xe2\x80\xa8", 3), 32));
+	MM_CHECK_FALSE(IsSafeDisplayText(std::string("\xe2\x80\xae", 3), 32));
+	MM_CHECK_FALSE(IsSafeDisplayText(std::string("\xe2\x81\xa6", 3), 32));
+	MM_CHECK_FALSE(IsSafeDisplayText(std::string("\xd8\x9c", 2), 32));
+	MM_CHECK_FALSE(IsSafeDisplayText(std::string("\xef\xbb\xbf", 3), 32));
+}
+
 MM_TEST(map_cycle_parser_preserves_order_comments_and_case_insensitive_deduplication) {
 	using muffmode::map_pool::ParseCycleText;
 
@@ -271,6 +330,27 @@ MM_TEST(map_cycle_parser_preserves_order_comments_and_case_insensitive_deduplica
 	MM_CHECK_EQ(result.maps[2], std::string("glug!"));
 	MM_CHECK_EQ(result.maps[3], std::string("q2dm2"));
 	MM_CHECK_EQ(result.maps[4], std::string("q2dm3"));
+}
+
+MM_TEST(map_cycle_parser_handles_bom_and_rejects_engine_map_command_tokens) {
+	using muffmode::map_pool::ParseCycleText;
+
+	const std::string with_bom =
+		std::string("\xef\xbb\xbf", 3) + "q2dm1 q2dm2";
+	const auto bom = ParseCycleText(with_bom, 64);
+	MM_CHECK(bom.valid);
+	MM_CHECK_EQ(bom.maps.size(), 2u);
+	MM_CHECK_EQ(bom.maps[0], std::string("q2dm1"));
+
+	const auto unsafe = ParseCycleText(
+		"q2dm1 q2dm2.bsp maps/q2dm3 q2dm4+base1 q2dm5$start !q2dm6 q2dm7",
+		64);
+	MM_CHECK(unsafe.valid);
+	MM_CHECK_EQ(unsafe.tokens_seen, 7u);
+	MM_CHECK_EQ(unsafe.invalid_tokens, 5u);
+	MM_CHECK_EQ(unsafe.maps.size(), 2u);
+	MM_CHECK_EQ(unsafe.maps[0], std::string("q2dm1"));
+	MM_CHECK_EQ(unsafe.maps[1], std::string("q2dm7"));
 }
 
 MM_TEST(map_cycle_parser_discards_unsafe_tokens_without_discarding_valid_order) {
@@ -295,6 +375,12 @@ MM_TEST(map_cycle_parser_rejects_malformed_or_over_limit_input) {
 	const auto unterminated = ParseCycleText("q2dm1 /* missing end", 64);
 	MM_CHECK_FALSE(unterminated.valid);
 	MM_CHECK_EQ(unterminated.error, std::string("cycle has an unterminated block comment"));
+
+	const auto unexpected_end = ParseCycleText("q2dm1 */ q2dm2", 64);
+	MM_CHECK_FALSE(unexpected_end.valid);
+	MM_CHECK_EQ(
+		unexpected_end.error,
+		std::string("cycle has an unexpected block-comment terminator"));
 
 	const char with_nul[] = { 'q', '2', 'd', 'm', '1', '\0', 'q', '2', 'd', 'm', '2' };
 	const auto embedded_nul =
@@ -351,6 +437,39 @@ MM_TEST(map_pool_mode_preferences_and_relaxation_order_are_explicit) {
 	MM_CHECK_FALSE(SELECTION_RELAXATIONS[1].enforce_cooldown);
 	MM_CHECK_FALSE(SELECTION_RELAXATIONS[2].enforce_player_bounds);
 	MM_CHECK_FALSE(SELECTION_RELAXATIONS[2].enforce_cooldown);
+}
+
+MM_TEST(map_pool_reload_action_prioritizes_pending_full_transactions) {
+	using muffmode::map_pool::reload_action_t;
+	using muffmode::map_pool::reload_context_t;
+	using muffmode::map_pool::ResolveReloadAction;
+
+	MM_CHECK_EQ(ResolveReloadAction(1, 1, 2, 2), reload_action_t::none);
+	MM_CHECK_EQ(ResolveReloadAction(2, 1, 2, 1), reload_action_t::pool);
+	MM_CHECK_EQ(ResolveReloadAction(1, 1, 2, 1), reload_action_t::cycle);
+	reload_context_t pending;
+	pending.pool_reload_pending = true;
+	MM_CHECK_EQ(
+		ResolveReloadAction(1, 1, 2, 1, pending),
+		reload_action_t::pool);
+	MM_CHECK_EQ(
+		ResolveReloadAction(1, 1, 1, 1, pending),
+		reload_action_t::none);
+
+	reload_context_t disable_pending = pending;
+	disable_pending.cycle_disabled = true;
+	MM_CHECK_EQ(
+		ResolveReloadAction(1, 1, 2, 1, disable_pending),
+		reload_action_t::cycle);
+	MM_CHECK_EQ(
+		ResolveReloadAction(2, 1, 2, 1, disable_pending),
+		reload_action_t::cycle);
+
+	reload_context_t disable_all = disable_pending;
+	disable_all.pool_disabled = true;
+	MM_CHECK_EQ(
+		ResolveReloadAction(2, 1, 2, 1, disable_all),
+		reload_action_t::pool);
 }
 
 MM_TEST(changelevel_tokens_allow_unit_markers_without_allowing_commands) {
