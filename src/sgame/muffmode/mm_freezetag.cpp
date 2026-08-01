@@ -1319,6 +1319,11 @@ mm_freezetag_team_counts_t CountTeam(team_t team)
 	mm_freezetag_team_counts_t counts;
 
 	for (auto ec : active_clients()) {
+		// A same-slot reconnect remains represented by its reservation while the
+		// transactional restore is pending; count it exactly once below using the
+		// saved team/elimination state.
+		if (MM_Ghost_IsPendingRestore(ec))
+			continue;
 		if (!ec->client || ec->client->sess.team != team)
 			continue;
 		if (!MM_FreezeTagClientCountsForRound(
@@ -1336,16 +1341,9 @@ mm_freezetag_team_counts_t CountTeam(team_t team)
 
 	for (uint32_t i = 1; i <= game.maxclients; ++i) {
 		gentity_t *slot = &g_entities[i];
-		if (!slot->inuse || !slot->client || slot->client->pers.connected)
+		if (!slot->inuse || !slot->client)
 			continue;
-		if (!MM_Ghost_IsReservedSlot(slot) || !RawFrozen(slot))
-			continue;
-		if (slot->client->sess.team != team)
-			continue;
-		if (!MM_FreezeTagClientCountsForRound(
-				ClientIsPlaying(slot->client),
-				IsFreezeTeam(slot->client->sess.team),
-				slot->client->eliminated))
+		if (!MM_Ghost_ReservedClientCountsForRound(slot, team) || !RawFrozen(slot))
 			continue;
 
 		counts.participants++;

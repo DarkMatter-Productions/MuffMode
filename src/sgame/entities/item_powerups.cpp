@@ -179,7 +179,7 @@ void Tech_ApplyExpiry(gentity_t *ent) {
 	}
 }
 
-static void Tech_Spawn(gitem_t *item, gentity_t *spot);
+static gentity_t *Tech_Spawn(gitem_t *item, gentity_t *spot);
 static void Tech_ScheduleRelocate(gentity_t *tech);
 
 static gentity_t *FindTechSpawn() {
@@ -263,7 +263,7 @@ void Tech_DeadDrop(gentity_t *ent) {
 // Spawn a tech at `origin`. `toss` pops it out with a random horizontal nudge (used at spawn
 // points, which sit in open areas); when false the tech settles straight down onto the spot it
 // was placed at, so a validated random floor position isn't flung into a pit or off a ledge.
-static void Tech_SpawnAtOrigin(gitem_t *item, const vec3_t &origin, bool toss) {
+static gentity_t *Tech_SpawnAtOrigin(gitem_t *item, const vec3_t &origin, bool toss) {
 	gentity_t	*ent = G_Spawn();
 
 	ent->classname = item->classname;
@@ -292,12 +292,13 @@ static void Tech_SpawnAtOrigin(gitem_t *item, const vec3_t &origin, bool toss) {
 	Tech_ScheduleRelocate(ent);
 
 	gi.linkentity(ent);
+	return ent;
 }
 
-static void Tech_Spawn(gitem_t *item, gentity_t *spot) {
+static gentity_t *Tech_Spawn(gitem_t *item, gentity_t *spot) {
 	vec3_t origin = spot->s.origin;
 	origin[2] += 16;
-	Tech_SpawnAtOrigin(item, origin, true);
+	return Tech_SpawnAtOrigin(item, origin, true);
 }
 
 bool AllowTechs() {
@@ -308,6 +309,31 @@ bool AllowTechs() {
 		return !!(GT(GT_CTF) && !(g_instagib->integer || GT(GT_INSTAGIB)) && !(g_nadefest->integer || GT(GT_NADEFEST)));
 	} else
 		return !!(g_allow_techs->integer && ItemSpawnsEnabled());
+}
+
+void Tech_ReturnToWorld(item_id_t tech_id, const vec3_t &fallback_origin,
+	gtime_t expire_time)
+{
+	gitem_t *item = GetItemByIndex(tech_id);
+	if (!item || !(item->flags & IF_TECH) || !AllowTechs())
+		return;
+	if (expire_time && expire_time <= level.time)
+		return;
+
+	// Return exactly the one copy owned by the expiring snapshot. Horde permits
+	// same-type copies from wave rolls and champion rewards even in otherwise
+	// unique configurations, so global same-type suppression would lose items.
+
+	gentity_t *tech = nullptr;
+	if (gentity_t *spot = FindTechSpawn())
+		tech = Tech_Spawn(item, spot);
+	else
+		tech = Tech_SpawnAtOrigin(item, fallback_origin, false);
+
+	if (expire_time) {
+		tech->timestamp = expire_time;
+		Tech_ScheduleDropped(tech);
+	}
 }
 
 static THINK(Tech_SpawnAll) (gentity_t *ent) -> void {

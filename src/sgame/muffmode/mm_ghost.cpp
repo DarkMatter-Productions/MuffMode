@@ -3,9 +3,13 @@
 
 #include "g_local.h"
 #include "muffmode/mm_command_contracts.h"
+#include "muffmode/mm_freezetag.h"
 #include "muffmode/mm_ghost.h"
 #include "muffmode/mm_match.h"
+#include "muffmode/mm_message_budget.h"
 #include "muffmode/mm_parse.h"
+#include "muffmode/mm_skin.h"
+#include "muffmode/mm_spawn_rules.h"
 #include "muffmode/mm_util.h"
 
 #include <algorithm>
@@ -27,12 +31,16 @@ constexpr float AUTO_GHOST_PLACEHOLDER_ALPHA = 0.25f;
 constexpr gtime_t AUTO_GHOST_FADE_OUT_TIME = 700_ms;
 constexpr gtime_t AUTO_GHOST_FADE_IN_TIME = 500_ms;
 constexpr gtime_t AUTO_GHOST_REINSTATE_DELAY = 3_sec;
+constexpr gtime_t AUTO_GHOST_PLACEMENT_RETRY_TIME = 3_sec;
 constexpr gtime_t AUTO_GHOST_EXPIRE_PULSE_TIME = 700_ms;
 } // namespace muffmode::ghost
 
+static_assert(MM_GHOST_MAX_CLIENT_CAPACITY == MAX_CLIENTS_KEX);
+static_assert(MM_GHOST_PLAYER_SKIN_CONFIGSTRING_VALUE_BYTES == CS_MAX_STRING_LENGTH);
+
 namespace muffmode::ghost::snapshot {
 
-enum class AutoGhostPhase {
+enum class AutoGhostPhase : uint8_t {
 	Reserved,
 	Reinstating,
 	Expiring
@@ -74,6 +82,8 @@ struct AutoGhostSnapshot {
 	bool valid = false;
 	char social_id[MAX_INFO_VALUE]{};
 	std::string match_id;
+	uint32_t round_epoch = 0;
+	uint32_t world_epoch = 0;
 	gtime_t remaining;
 	gclient_t client{};
 	EntityLifeSnapshot entity{};
@@ -87,6 +97,69 @@ struct AutoGhostSnapshot {
 };
 
 std::array<AutoGhostSnapshot, MAX_CLIENTS> auto_ghosts;
+
+struct ReconnectClientState {
+	char userinfo[MAX_INFO_STRING]{};
+	char social_id[MAX_INFO_VALUE]{};
+	client_config_t config{};
+	bool admin = false;
+	int32_t ping = 0;
+	gtime_t inactivity_time;
+	bool inactivity_warning = false;
+	int voted = 0;
+	vec3_t cmd_angles{};
+	gtime_t flood_locktill;
+	std::array<gtime_t, 10> flood_when{};
+	int32_t flood_whenhead = 0;
+	gtime_t last_banned_message_time;
+	gtime_t follow_msg_time;
+};
+
+static_assert(q_countof(gclient_t::flood_when) ==
+	std::tuple_size_v<decltype(ReconnectClientState::flood_when)>);
+
+struct RestorePlacement {
+	bool fallback = false;
+	vec3_t origin{};
+	vec3_t angles{};
+};
+
+mm_ghost_skin_sync_scheduler_t<MM_GHOST_MAX_CLIENT_CAPACITY> deferred_skin_sync;
+std::array<bool, MM_GHOST_MAX_CLIENT_CAPACITY> deferred_abort_spawns{};
+size_t pending_restore_commit_cursor = 0;
+
+struct GhostDiagnostics {
+	uint64_t capture_attempts = 0;
+	uint64_t capture_successes = 0;
+	uint64_t capture_rejected_client_state = 0;
+	uint64_t capture_rejected_intermission = 0;
+	uint64_t capture_rejected_social_id = 0;
+	uint64_t capture_rejected_match_id = 0;
+	uint64_t capture_rejected_disabled = 0;
+	uint64_t capture_rejected_capacity = 0;
+	uint64_t capture_rejected_no_slot = 0;
+	uint64_t restore_attempts = 0;
+	uint64_t restore_successes = 0;
+	uint64_t restore_retries = 0;
+	uint64_t restore_invalid = 0;
+	uint64_t restore_aborts = 0;
+	uint64_t restore_cancellations = 0;
+	uint64_t saved_placements = 0;
+	uint64_t fallback_placements = 0;
+	uint64_t skin_queues_queued = 0;
+	uint64_t skin_actions_attempted = 0;
+	uint64_t skin_messages_emitted = 0;
+	uint64_t skin_actions_without_message = 0;
+	size_t peak_active_skin_queues = 0;
+};
+
+GhostDiagnostics diagnostics{};
+
+void IncrementDiagnostic(uint64_t &value)
+{
+	if (value != std::numeric_limits<uint64_t>::max())
+		value++;
+}
 
 void ClearTransientClientReferences(gclient_t &client)
 {
@@ -166,14 +239,28 @@ bool HasUsableSocialId(const char *social_id)
 	return social_id && social_id[0];
 }
 
+bool SnapshotBelongsToCurrentMatchId(const AutoGhostSnapshot &snapshot)
+{
+	return MM_GhostSessionBelongsToMatch(snapshot.valid,
+		!snapshot.match_id.empty() && snapshot.match_id == level.match_id);
+}
+
+bool SnapshotBelongsToCurrentWorld(const AutoGhostSnapshot &snapshot)
+{
+	return SnapshotBelongsToCurrentMatchId(snapshot) &&
+		MM_GhostSnapshotBelongsToWorld(
+			true,
+			snapshot.world_epoch,
+			level.world_epoch);
+}
+
 bool SnapshotMatchesCurrentMatch(const AutoGhostSnapshot &snapshot)
 {
-	return snapshot.valid &&
+	return SnapshotBelongsToCurrentWorld(snapshot) &&
+		MM_GhostRestoreEpochMatches(snapshot.round_epoch, level.round_epoch) &&
 		(snapshot.remaining > 0_ms ||
 			snapshot.phase == AutoGhostPhase::Reinstating ||
 			snapshot.phase == AutoGhostPhase::Expiring) &&
-		!snapshot.match_id.empty() &&
-		snapshot.match_id == level.match_id &&
 		level.match_state == matchst_t::MATCH_IN_PROGRESS &&
 		!level.intermission_time &&
 		!level.intermission_queued;
@@ -193,17 +280,42 @@ int ActiveSnapshotCount(int except_index = -1)
 	return count;
 }
 
+bool SnapshotOwnsSocialId(const AutoGhostSnapshot &snapshot, const char *social_id)
+{
+	return snapshot.valid && HasUsableSocialId(social_id) &&
+		muffmode::CStringEquals(snapshot.social_id, social_id);
+}
+
 bool SnapshotMatchesSocialId(const AutoGhostSnapshot &snapshot, const char *social_id)
 {
 	return SnapshotMatchesCurrentMatch(snapshot) &&
 		snapshot.phase != AutoGhostPhase::Expiring &&
-		HasUsableSocialId(social_id) &&
-		muffmode::CStringEquals(snapshot.social_id, social_id);
+		SnapshotOwnsSocialId(snapshot, social_id);
 }
 
 bool IsClientSlot(gentity_t *ent)
 {
 	return ent && ent >= g_entities + 1 && ent < g_entities + game.maxclients + 1;
+}
+
+bool DeferredAbortSpawnIsPending(gentity_t *ent)
+{
+	if (!IsClientSlot(ent))
+		return false;
+
+	const size_t client_index = static_cast<size_t>(ent - g_entities - 1);
+	return client_index < deferred_abort_spawns.size() &&
+		deferred_abort_spawns[client_index];
+}
+
+void SetDeferredAbortSpawnPending(gentity_t *ent, bool pending)
+{
+	if (!IsClientSlot(ent))
+		return;
+
+	const size_t client_index = static_cast<size_t>(ent - g_entities - 1);
+	if (client_index < deferred_abort_spawns.size())
+		deferred_abort_spawns[client_index] = pending;
 }
 
 bool IsAutoGhostPlaceholder(const gentity_t *ent)
@@ -236,6 +348,15 @@ void SetPlaceholderOpacity(gentity_t *ent, float alpha)
 		ent->s.renderfx &= ~RF_TRANSLUCENT;
 }
 
+void CancelDeferredSkinSync(gentity_t *ent)
+{
+	if (!IsClientSlot(ent))
+		return;
+
+	const size_t client_index = static_cast<size_t>(ent - g_entities - 1);
+	MM_GhostCancelSkinSync(deferred_skin_sync, client_index);
+}
+
 void RemovePlaceholder(size_t index)
 {
 	if (index >= auto_ghosts.size())
@@ -252,6 +373,9 @@ void RemovePlaceholder(size_t index)
 	if (ent->linked)
 		gi.unlinkentity(ent);
 
+	CancelDeferredSkinSync(ent);
+	MM_FreezeTag_ClearClient(ent);
+
 	ent->s.modelindex = 0;
 	ent->s.modelindex2 = 0;
 	ent->s.modelindex3 = 0;
@@ -265,6 +389,9 @@ void RemovePlaceholder(size_t index)
 	ent->s.alpha = 0.0f;
 	ent->solid = SOLID_NOT;
 	ent->clipmask = CONTENTS_NONE;
+	// Client slots do not pass through G_FreeEntity. End this placeholder
+	// lifetime explicitly so delayed callbacks cannot bind to a later user.
+	ent->spawn_count = MM_NextEntityGeneration(ent->spawn_count);
 	ent->inuse = false;
 	ent->sv.init = false;
 	ent->classname = "disconnected";
@@ -278,6 +405,8 @@ void RemovePlaceholder(size_t index)
 }
 
 void ReleaseExpiredMatchItems(const AutoGhostSnapshot &snapshot);
+void AbortPendingRestore(size_t index, const char *reason,
+	bool release_match_items = true, bool resume_auto_timeout = true);
 
 void ClearSnapshot(size_t index, bool release_match_items = false)
 {
@@ -301,11 +430,19 @@ void ReleaseExpiredMatchItems(const AutoGhostSnapshot &snapshot)
 	if (snapshot.client.pers.inventory[IT_FLAG_BLUE])
 		CTF_ResetTeamFlag(TEAM_BLUE);
 
-	bool held_tech = false;
-	for (size_t i = 0; i < q_countof(tech_ids); i++)
-		held_tech = held_tech || snapshot.client.pers.inventory[tech_ids[i]];
-	if (held_tech)
-		Tech_Reset();
+	// Reset-each-wave Horde has already removed every old-wave Tech and will
+	// spawn the configured fresh set at wave start. Mid-wave expiry still returns
+	// exactly the snapshot-owned copy.
+	const bool horde_wave_owns_tech_reset = MM_GhostHordeWaveOwnsTechReset(
+		GT(GT_HORDE),
+		g_horde_tech_reset_each_wave && g_horde_tech_reset_each_wave->integer,
+		snapshot.round_epoch,
+		level.round_epoch);
+	if (!horde_wave_owns_tech_reset)
+		for (const item_id_t tech_id : tech_ids)
+			if (snapshot.client.pers.inventory[tech_id])
+				Tech_ReturnToWorld(tech_id, snapshot.entity.s.origin,
+					snapshot.client.tech_expire_time);
 }
 
 bool SnapshotCarriesFlag(const AutoGhostSnapshot &snapshot)
@@ -322,6 +459,25 @@ void ClearSnapshotFlagState(AutoGhostSnapshot &snapshot)
 	snapshot.client.pers.team_state.flag_pickup_time = 0_ms;
 	snapshot.client.resp.ctf_flagsince = 0_ms;
 	snapshot.entity.s.effects &= ~(EF_FLAG_RED | EF_FLAG_BLUE);
+}
+
+void ClearRestoringClientMatchItems(gentity_t *ent)
+{
+	if (!ent || !ent->client)
+		return;
+
+	gclient_t *client = ent->client;
+	client->pers.inventory[IT_FLAG_RED] = 0;
+	client->pers.inventory[IT_FLAG_BLUE] = 0;
+	client->pers.team_state.flag_pickup_time = 0_ms;
+	client->resp.ctf_flagsince = 0_ms;
+	for (const item_id_t tech_id : tech_ids)
+		client->pers.inventory[tech_id] = 0;
+	client->tech_regen_time = 0_ms;
+	client->tech_sound_time = 0_ms;
+	client->tech_last_message_time = 0_ms;
+	client->tech_expire_time = 0_ms;
+	ent->s.effects &= ~(EF_FLAG_RED | EF_FLAG_BLUE);
 }
 
 void DropSnapshotFlag(size_t index, item_id_t flag_id)
@@ -360,9 +516,28 @@ void ExpireSnapshot(size_t index)
 {
 	if (index >= auto_ghosts.size() || !auto_ghosts[index].valid)
 		return;
+	if (auto_ghosts[index].phase == AutoGhostPhase::Reinstating) {
+		AbortPendingRestore(index, nullptr, true);
+		return;
+	}
 
 	level.ghosts[index].code = 0;
 	ClearSnapshot(index, true);
+}
+
+void DiscardStaleSnapshot(size_t index)
+{
+	if (index >= auto_ghosts.size() || !auto_ghosts[index].valid)
+		return;
+	if (auto_ghosts[index].phase == AutoGhostPhase::Reinstating) {
+		AbortPendingRestore(index, nullptr, false);
+		return;
+	}
+
+	// A round/world reload has already recreated flags and Techs. Releasing an
+	// older snapshot into that new world would reset current-round item state.
+	level.ghosts[index].code = 0;
+	ClearSnapshot(index, false);
 }
 
 void ExpireSnapshotsForSocialId(const char *social_id, int except_index = -1)
@@ -373,8 +548,12 @@ void ExpireSnapshotsForSocialId(const char *social_id, int except_index = -1)
 	for (size_t i = 0; i < GhostSlotCapacity(); i++) {
 		if (static_cast<int>(i) == except_index)
 			continue;
-		if (SnapshotMatchesSocialId(auto_ghosts[i], social_id))
+		if (!SnapshotOwnsSocialId(auto_ghosts[i], social_id))
+			continue;
+		if (SnapshotBelongsToCurrentWorld(auto_ghosts[i]))
 			ExpireSnapshot(i);
+		else
+			DiscardStaleSnapshot(i);
 	}
 }
 
@@ -543,14 +722,9 @@ void RestoreEntityLife(gentity_t *ent, const EntityLifeSnapshot &snapshot)
 
 	if (ClientIsPlaying(ent->client) && !ent->deadflag && ent->health > 0)
 		ent->svflags &= ~SVF_DEADMONSTER;
-
-	gi.linkentity(ent);
-
-	if (ent->solid != SOLID_NOT && ent->health > 0)
-		KillBox(ent, true, MOD_TELEFRAG_SPAWN);
 }
 
-void SanitizeRestoredClient(gentity_t *ent, int ghost_index, bool keep_current_admin)
+void SanitizeRestoredClient(gentity_t *ent, int ghost_index)
 {
 	gclient_t *client = ent->client;
 
@@ -561,7 +735,7 @@ void SanitizeRestoredClient(gentity_t *ent, int ghost_index, bool keep_current_a
 	client->pers.max_health = ent->max_health;
 	client->pers.saved_flags = ent->flags & (FL_FLASHLIGHT | FL_GODMODE | FL_NOTARGET | FL_POWER_ARMOR | FL_WANTS_POWER_ARMOR);
 	client->sess.is_a_bot = false;
-	client->sess.admin = client->sess.admin || keep_current_admin || ent == &g_entities[1];
+	client->sess.admin = false;
 	client->resp.ghost = &level.ghosts[ghost_index];
 
 	client->showscores = false;
@@ -578,7 +752,10 @@ void SanitizeRestoredClient(gentity_t *ent, int ghost_index, bool keep_current_a
 	client->menudirty = false;
 	client->follow_queued_target = nullptr;
 	client->follow_queued_time = 0_ms;
-	SetFollowTarget(ent, nullptr);
+	// ClearTransientClientReferences already detached the saved target. Do not use
+	// SetFollowTarget here: its presentation refresh would emit an immediate burst
+	// of per-viewer skin configstrings before the bounded post-restore queue.
+	client->follow_target = nullptr;
 	client->follow_update = false;
 	client->owned_sphere = nullptr;
 	client->grapple_ent = nullptr;
@@ -600,9 +777,336 @@ void SanitizeRestoredClient(gentity_t *ent, int ghost_index, bool keep_current_a
 	client->ps.pmove.origin = ent->s.origin;
 	client->ps.pmove.velocity = ent->velocity;
 	if (!client->ps.pmove.viewheight)
-		client->ps.pmove.viewheight = ent->viewheight;
+		client->ps.pmove.viewheight = static_cast<int8_t>(clamp(ent->viewheight,
+			static_cast<int32_t>(std::numeric_limits<int8_t>::min()),
+			static_cast<int32_t>(std::numeric_limits<int8_t>::max())));
 
 	AngleVectors(client->v_angle, client->v_forward, nullptr, nullptr);
+}
+
+ReconnectClientState CaptureReconnectClientState(const gclient_t &client)
+{
+	ReconnectClientState state{};
+	muffmode::CopyString(state.userinfo, client.pers.userinfo);
+	muffmode::CopyString(state.social_id, client.pers.social_id);
+	state.config = client.sess.pc;
+	state.admin = client.sess.admin;
+	state.ping = client.ping;
+	state.inactivity_time = client.sess.inactivity_time;
+	state.inactivity_warning = client.sess.inactivity_warning;
+	state.voted = client.pers.voted;
+	state.cmd_angles = client.resp.cmd_angles;
+	state.flood_locktill = client.flood_locktill;
+	std::copy(std::begin(client.flood_when), std::end(client.flood_when),
+		state.flood_when.begin());
+	state.flood_whenhead = client.flood_whenhead;
+	state.last_banned_message_time = client.last_banned_message_time;
+	state.follow_msg_time = client.follow_msg_time;
+	return state;
+}
+
+void ApplyReconnectClientState(gentity_t *ent, const ReconnectClientState &state)
+{
+	gclient_t *client = ent->client;
+	client->sess.pc = state.config;
+	client->sess.admin = MM_GhostRestoreAdminState(state.admin, ent == &g_entities[1]);
+	client->sess.is_a_bot = false;
+	client->ping = state.ping;
+	client->sess.inactivity_time = state.inactivity_time;
+	client->sess.inactivity_warning = state.inactivity_warning;
+	client->pers.voted = state.voted;
+	client->resp.cmd_angles = state.cmd_angles;
+	client->flood_locktill = state.flood_locktill;
+	std::copy(state.flood_when.begin(), state.flood_when.end(),
+		std::begin(client->flood_when));
+	client->flood_whenhead = state.flood_whenhead;
+	client->last_banned_message_time = state.last_banned_message_time;
+	client->follow_msg_time = state.follow_msg_time;
+
+	// Re-parse the new connection's identity and presentation preferences after
+	// gameplay state is restored. The snapshot must never rename or reconfigure
+	// the user who owns this connection.
+	ClientUserinfoChangedForRestore(ent, state.userinfo);
+	muffmode::CopyString(client->pers.social_id, state.social_id);
+	client->ps.pmove.delta_angles = client->ps.viewangles - client->resp.cmd_angles;
+	client->old_pmove = client->ps.pmove;
+	AngleVectors(client->v_angle, client->v_forward, nullptr, nullptr);
+}
+
+bool FindRestorePlacement(gentity_t *ent, const EntityLifeSnapshot &snapshot,
+	RestorePlacement &placement)
+{
+	placement.origin = snapshot.s.origin;
+	placement.angles = snapshot.s.angles;
+
+	const bool saved_position_unsafe = snapshot.solid != SOLID_NOT &&
+		G_UnsafeSpawnPosition(snapshot.s.origin, true, ent, false);
+	if (MM_GhostRestorePlacementStrategy(
+			saved_position_unsafe, false, false) ==
+		mm_ghost_restore_placement_t::SavedPosition)
+		return true;
+
+	// The world kept moving while the reservation was non-solid. Never turn a
+	// congested old location into a mass telefrag; choose an ordinary clear spawn
+	// under the restored team/elimination rules and wait if none is available.
+	bool landmark = false;
+	const bool fallback_spawn_available =
+		SelectSpawnPoint(ent, placement.origin, placement.angles, false, landmark);
+	if (!fallback_spawn_available)
+		return false;
+
+	const bool fallback_spawn_unsafe =
+		G_UnsafeSpawnPosition(placement.origin, true, ent, false);
+	if (MM_GhostRestorePlacementStrategy(
+			saved_position_unsafe,
+			fallback_spawn_available,
+			fallback_spawn_unsafe) !=
+		mm_ghost_restore_placement_t::FallbackSpawn)
+		return false;
+
+	placement.fallback = true;
+	return true;
+}
+
+void ApplyRestorePlacement(gentity_t *ent, const RestorePlacement &placement)
+{
+	if (!placement.fallback)
+		return;
+
+	gclient_t *client = ent->client;
+	client->spawn_origin = placement.origin;
+	client->ps.pmove.origin = placement.origin;
+	client->ps.pmove.velocity = {};
+	client->ps.viewangles = placement.angles;
+	client->v_angle = placement.angles;
+	client->oldviewangles = placement.angles;
+
+	ent->s.origin = placement.origin;
+	ent->s.origin[2] += 1.0f;
+	ent->s.old_origin = ent->s.origin;
+	ent->s.angles = placement.angles;
+	ent->velocity = {};
+	ent->avelocity = {};
+	ent->groundentity = nullptr;
+	ent->groundentity_linkcount = 0;
+}
+
+void QueueDeferredSkinSync(gentity_t *restored)
+{
+	if (!IsClientSlot(restored))
+		return;
+
+	const size_t client_index = static_cast<size_t>(restored - g_entities - 1);
+	if (MM_GhostQueueSkinSync(deferred_skin_sync, client_index,
+			restored->spawn_count, level.round_epoch, level.world_epoch)) {
+		IncrementDiagnostic(diagnostics.skin_queues_queued);
+		diagnostics.peak_active_skin_queues = std::max(
+			diagnostics.peak_active_skin_queues,
+			MM_GhostActiveSkinSyncQueueCount(deferred_skin_sync));
+	}
+}
+
+std::array<mm_ghost_skin_sync_slot_t, MM_GHOST_MAX_CLIENT_CAPACITY>
+CaptureDeferredSkinSyncSlots()
+{
+	std::array<mm_ghost_skin_sync_slot_t, MM_GHOST_MAX_CLIENT_CAPACITY> slots{};
+	const size_t capacity = GhostSlotCapacity();
+	for (size_t i = 0; i < capacity; i++) {
+		gentity_t *ent = &g_entities[i + 1];
+		slots[i] = {
+			ent->inuse && ent->client,
+			ent->client && ent->client->pers.connected,
+			ent->client && ent->client->pers.spawned,
+			ent->spawn_count
+		};
+	}
+	return slots;
+}
+
+void RunDeferredSkinSyncs(bool presentation_allowed)
+{
+	const size_t capacity = GhostSlotCapacity();
+	const auto slots = CaptureDeferredSkinSyncSlots();
+	const mm_ghost_skin_sync_context_t context{
+		capacity,
+		level.round_epoch,
+		level.world_epoch,
+		presentation_allowed
+	};
+
+	if (!presentation_allowed || !capacity) {
+		MM_GhostStepSkinSync(deferred_skin_sync, slots, context);
+		return;
+	}
+	if (!MM_GhostActiveSkinSyncQueueCount(deferred_skin_sync))
+		return;
+
+	mm_reliable_fanout_scope_t fanout_budget(
+		MM_GHOST_POST_RESTORE_SKIN_MESSAGES_PER_FRAME,
+		MM_GHOST_POST_RESTORE_SKIN_MESSAGES_PER_FRAME *
+			MM_GHOST_MAX_SKIN_CONFIGSTRING_MESSAGE_BYTES,
+		"post-restore skin synchronization");
+
+	size_t sent = 0;
+	for (size_t attempted = 0;
+		attempted < MM_GHOST_MAX_SKIN_SYNC_ACTIONS_PER_DRAIN &&
+			sent < MM_GHOST_POST_RESTORE_SKIN_MESSAGES_PER_FRAME;
+		attempted++) {
+		const mm_ghost_skin_sync_step_t step =
+			MM_GhostStepSkinSync(deferred_skin_sync, slots, context);
+		if (step.action == mm_ghost_skin_sync_action_t::None)
+			break;
+		IncrementDiagnostic(diagnostics.skin_actions_attempted);
+
+		bool emitted = false;
+		if (step.action == mm_ghost_skin_sync_action_t::PublishCanonical) {
+			if (step.restored_index < capacity)
+				emitted = MM_PublishCanonicalPlayerSkin(
+					&g_entities[step.restored_index + 1]);
+		} else if (step.action == mm_ghost_skin_sync_action_t::ReapplyOverride &&
+			step.pair.valid && step.pair.viewer_index < capacity &&
+			step.pair.target_index < capacity) {
+			emitted = MM_ReapplySkinOverride(
+				&g_entities[step.pair.viewer_index + 1],
+				&g_entities[step.pair.target_index + 1]);
+		}
+
+		if (emitted) {
+			IncrementDiagnostic(diagnostics.skin_messages_emitted);
+			sent++;
+		} else {
+			IncrementDiagnostic(diagnostics.skin_actions_without_message);
+		}
+	}
+}
+
+struct SavedSessionMembership {
+	team_t team{};
+	bool duel_queued{};
+	int wins{};
+	int losses{};
+	gtime_t team_join_time{};
+};
+
+SavedSessionMembership CaptureSavedSessionMembership(const client_session_t &source)
+{
+	return {
+		source.team,
+		source.duel_queued,
+		source.wins,
+		source.losses,
+		source.team_join_time
+	};
+}
+
+void RestoreSavedSessionMembership(
+	client_session_t &destination, const SavedSessionMembership *saved,
+	const mm_ghost_session_membership_policy_t &policy)
+{
+	if (!saved || !policy.reapply_saved_membership)
+		return;
+
+	// Membership belongs to the authenticated reservation. Preferences,
+	// authority, inactivity and the remaining connection-owned fields stay live.
+	// Follow state is deliberately normalized because its client-slot reference
+	// is not valid across reconnects or world rebuilds.
+	destination.team = saved->team;
+	if (policy.clear_follow_target) {
+		destination.spectator_state = policy.use_free_spectator
+			? SPECTATOR_FREE : SPECTATOR_NOT;
+		destination.spectator_client = 0;
+	}
+	destination.duel_queued = saved->duel_queued;
+	destination.wins = saved->wins;
+	destination.losses = saved->losses;
+	destination.team_join_time = saved->team_join_time;
+}
+
+void RestartPendingRestoreTarget(gentity_t *target, const char *reason,
+	bool resume_auto_timeout, const SavedSessionMembership *saved_membership = nullptr,
+	bool stage_for_world_reset = false)
+{
+	if (!target || !target->client || !target->client->pers.connected)
+		return;
+
+	gclient_t *client = target->client;
+	const ReconnectClientState connection = CaptureReconnectClientState(*client);
+	const mm_ghost_session_membership_policy_t membership_policy =
+		MM_GhostSessionMembershipPolicy(saved_membership != nullptr,
+			saved_membership && saved_membership->team == TEAM_SPECTATOR);
+	client_session_t desired_session = client->sess;
+	RestoreSavedSessionMembership(desired_session, saved_membership,
+		membership_policy);
+	client_session_t restart_session = desired_session;
+	const bool restart_as_spectator =
+		!membership_policy.reapply_saved_membership || stage_for_world_reset;
+	if (restart_as_spectator) {
+		// A stale/cross-match snapshot grants no membership. Normalize before the
+		// ordinary spawn path; a pending world reset likewise keeps the invalidated
+		// reconnect non-playing until the rebuilt world can spawn it safely.
+		restart_session.team = TEAM_SPECTATOR;
+		restart_session.spectator_state = SPECTATOR_FREE;
+		restart_session.spectator_client = 0;
+		restart_session.duel_queued = false;
+	}
+
+	CancelDeferredSkinSync(target);
+	SetDeferredAbortSpawnPending(target, false);
+	if (client->menu)
+		P_Menu_Close(target);
+	Weapon_Grapple_DoReset(client);
+	ClearRestoringClientMatchItems(target);
+
+	// A reserved slot still contains the disconnected player's full gameplay
+	// payload. Start the abort from a clean client so Horde cannot mistake an old
+	// weapon/lives payload for an intentional between-wave rejoin. Only the new
+	// connection's session, identity, preferences, authentication and controls are
+	// overlaid before and after the ordinary spawn path.
+	memset(client, 0, sizeof(*client));
+	client->sess = restart_session;
+	client->pers.connected = true;
+	client->pers.spawned = false;
+	client->pers.ingame = true;
+	ApplyReconnectClientState(target, connection);
+	target->client->resp.ghost = nullptr;
+
+	ClientRestartAfterGhostRestoreAbort(target);
+	ApplyReconnectClientState(target, connection);
+	// World-reset aborts use a spectator only while the old world is still live.
+	// Reapply only authenticated, same-match membership afterward; stale-match
+	// fallbacks must keep the ordinary restart's normalized spectator result.
+	if (membership_policy.reapply_saved_membership) {
+		RestoreSavedSessionMembership(target->client->sess, saved_membership,
+			membership_policy);
+		P_PublishEngineTeam(target);
+	}
+	target->client->pers.connected = true;
+	target->client->pers.ingame = true;
+	if (target->client->pers.spawned)
+		QueueDeferredSkinSync(target);
+	else
+		SetDeferredAbortSpawnPending(target, true);
+
+	if (resume_auto_timeout && level.timeout_auto && !level.timeout_resuming &&
+		level.timeout_in_place > 0_ms && level.timeout_ent == target)
+		::TimeoutEnd();
+	if (reason)
+		gi.LocClient_Print(target, PRINT_HIGH, "{}\n", reason);
+}
+
+void ExpireStaleSnapshotsForSocialId(const char *social_id)
+{
+	if (!HasUsableSocialId(social_id))
+		return;
+
+	for (size_t i = 0; i < GhostSlotCapacity(); i++)
+		if (SnapshotOwnsSocialId(auto_ghosts[i], social_id) &&
+			!SnapshotMatchesCurrentMatch(auto_ghosts[i])) {
+			if (SnapshotBelongsToCurrentWorld(auto_ghosts[i]))
+				ExpireSnapshot(i);
+			else
+				DiscardStaleSnapshot(i);
+		}
 }
 
 void UpdateGhostStatsFromEntity(gentity_t *ent, ghost_t &ghost)
@@ -610,7 +1114,7 @@ void UpdateGhostStatsFromEntity(gentity_t *ent, ghost_t &ghost)
 	ghost.team = ent->client->sess.team;
 	ghost.score = ent->client->resp.score;
 	ghost.ent = ent;
-	ghost.number = ent->s.number;
+	ghost.number = static_cast<int>(ent->s.number);
 	muffmode::CopyString(ghost.netname, ent->client->resp.netname);
 }
 
@@ -636,6 +1140,14 @@ void ClearEntityGhostSlot(gentity_t *ent)
 	}
 
 	if (int ghost_index = GhostIndex(ent->client->resp.ghost); ghost_index >= 0) {
+		if (auto_ghosts[ghost_index].valid &&
+			auto_ghosts[ghost_index].phase == AutoGhostPhase::Reinstating) {
+			if (SnapshotBelongsToCurrentWorld(auto_ghosts[ghost_index]))
+				ExpireSnapshot(static_cast<size_t>(ghost_index));
+			else
+				DiscardStaleSnapshot(static_cast<size_t>(ghost_index));
+			return;
+		}
 		ClearSnapshot(static_cast<size_t>(ghost_index));
 		level.ghosts[ghost_index] = ghost_t{};
 	}
@@ -743,6 +1255,20 @@ void ReleaseTimedOutInventory(size_t index)
 	if (IsAutoGhostPlaceholder(ent)) {
 		CopySnapshotDropStateToEntity(snapshot, ent);
 		TossClientItems(ent);
+
+		// Tossing is policy-sensitive: combat-disabled phases can skip everything,
+		// and Horde may deliberately keep Techs on death. Treat only inventory that
+		// actually left the mirror as released, then return any remaining match
+		// items explicitly before destroying the reservation.
+		if (!ent->client->pers.inventory[IT_FLAG_RED])
+			snapshot.client.pers.inventory[IT_FLAG_RED] = 0;
+		if (!ent->client->pers.inventory[IT_FLAG_BLUE])
+			snapshot.client.pers.inventory[IT_FLAG_BLUE] = 0;
+		for (const item_id_t tech_id : tech_ids)
+			if (!ent->client->pers.inventory[tech_id])
+				snapshot.client.pers.inventory[tech_id] = 0;
+		ReleaseExpiredMatchItems(snapshot);
+		ClearRestoringClientMatchItems(ent);
 	} else {
 		ReleaseExpiredMatchItems(snapshot);
 	}
@@ -800,33 +1326,51 @@ bool StartAutoGhostTimeout(gentity_t *ent)
 
 bool CaptureActivePlayerSnapshot(gentity_t *ent, bool start_auto_timeout)
 {
+	IncrementDiagnostic(diagnostics.capture_attempts);
 	if (!EntityCanOwnGhost(ent)) {
+		IncrementDiagnostic(diagnostics.capture_rejected_client_state);
 		ClearEntityGhostSlot(ent);
 		return false;
 	}
-	if (level.intermission_time || level.intermission_queued)
+	if (level.intermission_time || level.intermission_queued) {
+		IncrementDiagnostic(diagnostics.capture_rejected_intermission);
 		return false;
-	if (!HasUsableSocialId(ent->client->pers.social_id))
+	}
+	if (!HasUsableSocialId(ent->client->pers.social_id)) {
+		IncrementDiagnostic(diagnostics.capture_rejected_social_id);
 		return false;
-	if (level.match_id.empty())
+	}
+	if (level.match_id.empty()) {
+		IncrementDiagnostic(diagnostics.capture_rejected_match_id);
 		return false;
+	}
 
 	const int ghost_seconds = AutoGhostDurationSeconds();
-	if (ghost_seconds <= 0)
+	if (ghost_seconds <= 0) {
+		IncrementDiagnostic(diagnostics.capture_rejected_disabled);
 		return false;
+	}
 
 	const int existing_ghost_index = GhostIndex(ent->client->resp.ghost);
 	ExpireSnapshotsForSocialId(ent->client->pers.social_id, existing_ghost_index);
 	const int max_ghosts = AutoGhostMaxReservations();
-	if (max_ghosts <= 0 || ActiveSnapshotCount(existing_ghost_index) >= max_ghosts)
+	if (max_ghosts <= 0) {
+		IncrementDiagnostic(diagnostics.capture_rejected_disabled);
 		return false;
+	}
+	if (ActiveSnapshotCount(existing_ghost_index) >= max_ghosts) {
+		IncrementDiagnostic(diagnostics.capture_rejected_capacity);
+		return false;
+	}
 
 	if (!ent->client->resp.ghost)
 		MM_Ghost_Assign(ent);
 
 	const int ghost_index = GhostIndex(ent->client->resp.ghost);
-	if (ghost_index < 0)
+	if (ghost_index < 0) {
+		IncrementDiagnostic(diagnostics.capture_rejected_no_slot);
 		return false;
+	}
 
 	ExpireSnapshotsForSocialId(ent->client->pers.social_id, ghost_index);
 	if (!level.ghosts[ghost_index].code)
@@ -836,6 +1380,8 @@ bool CaptureActivePlayerSnapshot(gentity_t *ent, bool start_auto_timeout)
 	snapshot = AutoGhostSnapshot{};
 	snapshot.valid = true;
 	snapshot.match_id = level.match_id;
+	snapshot.round_epoch = level.round_epoch;
+	snapshot.world_epoch = level.world_epoch;
 	snapshot.remaining = gtime_t::from_sec(ghost_seconds);
 	muffmode::CopyString(snapshot.social_id, ent->client->pers.social_id);
 	snapshot.client = *ent->client;
@@ -856,41 +1402,68 @@ bool CaptureActivePlayerSnapshot(gentity_t *ent, bool start_auto_timeout)
 		DropSnapshotFlags(static_cast<size_t>(ghost_index));
 	}
 
+	IncrementDiagnostic(diagnostics.capture_successes);
 	return true;
 }
 
-bool RestoreSnapshot(gentity_t *ent, int ghost_index, bool manual)
+enum class RestoreSnapshotResult : uint8_t {
+	Restored,
+	Retry,
+	Invalid
+};
+
+RestoreSnapshotResult RestoreSnapshot(gentity_t *ent, int ghost_index, bool manual)
 {
-	if (!ent || !ent->client || ghost_index < 0 || ghost_index >= static_cast<int>(GhostSlotCapacity()))
-		return false;
+	IncrementDiagnostic(diagnostics.restore_attempts);
+	if (!ent || !ent->client || ghost_index < 0 || ghost_index >= static_cast<int>(GhostSlotCapacity())) {
+		IncrementDiagnostic(diagnostics.restore_invalid);
+		return RestoreSnapshotResult::Invalid;
+	}
 
 	auto &snapshot = auto_ghosts[ghost_index];
-	if (!SnapshotMatchesSocialId(snapshot, ent->client->pers.social_id))
-		return false;
+	// Exact entity state (including Freeze Tag's slot-owned state) is only safe
+	// to reinstate into the slot that owns the reservation.
+	if (!SnapshotMatchesSocialId(snapshot, ent->client->pers.social_id) ||
+		level.ghosts[ghost_index].ent != ent) {
+		IncrementDiagnostic(diagnostics.restore_invalid);
+		return RestoreSnapshotResult::Invalid;
+	}
 
-	char userinfo[MAX_INFO_STRING];
-	char social_id[MAX_INFO_VALUE];
-	muffmode::CopyString(userinfo, ent->client->pers.userinfo);
-	muffmode::CopyString(social_id, ent->client->pers.social_id);
-	const bool keep_current_admin = ent->client->sess.admin;
-
+	const ReconnectClientState reconnect = CaptureReconnectClientState(*ent->client);
+	const gclient_t current_client = *ent->client;
 	*ent->client = snapshot.client;
-	// Defend older/in-memory snapshots too: RestoreEntityLife links the player
-	// and can invoke KillBox before the full post-restore sanitizer runs.
+	// Defend older/in-memory snapshots too: pointers and authority never cross
+	// the disconnect boundary, even if the snapshot predates this sanitizer.
 	ClearTransientClientReferences(*ent->client);
-	RestoreEntityLife(ent, snapshot.entity);
-	SanitizeRestoredClient(ent, ghost_index, keep_current_admin);
+	ent->client->sess.admin = false;
 
-	ClientUserinfoChanged(ent, userinfo);
-	muffmode::CopyString(ent->client->pers.social_id, social_id);
+	RestorePlacement placement{};
+	if (!FindRestorePlacement(ent, snapshot.entity, placement)) {
+		*ent->client = current_client;
+		IncrementDiagnostic(diagnostics.restore_retries);
+		return RestoreSnapshotResult::Retry;
+	}
+	if (placement.fallback)
+		IncrementDiagnostic(diagnostics.fallback_placements);
+	else
+		IncrementDiagnostic(diagnostics.saved_placements);
+
+	RestoreEntityLife(ent, snapshot.entity);
+	SanitizeRestoredClient(ent, ghost_index);
+	ApplyRestorePlacement(ent, placement);
+	ApplyReconnectClientState(ent, reconnect);
+
 	P_AssignClientSkinnum(ent);
-	P_ForceFogTransition(ent, true);
+	P_ForceFogTransition(ent, true, true);
+	gi.linkentity(ent);
 
 	level.ghosts[ghost_index].code = 0;
 	ClearSnapshot(static_cast<size_t>(ghost_index));
 	UpdateGhostStatsFromEntity(ent, level.ghosts[ghost_index]);
+	QueueDeferredSkinSync(ent);
 
-	if (level.timeout_auto && !level.timeout_resuming && level.timeout_in_place > 0_ms)
+	if (level.timeout_auto && !level.timeout_resuming && level.timeout_in_place > 0_ms &&
+		level.timeout_ent == ent)
 		::TimeoutEnd();
 
 	if (!(ent->svflags & SVF_NOCLIENT)) {
@@ -907,8 +1480,8 @@ bool RestoreSnapshot(gentity_t *ent, int ghost_index, bool manual)
 		gi.LocClient_Print(ent, PRINT_HIGH, "Your match state has been restored from auto-ghost.\n");
 
 	CalculateRanks();
-	ClientEndServerFrame(ent);
-	return true;
+	IncrementDiagnostic(diagnostics.restore_successes);
+	return RestoreSnapshotResult::Restored;
 }
 
 bool EntityMatchesPendingRestore(const AutoGhostSnapshot &snapshot, const gentity_t *ent)
@@ -952,7 +1525,9 @@ void PreparePendingRestoreClient(gentity_t *ent)
 
 	gclient_t *client = ent->client;
 	client->pers.connected = true;
-	client->pers.spawned = true;
+	// The reconnect is authenticated but not yet a live/spawned viewer. Keeping
+	// this false prevents pre-commit skin/config fan-out and gameplay iteration.
+	client->pers.spawned = false;
 	client->pers.ingame = true;
 	client->awaiting_respawn = false;
 	client->respawn_timeout = 0_ms;
@@ -1007,6 +1582,7 @@ void CancelPendingRestore(size_t index)
 	auto &snapshot = auto_ghosts[index];
 	if (snapshot.phase != AutoGhostPhase::Reinstating)
 		return;
+	IncrementDiagnostic(diagnostics.restore_cancellations);
 
 	snapshot.phase = AutoGhostPhase::Reserved;
 	snapshot.phase_elapsed = 0_ms;
@@ -1020,6 +1596,45 @@ void CancelPendingRestore(size_t index)
 	gentity_t *placeholder = PlaceholderEntity(index);
 	if (IsAutoGhostPlaceholder(placeholder) && !placeholder->client->pers.connected)
 		placeholder->classname = "auto_ghost";
+}
+
+void AbortPendingRestore(size_t index, const char *reason, bool release_match_items,
+	bool resume_auto_timeout)
+{
+	if (index >= auto_ghosts.size())
+		return;
+
+	auto &snapshot = auto_ghosts[index];
+	if (snapshot.phase == AutoGhostPhase::Reinstating)
+		IncrementDiagnostic(diagnostics.restore_aborts);
+	SavedSessionMembership saved_membership{};
+	// A new round/world invalidates exact combat state, but not the authenticated
+	// team reservation inside the same match. Preserve that membership so the
+	// ordinary abort path cannot strand a reconnect as a spectator in a lock.
+	const bool preserve_saved_membership = SnapshotBelongsToCurrentMatchId(snapshot);
+	if (preserve_saved_membership)
+		saved_membership = CaptureSavedSessionMembership(snapshot.client.sess);
+	gentity_t *target = nullptr;
+	if (snapshot.phase == AutoGhostPhase::Reinstating &&
+		snapshot.pending_entnum > 0 &&
+		snapshot.pending_entnum < static_cast<int32_t>(globals.num_entities)) {
+		gentity_t *candidate = &g_entities[snapshot.pending_entnum];
+		if (candidate->spawn_count == snapshot.pending_spawn_count &&
+			candidate->inuse && candidate->client && candidate->client->pers.connected)
+			target = candidate;
+	}
+
+	if (release_match_items)
+		ReleaseExpiredMatchItems(snapshot);
+	level.ghosts[index].code = 0;
+	ClearSnapshot(index, false);
+	level.ghosts[index] = ghost_t{};
+
+	if (!target)
+		return;
+
+	RestartPendingRestoreTarget(target, reason, resume_auto_timeout,
+		preserve_saved_membership ? &saved_membership : nullptr);
 }
 
 bool CancelPendingRestoreForTarget(gentity_t *ent, bool &target_is_placeholder)
@@ -1040,7 +1655,8 @@ bool BeginRestoreDelay(gentity_t *ent, int ghost_index, bool manual)
 		return false;
 
 	auto &snapshot = auto_ghosts[ghost_index];
-	if (!SnapshotMatchesSocialId(snapshot, ent->client->pers.social_id))
+	if (!SnapshotMatchesSocialId(snapshot, ent->client->pers.social_id) ||
+		level.ghosts[ghost_index].ent != ent)
 		return false;
 	if (snapshot.phase == AutoGhostPhase::Reinstating)
 		return EntityMatchesPendingRestore(snapshot, ent);
@@ -1084,11 +1700,50 @@ bool FinishPendingRestore(size_t index)
 	}
 
 	const bool manual = snapshot.pending_manual;
-	if (!RestoreSnapshot(target, static_cast<int>(index), manual)) {
-		CancelPendingRestore(index);
+	switch (RestoreSnapshot(target, static_cast<int>(index), manual)) {
+	case RestoreSnapshotResult::Restored:
+		return true;
+	case RestoreSnapshotResult::Retry:
+		// A mover/player still occupies the saved location and no clear normal
+		// spawn exists. Remain frozen briefly and retry without telefragging the
+		// world; then fall back through the normal spawn/limbo policy.
+		if (snapshot.phase_elapsed >= muffmode::ghost::AUTO_GHOST_REINSTATE_DELAY +
+			muffmode::ghost::AUTO_GHOST_PLACEMENT_RETRY_TIME) {
+			AbortPendingRestore(index,
+				"No safe reinstatement position became available; you were returned to normal play.");
+			return false;
+		}
+		snapshot.reinstate_remaining = FRAME_TIME_MS;
+		return false;
+	case RestoreSnapshotResult::Invalid:
+		AbortPendingRestore(index,
+			"Your saved match state is no longer safe to reinstate; you were returned to normal play.");
 		return false;
 	}
 
+	return false;
+}
+
+bool RunOneDueRestoreCommit()
+{
+	const size_t capacity = GhostSlotCapacity();
+	std::array<bool, MM_GHOST_MAX_CLIENT_CAPACITY> due{};
+	for (size_t i = 0; i < capacity; i++) {
+		const AutoGhostSnapshot &snapshot = auto_ghosts[i];
+		due[i] = SnapshotMatchesCurrentMatch(snapshot) &&
+			snapshot.phase == AutoGhostPhase::Reinstating &&
+			snapshot.reinstate_remaining <= 0_ms;
+	}
+
+	const size_t index = MM_GhostSelectDueRestoreCommit(
+		due, capacity, pending_restore_commit_cursor);
+	if (index == MM_GHOST_NO_CLIENT_INDEX)
+		return false;
+
+	// An attempt owns this outer server frame even if placement must retry or
+	// validation aborts. The fair cursor lets every simultaneously due client
+	// receive one attempt before an earlier slot is retried.
+	FinishPendingRestore(index);
 	return true;
 }
 
@@ -1113,21 +1768,132 @@ bool FreezePendingRestoreFrame(gentity_t *ent)
 	return true;
 }
 
+void QuiesceClientForSnapshot(gentity_t *ent)
+{
+	if (!ent || !ent->client)
+		return;
+	if (ent->client->menu)
+		P_Menu_Close(ent);
+	Weapon_Grapple_DoReset(ent->client);
+	ent->flags &= ~FL_NO_KNOCKBACK;
+}
+
+void ClearSnapshotTechState(gentity_t *ent)
+{
+	if (!ent || !ent->client)
+		return;
+	const int ghost_index = GhostIndex(ent->client->resp.ghost);
+	if (ghost_index < 0 || ghost_index >= static_cast<int>(auto_ghosts.size()))
+		return;
+
+	auto &client = auto_ghosts[ghost_index].client;
+	for (const item_id_t tech_id : tech_ids)
+		client.pers.inventory[tech_id] = 0;
+	client.tech_regen_time = 0_ms;
+	client.tech_sound_time = 0_ms;
+	client.tech_last_message_time = 0_ms;
+	client.tech_expire_time = 0_ms;
+}
+
 } // namespace muffmode::ghost::snapshot
 
 namespace ghost_snapshot = muffmode::ghost::snapshot;
+
+bool MM_Ghost_IsAbortSpawnPending(gentity_t *ent)
+{
+	return ghost_snapshot::DeferredAbortSpawnIsPending(ent);
+}
+
+void MM_Ghost_CancelAbortSpawn(gentity_t *ent)
+{
+	ghost_snapshot::SetDeferredAbortSpawnPending(ent, false);
+}
+
+void MM_Ghost_CompleteAbortSpawn(gentity_t *ent)
+{
+	if (!ghost_snapshot::DeferredAbortSpawnIsPending(ent) || !ent->client ||
+		!ent->client->pers.connected || !ent->client->pers.spawned ||
+		ent->client->awaiting_respawn)
+		return;
+
+	ghost_snapshot::SetDeferredAbortSpawnPending(ent, false);
+	ghost_snapshot::QueueDeferredSkinSync(ent);
+}
 
 /*
 ================
 MM_Ghost_ClearAll
 ================
 */
-void MM_Ghost_ClearAll() {
+void MM_Ghost_ClearAll(bool restart_pending_clients) {
+	struct PendingRestoreRestart {
+		gentity_t *target = nullptr;
+		ghost_snapshot::SavedSessionMembership saved_membership{};
+	};
+	std::array<PendingRestoreRestart, MM_GHOST_MAX_CLIENT_CAPACITY> pending_targets{};
+	size_t pending_target_count = 0;
+	for (size_t i = 0; i < ghost_snapshot::GhostSlotCapacity(); i++) {
+		const auto &snapshot = ghost_snapshot::auto_ghosts[i];
+		if (snapshot.valid &&
+			snapshot.phase == ghost_snapshot::AutoGhostPhase::Reinstating) {
+			ghost_snapshot::IncrementDiagnostic(
+				ghost_snapshot::diagnostics.restore_aborts);
+			if (restart_pending_clients) {
+				if (gentity_t *target = ghost_snapshot::PendingRestoreTarget(snapshot))
+					pending_targets[pending_target_count++] = {
+						target,
+						ghost_snapshot::CaptureSavedSessionMembership(snapshot.client.sess)
+					};
+			}
+		}
+	}
+
 	for (size_t i = 0; i < ghost_snapshot::GhostSlotCapacity(); i++)
 		ghost_snapshot::ClearSnapshot(i);
+	std::fill(ghost_snapshot::auto_ghosts.begin(), ghost_snapshot::auto_ghosts.end(),
+		ghost_snapshot::AutoGhostSnapshot{});
+	// A map load discards every old marker. A same-map reset must retain a genuine
+	// connected spawn retry even when its snapshot was already cleared on an
+	// earlier abort; otherwise disconnect could recapture its zeroed limbo state.
+	// Pending snapshot targets below clear/recreate their own slot marker.
+	for (size_t i = 0; i < ghost_snapshot::deferred_abort_spawns.size(); i++) {
+		gclient_t *client = game.clients && i < ghost_snapshot::GhostSlotCapacity()
+			? &game.clients[i] : nullptr;
+		const bool retain = ghost_snapshot::deferred_abort_spawns[i] && client &&
+			MM_GhostAbortMarkerSurvivesSystemClear(restart_pending_clients,
+				client->pers.connected, client->pers.spawned,
+				client->awaiting_respawn);
+		ghost_snapshot::deferred_abort_spawns[i] = retain;
+	}
 
+	// An auto-timeout exists only to protect a reservation. A match start/reset
+	// removes every reservation and must not carry that pause into the rebuilt
+	// world or warmup. Manual timeouts remain under the match controller's policy.
+	if (restart_pending_clients && level.timeout_auto) {
+		level.timeout_in_place = 0_ms;
+		level.timeout_ent = nullptr;
+		level.timeout_auto = false;
+		level.timeout_resuming = false;
+		level.countdown_check = 0_sec;
+	}
+
+	// Match start/reset rebuilds the world immediately after this call. Return a
+	// connected client that was inside the reinstatement delay to the ordinary
+	// spawn path first, without releasing snapshot-owned items into the old world.
+	for (size_t i = 0; i < pending_target_count; i++) {
+		gentity_t *target = pending_targets[i].target;
+		if (!target || !target->client || !target->client->pers.connected)
+			continue;
+		ghost_snapshot::RestartPendingRestoreTarget(target, nullptr, false,
+			&pending_targets[i].saved_membership, true);
+	}
+
+	// A normal abort restart may assign a fresh code or queue presentation work.
+	// Erase completed presentation work, while retaining any new abort marker from
+	// a target that still awaits a valid spawn in the rebuilt world.
+	MM_GhostResetSkinSync(ghost_snapshot::deferred_skin_sync);
+	ghost_snapshot::pending_restore_commit_cursor = 0;
 	std::fill(std::begin(level.ghosts), std::end(level.ghosts), ghost_t{});
-
 	if (game.clients) {
 		for (size_t i = 0; i < ghost_snapshot::GhostSlotCapacity(); i++)
 			game.clients[i].resp.ghost = nullptr;
@@ -1140,6 +1906,7 @@ MM_Ghost_ClearClient
 ================
 */
 void MM_Ghost_ClearClient(gentity_t *ent) {
+	ghost_snapshot::CancelDeferredSkinSync(ent);
 	ghost_snapshot::ClearEntityGhostSlot(ent);
 }
 
@@ -1206,7 +1973,14 @@ Captures a live player's match state before an inactivity move to spectator.
 ================
 */
 bool MM_Ghost_CaptureInactive(gentity_t *ent) {
-	return ghost_snapshot::CaptureActivePlayerSnapshot(ent, false);
+	ghost_snapshot::QuiesceClientForSnapshot(ent);
+	if (!ghost_snapshot::CaptureActivePlayerSnapshot(ent, false))
+		return false;
+
+	// SetTeam immediately drops a held Tech into the world. The reservation must
+	// not retain a second copy that could be restored later.
+	ghost_snapshot::ClearSnapshotTechState(ent);
+	return true;
 }
 
 /*
@@ -1224,6 +1998,8 @@ bool MM_Ghost_CaptureDisconnect(gentity_t *ent) {
 	if (ghost_snapshot::CancelPendingRestoreForTarget(ent, target_is_placeholder))
 		return target_is_placeholder;
 
+	ghost_snapshot::CancelDeferredSkinSync(ent);
+	ghost_snapshot::QuiesceClientForSnapshot(ent);
 	return ghost_snapshot::CaptureActivePlayerSnapshot(ent, true);
 }
 
@@ -1236,6 +2012,11 @@ void MM_Ghost_MakeDisconnectPlaceholder(gentity_t *ent) {
 	if (!ent || !ent->client)
 		return;
 
+	ghost_snapshot::CancelDeferredSkinSync(ent);
+	// End the connected entity lifetime before retaining this slot as a
+	// reservation. Delayed callbacks from the old connection must fail their
+	// generation check even though the placeholder remains inuse.
+	ent->spawn_count = MM_NextEntityGeneration(ent->spawn_count);
 	ent->svflags = (ent->svflags | SVF_PLAYER) & ~SVF_NOCLIENT;
 	ent->solid = SOLID_NOT;
 	ent->clipmask = CONTENTS_NONE;
@@ -1271,6 +2052,9 @@ MM_Ghost_ChooseReconnectSlot
 ================
 */
 gentity_t *MM_Ghost_ChooseReconnectSlot(const char *social_id, gentity_t **ignore, size_t num_ignore) {
+	// Free a same-account reservation from an earlier round before ordinary slot
+	// selection. Exact gameplay state never crosses the round epoch boundary.
+	ghost_snapshot::ExpireStaleSnapshotsForSocialId(social_id);
 	const int ghost_index = ghost_snapshot::FindSnapshotForSocialId(social_id);
 	if (ghost_index < 0)
 		return nullptr;
@@ -1296,8 +2080,35 @@ bool MM_Ghost_IsReservedSlot(gentity_t *slot) {
 		return false;
 
 	for (size_t i = 0; i < ghost_snapshot::GhostSlotCapacity(); i++)
-		if (level.ghosts[i].ent == slot && ghost_snapshot::SnapshotMatchesCurrentMatch(ghost_snapshot::auto_ghosts[i]))
+		if (MM_GhostSnapshotReservesSlot(
+				ghost_snapshot::auto_ghosts[i].valid,
+				level.ghosts[i].ent == slot))
 			return true;
+
+	return false;
+}
+
+bool MM_Ghost_ReservedClientCountsForRound(const gentity_t *slot, team_t team) {
+	if (!slot || !slot->client)
+		return false;
+
+	for (size_t i = 0; i < ghost_snapshot::GhostSlotCapacity(); i++) {
+		const auto &snapshot = ghost_snapshot::auto_ghosts[i];
+		if (level.ghosts[i].ent != slot)
+			continue;
+
+		const bool counts = MM_GhostReservedParticipantCountsForRound(
+			ghost_snapshot::SnapshotMatchesCurrentMatch(snapshot),
+			true,
+			!slot->client->pers.connected ||
+				snapshot.phase == ghost_snapshot::AutoGhostPhase::Reinstating,
+			snapshot.client.sess.team == team,
+			snapshot.client.sess.team != TEAM_NONE &&
+				snapshot.client.sess.team != TEAM_SPECTATOR,
+			snapshot.client.eliminated);
+		if (counts)
+			return true;
+	}
 
 	return false;
 }
@@ -1360,7 +2171,9 @@ MM_Ghost_HasActiveReservations
 */
 bool MM_Ghost_HasActiveReservations() {
 	for (size_t i = 0; i < ghost_snapshot::GhostSlotCapacity(); i++)
-		if (ghost_snapshot::SnapshotMatchesCurrentMatch(ghost_snapshot::auto_ghosts[i]))
+		// Even a stale snapshot keeps its slot reserved until RunFrame removes it.
+		// Keep the frame loop awake long enough to perform that cleanup.
+		if (MM_GhostSnapshotNeedsCleanup(ghost_snapshot::auto_ghosts[i].valid))
 			return true;
 
 	return false;
@@ -1404,10 +2217,23 @@ MM_Ghost_RunFrame
 ================
 */
 void MM_Ghost_RunFrame() {
-	if (level.match_state != matchst_t::MATCH_IN_PROGRESS || level.intermission_time || level.intermission_queued) {
-		for (size_t i = 0; i < ghost_snapshot::GhostSlotCapacity(); i++)
-			if (ghost_snapshot::auto_ghosts[i].valid)
+	if (!MM_GhostMayRunRestoreCommit(
+			level.match_state == matchst_t::MATCH_IN_PROGRESS,
+			level.intermission_time != 0_ms,
+			level.intermission_queued != 0_ms)) {
+		for (size_t i = 0; i < ghost_snapshot::GhostSlotCapacity(); i++) {
+			auto &snapshot = ghost_snapshot::auto_ghosts[i];
+			if (!snapshot.valid)
+				continue;
+			const bool snapshot_is_current =
+				ghost_snapshot::SnapshotBelongsToCurrentWorld(snapshot);
+			if (snapshot.phase == ghost_snapshot::AutoGhostPhase::Reinstating)
+				ghost_snapshot::AbortPendingRestore(i, nullptr, snapshot_is_current);
+			else if (snapshot_is_current)
 				ghost_snapshot::ExpireSnapshot(i);
+			else
+				ghost_snapshot::DiscardStaleSnapshot(i);
+		}
 		return;
 	}
 
@@ -1416,22 +2242,37 @@ void MM_Ghost_RunFrame() {
 		if (!snapshot.valid)
 			continue;
 
-		if (snapshot.match_id != level.match_id) {
-			ghost_snapshot::ExpireSnapshot(i);
+		const bool snapshot_is_current_world =
+			ghost_snapshot::SnapshotBelongsToCurrentWorld(snapshot);
+		if (!snapshot_is_current_world ||
+			!MM_GhostRestoreEpochMatches(snapshot.round_epoch, level.round_epoch)) {
+			if (snapshot.phase == ghost_snapshot::AutoGhostPhase::Reinstating)
+				ghost_snapshot::AbortPendingRestore(i,
+					"The round changed before reinstatement completed; you were returned to normal play.",
+					snapshot_is_current_world);
+			else if (snapshot_is_current_world)
+				ghost_snapshot::ExpireSnapshot(i);
+			else
+				ghost_snapshot::DiscardStaleSnapshot(i);
 			continue;
 		}
 
 		if (snapshot.phase == ghost_snapshot::AutoGhostPhase::Reinstating) {
 			if (!ghost_snapshot::PendingRestoreTarget(snapshot)) {
-				ghost_snapshot::CancelPendingRestore(i);
+				ghost_snapshot::AbortPendingRestore(i, nullptr);
 				continue;
 			}
 
-			snapshot.phase_elapsed += FRAME_TIME_MS;
-			snapshot.reinstate_remaining -= FRAME_TIME_MS;
+			// Once due, freeze the simulated countdown until the outer-server-frame
+			// fair scheduler admits this restore. Scheduler delay must not consume the
+			// separate safe-placement retry window.
+			if (snapshot.reinstate_remaining > 0_ms) {
+				snapshot.phase_elapsed += FRAME_TIME_MS;
+				snapshot.reinstate_remaining -= FRAME_TIME_MS;
+				if (snapshot.reinstate_remaining < 0_ms)
+					snapshot.reinstate_remaining = 0_ms;
+			}
 			ghost_snapshot::UpdateReinstatingPlaceholderVisual(i);
-			if (snapshot.reinstate_remaining <= 0_ms)
-				ghost_snapshot::FinishPendingRestore(i);
 			continue;
 		}
 
@@ -1452,6 +2293,108 @@ void MM_Ghost_RunFrame() {
 		snapshot.remaining -= FRAME_TIME_MS;
 		if (snapshot.remaining <= 0_ms)
 			ghost_snapshot::BeginSnapshotTimeoutExpiry(i);
+	}
+}
+
+/*
+================
+MM_Ghost_RunServerFrame
+
+Runs once after all simulated game substeps in an outer engine frame. A frame
+admits one due restore attempt or one bounded presentation drain, never both.
+Presentation may finish during warmup after a same-map reset; only restore
+commits require an active match.
+================
+*/
+void MM_Ghost_RunServerFrame()
+{
+	const bool restore_commit_allowed = MM_GhostMayRunRestoreCommit(
+		level.match_state == matchst_t::MATCH_IN_PROGRESS,
+		level.intermission_time != 0_ms,
+		level.intermission_queued != 0_ms);
+	const bool presentation_allowed = MM_GhostMayRunDeferredPresentation(
+		level.intermission_time != 0_ms,
+		level.intermission_queued != 0_ms);
+	if (!presentation_allowed) {
+		ghost_snapshot::RunDeferredSkinSyncs(false);
+		return;
+	}
+
+	if (restore_commit_allowed && ghost_snapshot::RunOneDueRestoreCommit())
+		return;
+
+	ghost_snapshot::RunDeferredSkinSyncs(true);
+}
+
+void MM_Ghost_ReportDiagnostics(bool reset_after)
+{
+	size_t active_snapshots = 0;
+	size_t pending_restores = 0;
+	for (const ghost_snapshot::AutoGhostSnapshot &snapshot :
+			ghost_snapshot::auto_ghosts) {
+		if (!snapshot.valid)
+			continue;
+		active_snapshots++;
+		if (snapshot.phase == ghost_snapshot::AutoGhostPhase::Reinstating)
+			pending_restores++;
+	}
+
+	const size_t capacity = ghost_snapshot::GhostSlotCapacity();
+	const mm_ghost_skin_sync_context_t skin_context{
+		capacity,
+		level.round_epoch,
+		level.world_epoch,
+		MM_GhostMayRunDeferredPresentation(
+			level.intermission_time != 0_ms,
+			level.intermission_queued != 0_ms)
+	};
+	const size_t active_skin_queues = MM_GhostActiveSkinSyncQueueCount(
+		ghost_snapshot::deferred_skin_sync);
+	const size_t pending_skin_actions = MM_GhostPendingSkinSyncActionUpperBound(
+		ghost_snapshot::deferred_skin_sync, skin_context);
+	const auto &ghost = ghost_snapshot::diagnostics;
+	const mm_reliable_fanout_diagnostics_t fanout =
+		MM_GetReliableFanoutDiagnostics();
+
+	gi.Com_PrintFmt(
+		"MuffMode ghost capture: attempts={} successes={}; rejected client-state={} intermission={} social-id={} match-id={} disabled={} capacity={} no-slot={}.\n",
+		ghost.capture_attempts, ghost.capture_successes,
+		ghost.capture_rejected_client_state,
+		ghost.capture_rejected_intermission,
+		ghost.capture_rejected_social_id,
+		ghost.capture_rejected_match_id,
+		ghost.capture_rejected_disabled,
+		ghost.capture_rejected_capacity,
+		ghost.capture_rejected_no_slot);
+	gi.Com_PrintFmt(
+		"MuffMode ghost restore: snapshots={} pending-restores={}; attempts={} successes={} retries={} invalid={} aborts={} cancellations={}; placements saved={} fallback={}.\n",
+		active_snapshots, pending_restores,
+		ghost.restore_attempts, ghost.restore_successes,
+		ghost.restore_retries, ghost.restore_invalid,
+		ghost.restore_aborts, ghost.restore_cancellations,
+		ghost.saved_placements, ghost.fallback_placements);
+	gi.Com_PrintFmt(
+		"MuffMode ghost presentation: queues active={} peak={} pending-actions-upper-bound={} queued={}; actions attempted={} emitted={} without-message={}.\n",
+		active_skin_queues, ghost.peak_active_skin_queues,
+		pending_skin_actions, ghost.skin_queues_queued,
+		ghost.skin_actions_attempted, ghost.skin_messages_emitted,
+		ghost.skin_actions_without_message);
+	gi.Com_PrintFmt(
+		"MuffMode reliable fan-out: scopes started={} completed={} active={} peak-active={} reserved messages={} bytes={} rejected messages={} bytes={}; peak-scope messages={} bytes={} last-scope messages={} bytes={} out-of-order={}.\n",
+		fanout.scopes_started, fanout.scopes_completed,
+		fanout.active_scopes, fanout.peak_active_scopes,
+		fanout.messages_reserved, fanout.bytes_reserved,
+		fanout.messages_rejected, fanout.bytes_rejected,
+		fanout.peak_scope_messages, fanout.peak_scope_bytes,
+		fanout.last_scope_messages, fanout.last_scope_bytes,
+		fanout.out_of_order_destructions);
+	gi.Com_PrintFmt(
+		"MuffMode reliable fan-out diagnostics cover pre-write game-side reservations only; engine netchan backlog occupancy is not exposed by the game API.\n");
+
+	if (reset_after) {
+		ghost_snapshot::diagnostics = {};
+		MM_ResetReliableFanoutDiagnostics();
+		gi.Com_PrintFmt("MuffMode ghost diagnostics reset.\n");
 	}
 }
 

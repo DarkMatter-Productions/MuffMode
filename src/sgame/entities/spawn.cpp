@@ -1690,6 +1690,8 @@ struct world_reload_state_t {
 	gtime_t match_cancel_delay_timer;
 
 	int round_number = 0;
+	uint32_t round_epoch = 0;
+	uint32_t world_epoch = 0;
 	roundst_t round_state = roundst_t::ROUND_NONE;
 	int round_state_queued = 0;
 	gtime_t round_state_timer;
@@ -1880,6 +1882,8 @@ std::unique_ptr<world_reload_state_t> CaptureWorldReloadState()
 	state->match_cancel_delay_timer = level.match_cancel_delay_timer;
 
 	state->round_number = level.round_number;
+	state->round_epoch = level.round_epoch;
+	state->world_epoch = level.world_epoch;
 	state->round_state = level.round_state;
 	state->round_state_queued = level.round_state_queued;
 	state->round_state_timer = level.round_state_timer;
@@ -1991,6 +1995,8 @@ void RestoreWorldReloadState(world_reload_state_t &state)
 	level.match_cancel_delay_timer = state.match_cancel_delay_timer;
 
 	level.round_number = state.round_number;
+	level.round_epoch = state.round_epoch;
+	level.world_epoch = state.world_epoch;
 	level.round_state = state.round_state;
 	level.round_state_queued = state.round_state_queued;
 	level.round_state_timer = state.round_state_timer;

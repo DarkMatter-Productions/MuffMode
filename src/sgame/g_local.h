@@ -1692,6 +1692,8 @@ struct level_locals_t {
 	gtime_t		match_cancel_delay_timer;	// delay before cancelling match due to too few players
 
 	int			round_number;
+	uint32_t	round_epoch;				// increments before every round reset
+	uint32_t	world_epoch;				// increments before a same-match world rebuild
 	roundst_t	round_state;
 	int			round_state_queued;
 	gtime_t		round_state_timer;			// change match state at this time
@@ -2699,7 +2701,8 @@ bool CheckFlood(gentity_t *ent);
 void Cmd_Help_f(gentity_t *ent);
 void Cmd_Score_f(gentity_t *ent);
 
-void G_AssignPlayerSkin(gentity_t *ent, const char *s);
+std::string_view G_FormatPlayerSkinConfigString(gentity_t *ent, const char *skin);
+void G_AssignPlayerSkin(gentity_t *ent, const char *s, bool refresh_overrides = true);
 
 void TransitionVoteState(VoteState new_state);
 void ClearVote();
@@ -2715,6 +2718,7 @@ void		QuadHog_Spawn(gitem_t *item, gentity_t *spot, bool reset);
 bool		AllowTechs();
 void		Tech_DeadDrop(gentity_t *ent);
 void		Tech_ApplyExpiry(gentity_t *ent);
+void		Tech_ReturnToWorld(item_id_t tech_id, const vec3_t &fallback_origin, gtime_t expire_time);
 void		Tech_Reset();
 void		Tech_HordeClear();
 void		Tech_HordeSpawnWave();
@@ -3172,9 +3176,10 @@ void InitBodyQue();
 void CopyToBodyQue(gentity_t *ent);
 void ClientBeginServerFrame(gentity_t *ent);
 void ClientUserinfoChanged(gentity_t *ent, const char *userinfo);
+void ClientUserinfoChangedForRestore(gentity_t *ent, const char *userinfo);
 void P_AssignClientSkinnum(gentity_t *ent);
 void P_PublishEngineTeam(gentity_t *ent);
-void P_ForceFogTransition(gentity_t *ent, bool instant);
+void P_ForceFogTransition(gentity_t *ent, bool instant, bool force = false);
 void P_SendLevelPOI(gentity_t *ent);
 unsigned int P_GetLobbyUserNum(const gentity_t *player);
 void G_UpdateLevelEntry();
@@ -3220,6 +3225,7 @@ void ServerCommand();
 // sgame/client/view.cpp
 //
 void ClientEndServerFrame(gentity_t *ent);
+void ClientRestartAfterGhostRestoreAbort(gentity_t *ent);
 bool G_LagCompensate(gentity_t *from_player, const vec3_t &start, const vec3_t &dir);
 void G_UnLagCompensate();
 void G_ClearLagCompensationHistory(gentity_t *ent);

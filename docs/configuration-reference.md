@@ -31,6 +31,7 @@ Use commands in the form `command [arg]`.
 | `spawn <entity> [spawn_args]` | Spawn an entity without requiring cheats. |
 | `load_mappool` / dedicated console `sv load_mappool` | Reload the structured pool and validate its configured cycle. |
 | `load_mapcycle` / dedicated console `sv load_mapcycle` | Reload only the configured structured cycle. |
+| Dedicated console `sv ghost_diag [reset]` | Report ghost capture eligibility/rejections, live reinstatement outcomes, deferred skin synchronization, and game-side reliable-message budget counters. The optional `reset` reports first, then clears the lifetime counters. Engine netchan backlog occupancy is not available through the game API. |
 | `loadmotd` | Reload the message of the day file. |
 | `doctor` | Print diagnostics for risky or inconsistent cvar combinations. |
 | `boot <player>` | Remove a player, depending on server admin configuration. |
@@ -239,6 +240,9 @@ Deathmatch respawns use a WORR-style danger score instead of raw farthest-only m
 | `g_allow_techs` | `auto` | Controls tech pickups in FFA/TDM/CTF/Horde. `auto` enables techs by default in CTF and Horde (off in FFA/TDM); votes can force `0` or `1` in any of those modes. |
 | `g_allow_vote_midgame` | `0` | Allows votes during active matches. |
 | `g_allow_voting` | `1` | Enables voting globally. |
+| `flood_msgs` | `4` | Messages allowed within the flood window; values above the ten-entry history capacity are clamped to `10`, and values at or below `0` disable chat flood protection. |
+| `flood_persecond` | `4` | Length of the chat flood-detection window in seconds. |
+| `flood_waitdelay` | `10` | Seconds a client must wait after triggering chat flood protection. |
 | `g_inactivity` | `120` | Seconds before inactive players are moved to spectators. |
 | `g_match_lock` | `0` | Prevents joining while a match is active. |
 | `g_owner_auto_join` | `1` | Auto-joins lobby owner on server start. |
@@ -688,7 +692,7 @@ dedicated console can use `sv load_mappool` and `sv load_mapcycle`.
 | `bot_name_prefix` | `B|` | Prefix for bot names. Blank removes the prefix. |
 | `g_dm_crosshair_id` | `1` | Enables crosshair player identification by default. |
 | `g_frag_messages` | `1` | Enables frag message drawing. |
-| `g_frames_per_frame` | `1` | Game frames run per server frame. Useful for performance tuning. |
+| `g_frames_per_frame` | `1` | Game frames run per server frame, clamped to `0..64`; `0` intentionally pauses game simulation. Useful for controlled testing and performance tuning. |
 | `g_huntercam` | `1` | Enables huntercam spectator behavior. |
 | `g_item_bobbing` | `1` | Enables item bobbing. |
 | `g_matchstats` | `0` | Enables match statistics menu/reporting features. |

@@ -37,6 +37,10 @@ disable_weapon_bfg 1
 q2dm1_replace_item_quad item_regen
 ```
 
+Set these cvars from server configuration or the dedicated console. Authenticated
+in-game admins may also set an exact, known item-override cvar with one value;
+ordinary clients and partial-name matches are rejected.
+
 ## Entity Override Files
 
 MuffMode can load and save complete map entity strings as `.ent` files.

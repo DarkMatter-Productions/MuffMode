@@ -6,6 +6,7 @@
 #include "muffmode/mm_arena_rules.h"
 #include "muffmode/mm_command_contracts.h"
 #include "muffmode/mm_freezetag_rules.h"
+#include "muffmode/mm_ghost.h"
 #include "muffmode/mm_hud_stat_contracts.h"
 #include "muffmode/mm_horde_ai_rules.h"
 #include "muffmode/mm_items_rules.h"
@@ -13,6 +14,7 @@
 #include "muffmode/mm_loc_parse.h"
 #include "muffmode/mm_map_pool.h"
 #include "muffmode/mm_maps.h"
+#include "muffmode/mm_message_budget.h"
 #include "muffmode/mm_motd.h"
 #include "muffmode/mm_parse.h"
 #include "muffmode/mm_pconfig_rules.h"
@@ -22,6 +24,7 @@
 #include "muffmode/mm_util.h"
 #include "muffmode/mm_vote_menu.h"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstdio>
@@ -675,6 +678,64 @@ MM_TEST(command_contract_helpers_enforce_exact_arity_and_timeout_bounds) {
 	MM_CHECK_EQ(MM_ClampTimeoutSeconds(3601), 3600);
 }
 
+MM_TEST(item_override_commands_require_exact_known_names_and_admin_authority) {
+	MM_CHECK(MM_IsItemOverrideCvarFor("disable_weapon_bfg", "q2dm1", "weapon_bfg"));
+	MM_CHECK(MM_IsItemOverrideCvarFor("replace_item_quad", "q2dm1", "item_quad"));
+	MM_CHECK(MM_IsItemOverrideCvarFor("q2dm1_disable_weapon_bfg", "q2dm1", "weapon_bfg"));
+	MM_CHECK(MM_IsItemOverrideCvarFor("q2dm1_replace_item_quad", "q2dm1", "item_quad"));
+
+	MM_CHECK_FALSE(MM_IsItemOverrideCvarFor("g_disable_player_collision", "q2dm1", "weapon_bfg"));
+	MM_CHECK_FALSE(MM_IsItemOverrideCvarFor("foo_disable_weapon_bfg", "q2dm1", "weapon_bfg"));
+	MM_CHECK_FALSE(MM_IsItemOverrideCvarFor("xdisable_weapon_bfg", "q2dm1", "weapon_bfg"));
+	MM_CHECK_FALSE(MM_IsItemOverrideCvarFor("disable_weapon_bfg_extra", "q2dm1", "weapon_bfg"));
+	MM_CHECK_FALSE(MM_IsItemOverrideCvarFor("q2dm10_disable_weapon_bfg", "q2dm1", "weapon_bfg"));
+
+	MM_CHECK(MM_ClientMaySetItemOverride(true, true));
+	MM_CHECK_FALSE(MM_ClientMaySetItemOverride(false, true));
+	MM_CHECK_FALSE(MM_ClientMaySetItemOverride(true, false));
+	MM_CHECK_FALSE(MM_ClientMaySetItemOverride(false, false));
+}
+
+MM_TEST(flood_history_contracts_bound_extreme_server_values) {
+	constexpr int history_capacity = 10;
+
+	MM_CHECK_EQ(MM_ClampFloodMessageCount(std::numeric_limits<int>::min(), history_capacity), 0);
+	MM_CHECK_EQ(MM_ClampFloodMessageCount(-1, history_capacity), 0);
+	MM_CHECK_EQ(MM_ClampFloodMessageCount(0, history_capacity), 0);
+	MM_CHECK_EQ(MM_ClampFloodMessageCount(1, history_capacity), 1);
+	MM_CHECK_EQ(MM_ClampFloodMessageCount(history_capacity, history_capacity), history_capacity);
+	MM_CHECK_EQ(MM_ClampFloodMessageCount(history_capacity + 1, history_capacity), history_capacity);
+	MM_CHECK_EQ(MM_ClampFloodMessageCount(std::numeric_limits<int>::max(), history_capacity), history_capacity);
+
+	MM_CHECK_EQ(MM_FloodHistoryIndex({ 0, 4, history_capacity }), 7);
+	MM_CHECK_EQ(MM_FloodHistoryIndex({ 0, history_capacity, history_capacity }), 1);
+	for (int head = 0; head < history_capacity; ++head) {
+		for (const int count : { 1, history_capacity, history_capacity + 1,
+				std::numeric_limits<int>::max() }) {
+			const int index = MM_FloodHistoryIndex({ head, count, history_capacity });
+			MM_CHECK(index >= 0);
+			MM_CHECK(index < history_capacity);
+		}
+	}
+
+	MM_CHECK_EQ(MM_NormalizeRingIndex(std::numeric_limits<int>::min(), history_capacity), 2);
+	MM_CHECK_EQ(MM_NormalizeRingIndex(-1, history_capacity), 9);
+	MM_CHECK_EQ(MM_NormalizeRingIndex(std::numeric_limits<int>::max(), history_capacity), 7);
+}
+
+MM_TEST(frames_per_server_frame_is_bounded_without_losing_pause_semantics) {
+	MM_CHECK_EQ(MM_ClampFramesPerServerFrame(std::numeric_limits<int>::min()), 0);
+	MM_CHECK_EQ(MM_ClampFramesPerServerFrame(-1), 0);
+	MM_CHECK_EQ(MM_ClampFramesPerServerFrame(0), 0);
+	MM_CHECK_EQ(MM_ClampFramesPerServerFrame(1), 1);
+	MM_CHECK_EQ(MM_ClampFramesPerServerFrame(MM_MAX_FRAMES_PER_SERVER_FRAME),
+		MM_MAX_FRAMES_PER_SERVER_FRAME);
+	MM_CHECK_EQ(MM_ClampFramesPerServerFrame(MM_MAX_FRAMES_PER_SERVER_FRAME + 1),
+		MM_MAX_FRAMES_PER_SERVER_FRAME);
+	MM_CHECK_EQ(MM_ClampFramesPerServerFrame(std::numeric_limits<int>::max()),
+		MM_MAX_FRAMES_PER_SERVER_FRAME);
+}
+
 MM_TEST(arena_players_per_team_is_bounded_by_half_the_server_capacity) {
 	MM_CHECK_EQ(MM_ArenaNormalizePlayersPerTeam(-1, -1), 1);
 	MM_CHECK_EQ(MM_ArenaNormalizePlayersPerTeam(0, 0), 1);
@@ -688,6 +749,28 @@ MM_TEST(arena_players_per_team_is_bounded_by_half_the_server_capacity) {
 	MM_CHECK_EQ(
 		MM_ArenaNormalizePlayersPerTeam(std::numeric_limits<int>::max(), std::numeric_limits<int>::max()),
 		std::numeric_limits<int>::max() / 2);
+}
+
+MM_TEST(arena_team_zero_never_matches_and_round_over_revalidates_pairing) {
+	MM_CHECK_FALSE(MM_ArenaLogicalTeamIdMatches(0, 0));
+	MM_CHECK_FALSE(MM_ArenaLogicalTeamIdMatches(7, 0));
+	MM_CHECK_FALSE(MM_ArenaLogicalTeamIdMatches(0, 7));
+	MM_CHECK(MM_ArenaLogicalTeamIdMatches(7, 7));
+	MM_CHECK_FALSE(MM_ArenaLogicalTeamIdMatches(8, 7));
+
+	MM_CHECK(MM_ArenaStateRequiresValidPairing(mm_arena_state_t::Empty));
+	MM_CHECK(MM_ArenaStateRequiresValidPairing(mm_arena_state_t::Warmup));
+	MM_CHECK(MM_ArenaStateRequiresValidPairing(mm_arena_state_t::MatchCountdown));
+	MM_CHECK(MM_ArenaStateRequiresValidPairing(mm_arena_state_t::RoundCountdown));
+	MM_CHECK(MM_ArenaStateRequiresValidPairing(mm_arena_state_t::RoundOver));
+	MM_CHECK_FALSE(MM_ArenaStateRequiresValidPairing(mm_arena_state_t::Running));
+	MM_CHECK_FALSE(MM_ArenaStateRequiresValidPairing(mm_arena_state_t::MatchOver));
+	MM_CHECK_FALSE(MM_ArenaStateRequiresValidPairing(mm_arena_state_t::Paused));
+
+	MM_CHECK(MM_ArenaInvalidPairingCancelsSeries(mm_arena_state_t::MatchCountdown));
+	MM_CHECK(MM_ArenaInvalidPairingCancelsSeries(mm_arena_state_t::RoundCountdown));
+	MM_CHECK(MM_ArenaInvalidPairingCancelsSeries(mm_arena_state_t::RoundOver));
+	MM_CHECK_FALSE(MM_ArenaInvalidPairingCancelsSeries(mm_arena_state_t::Warmup));
 }
 
 MM_TEST(arena_menu_pagination_clamps_pages_and_keeps_every_item_reachable) {
@@ -2081,6 +2164,501 @@ MM_TEST(spawn_rules_join_directory_file_adds_separator_when_needed) {
 
 	char tiny[8] = {};
 	MM_CHECK_FALSE(MM_JoinDirectoryFile(tiny, sizeof(tiny), "C:\\Temp", "muffmode_alloc.log"));
+}
+
+MM_TEST(ghost_restore_authority_comes_only_from_the_current_connection) {
+	MM_CHECK_FALSE(MM_GhostRestoreAdminState(false, false));
+	MM_CHECK(MM_GhostRestoreAdminState(true, false));
+	MM_CHECK(MM_GhostRestoreAdminState(false, true));
+	MM_CHECK(MM_GhostRestoreAdminState(true, true));
+}
+
+MM_TEST(ghost_restore_epoch_rejects_state_from_another_round) {
+	MM_CHECK(MM_GhostRestoreEpochMatches(0, 0));
+	MM_CHECK(MM_GhostRestoreEpochMatches(17, 17));
+	MM_CHECK_FALSE(MM_GhostRestoreEpochMatches(16, 17));
+}
+
+MM_TEST(ghost_world_epoch_distinguishes_rebuilds_from_persistent_horde_waves) {
+	MM_CHECK(MM_GhostSnapshotBelongsToWorld(true, 0, 0));
+	MM_CHECK(MM_GhostSnapshotBelongsToWorld(true, 17, 17));
+	MM_CHECK_FALSE(MM_GhostSnapshotBelongsToWorld(false, 17, 17));
+	MM_CHECK_FALSE(MM_GhostSnapshotBelongsToWorld(true, 16, 17));
+}
+
+MM_TEST(ghost_same_match_world_reset_preserves_session_membership_only) {
+	// A round reset invalidates position/inventory through its world epoch while
+	// the same match still owns the authenticated team/duel reservation.
+	MM_CHECK_FALSE(MM_GhostSnapshotBelongsToWorld(true, 16, 17));
+	MM_CHECK(MM_GhostSessionBelongsToMatch(true, true));
+	MM_CHECK_FALSE(MM_GhostSessionBelongsToMatch(false, true));
+	MM_CHECK_FALSE(MM_GhostSessionBelongsToMatch(true, false));
+
+	const auto playing = MM_GhostSessionMembershipPolicy(true, false);
+	MM_CHECK(playing.reapply_saved_membership);
+	MM_CHECK(playing.clear_follow_target);
+	MM_CHECK_FALSE(playing.use_free_spectator);
+
+	const auto spectator = MM_GhostSessionMembershipPolicy(true, true);
+	MM_CHECK(spectator.reapply_saved_membership);
+	MM_CHECK(spectator.clear_follow_target);
+	MM_CHECK(spectator.use_free_spectator);
+
+	const auto stale_match = MM_GhostSessionMembershipPolicy(false, false);
+	MM_CHECK_FALSE(stale_match.reapply_saved_membership);
+	MM_CHECK_FALSE(stale_match.clear_follow_target);
+	MM_CHECK_FALSE(stale_match.use_free_spectator);
+
+	// A normal elimination spawn may choose a follow target. The same spawn
+	// entered as a ghost-abort fallback must remain in normalized freecam so it
+	// cannot retain a client-slot pointer or bypass deferred presentation.
+	MM_CHECK_FALSE(MM_GhostSpawnUsesDeferredPresentation(false, false));
+	MM_CHECK(MM_GhostSpawnUsesDeferredPresentation(true, false));
+	MM_CHECK(MM_GhostSpawnUsesDeferredPresentation(false, true));
+	MM_CHECK(MM_GhostSpawnMayAutoFollow(false));
+	MM_CHECK_FALSE(MM_GhostSpawnMayAutoFollow(true));
+	MM_CHECK(MM_GhostSpawnMayAutoJoin(false));
+	MM_CHECK_FALSE(MM_GhostSpawnMayAutoJoin(true));
+	MM_CHECK_FALSE(MM_GhostSpawnNeedsPersistentInitialization(false, false));
+	MM_CHECK_FALSE(MM_GhostSpawnNeedsPersistentInitialization(true, true));
+	MM_CHECK(MM_GhostSpawnNeedsPersistentInitialization(true, false));
+	MM_CHECK(MM_GhostDisconnectMayCaptureSnapshot(false));
+	MM_CHECK_FALSE(MM_GhostDisconnectMayCaptureSnapshot(true));
+	MM_CHECK_FALSE(MM_GhostAbortMarkerSurvivesSystemClear(
+		false, true, false, true));
+	MM_CHECK_FALSE(MM_GhostAbortMarkerSurvivesSystemClear(
+		true, false, false, true));
+	MM_CHECK_FALSE(MM_GhostAbortMarkerSurvivesSystemClear(
+		true, true, true, false));
+	MM_CHECK(MM_GhostAbortMarkerSurvivesSystemClear(
+		true, true, false, true));
+	MM_CHECK(MM_GhostAbortMarkerSurvivesSystemClear(
+		true, true, true, true));
+}
+
+MM_TEST(ghost_old_wave_techs_defer_to_horde_reset_policy_only) {
+	MM_CHECK(MM_GhostHordeWaveOwnsTechReset(true, true, 16, 17));
+	MM_CHECK_FALSE(MM_GhostHordeWaveOwnsTechReset(true, true, 17, 17));
+	MM_CHECK_FALSE(MM_GhostHordeWaveOwnsTechReset(true, false, 16, 17));
+	MM_CHECK_FALSE(MM_GhostHordeWaveOwnsTechReset(false, true, 16, 17));
+}
+
+MM_TEST(ghost_snapshot_reserves_its_slot_until_cleanup_finishes) {
+	MM_CHECK(MM_GhostSnapshotNeedsCleanup(true));
+	MM_CHECK_FALSE(MM_GhostSnapshotNeedsCleanup(false));
+	MM_CHECK(MM_GhostSnapshotReservesSlot(true, true));
+	MM_CHECK_FALSE(MM_GhostSnapshotReservesSlot(false, true));
+	MM_CHECK_FALSE(MM_GhostSnapshotReservesSlot(true, false));
+	MM_CHECK_FALSE(MM_GhostSnapshotReservesSlot(false, false));
+}
+
+MM_TEST(ghost_pending_restore_keeps_saved_round_participant_counted) {
+	MM_CHECK(MM_GhostReservedParticipantCountsForRound(
+		true, true, true, true, true, false));
+	MM_CHECK_FALSE(MM_GhostReservedParticipantCountsForRound(
+		false, true, true, true, true, false));
+	MM_CHECK_FALSE(MM_GhostReservedParticipantCountsForRound(
+		true, false, true, true, true, false));
+	MM_CHECK_FALSE(MM_GhostReservedParticipantCountsForRound(
+		true, true, false, true, true, false));
+	MM_CHECK_FALSE(MM_GhostReservedParticipantCountsForRound(
+		true, true, true, false, true, false));
+	MM_CHECK_FALSE(MM_GhostReservedParticipantCountsForRound(
+		true, true, true, true, false, false));
+	MM_CHECK_FALSE(MM_GhostReservedParticipantCountsForRound(
+		true, true, true, true, true, true));
+}
+
+MM_TEST(ghost_skin_sync_maps_each_peer_in_both_directions) {
+	constexpr size_t capacity = 4;
+	constexpr size_t restored = 1;
+
+	auto pair = MM_GhostSkinSyncPair(restored, 0, capacity);
+	MM_CHECK(pair.valid);
+	MM_CHECK_EQ(pair.viewer_index, 0u);
+	MM_CHECK_EQ(pair.target_index, restored);
+
+	pair = MM_GhostSkinSyncPair(restored, 1, capacity);
+	MM_CHECK(pair.valid);
+	MM_CHECK_EQ(pair.viewer_index, restored);
+	MM_CHECK_EQ(pair.target_index, 0u);
+
+	MM_CHECK_FALSE(MM_GhostSkinSyncPair(restored, 2, capacity).valid);
+	MM_CHECK_FALSE(MM_GhostSkinSyncPair(restored, 3, capacity).valid);
+
+	pair = MM_GhostSkinSyncPair(restored, 6, capacity);
+	MM_CHECK(pair.valid);
+	MM_CHECK_EQ(pair.viewer_index, 3u);
+	MM_CHECK_EQ(pair.target_index, restored);
+	MM_CHECK_FALSE(MM_GhostSkinSyncPair(restored, 8, capacity).valid);
+	MM_CHECK_FALSE(MM_GhostSkinSyncPair(capacity, 0, capacity).valid);
+}
+
+MM_TEST(ghost_restore_placement_never_telefrags_a_crowded_position) {
+	MM_CHECK_EQ(MM_GhostRestorePlacementStrategy(false, false, false),
+		mm_ghost_restore_placement_t::SavedPosition);
+	MM_CHECK_EQ(MM_GhostRestorePlacementStrategy(false, true, true),
+		mm_ghost_restore_placement_t::SavedPosition);
+	MM_CHECK_EQ(MM_GhostRestorePlacementStrategy(true, true, false),
+		mm_ghost_restore_placement_t::FallbackSpawn);
+	MM_CHECK_EQ(MM_GhostRestorePlacementStrategy(true, false, false),
+		mm_ghost_restore_placement_t::Wait);
+	MM_CHECK_EQ(MM_GhostRestorePlacementStrategy(true, true, true),
+		mm_ghost_restore_placement_t::Wait);
+
+	// At the engine's 32-client ceiling, every saved hull may be occupied at
+	// once. None becomes eligible until a genuinely clear fallback exists.
+	for (size_t client = 0; client < MM_GHOST_MAX_CLIENT_CAPACITY; client++)
+		MM_CHECK_EQ(MM_GhostRestorePlacementStrategy(true, true, true),
+			mm_ghost_restore_placement_t::Wait);
+}
+
+MM_TEST(ghost_deferred_presentation_is_connection_and_transition_owned) {
+	MM_CHECK(MM_GhostMayRunRestoreCommit(true, false, false));
+	MM_CHECK_FALSE(MM_GhostMayRunRestoreCommit(false, false, false));
+	MM_CHECK_FALSE(MM_GhostMayRunRestoreCommit(true, true, false));
+	MM_CHECK_FALSE(MM_GhostMayRunRestoreCommit(true, false, true));
+	MM_CHECK(MM_GhostMayRunDeferredPresentation(false, false));
+	MM_CHECK_FALSE(MM_GhostMayRunDeferredPresentation(true, false));
+	MM_CHECK_FALSE(MM_GhostMayRunDeferredPresentation(false, true));
+	MM_CHECK_FALSE(MM_GhostMayRunDeferredPresentation(true, true));
+
+	MM_CHECK(MM_GhostRestoreEpochMatches(41, 41));
+	MM_CHECK_FALSE(MM_GhostRestoreEpochMatches(41, 42));
+	MM_CHECK(MM_GhostSnapshotBelongsToWorld(true, 7, 7));
+	MM_CHECK_FALSE(MM_GhostSnapshotBelongsToWorld(true, 7, 8));
+	MM_CHECK_FALSE(MM_GhostSnapshotBelongsToWorld(false, 7, 7));
+}
+
+MM_TEST(reliable_fanout_budget_is_overflow_safe_and_fail_closed) {
+	mm_reliable_fanout_budget_t budget{
+		MM_GHOST_POST_RESTORE_SKIN_MESSAGES_PER_FRAME,
+		MM_GHOST_POST_RESTORE_SKIN_MESSAGES_PER_FRAME *
+			MM_GHOST_MAX_SKIN_CONFIGSTRING_MESSAGE_BYTES
+	};
+
+	MM_CHECK(MM_ReliableFanoutTryReserve(
+		budget, MM_GHOST_MAX_SKIN_CONFIGSTRING_MESSAGE_BYTES));
+	MM_CHECK(MM_ReliableFanoutTryReserve(
+		budget, MM_GHOST_MAX_SKIN_CONFIGSTRING_MESSAGE_BYTES));
+	MM_CHECK_FALSE(MM_ReliableFanoutTryReserve(budget, 1));
+	MM_CHECK_EQ(budget.messages, MM_GHOST_POST_RESTORE_SKIN_MESSAGES_PER_FRAME);
+	MM_CHECK_EQ(budget.bytes,
+		MM_GHOST_POST_RESTORE_SKIN_MESSAGES_PER_FRAME *
+			MM_GHOST_MAX_SKIN_CONFIGSTRING_MESSAGE_BYTES);
+
+	mm_reliable_fanout_budget_t byte_limited{
+		3, MM_GHOST_MAX_SKIN_CONFIGSTRING_MESSAGE_BYTES
+	};
+	MM_CHECK(MM_ReliableFanoutTryReserve(
+		byte_limited, MM_GHOST_MAX_SKIN_CONFIGSTRING_MESSAGE_BYTES));
+	MM_CHECK_FALSE(MM_ReliableFanoutTryReserve(byte_limited, 1));
+	MM_CHECK_EQ(byte_limited.messages, 1u);
+	MM_CHECK_EQ(byte_limited.bytes,
+		MM_GHOST_MAX_SKIN_CONFIGSTRING_MESSAGE_BYTES);
+
+	mm_reliable_fanout_budget_t corrupt{ 3, 8, 0, 9 };
+	MM_CHECK_FALSE(MM_ReliableFanoutTryReserve(corrupt, 0));
+	MM_CHECK_EQ(corrupt.messages, 0u);
+	MM_CHECK_EQ(corrupt.bytes, 9u);
+
+	mm_reliable_fanout_budget_t maximum{
+		2, std::numeric_limits<size_t>::max()
+	};
+	MM_CHECK(MM_ReliableFanoutTryReserve(
+		maximum, std::numeric_limits<size_t>::max()));
+	MM_CHECK_FALSE(MM_ReliableFanoutTryReserve(maximum, 1));
+}
+
+std::array<mm_ghost_skin_sync_slot_t, MM_GHOST_MAX_CLIENT_CAPACITY>
+ReadyGhostSkinSyncSlots()
+{
+	std::array<mm_ghost_skin_sync_slot_t, MM_GHOST_MAX_CLIENT_CAPACITY> slots{};
+	for (size_t i = 0; i < slots.size(); i++)
+		slots[i] = { true, true, true, static_cast<int32_t>(1000 + i) };
+	return slots;
+}
+
+MM_TEST(ghost_due_restore_commits_once_after_64_substeps_and_remain_fair) {
+	constexpr size_t capacity = MM_GHOST_MAX_CLIENT_CAPACITY;
+	constexpr size_t simulated_substeps = 64;
+	std::array<bool, capacity> due{};
+	due.fill(true);
+
+	// Substeps only advance countdown state. Commit admission belongs to the one
+	// outer-server-frame pass that follows all of them.
+	size_t commit_attempts = 0;
+	for (size_t substep = 0; substep < simulated_substeps; substep++)
+		MM_CHECK_EQ(commit_attempts, 0u);
+
+	std::array<size_t, capacity> selected_counts{};
+	size_t cursor = capacity - 3;
+	for (size_t server_frame = 0; server_frame < capacity; server_frame++) {
+		const size_t selected =
+			MM_GhostSelectDueRestoreCommit(due, capacity, cursor);
+		commit_attempts++;
+		MM_CHECK(selected < capacity);
+		MM_CHECK(due[selected]);
+		selected_counts[selected]++;
+		due[selected] = false;
+	}
+
+	MM_CHECK_EQ(commit_attempts, capacity);
+	for (const size_t count : selected_counts)
+		MM_CHECK_EQ(count, 1u);
+	MM_CHECK_EQ(MM_GhostSelectDueRestoreCommit(due, capacity, cursor),
+		MM_GHOST_NO_CLIENT_INDEX);
+
+	// Capacity is clamped to the production ceiling, and one call still admits
+	// only one of several simultaneous due restores.
+	due.fill(true);
+	cursor = 0;
+	const size_t selected = MM_GhostSelectDueRestoreCommit(
+		due, capacity + 100, cursor);
+	MM_CHECK_EQ(selected, 0u);
+	MM_CHECK_EQ(cursor, 1u);
+}
+
+MM_TEST(ghost_skin_sync_discards_partially_drained_stale_work) {
+	constexpr size_t capacity = MM_GHOST_MAX_CLIENT_CAPACITY;
+	constexpr size_t restored = 5;
+	const auto ready_slots = ReadyGhostSkinSyncSlots();
+	const mm_ghost_skin_sync_context_t ready_context{
+		capacity, 71, 13, true
+	};
+
+	const auto check_invalidation = [&](const auto &invalidate) {
+		mm_ghost_skin_sync_scheduler_t<capacity> scheduler{};
+		auto slots = ready_slots;
+		auto context = ready_context;
+		MM_CHECK(MM_GhostQueueSkinSync(scheduler, restored,
+			slots[restored].spawn_count, context.round_epoch,
+			context.world_epoch));
+
+		const auto first = MM_GhostStepSkinSync(scheduler, slots, context);
+		MM_CHECK_EQ(first.action,
+			mm_ghost_skin_sync_action_t::PublishCanonical);
+		MM_CHECK_EQ(first.restored_index, restored);
+		MM_CHECK(scheduler.queues[restored].active);
+		MM_CHECK_EQ(scheduler.queues[restored].next_operation, 1u);
+
+		invalidate(slots, context);
+		const auto stale = MM_GhostStepSkinSync(scheduler, slots, context);
+		MM_CHECK_EQ(stale.action, mm_ghost_skin_sync_action_t::None);
+		MM_CHECK_FALSE(scheduler.queues[restored].active);
+		MM_CHECK_FALSE(scheduler.queues[restored].owns_pairs);
+		MM_CHECK_EQ(scheduler.queues[restored].serial, 0u);
+	};
+
+	check_invalidation([](auto &, auto &context) { context.round_epoch++; });
+	check_invalidation([](auto &, auto &context) { context.world_epoch++; });
+	check_invalidation([](auto &slots, auto &) { slots[restored].spawn_count++; });
+	check_invalidation([](auto &slots, auto &) { slots[restored].connected = false; });
+	check_invalidation([](auto &slots, auto &) { slots[restored].spawned = false; });
+
+	mm_ghost_skin_sync_scheduler_t<capacity> scheduler{};
+	MM_CHECK(MM_GhostQueueSkinSync(scheduler, restored,
+		ready_slots[restored].spawn_count, ready_context.round_epoch,
+		ready_context.world_epoch));
+	MM_CHECK(MM_GhostQueueSkinSync(scheduler, restored + 1,
+		ready_slots[restored + 1].spawn_count, ready_context.round_epoch,
+		ready_context.world_epoch));
+	auto transition_context = ready_context;
+	transition_context.presentation_allowed = false;
+	MM_CHECK_EQ(MM_GhostStepSkinSync(
+		scheduler, ready_slots, transition_context).action,
+		mm_ghost_skin_sync_action_t::None);
+	MM_CHECK_EQ(scheduler.last_serial, 0u);
+	MM_CHECK_EQ(scheduler.cursor, 0u);
+	for (const auto &queue : scheduler.queues) {
+		MM_CHECK_FALSE(queue.active);
+		MM_CHECK_FALSE(queue.owns_pairs);
+		MM_CHECK_EQ(queue.serial, 0u);
+	}
+}
+
+MM_TEST(ghost_skin_sync_false_sends_still_make_bounded_progress) {
+	constexpr size_t capacity = MM_GHOST_MAX_CLIENT_CAPACITY;
+	constexpr size_t restored = 0;
+	auto slots = ReadyGhostSkinSyncSlots();
+	const mm_ghost_skin_sync_context_t context{ capacity, 9, 4, true };
+	mm_ghost_skin_sync_scheduler_t<capacity> scheduler{};
+	MM_CHECK(MM_GhostQueueSkinSync(scheduler, restored,
+		slots[restored].spawn_count, context.round_epoch, context.world_epoch));
+
+	// The caller deliberately treats every action as an emission failure. Each
+	// failed action is nevertheless consumed, so the drain cannot spin forever.
+	size_t attempts = 0;
+	for (; attempts < MM_GHOST_MAX_SKIN_SYNC_ACTIONS_PER_DRAIN; attempts++) {
+		const auto step = MM_GhostStepSkinSync(scheduler, slots, context);
+		if (step.action == mm_ghost_skin_sync_action_t::None)
+			break;
+	}
+	MM_CHECK_EQ(attempts, MM_GHOST_MAX_SKIN_SYNC_ACTIONS_PER_QUEUE);
+	MM_CHECK_EQ(MM_GhostStepSkinSync(scheduler, slots, context).action,
+		mm_ghost_skin_sync_action_t::None);
+}
+
+MM_TEST(ghost_skin_sync_queue_diagnostics_bound_remaining_work) {
+	constexpr size_t capacity = MM_GHOST_MAX_CLIENT_CAPACITY;
+	const auto slots = ReadyGhostSkinSyncSlots();
+	mm_ghost_skin_sync_scheduler_t<capacity> scheduler{};
+	const mm_ghost_skin_sync_context_t full_context{ capacity, 9, 4, true };
+
+	MM_CHECK(MM_GhostQueueSkinSync(scheduler, 1,
+		slots[1].spawn_count, full_context.round_epoch,
+		full_context.world_epoch));
+	MM_CHECK(MM_GhostQueueSkinSync(scheduler, 5,
+		slots[5].spawn_count, full_context.round_epoch,
+		full_context.world_epoch));
+	MM_CHECK_EQ(MM_GhostActiveSkinSyncQueueCount(scheduler), 2u);
+	MM_CHECK_EQ(MM_GhostPendingSkinSyncActionUpperBound(
+		scheduler, full_context),
+		2 * MM_GHOST_MAX_SKIN_SYNC_ACTIONS_PER_QUEUE);
+
+	const mm_ghost_skin_sync_context_t four_client_context{ 4, 9, 4, true };
+	MM_CHECK_EQ(MM_GhostPendingSkinSyncActionUpperBound(
+		scheduler, four_client_context), 7u);
+
+	const auto first = MM_GhostStepSkinSync(scheduler, slots, full_context);
+	MM_CHECK_EQ(first.action, mm_ghost_skin_sync_action_t::PublishCanonical);
+	MM_CHECK_EQ(first.restored_index, 1u);
+	MM_CHECK_EQ(MM_GhostPendingSkinSyncActionUpperBound(
+		scheduler, full_context),
+		2 * MM_GHOST_MAX_SKIN_SYNC_ACTIONS_PER_QUEUE - 1);
+
+	MM_GhostCancelSkinSync(scheduler, 1);
+	MM_CHECK_EQ(MM_GhostActiveSkinSyncQueueCount(scheduler), 1u);
+	MM_CHECK_EQ(MM_GhostPendingSkinSyncActionUpperBound(
+		scheduler, full_context),
+		MM_GHOST_MAX_SKIN_SYNC_ACTIONS_PER_QUEUE);
+}
+
+MM_TEST(ghost_skin_sync_stress_bounds_repeated_max_client_reconnects) {
+	constexpr size_t capacity = MM_GHOST_MAX_CLIENT_CAPACITY;
+	constexpr size_t reconnect_waves = 4;
+	constexpr size_t expected_pair_messages_per_wave =
+		capacity * (capacity - 1);
+	constexpr size_t expected_messages_per_wave =
+		capacity + expected_pair_messages_per_wave;
+
+	auto slots = ReadyGhostSkinSyncSlots();
+	mm_ghost_skin_sync_scheduler_t<capacity> scheduler{};
+	mm_ghost_skin_sync_context_t context{ capacity, 100, 20, true };
+
+	for (size_t wave = 0; wave < reconnect_waves; wave++) {
+		context.round_epoch = static_cast<uint32_t>(100 + wave);
+		context.world_epoch = wave < reconnect_waves / 2 ? 20u : 21u;
+		for (size_t restored = 0; restored < capacity; restored++)
+			MM_CHECK(MM_GhostQueueSkinSync(scheduler, restored,
+				slots[restored].spawn_count, context.round_epoch,
+				context.world_epoch));
+
+		std::array<std::array<size_t, capacity>, capacity> pair_counts{};
+		std::array<std::array<size_t, capacity>, capacity> pair_owners{};
+		for (auto &owners : pair_owners)
+			owners.fill(MM_GHOST_NO_CLIENT_INDEX);
+		std::array<size_t, capacity> canonical_counts{};
+		size_t total_messages = 0;
+		size_t frames = 0;
+
+		for (;;) {
+			mm_reliable_fanout_budget_t budget{
+				MM_GHOST_POST_RESTORE_SKIN_MESSAGES_PER_FRAME,
+				MM_GHOST_POST_RESTORE_SKIN_MESSAGES_PER_FRAME *
+					MM_GHOST_MAX_SKIN_CONFIGSTRING_MESSAGE_BYTES
+			};
+			size_t sent_this_frame = 0;
+
+			while (sent_this_frame <
+					MM_GHOST_POST_RESTORE_SKIN_MESSAGES_PER_FRAME) {
+				const auto step = MM_GhostStepSkinSync(scheduler, slots, context);
+				if (step.action == mm_ghost_skin_sync_action_t::None)
+					break;
+
+				MM_CHECK(MM_ReliableFanoutTryReserve(
+					budget, MM_GHOST_MAX_SKIN_CONFIGSTRING_MESSAGE_BYTES));
+				if (step.action == mm_ghost_skin_sync_action_t::PublishCanonical) {
+					MM_CHECK(step.restored_index < capacity);
+					canonical_counts[step.restored_index]++;
+				} else {
+					MM_CHECK_EQ(step.action,
+						mm_ghost_skin_sync_action_t::ReapplyOverride);
+					MM_CHECK(step.pair.valid);
+					MM_CHECK(step.pair.viewer_index < capacity);
+					MM_CHECK(step.pair.target_index < capacity);
+					MM_CHECK(step.pair.viewer_index != step.pair.target_index);
+					MM_CHECK_EQ(canonical_counts[step.restored_index], 1u);
+					pair_counts[step.pair.viewer_index][step.pair.target_index]++;
+					pair_owners[step.pair.viewer_index][step.pair.target_index] =
+						step.restored_index;
+				}
+				sent_this_frame++;
+				total_messages++;
+			}
+
+			if (!sent_this_frame)
+				break;
+
+			MM_CHECK(sent_this_frame <=
+				MM_GHOST_POST_RESTORE_SKIN_MESSAGES_PER_FRAME);
+			MM_CHECK_EQ(budget.messages, sent_this_frame);
+			MM_CHECK_EQ(budget.bytes,
+				sent_this_frame * MM_GHOST_MAX_SKIN_CONFIGSTRING_MESSAGE_BYTES);
+			frames++;
+			MM_CHECK(frames <= expected_messages_per_wave);
+		}
+
+		MM_CHECK_EQ(total_messages, expected_messages_per_wave);
+		MM_CHECK_EQ(frames,
+			(expected_messages_per_wave +
+				MM_GHOST_POST_RESTORE_SKIN_MESSAGES_PER_FRAME - 1) /
+			MM_GHOST_POST_RESTORE_SKIN_MESSAGES_PER_FRAME);
+		for (size_t target = 0; target < capacity; target++)
+			MM_CHECK_EQ(canonical_counts[target], 1u);
+		for (size_t viewer = 0; viewer < capacity; viewer++) {
+			for (size_t target = 0; target < capacity; target++) {
+				MM_CHECK_EQ(pair_counts[viewer][target],
+					viewer == target ? 0u : 1u);
+				if (viewer != target)
+					MM_CHECK_EQ(pair_owners[viewer][target],
+						std::max(viewer, target));
+			}
+		}
+	}
+
+	// A genuinely later restore supersedes the completed ownership watermark and
+	// refreshes both directions involving that client, without touching peer pairs.
+	constexpr size_t later_restored = capacity / 2;
+	MM_CHECK(MM_GhostQueueSkinSync(scheduler, later_restored,
+		slots[later_restored].spawn_count, context.round_epoch,
+		context.world_epoch));
+	std::array<std::array<size_t, capacity>, capacity> later_pair_counts{};
+	size_t later_canonical_count = 0;
+	for (;;) {
+		const auto step = MM_GhostStepSkinSync(scheduler, slots, context);
+		if (step.action == mm_ghost_skin_sync_action_t::None)
+			break;
+		if (step.action == mm_ghost_skin_sync_action_t::PublishCanonical) {
+			MM_CHECK_EQ(step.restored_index, later_restored);
+			later_canonical_count++;
+			continue;
+		}
+
+		MM_CHECK_EQ(step.action,
+			mm_ghost_skin_sync_action_t::ReapplyOverride);
+		MM_CHECK_EQ(step.restored_index, later_restored);
+		later_pair_counts[step.pair.viewer_index][step.pair.target_index]++;
+	}
+	MM_CHECK_EQ(later_canonical_count, 1u);
+	for (size_t viewer = 0; viewer < capacity; viewer++) {
+		for (size_t target = 0; target < capacity; target++) {
+			const bool involves_later = viewer != target &&
+				(viewer == later_restored || target == later_restored);
+			MM_CHECK_EQ(later_pair_counts[viewer][target],
+				involves_later ? 1u : 0u);
+		}
+	}
 }
 
 } // namespace

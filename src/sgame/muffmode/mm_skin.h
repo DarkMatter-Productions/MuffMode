@@ -14,3 +14,5 @@ void MM_CmdEnemySkin(gentity_t *ent);
 void MM_CmdTeamSkin(gentity_t *ent);
 void MM_RefreshSkinOverridesForTarget(gentity_t *target);
 void MM_RefreshSkinOverridesForViewer(gentity_t *viewer);
+bool MM_PublishCanonicalPlayerSkin(gentity_t *target);
+bool MM_ReapplySkinOverride(gentity_t *viewer, gentity_t *target);

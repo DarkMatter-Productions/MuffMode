@@ -8,6 +8,7 @@
 #include "muffmode/mm_arena.h"
 #include "muffmode/mm_captain.h"
 #include "muffmode/mm_combat_heatmap.h"
+#include "muffmode/mm_command_contracts.h"
 #include "muffmode/mm_duel.h"
 #include "muffmode/mm_gametype.h"
 #include "muffmode/mm_ghost.h"
@@ -2827,8 +2828,20 @@ void G_RunFrame(bool main_loop) {
 		return;
 	}
 
-	for (size_t i = 0; i < g_frames_per_frame->integer; i++)
+	const int configured_frames_per_frame = g_frames_per_frame->integer;
+	const int frames_per_frame = MM_ClampFramesPerServerFrame(configured_frames_per_frame);
+	if (frames_per_frame != configured_frames_per_frame) {
+		const std::string normalized_value = fmt::format("{}", frames_per_frame);
+		gi.cvar_forceset("g_frames_per_frame", normalized_value.c_str());
+	}
+
+	for (int i = 0; i < frames_per_frame; i++)
 		G_RunFrame_(main_loop);
+
+	// [MuffMode] Simulation substeps may advance many times per engine frame,
+	// but restore commits and their reliable presentation fan-out get one shared
+	// scheduling opportunity for the actual server frame.
+	MM_Ghost_RunServerFrame();
 
 	// match details.. only bother if there's at least 1 player in-game
 	// and not already end of game

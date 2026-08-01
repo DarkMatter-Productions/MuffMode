@@ -245,7 +245,7 @@ static void sphere_chase(gentity_t *self, int stupidChase) {
 	vec3_t dir;
 	float  dist;
 
-	if (level.time >= gtime_t::from_sec(self->wait) || (self->enemy && self->enemy->health < 1)) {
+	if (!self->enemy || level.time >= gtime_t::from_sec(self->wait) || self->enemy->health < 1) {
 		sphere_think_explode(self);
 		return;
 	}
@@ -2561,8 +2561,10 @@ void PrecacheItem(gitem_t *it) {
 			s++;
 
 		len = s - start;
-		if (len >= MAX_QPATH || len < 5)
+		if (len >= MAX_QPATH || len < 5) {
 			gi.Com_ErrorFmt("PrecacheItem: {} has bad precache string", it->classname);
+			return;
+		}
 		memcpy(data, start, len);
 		data[len] = 0;
 		if (*s)

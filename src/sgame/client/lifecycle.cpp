@@ -74,13 +74,27 @@ This is only called when the game first initializes in single player,
 but is called after each death and level change in deathmatch
 ==============
 */
+namespace {
+bool ghost_abort_restart_in_progress = false;
+
+bool GhostAbortSpawnUsesDeferredPresentation(gentity_t *ent)
+{
+	return MM_GhostSpawnUsesDeferredPresentation(
+		ghost_abort_restart_in_progress,
+		MM_Ghost_IsAbortSpawnPending(ent));
+}
+}
+
 void InitClientPersistant(gentity_t *ent, gclient_t *client) {
 	// backup & restore userinfo
 	char userinfo[MAX_INFO_STRING];
 	Q_strlcpy(userinfo, client->pers.userinfo, sizeof(userinfo));
 
 	memset(&client->pers, 0, sizeof(client->pers));
-	ClientUserinfoChanged(ent, userinfo);
+	if (GhostAbortSpawnUsesDeferredPresentation(ent))
+		ClientUserinfoChangedForRestore(ent, userinfo);
+	else
+		ClientUserinfoChanged(ent, userinfo);
 
 	client->pers.health = 100;
 	client->pers.max_health = 100;
@@ -529,31 +543,32 @@ void P_SendLevelPOI(gentity_t *ent) {
 }
 
 // [Paril-KEX] force the fog transition on the given player,
-// optionally instantaneously (ignore any transition time)
-void P_ForceFogTransition(gentity_t *ent, bool instant) {
+// optionally instantaneously (ignore any transition time). A forced publish
+// also sends values that compare equal, for a newly connected client.
+void P_ForceFogTransition(gentity_t *ent, bool instant, bool force) {
 	// sanity check; if we're not changing the values, don't bother
-	if (ent->client->fog == ent->client->pers.wanted_fog &&
+	if (!force && ent->client->fog == ent->client->pers.wanted_fog &&
 		ent->client->heightfog == ent->client->pers.wanted_heightfog)
 		return;
 
 	svc_fog_data_t fog{};
 
 	// check regular fog
-	if (ent->client->pers.wanted_fog[0] != ent->client->fog[0] ||
+	if (force || ent->client->pers.wanted_fog[0] != ent->client->fog[0] ||
 		ent->client->pers.wanted_fog[4] != ent->client->fog[4]) {
 		fog.bits |= svc_fog_data_t::BIT_DENSITY;
 		fog.density = ent->client->pers.wanted_fog[0];
 		fog.skyfactor = ent->client->pers.wanted_fog[4] * 255.f;
 	}
-	if (ent->client->pers.wanted_fog[1] != ent->client->fog[1]) {
+	if (force || ent->client->pers.wanted_fog[1] != ent->client->fog[1]) {
 		fog.bits |= svc_fog_data_t::BIT_R;
 		fog.red = ent->client->pers.wanted_fog[1] * 255.f;
 	}
-	if (ent->client->pers.wanted_fog[2] != ent->client->fog[2]) {
+	if (force || ent->client->pers.wanted_fog[2] != ent->client->fog[2]) {
 		fog.bits |= svc_fog_data_t::BIT_G;
 		fog.green = ent->client->pers.wanted_fog[2] * 255.f;
 	}
-	if (ent->client->pers.wanted_fog[3] != ent->client->fog[3]) {
+	if (force || ent->client->pers.wanted_fog[3] != ent->client->fog[3]) {
 		fog.bits |= svc_fog_data_t::BIT_B;
 		fog.blue = ent->client->pers.wanted_fog[3] * 255.f;
 	}
@@ -567,14 +582,14 @@ void P_ForceFogTransition(gentity_t *ent, bool instant) {
 	auto &hf = ent->client->heightfog;
 	const auto &wanted_hf = ent->client->pers.wanted_heightfog;
 
-	if (hf.falloff != wanted_hf.falloff) {
+	if (force || hf.falloff != wanted_hf.falloff) {
 		fog.bits |= svc_fog_data_t::BIT_HEIGHTFOG_FALLOFF;
 		if (!wanted_hf.falloff)
 			fog.hf_falloff = 0;
 		else
 			fog.hf_falloff = wanted_hf.falloff;
 	}
-	if (hf.density != wanted_hf.density) {
+	if (force || hf.density != wanted_hf.density) {
 		fog.bits |= svc_fog_data_t::BIT_HEIGHTFOG_DENSITY;
 
 		if (!wanted_hf.density)
@@ -583,36 +598,36 @@ void P_ForceFogTransition(gentity_t *ent, bool instant) {
 			fog.hf_density = wanted_hf.density;
 	}
 
-	if (hf.start[0] != wanted_hf.start[0]) {
+	if (force || hf.start[0] != wanted_hf.start[0]) {
 		fog.bits |= svc_fog_data_t::BIT_HEIGHTFOG_START_R;
 		fog.hf_start_r = wanted_hf.start[0] * 255.f;
 	}
-	if (hf.start[1] != wanted_hf.start[1]) {
+	if (force || hf.start[1] != wanted_hf.start[1]) {
 		fog.bits |= svc_fog_data_t::BIT_HEIGHTFOG_START_G;
 		fog.hf_start_g = wanted_hf.start[1] * 255.f;
 	}
-	if (hf.start[2] != wanted_hf.start[2]) {
+	if (force || hf.start[2] != wanted_hf.start[2]) {
 		fog.bits |= svc_fog_data_t::BIT_HEIGHTFOG_START_B;
 		fog.hf_start_b = wanted_hf.start[2] * 255.f;
 	}
-	if (hf.start[3] != wanted_hf.start[3]) {
+	if (force || hf.start[3] != wanted_hf.start[3]) {
 		fog.bits |= svc_fog_data_t::BIT_HEIGHTFOG_START_DIST;
 		fog.hf_start_dist = wanted_hf.start[3];
 	}
 
-	if (hf.end[0] != wanted_hf.end[0]) {
+	if (force || hf.end[0] != wanted_hf.end[0]) {
 		fog.bits |= svc_fog_data_t::BIT_HEIGHTFOG_END_R;
 		fog.hf_end_r = wanted_hf.end[0] * 255.f;
 	}
-	if (hf.end[1] != wanted_hf.end[1]) {
+	if (force || hf.end[1] != wanted_hf.end[1]) {
 		fog.bits |= svc_fog_data_t::BIT_HEIGHTFOG_END_G;
 		fog.hf_end_g = wanted_hf.end[1] * 255.f;
 	}
-	if (hf.end[2] != wanted_hf.end[2]) {
+	if (force || hf.end[2] != wanted_hf.end[2]) {
 		fog.bits |= svc_fog_data_t::BIT_HEIGHTFOG_END_B;
 		fog.hf_end_b = wanted_hf.end[2] * 255.f;
 	}
-	if (hf.end[3] != wanted_hf.end[3]) {
+	if (force || hf.end[3] != wanted_hf.end[3]) {
 		fog.bits |= svc_fog_data_t::BIT_HEIGHTFOG_END_DIST;
 		fog.hf_end_dist = wanted_hf.end[3];
 	}
@@ -713,7 +728,11 @@ static bool InitPlayerTeam(gentity_t *ent) {
 	P_PublishEngineTeam(ent);
 	MoveClientToFreeCam(ent);
 	
-	if (ent->client->sess.is_a_bot || (ent->svflags & SVF_BOT) || g_dm_force_join->integer || g_dm_auto_join->integer) {
+	const bool may_auto_join = MM_GhostSpawnMayAutoJoin(
+		GhostAbortSpawnUsesDeferredPresentation(ent));
+	if (may_auto_join &&
+		(ent->client->sess.is_a_bot || (ent->svflags & SVF_BOT) ||
+			g_dm_force_join->integer || g_dm_auto_join->integer)) {
 		if (ent != &g_entities[1] || (ent == &g_entities[1] && g_owner_auto_join->integer)) {
 			team_t pick = PickTeam(-1);
 			if (!level.locked[pick]) {
@@ -772,10 +791,12 @@ void ClientSpawn(gentity_t *ent) {
 	vec3_t					spawn_origin, spawn_angles;
 	gclient_t				*client = ent->client;
 	client_persistant_t		saved;
-	client_respawn_t		resp;
-	client_session_t		sess;
+	client_respawn_t		resp{};
+	client_session_t		sess = client->sess;
 	const gtime_t			horde_reinforcement_protection = client->pers.horde_reinforcement_protection;
 	const gtime_t			horde_elim_msg_next = client->horde_elim_msg_next;
+	const bool				defer_ghost_presentation =
+		GhostAbortSpawnUsesDeferredPresentation(ent);
 
 	if (GTF(GTF_ROUNDS) && level.match_state == matchst_t::MATCH_IN_PROGRESS && notGT(GT_HORDE)) {
 		const bool round_locked = level.round_state == roundst_t::ROUND_IN_PROGRESS ||
@@ -841,7 +862,10 @@ void ClientSpawn(gentity_t *ent) {
 		if (!client->awaiting_respawn) {
 			char userinfo[MAX_INFO_STRING];
 			memcpy(userinfo, client->pers.userinfo, sizeof(userinfo));
-			ClientUserinfoChanged(ent, userinfo);
+			if (defer_ghost_presentation)
+				ClientUserinfoChangedForRestore(ent, userinfo);
+			else
+				ClientUserinfoChanged(ent, userinfo);
 
 			client->respawn_timeout = level.time + 3_sec;
 		}
@@ -912,8 +936,8 @@ void ClientSpawn(gentity_t *ent) {
 			if (resp.score > client->pers.score)
 				client->pers.score = resp.score;
 		} else {
-			memset(&resp, 0, sizeof(resp));
-			client->sess.team = TEAM_FREE;
+			resp = {};
+			sess.team = TEAM_FREE;
 		}
 	}
 
@@ -933,8 +957,16 @@ void ClientSpawn(gentity_t *ent) {
 	const bool horde_wave_rejoin = GT(GT_HORDE) && ClientIsPlaying(client) && !eliminated &&
 		level.round_state == roundst_t::ROUND_COUNTDOWN && level.round_number > 0 &&
 		client->pers.weapon != nullptr;
+	const bool ghost_abort_needs_persistent_initialization =
+		MM_GhostSpawnNeedsPersistentInitialization(defer_ghost_presentation,
+			client->pers.spawned);
 
-	if (client->pers.health <= 0 && !horde_elim_spectator && !horde_wave_rejoin)
+	// A restore abort begins from a deliberately zeroed client. Horde normally
+	// preserves an eliminated fighter's existing loadout, but there is no prior
+	// loadout to preserve here. Initialize it once so this valid freecam spawn is
+	// complete and the next wave cannot inherit one health with no weapon.
+	if (ghost_abort_needs_persistent_initialization ||
+		(client->pers.health <= 0 && !horde_elim_spectator && !horde_wave_rejoin))
 		InitClientPersistant(ent, client);
 	else if (horde_wave_rejoin) {
 		if (client->pers.max_health < 1)
@@ -1018,6 +1050,7 @@ void ClientSpawn(gentity_t *ent) {
 	// sknum is player num and weapon number
 	// weapon number will be added in changeweapon
 	P_AssignClientSkinnum(ent);
+	MM_Ghost_CompleteAbortSpawn(ent);
 
 	CalculateRanks();
 
@@ -1050,11 +1083,16 @@ void ClientSpawn(gentity_t *ent) {
 		if (!ent->client->initial_menu_shown)
 			ent->client->initial_menu_delay = level.time + 10_hz;
 		ent->client->eliminated = eliminated;
+		const bool may_auto_follow = MM_GhostSpawnMayAutoFollow(
+			defer_ghost_presentation);
 		if (eliminated &&
-			(GT(GT_ARENA) || (GTF(GTF_ARENA) && GTF(GTF_ELIMINATION))))
-			GetFollowTarget(ent);
+			(GT(GT_ARENA) || (GTF(GTF_ARENA) && GTF(GTF_ELIMINATION)))) {
+			if (may_auto_follow)
+				GetFollowTarget(ent);
+		}
 		else if (eliminated && GT(GT_HORDE)) {
-			GetFollowTarget(ent);
+			if (may_auto_follow)
+				GetFollowTarget(ent);
 			MM_Horde_NotifyEliminatedSpectator(ent);
 			ent->client->pers.health = 1; // prevent pers.health <= 0 from forcing scoreboard layout in freecam
 		}
@@ -1129,7 +1167,7 @@ A client has just connected to the server in
 deathmatch mode, so clear everything out before starting them.
 =====================
 */
-static void ClientBeginDeathmatch(gentity_t *ent) {
+static void ClientBeginDeathmatch(gentity_t *ent, bool finish_server_frame = true) {
 	// SpawnEntities marks retained clients unspawned before the engine calls
 	// ClientBegin for the new map. Preserve that distinction across ClientSpawn,
 	// which initializes pers.spawned again.
@@ -1160,8 +1198,29 @@ static void ClientBeginDeathmatch(gentity_t *ent) {
 
 	//gi.LocBroadcast_Print(PRINT_HIGH, "$g_entered_game", ent->client->resp.netname);
 
-	// make sure all view stuff is valid
-	ClientEndServerFrame(ent);
+	// make sure all view stuff is valid. Ghost aborts run at the start of a live
+	// game frame and will be finalized by the ordinary end-frame pass.
+	if (finish_server_frame)
+		ClientEndServerFrame(ent);
+}
+
+void ClientRestartAfterGhostRestoreAbort(gentity_t *ent)
+{
+	if (!ent || !ent->client || !ent->client->pers.connected)
+		return;
+
+	if (ent->linked)
+		gi.unlinkentity(ent);
+
+	const bool previous_restart_state = ghost_abort_restart_in_progress;
+	ghost_abort_restart_in_progress = true;
+	struct ghost_abort_restart_scope_t {
+		bool previous;
+		~ghost_abort_restart_scope_t() { ghost_abort_restart_in_progress = previous; }
+	} restart_scope { previous_restart_state };
+
+	ClientBeginDeathmatch(ent, false);
+	CalculateRanks();
 }
 
 static void G_SetLevelEntry() {
@@ -1334,6 +1393,13 @@ void ClientBegin(gentity_t *ent) {
 	// [Paril-KEX] we're always connected by this point...
 	ent->client->pers.connected = true;
 
+	// A reconnect reservation already has current connection identity and loaded
+	// preferences from ClientConnect. Enter the restore delay before ordinary
+	// ClientBegin republishes canonical skins or applies viewer-wide overrides;
+	// the bounded restore scheduler owns those presentation writes.
+	if (deathmatch->integer && notGT(GT_ARENA) && MM_Ghost_TryRestore(ent))
+		return;
+
 	// Map loads clear engine configstrings without calling ClientConnect again.
 	// Republish retained name/skin data before exposing MODELINDEX_PLAYER so the
 	// renderer cannot observe a player backed by a stale map model handle.
@@ -1346,11 +1412,6 @@ void ClientBegin(gentity_t *ent) {
 	// Reload persisted preferences here every ClientBegin.
 	if (!(ent->svflags & SVF_BOT))
 		MM_ClientInitPConfig(ent);
-
-	// [MuffMode] Arena membership, logical teams and queue positions are
-	// map-local. Never restore those through the cross-map ghost path.
-	if (deathmatch->integer && notGT(GT_ARENA) && MM_Ghost_TryRestore(ent))
-		return;
 
 	if (deathmatch->integer) {
 		ClientBeginDeathmatch(ent);
@@ -1545,9 +1606,35 @@ static inline gentity_t *ClientChooseSlot_Coop(const char *userinfo, const char 
 	return any_slot;
 }
 
+#if defined(MM_GHOST_RUNTIME_TESTING)
+// Q2REPRO deliberately supplies no platform identity. Runtime soak builds may
+// derive an ephemeral identity from a unique test-client name so the real
+// disconnect/reconnect path can be exercised. Production builds never compile
+// this fallback and continue to require the engine-authenticated social ID.
+static const char *RuntimeTestSocialId(const char *userinfo, const char *social_id,
+	bool is_bot, char (&derived)[MAX_INFO_VALUE])
+{
+	if (is_bot || (social_id && social_id[0]))
+		return social_id;
+
+	char name[MAX_INFO_VALUE]{};
+	gi.Info_ValueForKey(userinfo, "name", name, sizeof(name));
+	if (!name[0])
+		return social_id;
+
+	Q_strlcpy(derived, "runtime-soak:", sizeof(derived));
+	Q_strlcat(derived, name, sizeof(derived));
+	return derived;
+}
+#endif
+
 // [Paril-KEX] for coop, we want to try to ensure that players will always get their
 // proper slot back when they connect.
 gentity_t *ClientChooseSlot(const char *userinfo, const char *social_id, bool is_bot, gentity_t **ignore, size_t num_ignore, bool cinematic) {
+#if defined(MM_GHOST_RUNTIME_TESTING)
+	char derived_social_id[MAX_INFO_VALUE]{};
+	social_id = RuntimeTestSocialId(userinfo, social_id, is_bot, derived_social_id);
+#endif
 	if (!cinematic && deathmatch->integer && !is_bot)
 		if (gentity_t *slot = MM_Ghost_ChooseReconnectSlot(social_id, ignore, num_ignore))
 			return slot;
@@ -1573,10 +1660,18 @@ loadgames will.
 ============
 */
 bool ClientConnect(gentity_t *ent, char *userinfo, const char *social_id, bool is_bot) {
-	ent->client->sess.team = deathmatch->integer ? TEAM_NONE : TEAM_FREE;
-
+#if defined(MM_GHOST_RUNTIME_TESTING)
+	char derived_social_id[MAX_INFO_VALUE]{};
+	social_id = RuntimeTestSocialId(userinfo, social_id, is_bot, derived_social_id);
+#endif
 	// they can connect
 	ent->client = game.clients + (ent - g_entities - 1);
+	MM_Ghost_CancelAbortSpawn(ent);
+	ent->client->sess.team = deathmatch->integer ? TEAM_NONE : TEAM_FREE;
+	// Authentication belongs to a network connection, not a reusable client
+	// slot or ghost snapshot. Real auth may grant this again after connect.
+	ent->client->sess.admin = ent == &g_entities[1];
+	ent->client->pers.voted = 0;
 	P_PublishEngineTeam(ent);
 
 	// set up userinfo early
@@ -1646,14 +1741,6 @@ bool ClientConnect(gentity_t *ent, char *userinfo, const char *social_id, bool i
 
 	ent->client->pers.ingame = true;
 
-	// entity 1 is always server host, so make admin
-	if (ent == &g_entities[1])
-		ent->client->sess.admin = true;
-	else {
-		//TODO: check admins.txt for social_id
-
-	}
-
 	// count current clients and rank for scoreboard
 	CalculateRanks();
 
@@ -1682,10 +1769,14 @@ Will not be called between levels.
 void ClientDisconnect(gentity_t *ent) {
 	if (!ent->client)
 		return;
+	const bool abort_spawn_pending = MM_Ghost_IsAbortSpawnPending(ent);
+	MM_Ghost_CancelAbortSpawn(ent);
 
 	G_ClearLagCompensationHistory(ent);
 
-	const bool auto_ghosted = notGT(GT_ARENA) && MM_Ghost_CaptureDisconnect(ent);
+	const bool auto_ghosted =
+		MM_GhostDisconnectMayCaptureSnapshot(abort_spawn_pending) &&
+		notGT(GT_ARENA) && MM_Ghost_CaptureDisconnect(ent);
 	MM_Arena_OnClientDisconnect(ent);
 	if (!auto_ghosted) {
 		TossClientItems(ent);

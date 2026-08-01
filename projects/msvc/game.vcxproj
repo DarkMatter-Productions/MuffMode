@@ -44,9 +44,15 @@
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup>
+	<MMGhostRuntimeTesting Condition="'$(MMGhostRuntimeTesting)'==''">false</MMGhostRuntimeTesting>
+	<MMGhostRuntimeTestingDefine Condition="'$(MMGhostRuntimeTesting)'=='true'">MM_GHOST_RUNTIME_TESTING;</MMGhostRuntimeTestingDefine>
     <OutDir>$(ProjectDir)..\..\build\msbuild\$(Platform)\$(Configuration)\</OutDir>
     <IntDir>$(ProjectDir)..\..\build\msbuild\obj\$(ProjectName)\$(Platform)\$(Configuration)\</IntDir>
   </PropertyGroup>
+	<PropertyGroup Condition="'$(MMGhostRuntimeTesting)'=='true'">
+		<OutDir>$(ProjectDir)..\..\build\runtime-soak\$(Platform)\$(Configuration)\</OutDir>
+		<IntDir>$(ProjectDir)..\..\build\runtime-soak\obj\$(ProjectName)\$(Platform)\$(Configuration)\</IntDir>
+	</PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <TargetName>$(ProjectName)_x64</TargetName>
   </PropertyGroup>
@@ -70,7 +76,7 @@
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>KEX_Q2_GAME;KEX_Q2GAME_EXPORTS;KEX_Q2GAME_DYNAMIC;_CRT_SECURE_NO_WARNINGS;_DEBUG;_CONSOLE;NO_FMT_SOURCE;FMT_HEADER_ONLY;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>$(MMGhostRuntimeTestingDefine)KEX_Q2_GAME;KEX_Q2GAME_EXPORTS;KEX_Q2GAME_DYNAMIC;_CRT_SECURE_NO_WARNINGS;_DEBUG;_CONSOLE;NO_FMT_SOURCE;FMT_HEADER_ONLY;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <DisableSpecificWarnings>4267;4244</DisableSpecificWarnings>
@@ -95,7 +101,7 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>KEX_Q2_GAME;KEX_Q2GAME_EXPORTS;NO_FMT_SOURCE;FMT_HEADER_ONLY;KEX_Q2GAME_DYNAMIC;_CRT_SECURE_NO_WARNINGS;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>$(MMGhostRuntimeTestingDefine)KEX_Q2_GAME;KEX_Q2GAME_EXPORTS;NO_FMT_SOURCE;FMT_HEADER_ONLY;KEX_Q2GAME_DYNAMIC;_CRT_SECURE_NO_WARNINGS;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <DisableSpecificWarnings>4267;4244</DisableSpecificWarnings>
@@ -197,6 +203,7 @@
     <ClInclude Include="..\..\src\sgame\muffmode\mm_map_pool.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_maps.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_match.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_message_budget.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_menu.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_motd.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_nav_bake.h" />
@@ -326,6 +333,7 @@
     <ClCompile Include="..\..\src\sgame\muffmode\mm_map_pool.cpp" />
     <ClCompile Include="..\..\src\sgame\muffmode\mm_maps.cpp" />
     <ClCompile Include="..\..\src\sgame\muffmode\mm_match.cpp" />
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_message_budget.cpp" />
     <ClCompile Include="..\..\src\sgame\muffmode\mm_menu.cpp" />
     <ClCompile Include="..\..\src\sgame\muffmode\mm_motd.cpp" />
     <ClCompile Include="..\..\src\sgame\muffmode\mm_nav_bake.cpp" />

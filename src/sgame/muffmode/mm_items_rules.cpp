@@ -128,6 +128,18 @@ bool PickupArmorQ1(gentity_t *ent, gentity_t *other, const gitem_armor_t *newinf
 
 } // namespace muffmode::items
 
+bool MM_IsKnownItemOverrideCvarName(std::string_view cvar_name,
+	std::string_view map_name)
+{
+	for (const gitem_t &item : itemlist) {
+		if (item.classname && MM_IsItemOverrideCvarFor(
+				cvar_name, map_name, item.classname))
+			return true;
+	}
+
+	return false;
+}
+
 void MM_GetItemInhibitMode(item_flags_t flags, bool &add, bool &subtract)
 {
 	add = false;

@@ -82,6 +82,31 @@ Regression and fuzz corpora live under `docs-dev/test-assets/` and `tests/fuzz/`
 
 Runtime fuzzing is still experimental because local libFuzzer execution depends on the LLVM sanitizer runtime DLL being available.
 
+## Ghost Reconnect Runtime Soak
+
+For a dedicated-server reconnect soak whose test client cannot supply a platform
+social ID, build the game DLL with the opt-in runtime-test seam:
+
+```powershell
+./scripts/ci/build-msbuild.ps1 -Configuration Release -Platform x64 -TreatWarningsAsErrors -AdditionalMsBuildArgs "/p:MMGhostRuntimeTesting=true"
+```
+
+This writes to `build/runtime-soak/` so it cannot replace a normal build. The
+flag derives a temporary `runtime-soak:<unique-name>` identity only when a
+non-bot test client supplies no engine identity. Never package or deploy this
+DLL; production builds continue to require the authenticated engine social ID.
+
+During the soak, use `sv ghost_diag reset` immediately before the disconnect,
+then `sv ghost_diag` after reinstatement. Exercise a full 32-client server, an
+active-match disconnect/reconnect, a reconnect while skin-override reliable
+traffic is active, a match reset during the three-second pending delay, and a
+Horde reconnect. The expected end state is one capture and restore success,
+no invalid restore or rejected game-side reliable reservation, no active skin
+queue, and every client still connected. The report deliberately cannot show
+the engine netchan backlog because that occupancy is not exposed to the game
+API; retain the dedicated-server log to correlate engine-side drops or reliable
+overflow errors.
+
 ## Crash Triage
 
 Follow [docs-dev/robustness/crash-policy.md](../docs-dev/robustness/crash-policy.md).

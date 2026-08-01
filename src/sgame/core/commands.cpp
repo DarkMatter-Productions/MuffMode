@@ -10,6 +10,7 @@
 #include "muffmode/mm_duel.h"
 #include "muffmode/mm_freezetag.h"
 #include "muffmode/mm_ghost.h"
+#include "muffmode/mm_items_rules.h"
 #include "muffmode/mm_loc.h"
 #include "muffmode/mm_map_pool.h"
 #include "muffmode/mm_maps.h"
@@ -1445,29 +1446,31 @@ static void Cmd_PlayersJoinTime_f(gentity_t *ent) {
 }
 
 bool CheckFlood(gentity_t *ent) {
-	int		   i;
-	gclient_t *cl;
+	constexpr int flood_history_capacity = 10;
+	static_assert(q_countof(gclient_t::flood_when) == flood_history_capacity);
 
-	if (flood_msgs->integer) {
-		cl = ent->client;
+	const int message_count = MM_ClampFloodMessageCount(
+		flood_msgs->integer, flood_history_capacity);
+	if (message_count) {
+		gclient_t *cl = ent->client;
 
 		if (level.time < cl->flood_locktill) {
 			gi.LocClient_Print(ent, PRINT_HIGH, "$g_flood_cant_talk",
 				(cl->flood_locktill - level.time).seconds<int32_t>());
 			return true;
 		}
-		i = cl->flood_whenhead - flood_msgs->integer + 1;
-		if (i < 0)
-			i = (sizeof(cl->flood_when) / sizeof(cl->flood_when[0])) + i;
-		if (i >= q_countof(cl->flood_when))
-			i = 0;
+
+		cl->flood_whenhead = MM_NormalizeRingIndex(
+			cl->flood_whenhead, flood_history_capacity);
+		const int i = MM_FloodHistoryIndex({
+			cl->flood_whenhead, message_count, flood_history_capacity });
 		if (cl->flood_when[i] && level.time - cl->flood_when[i] < gtime_t::from_sec(flood_persecond->value)) {
 			cl->flood_locktill = level.time + gtime_t::from_sec(flood_waitdelay->value);
 			gi.LocClient_Print(ent, PRINT_CHAT, "$g_flood_cant_talk",
 				flood_waitdelay->integer);
 			return true;
 		}
-		cl->flood_whenhead = (cl->flood_whenhead + 1) % (sizeof(cl->flood_when) / sizeof(cl->flood_when[0]));
+		cl->flood_whenhead = (cl->flood_whenhead + 1) % flood_history_capacity;
 		cl->flood_when[cl->flood_whenhead] = level.time;
 	}
 	return false;
@@ -2575,12 +2578,25 @@ void ClientCommand(gentity_t *ent) {
 		}
 	}
 
+	// The reconnect snapshot is not committed yet. Do not let team, vote,
+	// forfeit, or admin commands mutate external match state during the bounded
+	// reinstatement delay. Chat above remains available where the host forwards it.
+	if (MM_Ghost_IsPendingRestore(ent))
+		return;
+
 	if (!cc) {
-		// always allow replace_/disable_ item cvars
-		if (gi.argc() > 1 && (strstr(cmd, "replace_") || strstr(cmd, "disable_"))) {
-			gi.cvar_forceset(cmd, gi.argv(1));
-		} else
+		// [MuffMode] Only authenticated admins may change exact, known item overrides.
+		if (MM_IsExactArgcValid(gi.argc(), 2) &&
+			MM_IsKnownItemOverrideCvarName(cmd,
+				std::string_view(&level.mapname[0]))) {
+			if (MM_ClientMaySetItemOverride(
+					g_allow_admin->integer != 0, ent->client->sess.admin))
+				gi.cvar_forceset(cmd, gi.argv(1));
+			else
+				gi.LocClient_Print(ent, PRINT_HIGH, "Only admins can use this command.\n");
+		} else {
 			gi.LocClient_Print(ent, PRINT_HIGH, "Invalid client command: \"{}\"\n", cmd);
+		}
 		return;
 	}
 

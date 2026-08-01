@@ -48,6 +48,28 @@ enum class mm_arena_round_result_t {
 	Blue
 };
 
+inline constexpr bool MM_ArenaLogicalTeamIdMatches(
+	uint16_t client_team_id, uint16_t requested_team_id)
+{
+	return requested_team_id != 0 && client_team_id == requested_team_id;
+}
+
+inline constexpr bool MM_ArenaStateRequiresValidPairing(mm_arena_state_t state)
+{
+	return state == mm_arena_state_t::Empty ||
+		state == mm_arena_state_t::Warmup ||
+		state == mm_arena_state_t::MatchCountdown ||
+		state == mm_arena_state_t::RoundCountdown ||
+		state == mm_arena_state_t::RoundOver;
+}
+
+inline constexpr bool MM_ArenaInvalidPairingCancelsSeries(mm_arena_state_t state)
+{
+	return state == mm_arena_state_t::MatchCountdown ||
+		state == mm_arena_state_t::RoundCountdown ||
+		state == mm_arena_state_t::RoundOver;
+}
+
 // RA2 reserves arena zero for the lobby and stores the playable-room count on
 // worldspawn. Keep this map contract independent from the game DLL so the
 // fail-closed activation policy can be covered by host tests.

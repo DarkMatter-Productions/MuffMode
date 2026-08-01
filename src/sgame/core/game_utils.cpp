@@ -775,41 +775,48 @@ constexpr const char *TEAM_BLUE_SKIN = "ctf_b";
 G_AssignPlayerSkin
 =================
 */
-void G_AssignPlayerSkin(gentity_t *ent, const char *s) {
-	int	  playernum = ent - g_entities - 1;
-	std::string_view t(s);
+std::string_view G_FormatPlayerSkinConfigString(gentity_t *ent, const char *skin)
+{
+	std::string_view model_skin(skin);
 
-	if (size_t i = t.find_first_of('/'); i != std::string_view::npos)
-		t = t.substr(0, i + 1);
+	if (size_t i = model_skin.find_first_of('/'); i != std::string_view::npos)
+		model_skin = model_skin.substr(0, i + 1);
 	else
-		t = "male/";
+		model_skin = "male/";
 
 	switch (ent->client->sess.team) {
 	case TEAM_RED:
 		if (g_team_force_models->integer && *g_team_red_model->string)
-			t = G_Fmt("{}\\{}\\default", ent->client->resp.netname, g_team_red_model->string);
-		else
-			t = G_Fmt("{}\\{}{}\\default", ent->client->resp.netname, t, TEAM_RED_SKIN);
-		break;
+			return G_Fmt("{}\\{}\\default",
+				ent->client->resp.netname, g_team_red_model->string);
+		return G_Fmt("{}\\{}{}\\default",
+			ent->client->resp.netname, model_skin, TEAM_RED_SKIN);
 	case TEAM_BLUE:
 		if (g_team_force_models->integer && *g_team_blue_model->string)
-			t = G_Fmt("{}\\{}\\default", ent->client->resp.netname, g_team_blue_model->string);
-		else
-			t = G_Fmt("{}\\{}{}\\default", ent->client->resp.netname, t, TEAM_BLUE_SKIN);
-		break;
+			return G_Fmt("{}\\{}\\default",
+				ent->client->resp.netname, g_team_blue_model->string);
+		return G_Fmt("{}\\{}{}\\default",
+			ent->client->resp.netname, model_skin, TEAM_BLUE_SKIN);
 	default:
-		t = G_Fmt("{}\\{}\\default", ent->client->resp.netname, s);
-		break;
+		return G_Fmt("{}\\{}\\default",
+			ent->client->resp.netname, skin);
 	}
+}
 
-	gi.configstring(CS_PLAYERSKINS + playernum, t.data());
+void G_AssignPlayerSkin(gentity_t *ent, const char *s, bool refresh_overrides) {
+	const int playernum = ent - g_entities - 1;
+	const std::string_view value = G_FormatPlayerSkinConfigString(ent, s);
+
+	gi.configstring(CS_PLAYERSKINS + playernum, value.data());
 
 	// [MuffMode] The canonical broadcast above clobbers any per-viewer skin
 	// override of this player, and a team change here can flip enemy/teammate
 	// relationships, so re-send overrides both for this player as a target and
 	// as a viewer.
-	MM_RefreshSkinOverridesForTarget(ent);
-	MM_RefreshSkinOverridesForViewer(ent);
+	if (refresh_overrides) {
+		MM_RefreshSkinOverridesForTarget(ent);
+		MM_RefreshSkinOverridesForViewer(ent);
+	}
 
 	//	gi.LocClient_Print(ent, PRINT_HIGH, "$g_assigned_team", ent->client->resp.netname);
 }

@@ -403,11 +403,22 @@ bool StartNewRound(bool reset_world = true)
 		return false;
 	}
 
+	// Ghost snapshots are exact, round-owned gameplay state. Advance this before
+	// rebuilding the world so a reservation can never resurrect the previous
+	// round's position, inventory, lives, or frozen state.
+	if (++level.round_epoch == 0)
+		level.round_epoch = 1;
+
 	level.round_state = roundst_t::ROUND_COUNTDOWN;
 	level.round_state_timer = level.time + gtime_t::from_sec(g_round_countdown->integer);
 	level.countdown_check = 0_sec;
 
 	if (reset_world && !MM_Horde_ShouldSkipEntitiesReset()) {
+		// Distinguish an actual world rebuild from a no-reset Horde wave. Stale
+		// snapshots must not reset items in a rebuilt world, while a persistent
+		// world still needs held flags and Techs released during cleanup.
+		if (++level.world_epoch == 0)
+			level.world_epoch = 1;
 		if (GT(GT_FREEZE)) {
 			ResetEntities(false, false, false);
 		} else {
@@ -553,7 +564,7 @@ void Match_Start() {
 
 	level.total_player_deaths = 0;
 
-	MM_Ghost_ClearAll();
+	MM_Ghost_ClearAll(true);
 	match::ResetEntities(true, true, true);
 
 	// Horde world initialization is part of the entity reload, so choose this
@@ -623,7 +634,7 @@ void Match_Reset() {
 	//	return;
 	//}
 
-	MM_Ghost_ClearAll();
+	MM_Ghost_ClearAll(true);
 	match::ResetEntities(true, false, true);
 	UnReadyAll();
 	ValidateCaptains();
@@ -1609,7 +1620,9 @@ void MM_TimeoutBeginResumeCountdown() {
 
 	MM_Ghost_DropTimedOutFlags();
 
-	level.timeout_auto = false;
+	// Keep automatic-timeout provenance through the resume countdown. Match
+	// start/reset can then discard a ghost-owned countdown instead of carrying it
+	// into the rebuilt match; FinishTimeout clears the flag at completion.
 	level.timeout_ent = nullptr;
 	level.timeout_resuming = true;
 	level.countdown_check = 0_sec;

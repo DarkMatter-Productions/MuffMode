@@ -3,6 +3,7 @@
 
 #include "g_local.h"
 #include "debug_log.h"
+#include "muffmode/mm_ghost.h"
 #include "muffmode/mm_map_pool.h"
 #include "muffmode/mm_maps.h"
 #include "muffmode/mm_nav_bake.h"
@@ -49,6 +50,19 @@ static void SVCmd_LoadMapCycle_f() {
 	MM_ReloadMapCycle(nullptr);
 }
 
+static void SVCmd_GhostDiagnostics_f() {
+	if (gi.argc() == 2) {
+		MM_Ghost_ReportDiagnostics(false);
+		return;
+	}
+	if (gi.argc() == 3 && Q_strcasecmp(gi.argv(2), "reset") == 0) {
+		MM_Ghost_ReportDiagnostics(true);
+		return;
+	}
+
+	gi.LocClient_Print(nullptr, PRINT_HIGH, "Usage: sv ghost_diag [reset]\n");
+}
+
 // [MuffMode] Generate a walk-only bot nav file for the current map.
 // Usage: sv nav_bake [grid]  (grid = lattice spacing in units; default 96)
 static void SVCmd_NavBake_f() {
@@ -78,6 +92,8 @@ void ServerCommand() {
 		SVCmd_LoadMapCycle_f();
 	else if (Q_strcasecmp(cmd, "load_mappool") == 0)
 		SVCmd_LoadMapPool_f();
+	else if (Q_strcasecmp(cmd, "ghost_diag") == 0)
+		SVCmd_GhostDiagnostics_f();
 	else if (Q_strcasecmp(cmd, "nav_bake") == 0)
 		SVCmd_NavBake_f();
 	else

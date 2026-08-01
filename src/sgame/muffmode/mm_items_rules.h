@@ -4,12 +4,43 @@
 #pragma once
 
 #include <cstdint>
+#include <string_view>
 
 struct gentity_t;
 struct gitem_t;
 struct gtime_t;
 enum item_id_t : int32_t;
 enum item_flags_t : uint32_t;
+
+inline bool MM_IsItemOverrideCvarFor(std::string_view cvar_name,
+	std::string_view map_name, std::string_view item_classname)
+{
+	if (item_classname.empty())
+		return false;
+
+	const auto matches_operation = [item_classname](std::string_view candidate,
+		std::string_view operation) {
+		return candidate.size() >= operation.size() &&
+			candidate.compare(0, operation.size(), operation) == 0 &&
+			candidate.substr(operation.size()) == item_classname;
+	};
+
+	if (matches_operation(cvar_name, "disable_") ||
+		matches_operation(cvar_name, "replace_"))
+		return true;
+
+	if (map_name.empty() || cvar_name.size() <= map_name.size() ||
+		cvar_name.compare(0, map_name.size(), map_name) != 0 ||
+		cvar_name[map_name.size()] != '_')
+		return false;
+
+	const std::string_view map_scoped_name = cvar_name.substr(map_name.size() + 1);
+	return matches_operation(map_scoped_name, "disable_") ||
+		matches_operation(map_scoped_name, "replace_");
+}
+
+bool MM_IsKnownItemOverrideCvarName(std::string_view cvar_name,
+	std::string_view map_name);
 
 // [MuffMode] Ruleset-specific item pickup, respawn, inhibit, and autoswitch rules.
 inline bool MM_ItemTouchClientMayPickup(bool client_playing, int health, bool frozen)

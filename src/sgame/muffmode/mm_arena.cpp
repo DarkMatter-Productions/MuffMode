@@ -474,7 +474,8 @@ const LogicalTeam *FindTeam(uint16_t id, const int)
 
 bool IsTeamMember(const gclient_t *client, uint16_t team_id)
 {
-	if (!client || !team_id || client->resp.arena_team_id != team_id)
+	if (!client || !MM_ArenaLogicalTeamIdMatches(
+			client->resp.arena_team_id, team_id))
 		return false;
 	return Role(client) != mm_arena_role_t::Coach;
 }
@@ -482,8 +483,12 @@ bool IsTeamMember(const gclient_t *client, uint16_t team_id)
 std::vector<gentity_t *> TeamMembers(uint16_t team_id, bool include_coaches = false)
 {
 	std::vector<gentity_t *> result;
+	if (!team_id)
+		return result;
+
 	for (gentity_t *ent : active_clients()) {
-		if (!IsConnected(ent) || ent->client->resp.arena_team_id != team_id)
+		if (!IsConnected(ent) || !MM_ArenaLogicalTeamIdMatches(
+				ent->client->resp.arena_team_id, team_id))
 			continue;
 		if (!include_coaches && Role(ent->client) == mm_arena_role_t::Coach)
 			continue;
@@ -1636,11 +1641,14 @@ void SetTeamRole(uint16_t team_id, mm_arena_role_t role, team_t side,
 {
 	const LogicalTeam *team = FindTeam(team_id, 0);
 	const Arena *arena = team ? FindArena(team->arena_id, 0) : nullptr;
+	if (!team || !arena)
+		return;
+
 	for (gentity_t *ent : TeamMembers(team_id)) {
 		if (role == mm_arena_role_t::Fighter &&
 			ent->client->resp.arena_late_join)
 			continue;
-		if (role == mm_arena_role_t::Fighter && arena &&
+		if (role == mm_arena_role_t::Fighter &&
 			!PingAllowed(ent, *arena)) {
 			ProjectRole(ent, mm_arena_role_t::Observer,
 				TEAM_SPECTATOR, false);
@@ -2497,10 +2505,7 @@ void TickArena(Arena &arena)
 		return;
 	}
 
-	const bool pairing_phase = arena.state == mm_arena_state_t::Empty ||
-		arena.state == mm_arena_state_t::Warmup ||
-		arena.state == mm_arena_state_t::MatchCountdown ||
-		arena.state == mm_arena_state_t::RoundCountdown;
+	const bool pairing_phase = MM_ArenaStateRequiresValidPairing(arena.state);
 	const bool rover_pairing = arena.settings.type == mm_arena_type_t::RedRover;
 	const bool unequal_sides = pairing_phase && !rover_pairing &&
 		!arena.settings.unbalanced &&
@@ -2516,8 +2521,7 @@ void TickArena(Arena &arena)
 		(!rover_pairing && (!arena.active_red || !arena.active_blue ||
 			unequal_sides || !TeamEligible(arena, arena.active_red) ||
 			!TeamEligible(arena, arena.active_blue))))) {
-		if (arena.state == mm_arena_state_t::MatchCountdown ||
-			arena.state == mm_arena_state_t::RoundCountdown) {
+		if (MM_ArenaInvalidPairingCancelsSeries(arena.state)) {
 			AdmitLateJoiners(arena);
 			arena.red_score = arena.blue_score = arena.round = 0;
 			arena.series_winner = 0;

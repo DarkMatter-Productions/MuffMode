@@ -65,10 +65,14 @@ static void CG_ParseConfigString(int32_t i, const char *s) {
 }
 
 static void CG_GetMonsterFlashOffset(monster_muzzleflash_id_t id, gvec3_ref_t offset) {
-	if (id >= q_countof(monster_flash_offset))
+	const auto index = static_cast<size_t>(id);
+	if (index >= q_countof(monster_flash_offset)) {
 		cgi.Com_Error("Bad muzzle flash offset");
+		offset = vec3_origin;
+		return;
+	}
 
-	offset = monster_flash_offset[id];
+	offset = monster_flash_offset[index];
 }
 
 /*

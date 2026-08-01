@@ -42,12 +42,12 @@ static struct {
 		struct {
 			char    text[24];
 		} table_cells[6];
-	} table_rows[11]; // just enough to store 8 levels + header + total (+ one slack)
+	} table_rows[11]{}; // just enough to store 8 levels + header + total (+ one slack)
 
-	size_t column_widths[6];
+	size_t column_widths[6]{};
 	int32_t num_rows = 0;
 	int32_t num_columns = 0;
-} hud_temp;
+} hud_temp{};
 
 layout_flags_t CG_LayoutFlags(const player_state_t *ps) {
 	return (layout_flags_t)ps->stats[STAT_LAYOUTS];
@@ -121,13 +121,14 @@ int CG_DrawHUDString(const char *string, int x, int y, int centerwidth, int xor_
 			line[width++] = *string++;
 		line[width] = 0;
 
-		vec2_t size;
+		const bool use_kfont = CG_UseKFont();
+		vec2_t size{};
 
-		if (CG_UseKFont())
+		if (use_kfont)
 			size = cgi.SCR_MeasureFontString(line, scale);
 
 		if (centerwidth) {
-			if (!CG_UseKFont())
+			if (!use_kfont)
 				x = margin + ((centerwidth - width * CONCHAR_WIDTH * scale)) / 2;
 			else
 				x = margin + ((centerwidth - size.x)) / 2;
@@ -135,7 +136,7 @@ int CG_DrawHUDString(const char *string, int x, int y, int centerwidth, int xor_
 			x = margin;
 		}
 
-		if (!CG_UseKFont()) {
+		if (!use_kfont) {
 			for (i = 0; i < width; i++) {
 				cgi.SCR_DrawChar(x, y, scale, line[i] ^ xor_mask, shadow);
 				x += CONCHAR_WIDTH * scale;
@@ -148,7 +149,7 @@ int CG_DrawHUDString(const char *string, int x, int y, int centerwidth, int xor_
 		if (*string) {
 			string++;
 			x = margin;
-			y += (CG_UseKFont() ? 10 : CONCHAR_WIDTH) * scale;
+			y += (use_kfont ? 10 : CONCHAR_WIDTH) * scale;
 		}
 	}
 
