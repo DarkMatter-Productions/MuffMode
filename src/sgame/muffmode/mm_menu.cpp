@@ -3,6 +3,7 @@
 #include "g_local.h"
 #include "muffmode/mm_arena.h"
 #include "muffmode/mm_captain.h"
+#include "muffmode/mm_duel.h"
 #include "muffmode/mm_match.h"
 #include "muffmode/mm_menu.h"
 #include "muffmode/mm_pconfig.h"
@@ -97,17 +98,14 @@ void SetGametypeName(menu_t *p)
 
 void SetLevelName(menu_t *p)
 {
-	static char levelname[33];
-
 	std::string value = "*";
 	value += g_entities[0].message ? g_entities[0].message : level.mapname;
-	muffmode::CopyString(levelname, value);
-	SetText(p, levelname);
+	SetText(p, value);
 }
 
 const char *CurrentRulesetName()
 {
-	const int ruleset = clamp(static_cast<int>(game.ruleset), static_cast<int>(RS_NONE) + 1, static_cast<int>(RS_NUM_RULESETS) - 1);
+	const int ruleset = ClampPlayableRulesetIndex(static_cast<int>(game.ruleset));
 	return rs_long_name[ruleset];
 }
 
@@ -488,17 +486,28 @@ void Update(gentity_t *ent)
 	if (!menu::GetEntries(ent, &entries, &num_entries))
 		return;
 
-	// ent->client->mstats (client_match_stats_t) has no writers anywhere in the
-	// tree, so this screen always rendered zeros. Source the live per-match
-	// counters from resp.mstats[] via MS_Value. Field order matches the struct.
-	const client_match_stats_t stats = {
-		static_cast<uint32_t>(MS_Value(ent->client, MSTAT_DMG_DEALT)),
-		static_cast<uint32_t>(MS_Value(ent->client, MSTAT_DMG_RECEIVED)),
-		static_cast<uint32_t>(MS_Value(ent->client, MSTAT_SHOTS)),
-		static_cast<uint32_t>(MS_Value(ent->client, MSTAT_HITS)),
-		static_cast<uint32_t>(MS_Value(ent->client, MSTAT_KILLS_TOTAL)),
-		static_cast<uint32_t>(MS_Value(ent->client, MSTAT_DEATHS_TOTAL)),
-	};
+	const mm_match_player_stats_t &stats = ent->client->pers.match;
+	// GT_ARENA owns simultaneous room-local series and deliberately does not use
+	// the singleton match exporter. Its established resp.mstats counters remain
+	// the authoritative live-menu source.
+	const uint64_t kills = GT(GT_ARENA)
+		? static_cast<uint64_t>(std::max(0, MS_Value(ent->client, MSTAT_KILLS_TOTAL)))
+		: stats.total_kills;
+	const uint64_t deaths = GT(GT_ARENA)
+		? static_cast<uint64_t>(std::max(0, MS_Value(ent->client, MSTAT_DEATHS_TOTAL)))
+		: stats.total_deaths;
+	const uint64_t damage_dealt = GT(GT_ARENA)
+		? static_cast<uint64_t>(std::max(0, MS_Value(ent->client, MSTAT_DMG_DEALT)))
+		: stats.total_dmg_dealt;
+	const uint64_t damage_received = GT(GT_ARENA)
+		? static_cast<uint64_t>(std::max(0, MS_Value(ent->client, MSTAT_DMG_RECEIVED)))
+		: stats.total_dmg_received;
+	const uint64_t shots = GT(GT_ARENA)
+		? static_cast<uint64_t>(std::max(0, MS_Value(ent->client, MSTAT_SHOTS)))
+		: stats.total_shots;
+	const uint64_t hits = GT(GT_ARENA)
+		? static_cast<uint64_t>(std::max(0, MS_Value(ent->client, MSTAT_HITS)))
+		: stats.total_hits;
 	MenuWriter writer{ entries, num_entries };
 
 	writer.Add("Player Stats for Match");
@@ -509,39 +518,33 @@ void Update(gentity_t *ent)
 
 	writer.Add(menu::kBreaker);
 
-	writer.Add(G_Fmt("kills: {}", stats.total_kills).data());
-	writer.Add(G_Fmt("deaths: {}", stats.total_deaths).data());
-	if (stats.total_kills) {
-		if (stats.total_deaths > 0) {
-			const float ratio = static_cast<float>(stats.total_kills) / static_cast<float>(stats.total_deaths);
-			writer.Add(G_Fmt("k/d ratio: {:2}", ratio).data());
-		} else {
-			writer.Add("k/d ratio: N/A");
-		}
+	writer.Add(G_Fmt("kills: {}", kills).data());
+	writer.Add(G_Fmt("deaths: {}", deaths).data());
+	if (deaths > 0) {
+		const double ratio = static_cast<double>(kills) / static_cast<double>(deaths);
+		writer.Add(G_Fmt("k/d ratio: {:.2f}", ratio).data());
+	} else {
+		writer.Add("");
 	}
 
 	writer.Add("");
-	writer.Add(G_Fmt("dmg dealt: {}", stats.total_dmg_dealt).data());
-	writer.Add(G_Fmt("dmg received: {}", stats.total_dmg_received).data());
-	if (stats.total_dmg_dealt) {
-		if (stats.total_dmg_received > 0) {
-			const float ratio = static_cast<float>(stats.total_dmg_dealt) / static_cast<float>(stats.total_dmg_received);
-			writer.Add(G_Fmt("dmg ratio: {:02}", ratio).data());
-		} else {
-			writer.Add("dmg ratio: N/A");
-		}
+	writer.Add(G_Fmt("dmg dealt: {}", damage_dealt).data());
+	writer.Add(G_Fmt("dmg received: {}", damage_received).data());
+	if (damage_received > 0) {
+		const double ratio = static_cast<double>(damage_dealt) / static_cast<double>(damage_received);
+		writer.Add(G_Fmt("dmg ratio: {:.2f}", ratio).data());
+	} else {
+		writer.Add("");
 	}
 
 	writer.Add("");
-	writer.Add(G_Fmt("shots fired: {}", stats.total_shots).data());
-	writer.Add(G_Fmt("shots on target: {}", stats.total_hits).data());
-	if (stats.total_hits) {
-		if (stats.total_shots > 0) {
-			const int accuracy = static_cast<int>((static_cast<float>(stats.total_hits) / static_cast<float>(stats.total_shots)) * 100.f);
-			writer.Add(G_Fmt("total accuracy: {}%", accuracy).data());
-		} else {
-			writer.Add("total accuracy: N/A");
-		}
+	writer.Add(G_Fmt("shots fired: {}", shots).data());
+	writer.Add(G_Fmt("shots on target: {}", hits).data());
+	if (shots > 0) {
+		const int accuracy = static_cast<int>((static_cast<double>(hits) / static_cast<double>(shots)) * 100.0);
+		writer.Add(G_Fmt("total accuracy: {}%", accuracy).data());
+	} else {
+		writer.Add("");
 	}
 }
 
@@ -583,6 +586,29 @@ constexpr std::array<const char *, 4> kSkinChoices = {
 	"female/athena",
 	"cyborg/oni911"
 };
+
+constexpr gtime_t kPreferenceMenuChangeInterval = gtime_t::from_ms(250);
+std::array<gtime_t, MAX_CLIENTS> s_preference_menu_change_deadlines{};
+
+bool BeginPreferenceMenuChange(gentity_t *ent)
+{
+	if (!menu::HasClient(ent))
+		return false;
+	const int32_t slot = ent->s.number - 1;
+	if (slot < 0 || slot >= static_cast<int32_t>(
+			s_preference_menu_change_deadlines.size())) {
+		return false;
+	}
+
+	gtime_t &deadline = s_preference_menu_change_deadlines[
+		static_cast<size_t>(slot)];
+	if (deadline && level.time < deadline &&
+		deadline - level.time <= kPreferenceMenuChangeInterval) {
+		return false;
+	}
+	deadline = level.time + kPreferenceMenuChangeInterval;
+	return true;
+}
 
 const menu_t kPlayerConfigMenuTemplate[] = {
 	{ "*Player Config", MENU_ALIGN_CENTER, nullptr },
@@ -670,7 +696,7 @@ std::string SkinValueText(const char *skin)
 
 void ToggleBool(gentity_t *ent, menu_hnd_t *, mm_pconfig_bool_setting_t setting)
 {
-	if (!menu::HasClient(ent))
+	if (!BeginPreferenceMenuChange(ent))
 		return;
 
 	if (MM_PConfigToggleBool(ent, setting))
@@ -704,7 +730,7 @@ void ToggleAnnouncer(gentity_t *ent, menu_hnd_t *p)
 
 void CycleKillBeep(gentity_t *ent, menu_hnd_t *)
 {
-	if (!menu::HasClient(ent))
+	if (!BeginPreferenceMenuChange(ent))
 		return;
 
 	if (MM_PConfigCycleKillBeep(ent))
@@ -733,7 +759,7 @@ void ToggleFollowPowerup(gentity_t *ent, menu_hnd_t *p)
 
 void SetSkinChoice(gentity_t *ent, bool enemy, const char *skin)
 {
-	if (!menu::HasClient(ent))
+	if (!BeginPreferenceMenuChange(ent))
 		return;
 
 	char *store = enemy ? ent->client->sess.pc.enemy_skin : ent->client->sess.pc.team_skin;
@@ -742,7 +768,9 @@ void SetSkinChoice(gentity_t *ent, bool enemy, const char *skin)
 	else
 		store[0] = 0;
 
-	MM_ClientSavePConfigOrWarn(ent);
+	MM_ClientSavePConfigOrWarn(ent,
+		enemy ? MM_CLIENT_PROFILE_PREFERENCE_ENEMY_SKIN :
+			MM_CLIENT_PROFILE_PREFERENCE_TEAM_SKIN);
 	MM_RefreshSkinOverridesForViewer(ent);
 	P_Menu_Update(ent);
 }
@@ -1488,11 +1516,12 @@ void Update(gentity_t *ent)
 		}
 	} else {
 		// Allow duel queue joining even during match lock (queue joining doesn't affect active match)
-		const bool is_duel_queue_join = GT(GT_DUEL) && level.num_playing_clients == 2;
+		const bool is_duel_queue_join = GT(GT_DUEL) &&
+			MM_Duel_OccupiedSlots() >= 2;
 		if (level.locked[TEAM_FREE] && !is_duel_queue_join) {
 			menu::SetText(entries[kFreeJoin], "Match LOCKED");
 			entries[kFreeJoin].SelectFunc = nullptr;
-		} else if (GT(GT_DUEL) && level.num_playing_clients == 2) {
+		} else if (GT(GT_DUEL) && MM_Duel_OccupiedSlots() >= 2) {
 			menu::SetText(entries[kFreeJoin], G_Fmt("Join Queue to Play ({}/{})", num_queue, max(0, max_players - 2)).data());
 			entries[kFreeJoin].SelectFunc = JoinFree;
 		} else {

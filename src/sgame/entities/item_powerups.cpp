@@ -59,6 +59,7 @@ void QuadHog_Spawn(gitem_t *item, gentity_t *spot, bool reset) {
 	ent->movetype = MOVETYPE_TOSS;
 	ent->touch = Touch_Item;
 	ent->owner = ent;
+	ent->item_available_time = level.time;
 	ent->nextthink = level.time + 30_sec;
 	ent->think = QuadHog_DoSpawn;
 

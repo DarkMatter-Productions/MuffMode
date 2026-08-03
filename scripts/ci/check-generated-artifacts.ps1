@@ -8,8 +8,8 @@ Set-Location -LiteralPath $repoRoot
 
 $blockedRules = @(
     [pscustomobject]@{
-        Pattern = '(^|/)[^/]+\.(o|d)$'
-        Reason = 'native compiler object/dependency files (*.o, *.d)'
+        Pattern = '(^|/)[^/]+\.(o|d|obj|iobj|dll|exe|lib|exp|pdb|binlog|zip)$'
+        Reason = 'generated compiler, binary, symbol, log, or archive output'
     },
     [pscustomobject]@{
         Pattern = '(^|/)build_out\.txt$'
@@ -46,6 +46,15 @@ $trackedFiles = @(git ls-files --cached | Where-Object {
     -not $deletedFiles.Contains($normalised)
 })
 $trackedViolations = @(Find-GeneratedArtifactViolations -Paths $trackedFiles)
+$ignoredTrackedFiles = @(git ls-files --cached --ignored --exclude-per-directory=.gitignore)
+if ($LASTEXITCODE -ne 0) {
+    throw "Could not enumerate tracked files that match generated-output ignore rules."
+}
+
+if ($ignoredTrackedFiles.Count -gt 0) {
+    Write-Error "Files matching generated-output ignore rules are force-tracked:`n$($ignoredTrackedFiles -join "`n")"
+    exit 1
+}
 
 if ($trackedViolations.Count -gt 0) {
     Write-Error "Generated build artifacts are tracked in the repository:`n$($trackedViolations | Format-Table -AutoSize | Out-String)"

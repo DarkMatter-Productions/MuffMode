@@ -32,5 +32,6 @@ inline bool IsSafeFilenameText(std::string_view filename, size_t max_qpath) noex
 
 // [MuffMode] Message-of-the-day load and client commands.
 void MM_LoadMOTD();
+void MM_ShowAutomaticMOTD(gentity_t *ent);
 void MM_CmdLoadMotd(gentity_t *ent);
 void MM_CmdMotd(gentity_t *ent);

@@ -3,6 +3,7 @@
 #include "g_local.h"
 // [MuffMode] Round lifecycle lives in muffmode/mm_match
 #include "muffmode/mm_match.h"
+#include "muffmode/mm_match_stats.h"
 #include "muffmode/mm_strike.h"
 
 constexpr int32_t CTF_CAPTURE_BONUS = 15;	  // what you get for capture
@@ -26,6 +27,30 @@ constexpr gtime_t CTF_FRAG_CARRIER_ASSIST_TIMEOUT = 10_sec;
 constexpr gtime_t CTF_RETURN_FLAG_ASSIST_TIMEOUT = 10_sec;
 
 constexpr gtime_t CTF_AUTO_FLAG_RETURN_TIMEOUT = 30_sec; // number of seconds before dropped flag auto-returns
+
+static uint64_t CTF_FlagCarrierTimeMsec(const gclient_t *client) {
+	if (!client)
+		return 0;
+
+	const gtime_t start_time = client->resp.ctf_flagsince
+		? client->resp.ctf_flagsince
+		: client->pers.team_state.flag_pickup_time;
+	if (!start_time || level.time <= start_time)
+		return 0;
+
+	return static_cast<uint64_t>(
+		(level.time - start_time).milliseconds());
+}
+
+static void CTF_AwardMedal(gclient_t *client, medal_t medal) {
+	if (!client)
+		return;
+
+	client->pers.medal_time = level.time;
+	client->pers.medal_type = medal;
+	client->pers.medal_count[medal]++;
+	MM_MatchStats_RecordMedal(client, medal);
+}
 
 /*
 ============
@@ -98,6 +123,9 @@ void CTF_ScoreBonuses(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker
 			Teams_TeamName(attacker->client->sess.team));
 		if (attacker->client->resp.ghost)
 			attacker->client->resp.ghost->carrierdef++;
+		MM_MatchStats_RecordCtfFlagDefence(
+			attacker->client, attacker->client->sess.team);
+		CTF_AwardMedal(attacker->client, MEDAL_DEFENCE);
 		return;
 	}
 
@@ -156,6 +184,9 @@ void CTF_ScoreBonuses(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker
 				Teams_TeamName(attacker->client->sess.team));
 		if (attacker->client->resp.ghost)
 			attacker->client->resp.ghost->basedef++;
+		MM_MatchStats_RecordCtfFlagDefence(
+			attacker->client, attacker->client->sess.team);
+		CTF_AwardMedal(attacker->client, MEDAL_DEFENCE);
 		return;
 	}
 
@@ -172,6 +203,8 @@ void CTF_ScoreBonuses(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker
 				Teams_TeamName(attacker->client->sess.team));
 			if (attacker->client->resp.ghost)
 				attacker->client->resp.ghost->carrierdef++;
+			MM_MatchStats_RecordCtfFlagDefence(
+				attacker->client, attacker->client->sess.team);
 			return;
 		}
 	}
@@ -283,6 +316,8 @@ bool CTF_PickupFlag(gentity_t *ent, gentity_t *other) {
 			// flag, he's just scored a capture!
 
 			if (other->client->pers.inventory[enemy_flag_item]) {
+				const uint64_t carrier_time_msec =
+					CTF_FlagCarrierTimeMsec(other->client);
 				if (other->client->pers.team_state.flag_pickup_time) {
 					gi.LocBroadcast_Print(PRINT_HIGH, "{} TEAM CAPTURED the flag! ({} captured in {})\n",
 						Teams_TeamName(team), other->client->resp.netname, G_TimeStringMs((level.time - other->client->pers.team_state.flag_pickup_time).milliseconds(), false));
@@ -296,6 +331,9 @@ bool CTF_PickupFlag(gentity_t *ent, gentity_t *other) {
 				level.ctf_last_capture_team = team;
 				if (!GT(GT_STRIKE))
 					G_AdjustTeamScore(team, 1);
+				MM_MatchStats_RecordCtfFlagCapture(other->client, team,
+					Teams_OtherTeam(team), carrier_time_msec);
+				CTF_AwardMedal(other->client, MEDAL_CAPTURE);
 
 				gi.sound(ent, CHAN_RELIABLE | CHAN_NO_PHS_ADD | CHAN_AUX, gi.soundindex("ctf/flagcap.wav"), 1, ATTN_NONE, 0);
 
@@ -316,10 +354,14 @@ bool CTF_PickupFlag(gentity_t *ent, gentity_t *other) {
 							if (ec->client->resp.ctf_lastreturnedflag && ec->client->resp.ctf_lastreturnedflag + CTF_RETURN_FLAG_ASSIST_TIMEOUT > level.time) {
 								gi.LocBroadcast_Print(PRINT_HIGH, "$g_bonus_assist_return", ec->client->resp.netname);
 								G_AdjustPlayerScore(ec->client, CTF_RETURN_FLAG_ASSIST_BONUS, false, 0);
+								MM_MatchStats_RecordCtfFlagAssist(ec->client, team);
+								CTF_AwardMedal(ec->client, MEDAL_ASSIST);
 							}
 							if (ec->client->resp.ctf_lastfraggedcarrier && ec->client->resp.ctf_lastfraggedcarrier + CTF_FRAG_CARRIER_ASSIST_TIMEOUT > level.time) {
 								gi.LocBroadcast_Print(PRINT_HIGH, "$g_bonus_assist_frag_carrier", ec->client->resp.netname);
 								G_AdjustPlayerScore(ec->client, CTF_FRAG_CARRIER_ASSIST_BONUS, false, 0);
+								MM_MatchStats_RecordCtfFlagAssist(ec->client, team);
+								CTF_AwardMedal(ec->client, MEDAL_ASSIST);
 							}
 						}
 					}
@@ -339,6 +381,7 @@ bool CTF_PickupFlag(gentity_t *ent, gentity_t *other) {
 			other->client->resp.netname, Teams_TeamName(team));
 		G_AdjustPlayerScore(other->client, CTF_RECOVERY_BONUS, false, 0);
 		other->client->resp.ctf_lastreturnedflag = level.time;
+		MM_MatchStats_RecordCtfFlagReturn(other->client, team);
 		gi.sound(ent, CHAN_RELIABLE | CHAN_NO_PHS_ADD | CHAN_AUX, gi.soundindex("ctf/flagret.wav"), 1, ATTN_NONE, 0);
 		// CTF_ResetTeamFlag will remove this entity!  We must return false
 		CTF_ResetTeamFlag((team_t)team);
@@ -366,6 +409,7 @@ bool CTF_PickupFlag(gentity_t *ent, gentity_t *other) {
 
 	other->client->pers.inventory[flag_item] = 1;
 	other->client->resp.ctf_flagsince = level.time;
+	MM_MatchStats_RecordCtfFlagPickup(other->client, team);
 
 
 	// pick up the flag
@@ -432,20 +476,27 @@ void CTF_DeadDropFlag(gentity_t *self) {
 		return;
 
 	gentity_t *dropped = nullptr;
+	team_t dropped_flag_team = TEAM_NONE;
 
 	if (self->client->pers.inventory[IT_FLAG_RED]) {
 		dropped = Drop_Item(self, GetItemByIndex(IT_FLAG_RED));
+		dropped_flag_team = TEAM_RED;
 		self->client->pers.inventory[IT_FLAG_RED] = 0;
 		gi.LocBroadcast_Print(PRINT_HIGH, "$g_lost_flag",
 			self->client->resp.netname, Teams_TeamName(TEAM_RED));
 	} else if (self->client->pers.inventory[IT_FLAG_BLUE]) {
 		dropped = Drop_Item(self, GetItemByIndex(IT_FLAG_BLUE));
+		dropped_flag_team = TEAM_BLUE;
 		self->client->pers.inventory[IT_FLAG_BLUE] = 0;
 		gi.LocBroadcast_Print(PRINT_HIGH, "$g_lost_flag",
 			self->client->resp.netname, Teams_TeamName(TEAM_BLUE));
 	}
+	if (dropped_flag_team != TEAM_NONE)
+		MM_MatchStats_RecordCtfFlagDrop(self->client, dropped_flag_team,
+			CTF_FlagCarrierTimeMsec(self->client));
 
 	self->client->pers.team_state.flag_pickup_time = 0_ms;
+	self->client->resp.ctf_flagsince = 0_ms;
 
 	if (dropped) {
 		dropped->think = CTF_DropFlagThink;

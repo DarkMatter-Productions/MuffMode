@@ -1,7 +1,6 @@
 # MuffMode Analysis Policy
 
-Date: 2026-06-15
-Branch: `muffdev`
+Date: 2026-08-03
 
 Phase two analysis gates are intentionally script-first. CI should call the same scripts that local developers call, and workflow YAML should only provide runner setup, credentials and artifact upload.
 
@@ -21,13 +20,13 @@ Phase two analysis gates are intentionally script-first. CI should call the same
 
 MSVC warning-clean builds are the first enforced warning gate. The active build workflow calls `build-msbuild.ps1 -TreatWarningsAsErrors`, which maps to the project-local `MMTreatWarningsAsErrors` property in `projects/msvc/MuffMode.Analysis.props`.
 
-Clang diagnostics are introduced through `clang-tidy` on touched C++ files first. Once the baseline is triaged, the file set should ratchet from touched files to all project compile units.
+Clang diagnostics are introduced through `clang-tidy` on touched C++ files first. Header changes and runs without a trustworthy comparison commit scan the full compile database; documentation-only diffs exit cleanly without silently expanding the scan. The full configured rule set remains visible in the text artifact, while the reviewed clean-baseline correctness, lifetime, memory, nullability, and security checks in `scripts/ci/clang-tidy-blocking-checks.txt` fail the job. The runner validates the blocking list against enabled checks and considers every diagnostic alias, so stale patterns or secondary aliases cannot bypass the ratchet. MSVC `/analyze` follows the same model: every enabled diagnostic remains in its text and binary logs, while the clean high-confidence correctness and safety codes in `scripts/ci/msvc-analyze-blocking-warnings.txt` are enforced with normalized, deduplicated parsing. Cppcheck findings are blocking locally and in CI. Narrow reviewed suppressions are the only supported way to exempt a blocking finding. As legacy findings are triaged, add their clean rule families to the blocking lists and expand clang-tidy from touched files to all project compile units.
 
 ## Static Analysis Policy
 
 Analyzer jobs are non-packaging jobs and must publish machine-readable or durable output under `build/analysis/`:
 
-- MSVC `/analyze`: binary log artifact.
+- MSVC `/analyze`: text and binary log artifacts.
 - clang-tidy: text artifact from the selected compile units.
 - Cppcheck: XML artifact.
 - CodeQL: GitHub code scanning upload.

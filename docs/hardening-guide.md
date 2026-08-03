@@ -33,6 +33,8 @@ Use `-IncludeAnalysis` and `-IncludeSanitizers` for slower local parity with the
 ## Required Local Gates
 
 ```powershell
+./scripts/ci/check-release-workflow.ps1
+./scripts/ci/check-tooling-contracts.ps1
 ./scripts/ci/check-generated-artifacts.ps1
 ./scripts/ci/check-map-pool-examples.ps1
 ./scripts/ci/check-changelog.ps1
@@ -62,7 +64,7 @@ Useful local commands:
 ./scripts/ci/run-clang-tidy.ps1 -Files src/sgame/muffmode/mm_pconfig.cpp
 ./scripts/ci/run-cppcheck.ps1
 ./scripts/ci/run-sanitized-build.ps1 -Sanitizer Address
-./scripts/ci/run-sanitized-build.ps1 -Sanitizer Undefined -AllowUnsupported
+./scripts/ci/run-sanitized-build.ps1 -Sanitizer Undefined
 ```
 
 AddressSanitizer is the blocking sanitizer build on the Windows/MSBuild path. UndefinedBehaviorSanitizer remains experimental until the ClangCL toolset and runtime are stable on CI.
@@ -77,10 +79,14 @@ Regression and fuzz corpora live under `docs-dev/test-assets/` and `tests/fuzz/`
 ./scripts/ci/run-host-tests.ps1 -Configuration Release -Platform x64
 ./scripts/ci/run-updater-tests.ps1 -Configuration Release
 ./scripts/ci/check-regression-corpus.ps1
-./scripts/ci/build-fuzz-targets.ps1 -AllowUnsupported
+./scripts/ci/build-fuzz-targets.ps1
+./scripts/ci/run-fuzz-smoke.ps1 -Runs 1000
 ```
 
-Runtime fuzzing is still experimental because local libFuzzer execution depends on the LLVM sanitizer runtime DLL being available.
+The fuzz build verifies and stages the LLVM sanitizer runtime, then the bounded
+smoke command executes a generated copy of the checked-in corpus. Missing
+toolchains and target build failures remain visible instead of producing a
+false-green job.
 
 ## Ghost Reconnect Runtime Soak
 
@@ -97,7 +103,7 @@ non-bot test client supplies no engine identity. Never package or deploy this
 DLL; production builds continue to require the authenticated engine social ID.
 
 During the soak, use `sv ghost_diag reset` immediately before the disconnect,
-then `sv ghost_diag` after reinstatement. Exercise a full 32-client server, an
+then `sv ghost_diag` after reinstatement. Exercise a full 128-client server, an
 active-match disconnect/reconnect, a reconnect while skin-override reliable
 traffic is active, a match reset during the three-second pending delay, and a
 Horde reconnect. The expected end state is one capture and restore success,

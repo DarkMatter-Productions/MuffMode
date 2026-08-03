@@ -52,7 +52,8 @@ static USE(func_wall_use) (gentity_t *self, gentity_t *other, gentity_t *activat
 		self->solid = SOLID_BSP;
 		self->svflags &= ~SVF_NOCLIENT;
 		gi.linkentity(self);
-		KillBox(self, false);
+		if (!KillBox(self, false))
+			return;
 	} else {
 		self->solid = SOLID_NOT;
 		self->svflags |= SVF_NOCLIENT;
@@ -228,13 +229,21 @@ static DIE(func_explosive_explode) (gentity_t *self, gentity_t *inflictor, genti
 	int		 mass;
 	gentity_t *master;
 	bool	 done = false;
+	const int32_t self_generation = self->spawn_count;
+	const vec3_t inflictor_origin = inflictor
+		? inflictor->s.origin : self->s.origin;
+	gentity_t *use_attacker = attacker ? attacker : world;
+	const int32_t attacker_generation = use_attacker
+		? use_attacker->spawn_count : 0;
 
 	self->takedamage = false;
 
 	if (self->dmg)
 		T_RadiusDamage(self, attacker, (float)self->dmg, nullptr, (float)(self->dmg + 40), DAMAGE_NONE, MOD_EXPLOSIVE);
+	if (!self->inuse || self->spawn_count != self_generation)
+		return;
 
-	self->velocity = inflictor->s.origin - self->s.origin;
+	self->velocity = inflictor_origin - self->s.origin;
 	self->velocity.normalize();
 	self->velocity *= 150;
 
@@ -277,7 +286,12 @@ static DIE(func_explosive_explode) (gentity_t *self, gentity_t *inflictor, genti
 		}
 	}
 
-	G_UseTargets(self, attacker);
+	if (use_attacker && (!use_attacker->inuse ||
+		use_attacker->spawn_count != attacker_generation))
+		use_attacker = world;
+	if (!G_UseTargets(self, use_attacker) || !self->inuse ||
+		self->spawn_count != self_generation)
+		return;
 
 	self->s.origin = (self->absmin + self->absmax) * 0.5f;
 

@@ -4,6 +4,7 @@
 #pragma once
 
 #include "muffmode/mm_maps.h"
+#include "muffmode/mm_parse.h"
 
 #include <array>
 #include <cstddef>
@@ -53,47 +54,7 @@ inline bool AsciiEqualsI(std::string_view lhs, std::string_view rhs) noexcept
 
 inline bool IsWellFormedUtf8(std::string_view value) noexcept
 {
-	for (size_t i = 0; i < value.size();) {
-		const uint8_t lead = static_cast<uint8_t>(value[i]);
-		if (lead <= 0x7f) {
-			i++;
-			continue;
-		}
-
-		size_t length = 0;
-		uint32_t codepoint = 0;
-		if (lead >= 0xc2 && lead <= 0xdf) {
-			length = 2;
-			codepoint = lead & 0x1f;
-		} else if (lead >= 0xe0 && lead <= 0xef) {
-			length = 3;
-			codepoint = lead & 0x0f;
-		} else if (lead >= 0xf0 && lead <= 0xf4) {
-			length = 4;
-			codepoint = lead & 0x07;
-		} else {
-			return false;
-		}
-
-		if (length > value.size() - i)
-			return false;
-		for (size_t j = 1; j < length; j++) {
-			const uint8_t continuation =
-				static_cast<uint8_t>(value[i + j]);
-			if ((continuation & 0xc0) != 0x80)
-				return false;
-			codepoint = (codepoint << 6) | (continuation & 0x3f);
-		}
-
-		const uint32_t minimum = length == 2 ? 0x80u :
-			length == 3 ? 0x800u : 0x10000u;
-		if (codepoint < minimum || codepoint > 0x10ffffu ||
-			(codepoint >= 0xd800u && codepoint <= 0xdfffu)) {
-			return false;
-		}
-		i += length;
-	}
-	return true;
+	return MM_IsWellFormedUtf8(value);
 }
 
 inline bool IsSafeDisplayText(

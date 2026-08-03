@@ -3,11 +3,14 @@
 
 #include "g_local.h"
 #include "muffmode/mm_duel.h"
+#include "muffmode/mm_ghost.h"
 #include "muffmode/mm_team.h"
 
+#include <algorithm>
 #include <iterator>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace muffmode::duel {
 
@@ -107,12 +110,218 @@ size_t MM_DuelSortedClientLimit()
 
 namespace duel = muffmode::duel;
 
+namespace {
+
+struct final_duel_result_t {
+	bool frozen = false;
+	bool valid = false;
+	bool draw = false;
+	mm_duel_score_entry_t winner{};
+	mm_duel_score_entry_t loser{};
+};
+
+final_duel_result_t final_duel_result;
+
+bool DuelEntryMatchesIdentity(const mm_duel_score_entry_t &entry,
+	int client_num, std::string_view social_id) noexcept
+{
+	if (!social_id.empty() && !entry.social_id.empty())
+		return entry.social_id == social_id;
+	return client_num >= 0 && entry.client_num == client_num;
+}
+
+bool DuelEntryRanksBefore(
+	const mm_duel_score_entry_t &left,
+	const mm_duel_score_entry_t &right) noexcept
+{
+	return left.score > right.score ||
+		(left.score == right.score && left.client_num < right.client_num);
+}
+
+gentity_t *ConnectedEntityForDuelEntry(const mm_duel_score_entry_t &entry)
+{
+	if (!entry.social_id.empty()) {
+		for (gentity_t *ent : active_clients())
+			if (ent && ent->client && ent->client->pers.connected &&
+				std::string_view(ent->client->pers.social_id) == entry.social_id)
+				return ent;
+		return nullptr;
+	}
+
+	if (entry.client_num < 0 ||
+		static_cast<size_t>(entry.client_num) >= game.maxclients)
+		return nullptr;
+	gentity_t *ent = &g_entities[entry.client_num + 1];
+	if (!ent->inuse || !ent->client || !ent->client->pers.connected ||
+		ent->spawn_count != entry.spawn_count)
+		return nullptr;
+	return ent;
+}
+
+bool CommitFinalDuelResult(const mm_duel_score_entry_t &winner,
+	const mm_duel_score_entry_t &loser, bool draw)
+{
+	if (final_duel_result.frozen)
+		return false;
+	final_duel_result.frozen = true;
+	final_duel_result.valid = true;
+	final_duel_result.draw = draw;
+	final_duel_result.winner = winner;
+	final_duel_result.loser = loser;
+	if (!draw) {
+		if (gentity_t *winner_ent = ConnectedEntityForDuelEntry(winner))
+			winner_ent->client->sess.wins++;
+	}
+	return true;
+}
+
+} // namespace
+
+mm_duel_score_view_t MM_Duel_CurrentScoreView()
+{
+	mm_duel_score_view_t view;
+	if (notGT(GT_DUEL))
+		return view;
+
+	for (size_t i = 0; i < game.maxclients; ++i) {
+		gentity_t *ent = &g_entities[i + 1];
+		if (!ent->client)
+			continue;
+
+		const gclient_t *state = MM_Ghost_ReservedClientState(ent);
+		if (!state) {
+			if (!ent->inuse || !ent->client->pers.connected ||
+				!ClientIsPlaying(ent->client))
+				continue;
+			state = ent->client;
+		} else if (state->sess.team == TEAM_NONE ||
+			state->sess.team == TEAM_SPECTATOR) {
+			continue;
+		}
+
+		mm_duel_score_entry_t entry;
+		entry.client_num = static_cast<int>(i);
+		entry.spawn_count = ent->spawn_count;
+		entry.score = state->resp.score;
+		entry.player_name = state->resp.netname;
+		entry.social_id = state->pers.social_id;
+		entry.bot = state->sess.is_a_bot || (ent->svflags & SVF_BOT);
+
+		if (view.participant_count == 0) {
+			view.players[0] = std::move(entry);
+		} else if (view.participant_count == 1) {
+			if (DuelEntryRanksBefore(entry, view.players[0])) {
+				view.players[1] = std::move(view.players[0]);
+				view.players[0] = std::move(entry);
+			} else {
+				view.players[1] = std::move(entry);
+			}
+		} else if (DuelEntryRanksBefore(entry, view.players[0])) {
+			view.players[1] = std::move(view.players[0]);
+			view.players[0] = std::move(entry);
+		} else if (DuelEntryRanksBefore(entry, view.players[1])) {
+			view.players[1] = std::move(entry);
+		}
+		++view.participant_count;
+	}
+
+	view.tied = view.participant_count >= 2 &&
+		view.players[0].score == view.players[1].score;
+	return view;
+}
+
+void MM_Duel_ResetFinalResult()
+{
+	final_duel_result = {};
+}
+
+namespace {
+
+bool CommitForfeit(gentity_t *forfeiter, bool departure)
+{
+	if (notGT(GT_DUEL) || !forfeiter || !forfeiter->client ||
+		final_duel_result.frozen)
+		return false;
+	const ptrdiff_t client_num = forfeiter - g_entities - 1;
+	if (client_num < 0 || client_num >= static_cast<ptrdiff_t>(game.maxclients))
+		return false;
+
+	const mm_duel_score_view_t view = MM_Duel_CurrentScoreView();
+	if (view.participant_count != 2)
+		return false;
+	size_t forfeiter_index = view.players[0].client_num == client_num ? 0 :
+		view.players[1].client_num == client_num ? 1 : 2;
+	if (forfeiter_index >= view.participant_count ||
+		forfeiter_index >= view.players.size())
+		return false;
+	const bool allowed = departure
+		? MM_DuelDepartureForfeitAllowed(
+			view.participant_count, forfeiter_index)
+		: MM_DuelForfeitAllowed(
+			view.participant_count, view.tied, forfeiter_index);
+	if (!allowed)
+		return false;
+	const size_t winner_index = forfeiter_index == 0 ? 1 : 0;
+	return CommitFinalDuelResult(
+		view.players[winner_index], view.players[forfeiter_index], false);
+}
+
+} // namespace
+
+bool MM_Duel_CommitForfeit(gentity_t *forfeiter)
+{
+	return CommitForfeit(forfeiter, false);
+}
+
+bool MM_Duel_CommitDepartureForfeit(gentity_t *forfeiter)
+{
+	return CommitForfeit(forfeiter, true);
+}
+
+mm_duel_final_outcome_t MM_Duel_FinalOutcome(
+	int client_num, std::string_view social_id) noexcept
+{
+	if (!final_duel_result.frozen || !final_duel_result.valid)
+		return mm_duel_final_outcome_t::unavailable;
+	const bool winner = DuelEntryMatchesIdentity(
+		final_duel_result.winner, client_num, social_id);
+	const bool loser = DuelEntryMatchesIdentity(
+		final_duel_result.loser, client_num, social_id);
+	if (!winner && !loser)
+		return mm_duel_final_outcome_t::unavailable;
+	if (final_duel_result.draw)
+		return mm_duel_final_outcome_t::draw;
+	return winner
+		? mm_duel_final_outcome_t::win
+		: mm_duel_final_outcome_t::loss;
+}
+
+mm_duel_final_outcome_t MM_Duel_FinalOutcomeForClient(
+	const gentity_t *ent) noexcept
+{
+	if (!ent || ent <= g_entities ||
+		ent > g_entities + static_cast<ptrdiff_t>(game.maxclients))
+		return mm_duel_final_outcome_t::unavailable;
+	return MM_Duel_FinalOutcome(
+		static_cast<int>(ent - g_entities - 1),
+		ent->client ? std::string_view(ent->client->pers.social_id) :
+			std::string_view{});
+}
+
+size_t MM_Duel_OccupiedSlots()
+{
+	const size_t connected = level.num_playing_clients > 0
+		? static_cast<size_t>(level.num_playing_clients) : 0;
+	return MM_DuelLogicalParticipantCount(
+		connected, MM_Ghost_ActivePlayingReservationCount());
+}
+
 bool MM_Duel_AddPlayer()
 {
 	if (notGT(GT_DUEL))
 		return false;
 
-	if (level.num_playing_clients >= 2)
+	if (MM_Duel_OccupiedSlots() >= 2)
 		return false;
 
 	if (level.match_state > matchst_t::MATCH_WARMUP_READYUP || level.intermission_time || level.intermission_queued)
@@ -145,16 +354,14 @@ bool MM_Duel_AddPlayer()
 
 void MM_Duel_RemoveLoser()
 {
-	if (level.num_playing_clients != 2)
+	if (notGT(GT_DUEL) || !final_duel_result.valid ||
+		final_duel_result.draw)
 		return;
 
-	const int loser_num = duel::MM_DuelSortedClientAt(1);
-	if (loser_num < 0)
-		return;
-
-	gentity_t *ent = &g_entities[loser_num + 1];
-
-	if (!ent || !ent->client || !ent->client->pers.connected)
+	const mm_duel_score_entry_t loser = final_duel_result.loser;
+	MM_Duel_ResetFinalResult();
+	gentity_t *ent = ConnectedEntityForDuelEntry(loser);
+	if (!ent || !ClientIsPlaying(ent->client))
 		return;
 
 	if (duel::MM_DuelCvarEnabled(g_verbose))
@@ -165,17 +372,15 @@ void MM_Duel_RemoveLoser()
 
 void MM_Duel_MatchEnd_AdjustScores()
 {
-	if (notGT(GT_DUEL))
+	if (notGT(GT_DUEL) || final_duel_result.frozen)
 		return;
 
-	int client_num = duel::MM_DuelSortedClientAt(0);
-	if (client_num >= 0 && game.clients[client_num].pers.connected)
-		game.clients[client_num].sess.wins++;
-
-	client_num = duel::MM_DuelSortedClientAt(1);
-	if (client_num >= 0 && game.clients[client_num].pers.connected) {
-		// handled in SetTeam
+	const mm_duel_score_view_t view = MM_Duel_CurrentScoreView();
+	if (view.participant_count != 2) {
+		final_duel_result.frozen = true;
+		return;
 	}
+	CommitFinalDuelResult(view.players[0], view.players[1], view.tied);
 }
 
 void MM_Duel_QueueSpectatorBots()
@@ -443,17 +648,18 @@ void MM_Duel_CmdForfeit(gentity_t *ent) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "Forfeit is only available in a duel.\n");
 		return;
 	}
-	if (level.match_state < matchst_t::MATCH_IN_PROGRESS) {
+	if (level.match_state != matchst_t::MATCH_IN_PROGRESS ||
+		level.intermission_queued || level.intermission_time) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "Forfeit is not available during warmup.\n");
-		return;
-	}
-	const int loser_num = duel::MM_DuelSortedClientAt(1);
-	if (loser_num < 0 || ent->client != &game.clients[loser_num]) {
-		gi.LocClient_Print(ent, PRINT_HIGH, "Forfeit is only available to the losing player.\n");
 		return;
 	}
 	if (!duel::MM_DuelCvarEnabled(g_allow_forfeit)) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "Forfeits are not enabled on this server.\n");
+		return;
+	}
+	if (!MM_Duel_CommitForfeit(ent)) {
+		gi.LocClient_Print(ent, PRINT_HIGH,
+			"Forfeit is only available to a current losing or tied duelist.\n");
 		return;
 	}
 

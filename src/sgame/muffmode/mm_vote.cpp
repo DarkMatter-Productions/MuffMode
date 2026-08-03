@@ -1151,22 +1151,33 @@ void MM_VoteCommandStore(gentity_t *ent)
 	// Open vote menu for eligible non-caller clients.
 	for (auto ec : active_clients())
 	{
-		if (ec->svflags & SVF_BOT || ec->client->sess.is_a_bot)
+		if (!ec || !ec->client)
 			continue;
-		if (ec->client == level.vote_state.caller)
+		gclient_t *const client = ec->client;
+		if (ec->svflags & SVF_BOT || client->sess.is_a_bot)
 			continue;
-		if (!ClientCanVote(ec->client))
+		if (client == level.vote_state.caller)
+			continue;
+		if (!ClientCanVote(client))
 			continue;
 
-		int ci = (int)(ec->client - game.clients);
+		int ci = (int)(client - game.clients);
 		MuffModeLog("DEBUG", "VoteCommandStore: opening vote menu for client %d (%s), menu=%p, inmenu=%d",
-			ci, ec->client->resp.netname, (void *)ec->client->menu, (int)ec->client->inmenu);
+			ci, client->resp.netname, (void *)client->menu, (int)client->inmenu);
 
-		ec->client->showinventory = false;
-		ec->client->showhelp = false;
-		ec->client->showscores = false;
-		gentity_t *e = ec->client->follow_target ? ec->client->follow_target : ec;
-		ec->client->ps.stats[STAT_SHOW_STATUSBAR] = (e && e->client && ClientIsPlaying(e->client)) ? 1 : 0;
+		client->showinventory = false;
+		client->showhelp = false;
+		client->showscores = false;
+		int show_statusbar = 0;
+		if (client->follow_target) {
+			gclient_t *const followed_client = client->follow_target->client;
+			if (followed_client && ClientIsPlaying(followed_client))
+				show_statusbar = 1;
+		}
+		else if (ClientIsPlaying(client)) {
+			show_statusbar = 1;
+		}
+		client->ps.stats[STAT_SHOW_STATUSBAR] = show_statusbar;
 		P_Menu_Close(ec);
 		G_Menu_Vote_Open(ec);
 
@@ -1345,7 +1356,7 @@ vcmds_t vote_cmds[] = {
 	{"timelimit",			MM_VoteValTimelimit,		MM_VotePassTimelimit,		16,		2,	"<0..$>",							"alters the match time limit, 0 for no time limit"},
 	{"scorelimit",			MM_VoteValScorelimit,		MM_VotePassScorelimit,		32,		2,	"<0..$>",							"alters the match score limit, 0 for no score limit"},
 	{"fraglimit",			MM_VoteValScorelimit,		MM_VotePassScorelimit,		32,		2,	"<0..$>",							"alters the match score limit, 0 for no score limit (alias for scorelimit)"},
-	{"shuffle",				MM_VoteValShuffleTeams,		MM_VotePassShuffleTeams,	64,		1,	"",									"shuffles teams"},
+	{"shuffle",				MM_VoteValShuffleTeams,		MM_VotePassShuffleTeams,	64,		1,	"",									"shuffles teams based on skill"},
 	{"unlagged",			MM_VoteValUnlagged,			MM_VotePassUnlagged,		128,	2,	"<0/1>",							"enables or disables lag compensation"},
 	{"cointoss",			vote::MM_VoteValNone,		MM_VotePassCointoss,		256,	1,	"",									"invokes a HEADS or TAILS cointoss"},
 	{"random",				MM_VoteValRandom,			MM_VotePassRandom,			512,	2,	"<2-100>",							"randomly selects a number from 2 to specified value"},

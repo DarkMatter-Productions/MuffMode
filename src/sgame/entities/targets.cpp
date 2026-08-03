@@ -221,8 +221,8 @@ static USE(use_target_secret) (gentity_t *ent, gentity_t *other, gentity_t *acti
 
 	level.found_secrets++;
 
-	G_UseTargets(ent, activator);
-	G_FreeEntity(ent);
+	if (G_UseTargets(ent, activator))
+		G_FreeEntity(ent);
 }
 
 static THINK(G_VerifyTargetted) (gentity_t *ent) -> void {
@@ -348,8 +348,8 @@ static USE(use_target_goal) (gentity_t *ent, gentity_t *other, gentity_t *activa
 			G_PlayerNotifyGoal(player);
 	}
 
-	G_UseTargets(ent, activator);
-	G_FreeEntity(ent);
+	if (G_UseTargets(ent, activator))
+		G_FreeEntity(ent);
 }
 
 void SP_target_goal(gentity_t *ent) {
@@ -376,22 +376,37 @@ Spawns an explosion temporary entity when used.
 */
 static THINK(target_explosion_explode) (gentity_t *self) -> void {
 	float save;
+	const int32_t self_generation = self->spawn_count;
+	gentity_t *activator = self->activator;
+	if (!activator || !activator->inuse ||
+		activator->spawn_count != self->count ||
+		(activator->client && !activator->client->pers.connected))
+		activator = world;
+	const int32_t activator_generation = activator->spawn_count;
 
 	gi.WriteByte(svc_temp_entity);
 	gi.WriteByte(TE_EXPLOSION1);
 	gi.WritePosition(self->s.origin);
 	gi.multicast(self->s.origin, MULTICAST_PHS, false);
 
-	T_RadiusDamage(self, self->activator, (float)self->dmg, nullptr, (float)self->dmg + 40, DAMAGE_NONE, MOD_EXPLOSIVE);
+	T_RadiusDamage(self, activator, (float)self->dmg, nullptr, (float)self->dmg + 40, DAMAGE_NONE, MOD_EXPLOSIVE);
+	if (!self->inuse || self->spawn_count != self_generation)
+		return;
+	if (activator && (!activator->inuse ||
+		activator->spawn_count != activator_generation))
+		activator = world;
 
 	save = self->delay;
 	self->delay = 0;
-	G_UseTargets(self, self->activator);
+	if (!G_UseTargets(self, activator) || !self->inuse ||
+		self->spawn_count != self_generation)
+		return;
 	self->delay = save;
 }
 
 static USE(use_target_explosion) (gentity_t *self, gentity_t *other, gentity_t *activator) -> void {
 	self->activator = activator;
+	self->count = activator ? activator->spawn_count : 0;
 
 	if (!self->delay) {
 		target_explosion_explode(self);
@@ -596,7 +611,8 @@ static USE(use_target_spawner) (gentity_t *self, gentity_t *other, gentity_t *ac
 	ED_CallSpawn(ent);
 	gi.linkentity(ent);
 
-	KillBox(ent, false);
+	if (!KillBox(ent, false))
+		return;
 	if (self->speed)
 		ent->velocity = self->movedir;
 
@@ -674,8 +690,8 @@ killtarget also work.
 */
 static THINK(target_crosslevel_target_think) (gentity_t *self) -> void {
 	if (self->spawnflags.value == (game.cross_level_flags & SFL_CROSS_TRIGGER_MASK & self->spawnflags.value)) {
-		G_UseTargets(self, self);
-		G_FreeEntity(self);
+		if (G_UseTargets(self, self))
+			G_FreeEntity(self);
 	}
 }
 
@@ -1849,10 +1865,16 @@ static USE(use_target_sky) (gentity_t *self, gentity_t *other, gentity_t *activa
 		gi.configstring(CS_SKY, self->map);
 
 	if (self->count & 3) {
-		float rotate;
-		int32_t autorotate;
+		float rotate = 0.0f;
+		int32_t autorotate = 1;
 
-		sscanf(gi.get_configstring(CS_SKYROTATE), "%f %i", &rotate, &autorotate);
+		const char *const skyrotate = gi.get_configstring(CS_SKYROTATE);
+		if (!skyrotate || sscanf(skyrotate, "%f %i", &rotate, &autorotate) != 2) {
+			// [MuffMode] A malformed engine configstring must not leave either
+			// preserved value uninitialized.
+			rotate = 0.0f;
+			autorotate = 1;
+		}
 
 		if (self->count & 1)
 			rotate = self->accel;
@@ -1913,8 +1935,8 @@ If multiple triggers are checked, all must be true. Delay, target and killtarget
 */
 static THINK(target_crossunit_target_think) (gentity_t *self) -> void {
 	if (self->spawnflags.value == (game.cross_unit_flags & SFL_CROSS_TRIGGER_MASK & self->spawnflags.value)) {
-		G_UseTargets(self, self);
-		G_FreeEntity(self);
+		if (G_UseTargets(self, self))
+			G_FreeEntity(self);
 	}
 }
 

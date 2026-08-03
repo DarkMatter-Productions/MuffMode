@@ -5,3 +5,35 @@ cvar_set maxclients "8"
 cvar_forceset maxclients 64
 set maxclients nope
 kexmultiplayer 1
+maxclients 4
+maxclients "16"
+echo safe; maxclients 16
+set foo "quoted; maxclients 64"
+set foo bar; cvar_forceset "maxclients" "64"
+echo safe // comment; seta maxclients 16
+echo "maxclients 64; still quoted"
+set "maxclients" "$dynamic"
+set maxclients
+// maxclients 64
+setu maxclients 16
+toggle maxclients
+inc maxclients 1
+add maxclients 1
+reset maxclients
+cvar_toggle maxclients
+cvar_inc maxclients 1
+cvar_add maxclients 1
+cvar_reset maxclients
+exec gt-FFA.cfg
+execq gt-FFA.cfg
+alias grow "set maxclients 16"
+vstr next_gametype
+if 1 "set maxclients 16"
+ifnot 0 "set maxclients 16"
+delay 1 "set maxclients 16"
+defer "set maxclients 16"
+cvar_restart
+echo safe; exec gt-FFA.cfg
+echo safe; vstr next_gametype
+wait; set maxclients 4
+toggle g_friendly_fire

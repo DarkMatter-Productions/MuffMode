@@ -19,6 +19,7 @@ param(
     [string]$UpdaterRuntime = "win-x64",
     [string]$InstallerScript = "packaging/installer/muffmode-installer.iss",
     [string]$InnoSetupCompiler,
+    [string]$BuildReceiptPath,
     [string]$ChangelogPath = "docs/changelog.md",
     [AllowEmptyString()][string]$ReleaseIntro,
 
@@ -250,10 +251,10 @@ function Assert-WindowsExecutableImage {
     }
 }
 
-function Test-GitRevisionExists {
-    param([string]$Revision)
+function Test-GitTagExists {
+    param([string]$TagName)
 
-    git -C $RepoRoot rev-parse "$Revision^{commit}" *> $null
+    git -C $RepoRoot rev-parse --verify --end-of-options "refs/tags/${TagName}^{commit}" *> $null
     return $LASTEXITCODE -eq 0
 }
 
@@ -1345,7 +1346,7 @@ function Get-BumpedVersion {
 function Resolve-AutoVersionMode {
     param([string]$ChangeStartTag)
 
-    $range = "$ChangeStartTag..HEAD"
+    $range = "refs/tags/$ChangeStartTag..HEAD"
     $log = git -C $RepoRoot log --date=short --pretty=format:'%s%n%b' $range 2>$null | Out-String
     if ($LASTEXITCODE -ne 0) {
         throw "Could not inspect git history for automatic versioning range $range."
@@ -1438,7 +1439,7 @@ function Get-LatestReleaseTag {
             if ($releases.Count -gt 0) {
                 $latest = $releases | Sort-Object publishedAt -Descending | Select-Object -First 1
                 if ($latest.tagName) {
-                    if (Test-GitRevisionExists $latest.tagName) {
+                    if (Test-GitTagExists $latest.tagName) {
                         return $latest.tagName
                     }
 
@@ -1534,7 +1535,7 @@ function Resolve-PreviousTag {
     param([string]$TargetVersion, [string]$FallbackLatestTag)
 
     if ($PreviousTag) {
-        if (-not (Test-GitRevisionExists $PreviousTag)) {
+        if (-not (Test-GitTagExists $PreviousTag)) {
             throw "Previous tag '$PreviousTag' does not exist locally. Fetch tags or pass a valid tag."
         }
         return $PreviousTag
@@ -1559,10 +1560,92 @@ function Get-GitStatus {
     git -C $RepoRoot status --porcelain
 }
 
+function Get-SourceCommit {
+    $commit = (& git -C $RepoRoot rev-parse HEAD 2>$null | Out-String).Trim().ToLowerInvariant()
+    if ($LASTEXITCODE -ne 0 -or $commit -cnotmatch "^[0-9a-f]{40}$") {
+        throw "Could not resolve the source tree to a lowercase 40-character Git commit."
+    }
+    return $commit
+}
+
 function Get-GameDllBuildPath {
     param([string]$Configuration, [string]$Platform)
 
     return Join-Path $RepoRoot "build\msbuild\$Platform\$Configuration\game_x64.dll"
+}
+
+function Get-ReleaseBuildReceiptPath {
+    param(
+        [string]$Configuration,
+        [string]$Platform,
+        [AllowNull()][string]$RequestedPath
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($RequestedPath)) {
+        return Resolve-FullPath $RequestedPath
+    }
+
+    return Join-Path $RepoRoot "build\msbuild\$Platform\$Configuration\muffmode-build-receipt.json"
+}
+
+function Write-ReleaseBuildReceipt {
+    param(
+        [string]$Path,
+        [string]$SourceCommit,
+        [string]$Configuration,
+        [string]$Platform,
+        [string]$DllPath,
+        [bool]$WarningsAsErrors
+    )
+
+    $dll = Get-Item -LiteralPath $DllPath -ErrorAction Stop
+    $receipt = [ordered]@{
+        SchemaVersion = 1
+        SourceCommit = $SourceCommit
+        Configuration = $Configuration
+        Platform = $Platform
+        DllName = $dll.Name
+        DllSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $dll.FullName).Hash.ToLowerInvariant()
+        WarningsAsErrors = $WarningsAsErrors
+    }
+    $parent = Split-Path -Parent $Path
+    New-Item -ItemType Directory -Path $parent -Force | Out-Null
+    $receipt | ConvertTo-Json | Set-Content -LiteralPath $Path -Encoding utf8
+}
+
+function Assert-ReleaseBuildReceipt {
+    param(
+        [string]$Path,
+        [string]$SourceCommit,
+        [string]$Configuration,
+        [string]$Platform,
+        [string]$DllPath
+    )
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw "Skipped release builds require a matching build receipt, but none was found at $Path. Build through scripts/release.ps1 or the release workflow before reusing game_x64.dll."
+    }
+
+    $receipt = Get-Content -Raw -LiteralPath $Path | ConvertFrom-Json
+    foreach ($propertyName in @("SchemaVersion", "SourceCommit", "Configuration", "Platform", "DllName", "DllSha256", "WarningsAsErrors")) {
+        if ($receipt.PSObject.Properties.Name -cnotcontains $propertyName) {
+            throw "Release build receipt is missing required property '$propertyName': $Path"
+        }
+    }
+
+    $dll = Get-Item -LiteralPath $DllPath -ErrorAction Stop
+    $actualHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $dll.FullName).Hash.ToLowerInvariant()
+    if ([int]$receipt.SchemaVersion -ne 1 -or
+        [string]$receipt.SourceCommit -cne $SourceCommit -or
+        [string]$receipt.Configuration -cne $Configuration -or
+        [string]$receipt.Platform -cne $Platform -or
+        [string]$receipt.DllName -cne $dll.Name -or
+        [string]$receipt.DllSha256 -cnotmatch "^[0-9a-f]{64}$" -or
+        [string]$receipt.DllSha256 -cne $actualHash -or
+        $receipt.WarningsAsErrors -isnot [bool] -or
+        -not [bool]$receipt.WarningsAsErrors) {
+        throw "Release build receipt does not match the current source commit, build settings, and game DLL: $Path"
+    }
 }
 
 function Build-ReleaseDll {
@@ -1571,7 +1654,7 @@ function Build-ReleaseDll {
     Assert-Command "msbuild"
     $solution = Join-Path $RepoRoot "projects/msvc/MuffMode.sln"
     Write-Step "Building $Configuration|$Platform"
-    $buildOutput = & msbuild $solution "/p:Configuration=$Configuration" "/p:Platform=$Platform" 2>&1
+    $buildOutput = & msbuild $solution "/p:Configuration=$Configuration" "/p:Platform=$Platform" "/p:MMTreatWarningsAsErrors=true" 2>&1
     $buildExitCode = $LASTEXITCODE
     $buildOutput | ForEach-Object { Write-Host $_ }
     if ($buildExitCode -ne 0) {
@@ -2655,6 +2738,8 @@ function New-ReleasePackage {
     param(
         [string]$TargetVersion,
         [string]$Channel,
+        [string]$SourceCommit,
+        [bool]$SourceTreeDirty,
         [string]$DllPath,
         [string]$UpdaterPath,
         [string]$ChangelogPath,
@@ -2705,6 +2790,8 @@ function New-ReleasePackage {
         TagName = "v$TargetVersion"
         Repository = $ReleaseRepo
         Channel = $Channel
+        SourceCommit = $SourceCommit
+        SourceTreeDirty = $SourceTreeDirty
         ReleaseUrl = "https://github.com/$ReleaseRepo/releases/tag/v$TargetVersion"
         AssetName = "$packageName.zip"
         PackagedAtUtc = (Get-Date).ToUniversalTime().ToString("o")
@@ -2732,6 +2819,85 @@ function New-ReleasePackage {
         Name = $packageName
         Root = $packageRoot
         ZipPath = $zipPath
+    }
+}
+
+function New-ReleaseProvenanceFiles {
+    param(
+        [string]$TargetVersion,
+        [string]$Channel,
+        [string]$SourceCommit,
+        [bool]$SourceTreeDirty,
+        [string[]]$AssetPaths,
+        [string]$OutputRoot
+    )
+
+    if ($SourceCommit -cnotmatch "^[0-9a-f]{40}$") {
+        throw "Release provenance requires a lowercase 40-character source commit."
+    }
+
+    $assetRecords = @(
+        $AssetPaths |
+            ForEach-Object {
+                $asset = Get-Item -LiteralPath $_ -ErrorAction Stop
+                if (-not $asset.PSIsContainer) {
+                    $assetHash = Get-FileHash -Algorithm SHA256 -LiteralPath $asset.FullName
+                    [ordered]@{
+                        Name = $asset.Name
+                        Sha256 = $assetHash.Hash.ToLowerInvariant()
+                        Size = [Int64]$asset.Length
+                    }
+                }
+            } |
+            Sort-Object { $_.Name }
+    )
+    if ($assetRecords.Count -ne $AssetPaths.Count) {
+        throw "Release provenance requires every asset path to name a file."
+    }
+    $uniqueAssetNames = @($assetRecords.Name | Sort-Object -Unique)
+    if ($uniqueAssetNames.Count -ne $assetRecords.Count) {
+        throw "Release provenance asset names must be unique."
+    }
+
+    $packageName = Get-ReleasePackageName -TargetVersion $TargetVersion -Channel $Channel
+    $outputRootAbs = Resolve-FullPath $OutputRoot
+    $provenancePath = Join-Path $outputRootAbs "$packageName-provenance.json"
+    $checksumsPath = Join-Path $outputRootAbs "$packageName-SHA256SUMS.txt"
+
+    $provenance = [ordered]@{
+        SchemaVersion = 1
+        Repository = $ReleaseRepo
+        Version = $TargetVersion
+        TagName = "v$TargetVersion"
+        Channel = $Channel
+        SourceCommit = $SourceCommit
+        SourceTreeDirty = $SourceTreeDirty
+        Assets = $assetRecords
+    }
+    $provenance | ConvertTo-Json -Depth 5 |
+        Set-Content -LiteralPath $provenancePath -Encoding utf8
+
+    $checksumRecords = @($assetRecords) + @(
+        [ordered]@{
+            Name = [System.IO.Path]::GetFileName($provenancePath)
+            Sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $provenancePath).Hash.ToLowerInvariant()
+        }
+    )
+    $checksumLines = @(
+        $checksumRecords |
+            Sort-Object { $_.Name } |
+            ForEach-Object { "$($_.Sha256)  $($_.Name)" }
+    )
+    # Keep the conventional manifest portable for `sha256sum -c` on Unix as
+    # well as Windows: UTF-8 without a BOM and explicit LF line endings.
+    [System.IO.File]::WriteAllText(
+        $checksumsPath,
+        ($checksumLines -join "`n") + "`n",
+        [System.Text.UTF8Encoding]::new($false))
+
+    return [pscustomobject]@{
+        ProvenancePath = $provenancePath
+        ChecksumsPath = $checksumsPath
     }
 }
 
@@ -2845,10 +3011,98 @@ function New-WindowsInstaller {
     return $installerPath
 }
 
+function Get-RemoteReleaseTagCommit {
+    param(
+        [string]$Repository,
+        [string]$TagName
+    )
+
+    $referenceJson = (& gh api "repos/$Repository/git/ref/tags/$TagName" 2>$null | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0) {
+        return $null
+    }
+
+    try {
+        $reference = $referenceJson | ConvertFrom-Json
+    }
+    catch {
+        throw "GitHub returned malformed JSON while resolving release tag '$TagName'."
+    }
+
+    $target = $reference.object
+    for ($depth = 0; $depth -lt 8; $depth++) {
+        $targetType = [string]$target.type
+        $targetSha = ([string]$target.sha).ToLowerInvariant()
+        if ($targetSha -cnotmatch "^[0-9a-f]{40}$") {
+            throw "GitHub release tag '$TagName' resolved to an invalid object SHA."
+        }
+        if ($targetType -ceq "commit") {
+            return $targetSha
+        }
+        if ($targetType -cne "tag") {
+            throw "GitHub release tag '$TagName' resolved to unsupported object type '$targetType'."
+        }
+
+        $tagJson = (& gh api "repos/$Repository/git/tags/$targetSha" 2>$null | Out-String).Trim()
+        if ($LASTEXITCODE -ne 0) {
+            throw "Could not peel annotated GitHub release tag '$TagName'."
+        }
+        try {
+            $target = ($tagJson | ConvertFrom-Json).object
+        }
+        catch {
+            throw "GitHub returned malformed JSON while peeling release tag '$TagName'."
+        }
+    }
+
+    throw "GitHub release tag '$TagName' exceeded the supported annotated-tag nesting depth."
+}
+
+function Assert-RemoteReleaseTag {
+    param(
+        [string]$Repository,
+        [string]$TagName,
+        [string]$SourceCommit
+    )
+
+    if ($TagName -cnotmatch "^v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$" -or
+        $SourceCommit -cnotmatch "^[0-9a-f]{40}$") {
+        throw "Remote release tag creation requires a canonical version tag and lowercase source commit."
+    }
+
+    $remoteCommit = Get-RemoteReleaseTagCommit -Repository $Repository -TagName $TagName
+    if ($null -eq $remoteCommit) {
+        & gh api `
+            --method POST `
+            "repos/$Repository/git/refs" `
+            -f "ref=refs/tags/$TagName" `
+            -f "sha=$SourceCommit" *> $null
+        if ($LASTEXITCODE -ne 0) {
+            # A concurrent publisher may have created the tag after our read.
+            # Re-resolve it and accept only the intended immutable commit.
+            $remoteCommit = Get-RemoteReleaseTagCommit -Repository $Repository -TagName $TagName
+            if ($null -eq $remoteCommit) {
+                throw "Could not create or resolve GitHub release tag '$TagName'."
+            }
+        }
+        else {
+            $remoteCommit = Get-RemoteReleaseTagCommit -Repository $Repository -TagName $TagName
+            if ($null -eq $remoteCommit) {
+                throw "GitHub release tag '$TagName' was created but could not be verified."
+            }
+        }
+    }
+
+    if ($remoteCommit -cne $SourceCommit) {
+        throw "GitHub release tag '$TagName' resolves to $remoteCommit, not packaged source commit $SourceCommit."
+    }
+}
+
 function Publish-GitHubRelease {
     param(
         [string]$TargetVersion,
         [string]$Channel,
+        [string]$SourceCommit,
         [string[]]$AssetPaths,
         [string]$ReleaseNotesPath,
         [bool]$Prerelease
@@ -2859,13 +3113,23 @@ function Publish-GitHubRelease {
     if ($dirty) {
         throw "Working tree is dirty. Commit release/version changes before publishing a GitHub release."
     }
+    if ($SourceCommit -cnotmatch "^[0-9a-f]{40}$") {
+        throw "GitHub release publishing requires a lowercase 40-character source commit."
+    }
+
+    $tagName = "v$TargetVersion"
+    Assert-RemoteReleaseTag `
+        -Repository $ReleaseRepo `
+        -TagName $tagName `
+        -SourceCommit $SourceCommit
 
     $args = @(
-        "release", "create", "v$TargetVersion"
+        "release", "create", $tagName
     )
     $args += $AssetPaths
     $args += @(
         "--repo", $ReleaseRepo,
+        "--verify-tag",
         "--title", $(if ((Get-ChannelDisplayName -Channel $Channel)) { "MuffMode v$TargetVersion $(Get-ChannelDisplayName -Channel $Channel)" } else { "MuffMode v$TargetVersion" }),
         "--notes-file", $ReleaseNotesPath,
         "--fail-on-no-commits"
@@ -2888,6 +3152,22 @@ function Publish-GitHubRelease {
 Push-Location $RepoRoot
 try {
     Assert-Command "git"
+
+    if ($Prerelease -and $Channel -eq "stable") {
+        throw "-Prerelease cannot be combined with -Channel stable because stable asset names are not discoverable as prerelease updates. Choose alpha, beta, or rc."
+    }
+    if ($SkipUpdaterBuild -and ($CreateGitHubRelease -or $env:GITHUB_ACTIONS -ceq "true")) {
+        throw "-SkipUpdaterBuild is limited to local unpublished packages because a reused updater executable is not bound to the current source commit."
+    }
+    if (-not [string]::IsNullOrWhiteSpace($PreviousTag)) {
+        if ($PreviousTag.StartsWith("-", [System.StringComparison]::Ordinal)) {
+            throw "Previous release tag must not begin with '-': '$PreviousTag'."
+        }
+        git -C $RepoRoot check-ref-format "refs/tags/$PreviousTag" *> $null
+        if ($LASTEXITCODE -ne 0) {
+            throw "Previous release tag is not a valid Git tag name: '$PreviousTag'."
+        }
+    }
 
     $dirty = Get-GitStatus
     if ($dirty -and -not $AllowDirtyPackage -and -not $UpdateVersionFiles) {
@@ -2924,14 +3204,39 @@ try {
         }
     }
 
+    $sourceCommit = Get-SourceCommit
+    $sourceTreeDirty = [bool](Get-GitStatus)
+    $buildReceipt = Get-ReleaseBuildReceiptPath `
+        -Configuration $Configuration `
+        -Platform $Platform `
+        -RequestedPath $BuildReceiptPath
+
     if ($SkipBuild) {
         $dllPath = Get-GameDllBuildPath -Configuration $Configuration -Platform $Platform
         if (-not (Test-Path -LiteralPath $dllPath)) {
             throw "-SkipBuild was supplied, but game_x64.dll does not exist at $dllPath."
         }
+        if ((Test-Path -LiteralPath $buildReceipt -PathType Leaf) -or $CreateGitHubRelease -or $env:GITHUB_ACTIONS) {
+            Assert-ReleaseBuildReceipt `
+                -Path $buildReceipt `
+                -SourceCommit $sourceCommit `
+                -Configuration $Configuration `
+                -Platform $Platform `
+                -DllPath $dllPath
+        }
+        else {
+            Write-Warning "Reusing game_x64.dll without a build receipt for a local, unpublished package. Published releases require a receipt bound to the current commit."
+        }
     }
     else {
         $dllPath = Build-ReleaseDll -Configuration $Configuration -Platform $Platform
+        Write-ReleaseBuildReceipt `
+            -Path $buildReceipt `
+            -SourceCommit $sourceCommit `
+            -Configuration $Configuration `
+            -Platform $Platform `
+            -DllPath $dllPath `
+            -WarningsAsErrors $true
     }
 
     $outputRootAbs = Resolve-RepoPath $OutputRoot
@@ -2978,6 +3283,8 @@ try {
     $package = New-ReleasePackage `
         -TargetVersion $targetVersion `
         -Channel $Channel `
+        -SourceCommit $sourceCommit `
+        -SourceTreeDirty $sourceTreeDirty `
         -DllPath $dllPath `
         -UpdaterPath $updaterPath `
         -ChangelogPath $releaseNotesPath `
@@ -3014,6 +3321,16 @@ try {
     $releaseAssetPaths.Add($mapArchives.SourceMapsZipPath)
     $releaseAssetPaths.Add($mapArchives.OriginalMapsZipPath)
 
+    $provenanceFiles = New-ReleaseProvenanceFiles `
+        -TargetVersion $targetVersion `
+        -Channel $Channel `
+        -SourceCommit $sourceCommit `
+        -SourceTreeDirty $sourceTreeDirty `
+        -AssetPaths $releaseAssetPaths.ToArray() `
+        -OutputRoot $OutputRoot
+    $releaseAssetPaths.Add($provenanceFiles.ProvenancePath)
+    $releaseAssetPaths.Add($provenanceFiles.ChecksumsPath)
+
     $hash = Get-FileHash -Algorithm SHA256 -LiteralPath $package.ZipPath
     $sourceMapsHash = Get-FileHash -Algorithm SHA256 -LiteralPath $mapArchives.SourceMapsZipPath
     $originalMapsHash = Get-FileHash -Algorithm SHA256 -LiteralPath $mapArchives.OriginalMapsZipPath
@@ -3029,6 +3346,9 @@ try {
         Write-Host "Installer: $installerPath"
         Write-Host "SHA256:    $($installerHash.Hash.ToLowerInvariant())"
     }
+    Write-Host "Source commit: $sourceCommit"
+    Write-Host "Provenance:    $($provenanceFiles.ProvenancePath)"
+    Write-Host "Checksums:     $($provenanceFiles.ChecksumsPath)"
     Write-Host "Notes:   $releaseNotesPath"
     Write-Host "README:  $readmeHtmlPath"
     foreach ($translatedReadme in $translatedReadmes) {
@@ -3037,7 +3357,7 @@ try {
     Write-Host "Updater: $updaterPath"
 
     if ($CreateGitHubRelease) {
-        Publish-GitHubRelease -TargetVersion $targetVersion -Channel $Channel -AssetPaths $releaseAssetPaths.ToArray() -ReleaseNotesPath $releaseNotesPath -Prerelease $isPrerelease
+        Publish-GitHubRelease -TargetVersion $targetVersion -Channel $Channel -SourceCommit $sourceCommit -AssetPaths $releaseAssetPaths.ToArray() -ReleaseNotesPath $releaseNotesPath -Prerelease $isPrerelease
     }
     else {
         Write-Host "GitHub release not created. Re-run with -CreateGitHubRelease to publish with --latest."

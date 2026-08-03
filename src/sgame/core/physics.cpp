@@ -4,6 +4,7 @@
 
 #include "g_local.h"
 #include "muffmode/mm_arena.h"
+#include "muffmode/mm_ordnance_identity.h"
 
 /*
 
@@ -120,11 +121,28 @@ G_Impact
 Two entities have touched, so run their touch functions
 ==================
 */
+static gentity_t *G_ResolvePhysicsOwner(const gentity_t *ent) {
+	if (!ent || !ent->owner)
+		return nullptr;
+	if (gentity_t *owner = MM_ResolveOrdnanceOwner(ent))
+		return owner;
+
+	// Some upstream monster projectiles do not carry MuffMode's player
+	// lifetime stamp. They cannot reconnect or change arenas, so retain that
+	// legacy behavior while refusing an unvalidated player/non-monster slot.
+	gentity_t *const owner = ent->owner;
+	return owner->inuse && !owner->client && (owner->svflags & SVF_MONSTER)
+		? owner : nullptr;
+}
+
 static void G_InheritOwnerArena(gentity_t *ent) {
 	if (notGT(GT_ARENA) || !ent || ent->arena != 0 || !ent->owner)
 		return;
 
-	const int owner_arena = MM_Arena_Id(ent->owner);
+	gentity_t *const owner = G_ResolvePhysicsOwner(ent);
+	if (!owner)
+		return;
+	const int owner_arena = MM_Arena_Id(owner);
 	if (owner_arena > 0)
 		ent->arena = owner_arena;
 }
@@ -133,8 +151,8 @@ static bool G_IsArenaTransientOrdnance(const gentity_t *ent) {
 	if (ent->svflags & SVF_PROJECTILE)
 		return true;
 
-	if (ent->owner && ent->owner->client &&
-		ent->owner->client->grapple_ent == ent)
+	if (gentity_t *owner = G_ResolvePhysicsOwner(ent);
+		owner && owner->client && owner->client->grapple_ent == ent)
 		return true;
 
 	if (ent->item && ent->spawnflags.has(SPAWNFLAG_ITEM_DROPPED))
@@ -204,39 +222,59 @@ static bool G_HandleArenaOrdnanceState(gentity_t *ent) {
 		(!strcmp(ent->classname, "prox_mine") ||
 		 !strcmp(ent->classname, "tesla_mine"));
 	if (has_ordnance_children) {
-		for (gentity_t *child = ent->teamchain; child; ) {
-			gentity_t *next = child->teamchain;
+		gentity_t *const child = ent->teamchain;
+		ent->teamchain = nullptr;
+		if (child && MM_OrdnanceEntityIdentityMatches(child, ent->style,
+			ent->sounds) && MM_ResolveOrdnanceOwner(child) == ent)
 			G_FreeEntity(child);
-			child = next;
-		}
 	}
 
-	if (ent->owner && ent->owner->client &&
-		ent->owner->client->grapple_ent == ent)
-		Weapon_Grapple_DoReset(ent->owner->client);
+	gentity_t *const owner = G_ResolvePhysicsOwner(ent);
+	if (owner && owner->client && owner->client->grapple_ent == ent)
+		Weapon_Grapple_DoReset(owner->client);
 	else
 		G_FreeEntity(ent);
 	return true;
 }
 
-void G_Impact(gentity_t *e1, const trace_t &trace) {
+bool G_Impact(gentity_t *e1, const trace_t &trace) {
+	if (!e1 || !e1->inuse)
+		return false;
 	gentity_t *e2 = trace.ent;
+	if (!e2 || !e2->inuse)
+		return true;
+	const int32_t e1_generation = e1->spawn_count;
+	const int32_t e2_generation = e2->spawn_count;
+	const auto e1_is_current = [&]() {
+		return e1->inuse && e1->spawn_count == e1_generation;
+	};
+	const auto e2_is_current = [&]() {
+		return e2->inuse && e2->spawn_count == e2_generation;
+	};
 
 	// Persistent ordnance can deliberately clear owner after arming. Snapshot
 	// its arena while the ownership chain is still available so mines, teslas,
 	// traps, and their child fields remain isolated for their full lifetime.
 	G_InheritOwnerArena(e1);
+	if (!e1_is_current())
+		return false;
 
 	// [MuffMode] Projectiles and touch callbacks are scoped to their logical
 	// arena. MM_Arena_CanInteract resolves projectile owner chains.
 	if (GT(GT_ARENA) && !MM_Arena_CanInteract(e1, e2))
-		return;
+		return true;
 
-	if (e1->touch && (e1->solid != SOLID_NOT || (e1->flags & FL_ALWAYS_TOUCH)))
+	if (e1->touch && (e1->solid != SOLID_NOT || (e1->flags & FL_ALWAYS_TOUCH))) {
 		e1->touch(e1, e2, trace, false);
+		if (!e1_is_current())
+			return false;
+		if (!e2_is_current())
+			return true;
+	}
 
 	if (e2->touch && (e2->solid != SOLID_NOT || (e2->flags & FL_ALWAYS_TOUCH)))
 		e2->touch(e2, e1, trace, true);
+	return e1_is_current();
 }
 
 /*
@@ -246,26 +284,43 @@ G_FlyMove
 The basic solid body movement clip that slides along multiple planes
 ============
 */
-void G_FlyMove(gentity_t *ent, float time, contents_t mask) {
+bool G_FlyMove(gentity_t *ent, float time, contents_t mask) {
+	if (!ent || !ent->inuse)
+		return false;
+	const int32_t ent_generation = ent->spawn_count;
 	ent->groundentity = nullptr;
 
 	touch_list_t touch;
 	PM_StepSlideMove_Generic(ent->s.origin, ent->velocity, time, ent->mins, ent->maxs, touch, false, [&](const vec3_t &start, const vec3_t &mins, const vec3_t &maxs, const vec3_t &end) {
 		return gi.trace(start, mins, maxs, end, ent, mask);
 		});
+	std::array<int32_t, MAXTOUCH> touch_generations {};
+	for (size_t i = 0; i < touch.num; ++i)
+		touch_generations[i] = touch.traces[i].ent
+			? touch.traces[i].ent->spawn_count : 0;
 
 	for (size_t i = 0; i < touch.num; i++) {
 		auto &trace = touch.traces[i];
+		gentity_t *const hit = trace.ent;
+		if (!hit || !hit->inuse ||
+			hit->spawn_count != touch_generations[i])
+			continue;
 
 		if (trace.plane.normal[2] > 0.7f) {
-			ent->groundentity = trace.ent;
-			ent->groundentity_linkcount = trace.ent->linkcount;
+			ent->groundentity = hit;
+			ent->groundentity_linkcount = hit->linkcount;
 		}
 
 		//
 		// run the impact function
 		//
-		G_Impact(ent, trace);
+		if (!G_Impact(ent, trace) || !ent->inuse ||
+			ent->spawn_count != ent_generation)
+			return false;
+		if (!hit->inuse || hit->spawn_count != touch_generations[i]) {
+			if (ent->groundentity == hit)
+				ent->groundentity = nullptr;
+		}
 
 		// impact func requested velocity kill
 		if (ent->flags & FL_KILL_VELOCITY) {
@@ -273,6 +328,7 @@ void G_FlyMove(gentity_t *ent, float time, contents_t mask) {
 			ent->velocity = {};
 		}
 	}
+	return true;
 }
 
 /*
@@ -337,39 +393,57 @@ static trace_t G_ArenaProjectileTrace(gentity_t *ent, const vec3_t &start,
 	return trace;
 }
 
-static trace_t G_PushEntity(gentity_t *ent, const vec3_t &push) {
-	vec3_t start = ent->s.origin;
-	vec3_t end = start + push;
+static bool G_PushEntity(
+	gentity_t *ent, const vec3_t &push, trace_t &result) {
+	if (!ent || !ent->inuse)
+		return false;
+	const int32_t ent_generation = ent->spawn_count;
+	const vec3_t start = ent->s.origin;
+	const vec3_t end = start + push;
+	size_t retries_remaining = MAX_ENTITIES;
 
-	G_InheritOwnerArena(ent);
-	trace_t trace = G_ArenaProjectileTrace(ent, start, end);
+	while (retries_remaining-- > 0) {
+		G_InheritOwnerArena(ent);
+		if (!ent->inuse || ent->spawn_count != ent_generation)
+			return false;
+		trace_t trace = G_ArenaProjectileTrace(ent, start, end);
 
-	ent->s.origin = trace.endpos + (trace.plane.normal * .5f);
-	gi.linkentity(ent);
+		ent->s.origin = trace.endpos + (trace.plane.normal * .5f);
+		gi.linkentity(ent);
 
-	if (trace.fraction != 1.0f || trace.startsolid) {
-		G_Impact(ent, trace);
+		if (trace.fraction != 1.0f || trace.startsolid) {
+			gentity_t *const hit = trace.ent;
+			const int32_t hit_generation = hit ? hit->spawn_count : 0;
+			if (!G_Impact(ent, trace) || !ent->inuse ||
+				ent->spawn_count != ent_generation)
+				return false;
 
-		// if the pushed entity went away and the pusher is still there
-		if (!trace.ent->inuse && ent->inuse) {
-			// move the pusher back and try again
-			ent->s.origin = start;
-			gi.linkentity(ent);
-			return G_PushEntity(ent, push);
+			// A touch callback removed or recycled the obstacle. Move back and
+			// retrace rather than treating the replacement lifetime as the hit.
+			if (!hit || !hit->inuse || hit->spawn_count != hit_generation) {
+				ent->s.origin = start;
+				gi.linkentity(ent);
+				continue;
+			}
 		}
+
+		// Preserve stock push-movement behavior before trigger callbacks run.
+		ent->gravity = 1.0;
+		G_TouchTriggers(ent);
+		if (!ent->inuse || ent->spawn_count != ent_generation)
+			return false;
+
+		result = trace;
+		return true;
 	}
 
-	// FIXME - is this needed?
-	ent->gravity = 1.0;
-
-	if (ent->inuse)
-		G_TouchTriggers(ent);
-
-	return trace;
+	gi.Com_PrintFmt("WARNING: {} exceeded its push retry limit.\n", *ent);
+	return false;
 }
 
 struct pushed_t {
 	gentity_t *ent;
+	int32_t	 generation;
 	vec3_t	 origin;
 	vec3_t	 angles;
 	bool	 rotated;
@@ -379,6 +453,11 @@ struct pushed_t {
 pushed_t pushed[MAX_ENTITIES], *pushed_p;
 
 gentity_t *obstacle;
+int32_t obstacle_generation;
+
+// Pusher movement uses shared rollback storage. Reject re-entrant mover
+// simulation while a transaction is active so callbacks cannot overwrite it.
+static bool pusher_physics_active;
 
 static pushed_t *G_ReservePushed() {
 	if (pushed_p >= &pushed[MAX_ENTITIES])
@@ -391,15 +470,51 @@ static uint32_t G_PhysicsEntityLimit() {
 	return min(globals.num_entities, game.maxentities);
 }
 
-static bool G_CrushWithQ3SineMover(gentity_t *pusher, gentity_t *check) {
+static bool G_PushedEntityIsCurrent(const pushed_t &entry) {
+	return entry.ent && entry.ent->inuse &&
+		entry.ent->spawn_count == entry.generation;
+}
+
+static void G_RollbackPushed() {
+	for (pushed_t *entry = pushed_p; entry != pushed;) {
+		--entry;
+		if (!G_PushedEntityIsCurrent(*entry))
+			continue;
+
+		entry->ent->s.origin = entry->origin;
+		entry->ent->s.angles = entry->angles;
+		if (entry->rotated)
+			entry->ent->s.angles[YAW] = entry->yaw;
+		gi.linkentity(entry->ent);
+	}
+}
+
+enum class crush_result_t {
+	not_applicable,
+	handled,
+	pusher_invalidated
+};
+
+static crush_result_t G_CrushWithQ3SineMover(gentity_t *pusher,
+	int32_t pusher_generation, gentity_t *check, int32_t check_generation) {
 	if (!(pusher->flags & FL_Q3_SINE_MOVER))
-		return false;
+		return crush_result_t::not_applicable;
 
 	T_Damage(check, pusher, pusher, vec3_origin, check->s.origin, vec3_origin, 100000, 1, DAMAGE_NONE, MOD_CRUSH);
-	if (check->inuse && check->solid && !check->client && !(check->svflags & SVF_MONSTER))
+	if (!pusher->inuse || pusher->spawn_count != pusher_generation)
+		return crush_result_t::pusher_invalidated;
+
+	// Damage callbacks may free and recycle the blocker. Never explode or
+	// otherwise mutate the replacement lifetime that now occupies the slot.
+	if (!check->inuse || check->spawn_count != check_generation)
+		return crush_result_t::handled;
+
+	if (check->solid && !check->client && !(check->svflags & SVF_MONSTER))
 		BecomeExplosion1(check);
 
-	return true;
+	return pusher->inuse && pusher->spawn_count == pusher_generation
+		? crush_result_t::handled
+		: crush_result_t::pusher_invalidated;
 }
 
 /*
@@ -411,6 +526,11 @@ otherwise riders would continue to slide.
 ============
 */
 static bool G_Push(gentity_t *pusher, vec3_t &move, vec3_t &amove) {
+	// [MuffMode] Defensive boundary for malformed mover callbacks.
+	if (!pusher || !pusher->inuse)
+		return false;
+	const int32_t pusher_generation = pusher->spawn_count;
+
 	gentity_t *check, *block = nullptr;
 	vec3_t	  mins, maxs;
 	pushed_t *p;
@@ -427,6 +547,7 @@ static bool G_Push(gentity_t *pusher, vec3_t &move, vec3_t &amove) {
 	// save the pusher's original position
 	p = G_ReservePushed();
 	p->ent = pusher;
+	p->generation = pusher_generation;
 	p->origin = pusher->s.origin;
 	p->angles = pusher->s.angles;
 	p->rotated = false;
@@ -468,6 +589,7 @@ static bool G_Push(gentity_t *pusher, vec3_t &move, vec3_t &amove) {
 			// move this entity
 			p = G_ReservePushed();
 			p->ent = check;
+			p->generation = check->spawn_count;
 			p->origin = check->s.origin;
 			p->angles = check->s.angles;
 			p->rotated = !!amove[YAW];
@@ -524,7 +646,13 @@ static bool G_Push(gentity_t *pusher, vec3_t &move, vec3_t &amove) {
 			}
 
 			// [MuffMode] Quake III sine movers crush through blockers instead of rolling back.
-			if (G_CrushWithQ3SineMover(pusher, check)) {
+			const crush_result_t crush_result = G_CrushWithQ3SineMover(
+				pusher, pusher_generation, check, p->generation);
+			if (crush_result == crush_result_t::pusher_invalidated) {
+				G_RollbackPushed();
+				return false;
+			}
+			if (crush_result == crush_result_t::handled) {
 				pushed_p--;
 				continue;
 			}
@@ -532,28 +660,25 @@ static bool G_Push(gentity_t *pusher, vec3_t &move, vec3_t &amove) {
 
 		// save off the obstacle so we can call the block function
 		obstacle = check;
+		obstacle_generation = check->spawn_count;
 
 		// move back any entities we already moved
 		// go backwards, so if the same entity was pushed
 		// twice, it goes back to the original position
-		for (p = pushed_p - 1; p >= pushed; p--) {
-			p->ent->s.origin = p->origin;
-			p->ent->s.angles = p->angles;
-			if (p->rotated) {
-				//if (p->ent->client)
-				//	p->ent->client->ps.pmove.delta_angles[YAW] = p->yaw;
-				//else
-				p->ent->s.angles[YAW] = p->yaw;
-			}
-			gi.linkentity(p->ent);
-		}
+		G_RollbackPushed();
 		return false;
 	}
 
 	// FIXME: is there a better way to handle this?
 	//  see if anything we moved has touched a trigger
-	for (p = pushed_p - 1; p >= pushed; p--)
+	for (p = pushed_p; p != pushed;) {
+		--p;
+		if (!G_PushedEntityIsCurrent(*p))
+			continue;
 		G_TouchTriggers(p->ent);
+		if (!pusher->inuse || pusher->spawn_count != pusher_generation)
+			return false;
+	}
 
 	return true;
 }
@@ -569,46 +694,136 @@ push all box objects
 static void G_Physics_Pusher(gentity_t *ent) {
 	vec3_t	 move, amove;
 	gentity_t *part;
+	const int32_t ent_generation = ent->spawn_count;
+	const auto ent_is_current = [&]() {
+		return ent->inuse && ent->spawn_count == ent_generation;
+	};
+	const size_t team_limit = std::max<size_t>(1,
+		std::min(static_cast<size_t>(globals.num_entities),
+			static_cast<size_t>(game.maxentities)));
+	const auto bound_team_chain = [&]() {
+		gentity_t *member = ent;
+		gentity_t *tail = nullptr;
+		size_t remaining = team_limit;
+		while (member && remaining > 0) {
+			--remaining;
+			tail = member;
+			member = member->teamchain;
+		}
+		if (!member || !tail)
+			return;
+		tail->teamchain = nullptr;
+		gi.Com_PrintFmt(
+			"WARNING: {} had a cyclic or overlong pusher team; truncating it.\n",
+			*ent);
+	};
 
 	// if not a team captain, so movement will be handled elsewhere
 	if (ent->flags & FL_TEAMSLAVE)
 		return;
+	if (pusher_physics_active) {
+		gi.Com_PrintFmt(
+			"WARNING: ignored re-entrant pusher simulation for {}.\n", *ent);
+		return;
+	}
+	struct pusher_scope_t {
+		pusher_scope_t() { pusher_physics_active = true; }
+		~pusher_scope_t() { pusher_physics_active = false; }
+	} pusher_scope;
 
 	// make sure all team slaves can move before commiting
 	// any moves or calling any think functions
 	// if the move is blocked, all moved objects will be backed out
+	size_t retries_remaining = team_limit;
 retry:
+	if (!ent_is_current() || retries_remaining-- == 0) {
+		if (ent_is_current())
+			gi.Com_PrintFmt(
+				"WARNING: {} exceeded its pusher retry limit.\n", *ent);
+		return;
+	}
+	bound_team_chain();
 	pushed_p = pushed;
-	for (part = ent; part; part = part->teamchain) {
+	size_t remaining = team_limit;
+	bool movement_blocked = false;
+	for (part = ent; part && remaining > 0; --remaining) {
+		const int32_t part_generation = part->spawn_count;
+		gentity_t *const next = part->teamchain;
+		const int32_t next_generation = next ? next->spawn_count : 0;
 		if (part->velocity[0] || part->velocity[1] || part->velocity[2] || part->avelocity[0] || part->avelocity[1] ||
 			part->avelocity[2]) { // object is moving
 			move = part->velocity * gi.frame_time_s;
 			amove = part->avelocity * gi.frame_time_s;
 
-			if (!G_Push(part, move, amove))
+			if (!G_Push(part, move, amove)) {
+				if (!ent_is_current() || !part->inuse ||
+					part->spawn_count != part_generation)
+					return;
+				movement_blocked = true;
 				break; // move was blocked
+			}
 		}
+		if (!ent_is_current() || !part->inuse ||
+			part->spawn_count != part_generation)
+			return;
+		if (part->teamchain != next ||
+			(next && (!next->inuse || next->spawn_count != next_generation))) {
+			bound_team_chain();
+			return;
+		}
+		part = next;
+	}
+	if (part && !movement_blocked) {
+		bound_team_chain();
+		return;
 	}
 	if (pushed_p > &pushed[MAX_ENTITIES])
 		gi.Com_Error("pushed_p > &pushed[MAX_ENTITIES], memory corrupted");
 
-	if (part) {
+	if (movement_blocked) {
 		// if the pusher has a "blocked" function, call it
 		// otherwise, just stay in place until the obstacle is gone
 		if (part->moveinfo.blocked) {
-			if (obstacle->inuse && obstacle->movetype != MOVETYPE_FREECAM && obstacle->movetype != MOVETYPE_NOCLIP)
+			const int32_t part_generation = part->spawn_count;
+			if (obstacle && obstacle->inuse &&
+				obstacle->spawn_count == obstacle_generation &&
+				obstacle->movetype != MOVETYPE_FREECAM &&
+				obstacle->movetype != MOVETYPE_NOCLIP)
 				part->moveinfo.blocked(part, obstacle);
+			if (!ent_is_current() || !part->inuse ||
+				part->spawn_count != part_generation)
+				return;
+			if (!obstacle || !obstacle->inuse ||
+				obstacle->spawn_count != obstacle_generation)
+				goto retry;
 		}
 
-		if (!obstacle->inuse)
+		if (!obstacle || !obstacle->inuse)
 			goto retry;
 	} else {
 		// the move succeeded, so call all think functions
-		for (part = ent; part; part = part->teamchain) {
+		remaining = team_limit;
+		for (part = ent; part && remaining > 0;
+			--remaining) {
+			const int32_t part_generation = part->spawn_count;
+			gentity_t *const next = part->teamchain;
+			const int32_t next_generation = next ? next->spawn_count : 0;
 			// prevent entities that are on trains that have gone away from thinking!
 			if (part->inuse)
 				G_RunThink(part);
+			if (!ent_is_current() || !part->inuse ||
+				part->spawn_count != part_generation)
+				return;
+			if (part->teamchain != next ||
+				(next && (!next->inuse ||
+					next->spawn_count != next_generation))) {
+				bound_team_chain();
+				return;
+			}
+			part = next;
 		}
+		if (part)
+			bound_team_chain();
 	}
 }
 
@@ -634,8 +849,10 @@ A moving object that doesn't obey physics
 =============
 */
 static void G_Physics_Noclip(gentity_t *ent) {
+	const int32_t ent_generation = ent->spawn_count;
 	// regular thinking
-	if (!G_RunThink(ent) || !ent->inuse)
+	if (!G_RunThink(ent) || !ent->inuse ||
+		ent->spawn_count != ent_generation)
 		return;
 
 	ent->s.angles += (ent->avelocity * gi.frame_time_s);
@@ -660,6 +877,7 @@ Toss, bounce, and fly movement.  When onground, do nothing.
 =============
 */
 static void G_Physics_Toss(gentity_t *ent) {
+	const int32_t ent_generation = ent->spawn_count;
 	trace_t	 trace;
 	vec3_t	 move;
 	float	 backoff;
@@ -671,7 +889,7 @@ static void G_Physics_Toss(gentity_t *ent) {
 	// regular thinking
 	G_RunThink(ent);
 
-	if (!ent->inuse)
+	if (!ent->inuse || ent->spawn_count != ent_generation)
 		return;
 
 	// if not a team captain, so movement will be handled elsewhere
@@ -718,9 +936,7 @@ static void G_Physics_Toss(gentity_t *ent) {
 
 		num_tries--;
 		move = ent->velocity * time_left;
-		trace = G_PushEntity(ent, move);
-
-		if (!ent->inuse)
+		if (!G_PushEntity(ent, move, trace))
 			return;
 
 		if (trace.fraction == 1.f)
@@ -791,6 +1007,8 @@ static void G_Physics_Toss(gentity_t *ent) {
 	if (ent->svflags & SVF_MONSTER) {
 		M_CatagorizePosition(ent, ent->s.origin, ent->waterlevel, ent->watertype);
 		M_WorldEffects(ent);
+		if (!ent->inuse || ent->spawn_count != ent_generation)
+			return;
 	} else {
 		if (!wasinwater && isinwater)
 			gi.positioned_sound(old_origin, g_entities, CHAN_AUTO, gi.soundindex("misc/h2ohit1.wav"), 1, 1, 0);
@@ -820,6 +1038,7 @@ slide.
 =============
 */
 void G_Physics_NewToss(gentity_t *ent) {
+	const int32_t ent_generation = ent->spawn_count;
 	trace_t trace;
 	vec3_t	move;
 	//	float		backoff;
@@ -833,12 +1052,12 @@ void G_Physics_NewToss(gentity_t *ent) {
 
 	// regular thinking
 	G_RunThink(ent);
+	if (!ent->inuse || ent->spawn_count != ent_generation)
+		return;
 
 	// if not a team captain, so movement will be handled elsewhere
 	if (ent->flags & FL_TEAMSLAVE)
 		return;
-
-	wasinwater = ent->waterlevel;
 
 	// find out what we're sitting on.
 	move = ent->s.origin;
@@ -891,10 +1110,13 @@ void G_Physics_NewToss(gentity_t *ent) {
 		ent->velocity *= newspeed;
 	}
 
-	G_FlyMove(ent, gi.frame_time_s, ent->clipmask);
+	if (!G_FlyMove(ent, gi.frame_time_s, ent->clipmask))
+		return;
 	gi.linkentity(ent);
 
 	G_TouchTriggers(ent);
+	if (!ent->inuse || ent->spawn_count != ent_generation)
+		return;
 
 	// check for water transition
 	wasinwater = (ent->watertype & MASK_WATER);
@@ -959,6 +1181,7 @@ void G_AddRotationalFriction(gentity_t *ent) {
 }
 
 static void G_Physics_Step(gentity_t *ent) {
+	const int32_t ent_generation = ent->spawn_count;
 	bool	   wasonground;
 	bool	   hitsound = false;
 	float *vel;
@@ -1048,9 +1271,11 @@ static void G_Physics_Step(gentity_t *ent) {
 
 		vec3_t old_origin = ent->s.origin;
 
-		G_FlyMove(ent, gi.frame_time_s, mask);
+		if (!G_FlyMove(ent, gi.frame_time_s, mask))
+			return;
 
-		G_TouchProjectiles(ent, old_origin);
+		if (!G_TouchProjectiles(ent, old_origin))
+			return;
 
 		M_CheckGround(ent, mask);
 
@@ -1065,11 +1290,14 @@ static void G_Physics_Step(gentity_t *ent) {
 		// [Paril-KEX] this is something N64 does to avoid doors opening
 		// at the start of a level, which triggers some monsters to spawn.
 		if (notGT(GT_HORDE)) {
-			if (!level.is_n64 || level.time > FRAME_TIME_S)
+			if (!level.is_n64 || level.time > FRAME_TIME_S) {
 				G_TouchTriggers(ent);
+				if (!ent->inuse || ent->spawn_count != ent_generation)
+					return;
+			}
 		}
 
-		if (!ent->inuse)
+		if (!ent->inuse || ent->spawn_count != ent_generation)
 			return;
 
 		if (ent->groundentity)
@@ -1078,15 +1306,20 @@ static void G_Physics_Step(gentity_t *ent) {
 					ent->s.event = EV_FOOTSTEP;
 	}
 
-	if (GT(GT_HORDE))
+	if (GT(GT_HORDE)) {
 		G_TouchTriggers(ent);
+		if (!ent->inuse || ent->spawn_count != ent_generation)
+			return;
+	}
 
-	if (!ent->inuse) // PGM g_touchtrigger free problem
+	if (!ent->inuse || ent->spawn_count != ent_generation)
 		return;
 
 	if (ent->svflags & SVF_MONSTER) {
 		M_CatagorizePosition(ent, ent->s.origin, ent->waterlevel, ent->watertype);
 		M_WorldEffects(ent);
+		if (!ent->inuse || ent->spawn_count != ent_generation)
+			return;
 
 		// [Paril-KEX] last minute hack to fix Stalker upside down gravity
 		if (wasonground != !!ent->groundentity) {
@@ -1162,14 +1395,26 @@ G_RunEntity
 ================
 */
 void G_RunEntity(gentity_t *ent) {
+	if (!ent || !ent->inuse)
+		return;
+	const int32_t ent_generation = ent->spawn_count;
+	const auto ent_is_current = [&]() {
+		return ent->inuse && ent->spawn_count == ent_generation;
+	};
 	trace_t trace;
 	vec3_t	previous_origin;
 	bool	has_previous_origin = false;
 
 	G_InheritOwnerArena(ent);
+	if (!ent_is_current())
+		return;
 	if (G_PauseArenaEntity(ent))
 		return;
+	if (!ent_is_current())
+		return;
 	if (G_HandleArenaOrdnanceState(ent))
+		return;
+	if (!ent_is_current())
 		return;
 
 	if (level.timeout_in_place)
@@ -1180,8 +1425,11 @@ void G_RunEntity(gentity_t *ent) {
 		has_previous_origin = true;
 	}
 
-	if (ent->prethink)
+	if (ent->prethink) {
 		ent->prethink(ent);
+		if (!ent_is_current())
+			return;
+	}
 
 	// bmodel animation stuff runs first, so custom entities
 	// can override them
@@ -1216,6 +1464,8 @@ void G_RunEntity(gentity_t *ent) {
 	default:
 		gi.Com_ErrorFmt("G_Physics: bad movetype {}", (int32_t)ent->movetype);
 	}
+	if (!ent_is_current())
+		return;
 
 	if (has_previous_origin && ent->movetype == MOVETYPE_STEP) {
 		// if we moved, check and fix origin if needed
@@ -1247,6 +1497,9 @@ void G_RunEntity(gentity_t *ent) {
 		}
 	}
 
-	if (ent->postthink)
+	if (ent->postthink) {
 		ent->postthink(ent);
+		if (!ent_is_current())
+			return;
+	}
 }

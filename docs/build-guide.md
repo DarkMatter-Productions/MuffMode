@@ -80,7 +80,7 @@ Run the currently configured analyzer entrypoints:
 UndefinedBehaviorSanitizer is configured through the ClangCL MSBuild platform toolset:
 
 ```powershell
-./scripts/ci/run-sanitized-build.ps1 -Sanitizer Undefined -AllowUnsupported
+./scripts/ci/run-sanitized-build.ps1 -Sanitizer Undefined
 ```
 
 That job is experimental until the Visual Studio ClangCL build tools are installed and validated on the CI runner.
@@ -113,13 +113,17 @@ Validate dependency inventory and release notices:
 ./scripts/ci/check-dependency-inventory.ps1
 ```
 
-Build the first-wave libFuzzer targets:
+Build and execute the first-wave libFuzzer smoke target:
 
 ```powershell
-./scripts/ci/build-fuzz-targets.ps1 -AllowUnsupported
+./scripts/ci/build-fuzz-targets.ps1
+./scripts/ci/run-fuzz-smoke.ps1 -Runs 1000
 ```
 
-The current fuzz target build is a smoke gate. Runtime fuzzing depends on the local/CI LLVM sanitizer runtime being available.
+The build verifies the x64 libFuzzer/ASan runtime before compiling, stages the
+required runtime DLL beside the target, and then executes a bounded generated
+copy of the checked-in corpus. Compiler or target failures are not treated as
+unsupported-toolchain success.
 
 ## Output
 

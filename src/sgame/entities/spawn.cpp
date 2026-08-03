@@ -25,6 +25,7 @@
 #include "muffmode/mm_horde.h"
 #include "muffmode/mm_items_rules.h"
 #include "muffmode/mm_map_pool.h"
+#include "muffmode/mm_player_stats.h"
 #include "muffmode/mm_spawn_filter.h"
 #include "muffmode/mm_spawn_rules.h"
 #include "muffmode/mm_statusbar.h"
@@ -132,26 +133,15 @@ ED_NewString
 =============
 */
 char *ED_NewString(const char *string) {
-	char *newb, *new_p;
-	int		i;
-	size_t	l;
+	// [MuffMode] Escape expansion never grows the value, so strlen + 1 always
+	// holds the result. The previous in-place loop dropped the terminator when a
+	// value ended in a lone backslash, because the backslash consumed it, and
+	// left every later reader of that field walking off the allocation.
+	const std::string_view value = string ? std::string_view(string) : std::string_view();
+	const size_t capacity = value.size() + 1;
+	char *newb = (char *)gi.TagMalloc(capacity, TAG_LEVEL);
 
-	l = strlen(string) + 1;
-
-	newb = (char *)gi.TagMalloc(l, TAG_LEVEL);
-
-	new_p = newb;
-
-	for (i = 0; i < l; i++) {
-		if (string[i] == '\\' && i < l - 1) {
-			i++;
-			if (string[i] == 'n')
-				*new_p++ = '\n';
-			else
-				*new_p++ = '\\';
-		} else
-			*new_p++ = string[i];
-	}
+	MM_UnescapeEntityValue(value, newb, capacity);
 
 	return newb;
 }
@@ -235,14 +225,16 @@ struct type_loaders_t {
 
 	template<typename T, std::enable_if_t<std::is_same_v<T, vec3_t>, int> = 0>
 	static T load(const char *s) {
+		// [MuffMode] Every component parses through a private buffer. `s` is the
+		// value token ED_ParseEntity is still holding, which lives in COM_Parse's
+		// shared buffer, so an unbuffered COM_Parse here rewrote the very string
+		// it was reading. Sizing the buffer like the shared one keeps y and z at
+		// the bound they already had and lifts x to match its siblings.
+		char component[MAX_TOKEN_CHARS];
 		vec3_t vec;
-		static char vec_buffer[32];
-		const char *token = COM_Parse(&s, vec_buffer, sizeof(vec_buffer));
-		vec.x = ED_LoadFloat(token);
-		token = COM_Parse(&s);
-		vec.y = ED_LoadFloat(token);
-		token = COM_Parse(&s);
-		vec.z = ED_LoadFloat(token);
+		vec.x = ED_LoadFloat(COM_Parse(&s, component, sizeof(component)));
+		vec.y = ED_LoadFloat(COM_Parse(&s, component, sizeof(component)));
+		vec.z = ED_LoadFloat(COM_Parse(&s, component, sizeof(component)));
 		return vec;
 	}
 };
@@ -255,26 +247,23 @@ struct type_loaders_t {
 static int32_t ED_LoadColor(const char *value) {
 	// space means rgba as values
 	if (strchr(value, ' ')) {
-		static char color_buffer[32];
+		// [MuffMode] The buffer is per-call, not shared: `value` can point into
+		// COM_Parse's own token buffer. Packing moved to MM_PackEntityColorRgba,
+		// which clamps each channel before composing the word. Casting an
+		// unbounded map float to int32_t is undefined, and the saturated result
+		// then reached a left shift of a negative value; a merely large component
+		// stayed defined but bled across the neighbouring channel boundary.
+		char component[MM_ENTITY_COLOR_COMPONENT_CHARS];
 		std::array<float, 4> raw_values{ 0, 0, 0, 1.0f };
-		bool is_float = true;
 
 		for (auto &v : raw_values) {
-			const char *token = COM_Parse(&value, color_buffer, sizeof(color_buffer));
+			const char *token = COM_Parse(&value, component, sizeof(component));
 
-			if (*token) {
+			if (*token)
 				v = ED_LoadFloat(token);
-
-				if (v > 1.0f)
-					is_float = false;
-			}
 		}
 
-		if (is_float)
-			for (auto &v : raw_values)
-				v *= 255.f;
-
-		return ((int32_t)raw_values[3]) | (((int32_t)raw_values[2]) << 8) | (((int32_t)raw_values[1]) << 16) | (((int32_t)raw_values[0]) << 24);
+		return MM_PackEntityColorRgba(raw_values);
 	}
 
 	// integral
@@ -652,7 +641,7 @@ static const char *ED_ParseEntity(const char *data, gentity_t *ent) {
 	}
 
 	if (!init)
-		memset(ent, 0, sizeof(*ent));
+		memset(ent, 0, sizeof(*ent)); // NOLINT(bugprone-undefined-memory-manipulation): engine-owned gentity_t slots are intentionally raw C ABI storage.
 
 	return data;
 }
@@ -1336,6 +1325,12 @@ static world_spawn_stats_t ParseWorldEntities() {
 		} else {
 			ent = G_Spawn();
 		}
+		// [MuffMode] Keep the allocator failure boundary explicit before the
+		// entity parser and compatibility hooks dereference the result.
+		if (!ent) {
+			gi.Com_ErrorFmt("{}: Failed to allocate an entity.", __FUNCTION__);
+			return stats;
+		}
 		entities = ED_ParseEntity(entities, ent);
 
 		// nasty hacks time!
@@ -1358,9 +1353,6 @@ static world_spawn_stats_t ParseWorldEntities() {
 
 			ent->spawnflags &= ~SPAWNFLAG_EDITOR_MASK;
 		}
-
-		if (!ent)
-			gi.Com_ErrorFmt("{}: Invalid or empty entity string.", __FUNCTION__);
 
 		// do this before calling the spawn function so it can be overridden.
 		ent->gravityVector = { 0.0, 0.0, -1.0 };
@@ -1428,6 +1420,26 @@ parsing textual entity definitions out of an ent file.
 ==============
 */
 void SpawnEntities(const char *mapname, const char *entities, const char *spawnpoint) {
+	// [MuffMode] The engine routes every server state through this entry point,
+	// including demo playback, cinematics and pic screens. Those states load no
+	// collision model and hand us an empty entity lump, so they reset level state
+	// and spawn nothing rather than failing the real-map contract below.
+	const bool map_has_world = MM_MapStateHasWorld(mapname);
+
+	// A MyMap selection is a transaction with the next full engine map load.
+	// Consume it before any fallible work, but keep the modes local until the
+	// target map has passed the pre-reset validation path. A worldless state is
+	// not that transition, so it leaves the selection armed for the next map.
+	muffmode::maps::mymap_modifier_modes_t mymap_modifier_modes {};
+	const bool has_mymap_modifier_modes = map_has_world &&
+		MM_MQ_TakePendingModifiersForMap(mapname, mymap_modifier_modes);
+	// One-shot modes must never be inherited from an earlier load. In
+	// particular, Com_Error may leave SpawnCachedWorldEntities non-locally, so
+	// clear any previously published modes before this load performs fallible
+	// validation. A matching pending selection remains private in the local
+	// snapshot above until entity spawning begins.
+	MM_ClearItemInhibitFlags();
+
 	// [MuffMode] Record the map being left before level.mapname is replaced.
 	MM_RecordStructuredMapPlayed();
 	MuffModeLog("MAP", "Loading map: '%s' (spawnpoint: '%s')", mapname, spawnpoint ? spawnpoint : "(none)");
@@ -1438,7 +1450,8 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
 	const std::string override_name = std::string(G_Fmt("baseq2/{}/{}.ent",
 		g_entity_override_dir->string[0] ? g_entity_override_dir->string : "maps",
 		mapname));
-	FILE *f = fopen(override_name.c_str(), "rb");
+	// Worldless states have no authored entities to override or export.
+	FILE *f = map_has_world ? fopen(override_name.c_str(), "rb") : nullptr;
 	if (f != nullptr) {
 		ent_file_exists = true;
 		long length = -1;
@@ -1453,7 +1466,7 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
 		}
 		fclose(f);
 
-		if (ent_valid && g_entity_override_load->integer && !strstr(mapname, ".dm2")) {
+		if (ent_valid && g_entity_override_load->integer) {
 			entities = override_entities.c_str();
 			if (g_verbose->integer)
 				gi.Com_PrintFmt("{}: Entities override file verified and loaded: \"{}\"\n",
@@ -1465,7 +1478,7 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
 	}
 
 	// save ent override
-	if (g_entity_override_save->integer && !strstr(mapname, ".dm2")) {
+	if (g_entity_override_save->integer && map_has_world) {
 		if (!ent_file_exists) {
 			f = fopen(override_name.c_str(), "wb");
 			if (f) {
@@ -1489,19 +1502,24 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
 		static_cast<size_t>(game.maxentities) > reserved_slots
 			? static_cast<size_t>(game.maxentities) - reserved_slots
 			: 0;
-	const mm_entity_lump_validation_t validation =
-		MM_ValidateEntityLump(saved_entstring, definition_capacity);
-	if (!validation.valid) {
-		gi.Com_ErrorFmt("{}: invalid entity string for map \"{}\": {}.",
-			__FUNCTION__, mapname,
-			validation.error ? validation.error : "unknown error");
+	// Only a real map owes us a complete world; a worldless state legitimately
+	// carries no entities and no start-item contract to honour.
+	if (map_has_world) {
+		const mm_entity_lump_validation_t validation =
+			MM_ValidateEntityLump(saved_entstring, definition_capacity);
+		if (!validation.valid) {
+			gi.Com_ErrorFmt("{}: invalid entity string for map \"{}\": {}.",
+				__FUNCTION__, mapname,
+				validation.error ? validation.error : "unknown error");
+		}
+		char invalid_start_item[MAX_TOKEN_CHARS];
+		if (!ValidateStartItems(invalid_start_item, sizeof(invalid_start_item))) {
+			gi.Com_ErrorFmt("Invalid g_start_item entry: {}\n", invalid_start_item);
+		}
 	}
-	char invalid_start_item[MAX_TOKEN_CHARS];
-	if (!ValidateStartItems(invalid_start_item, sizeof(invalid_start_item))) {
-		gi.Com_ErrorFmt("Invalid g_start_item entry: {}\n", invalid_start_item);
-	}
-	const item_inhibit_modes_t effective_item_inhibit_modes =
-		CaptureItemInhibitModes();
+	item_inhibit_modes_t effective_item_inhibit_modes {};
+	if (has_mymap_modifier_modes)
+		effective_item_inhibit_modes = mymap_modifier_modes;
 
 	const size_t ent_lump_bytes = saved_entstring.size();
 	MuffModeLog("MAP", "SpawnEntities: phase=pre-reset map='%s' ent_lump_bytes=%zu",
@@ -1516,12 +1534,16 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
 	if (skill->integer != skill_level)
 		gi.cvar_forceset("skill", G_Fmt("{}", skill_level).data());
 
-	SaveClientData();
-
 	// [MuffMode] Validate the final (possibly overridden) entity lump before
 	// freeing the previous level or spawning anything. Arena remains an
 	// ordinary effective FFA unless the complete RA2 map contract passes.
 	MM_Arena_PreflightMap(mapname, saved_entstring.c_str());
+
+	// A direct gamemap/map_restart can bypass normal Match_End. Close the old
+	// singleton rating lifecycle while its clients and reservations still exist;
+	// the no-contest hook is exact-once after an ordinary completed match.
+	MM_PlayerStats_OnMatchAbort();
+	SaveClientData();
 
 	// Menus own TAG_LEVEL allocations; release them while their pointers are
 	// still valid rather than merely nulling dangling pointers after FreeTags.
@@ -1554,7 +1576,7 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
 	MuffModeLog("MAP", "SpawnEntities: phase=reset-complete ent_lump_bytes=%zu",
 		level.entstring.size());
 
-	memset(g_entities, 0, game.maxentities * sizeof(g_entities[0]));
+	memset(g_entities, 0, game.maxentities * sizeof(g_entities[0])); // NOLINT(bugprone-undefined-memory-manipulation): engine-owned gentity_t slots are intentionally raw C ABI storage.
 
 	// The entity array is empty again, so its published high-water mark must be
 	// reset as well. Leaving the previous map's peak here makes the engine consume
@@ -1575,8 +1597,9 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
 
 	level.is_n64 = strncmp(level.mapname, "q64/", 4) == 0;
 	
+	const int gametype_index = static_cast<int>(MM_CurrentGametype());
 	MuffModeLog("MAP", "Map name set: '%s' (is_n64=%d, gametype=%s)", 
-	           level.mapname, level.is_n64 ? 1 : 0, gt_short_name[g_gametype->integer]);
+	           level.mapname, level.is_n64 ? 1 : 0, gt_short_name[gametype_index]);
 
 	level.coop_scale_players = 0;
 	level.coop_health_scaling = clamp(g_coop_health_scaling->value, 0.f, 1.f);
@@ -1602,6 +1625,24 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
 		MuffModeLog("DEBUG", "SpawnEntities: entity string tail='%s'", entities + tail_start);
 	}
 
+	// [MuffMode] A worldless state now holds a fully reset level with no entities
+	// and level.init still false, which is exactly what the engine expects while a
+	// demo or cinematic streams. There is no world left to rebuild from, so the
+	// match/round reload path must fall back until a real map loads again.
+	if (!map_has_world) {
+		cached_entity_item_inhibit_modes_valid = false;
+		cached_world_spawn_profile_valid = false;
+		MuffModeLog("MAP",
+			"SpawnEntities: phase=complete map='%s' worldless state; no entities spawned",
+			level.mapname);
+		MuffModeLog_Separator();
+		return;
+	}
+
+	// Publish the selected modes only once the matching map is committed to its
+	// entity spawn. Validation or preflight failures above leave no global state
+	// that a later map can inherit.
+	ApplyItemInhibitModes(effective_item_inhibit_modes);
 	const world_spawn_stats_t stats = SpawnCachedWorldEntities(true);
 	cached_entity_item_inhibit_modes = effective_item_inhibit_modes;
 	cached_entity_item_inhibit_modes_valid = true;
@@ -1719,6 +1760,7 @@ struct world_reload_state_t {
 	bool timeout_auto = false;
 	bool timeout_resuming = false;
 	std::string match_id;
+	mm_match_overall_stats_t match;
 	std::array<bool, 3> frag_warning {};
 	bool prepare_to_fight = false;
 	std::array<char, 64> intermission_victor_msg {};
@@ -1915,6 +1957,7 @@ std::unique_ptr<world_reload_state_t> CaptureWorldReloadState()
 	state->timeout_auto = level.timeout_auto;
 	state->timeout_resuming = level.timeout_resuming;
 	state->match_id = level.match_id;
+	state->match = level.match;
 	std::copy(std::begin(level.frag_warning), std::end(level.frag_warning),
 		state->frag_warning.begin());
 	state->prepare_to_fight = level.prepare_to_fight;
@@ -2024,6 +2067,7 @@ void RestoreWorldReloadState(world_reload_state_t &state)
 	level.timeout_auto = state.timeout_auto;
 	level.timeout_resuming = state.timeout_resuming;
 	level.match_id = std::move(state.match_id);
+	level.match = std::move(state.match);
 	std::copy(state.frag_warning.begin(), state.frag_warning.end(),
 		std::begin(level.frag_warning));
 	level.prepare_to_fight = state.prepare_to_fight;
@@ -2059,10 +2103,12 @@ void PrepareClientsForWorldReload(world_reload_state_t &state)
 		}
 		if (client->owned_sphere) {
 			gentity_t *sphere = ReloadDynamicEntity(client->owned_sphere);
-			if (sphere && sphere->inuse && sphere->owner == ent &&
+			if (sphere && sphere->inuse &&
+				sphere->spawn_count == client->owned_sphere_generation &&
+				sphere->owner == ent && sphere->count == ent->spawn_count &&
 				sphere->classname && !strcmp(sphere->classname, "sphere"))
 				G_FreeEntity(sphere);
-			client->owned_sphere = nullptr;
+			G_ClearOwnedSphere(client);
 		}
 
 		client->grapple_ent = nullptr;
@@ -2170,7 +2216,7 @@ void ClearWorldEntitySlots()
 		const int32_t generation = occupied
 			? MM_NextEntityGeneration(ent->spawn_count)
 			: ent->spawn_count;
-		memset(ent, 0, sizeof(*ent));
+		memset(ent, 0, sizeof(*ent)); // NOLINT(bugprone-undefined-memory-manipulation): engine-owned gentity_t slots are intentionally raw C ABI storage.
 		ent->s.number = static_cast<int32_t>(i);
 		ent->spawn_count = generation;
 		ent->classname = "freed";
@@ -2430,10 +2476,12 @@ void SP_worldspawn(gentity_t *ent) {
 		game.ruleset = RS_IndexFromString(st.ruleset);
 		gi.Com_PrintFmt("st={} game={}\n", st.ruleset, rs_long_name[(int)game.ruleset]);
 		if (!game.ruleset)
-			game.ruleset = (ruleset_t)clamp(g_ruleset->integer, 1, (int)RS_NUM_RULESETS);
+			game.ruleset = static_cast<ruleset_t>(
+				ClampPlayableRulesetIndex(g_ruleset->integer));
 	} else
 		if ((int)game.ruleset != g_ruleset->integer)
-			game.ruleset = (ruleset_t)clamp(g_ruleset->integer, 1, (int)RS_NUM_RULESETS);
+			game.ruleset = static_cast<ruleset_t>(
+				ClampPlayableRulesetIndex(g_ruleset->integer));
 
 	if (st.sky && st.sky[0])
 		gi.configstring(CS_SKY, st.sky);

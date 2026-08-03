@@ -558,7 +558,14 @@ void MM_CmdAdmin(gentity_t *ent) {
 	if (!admin::MM_RequireExactCommandArgc(ent, 2, G_Fmt("{} <password>", gi.argv(0)).data()))
 		return;
 
-	if (!muffmode::CStringEqualsI(password, gi.argv(1))) {
+	// Apply the same configured guess rate used by ghost-code authentication
+	// before evaluating this full-administrator secret.
+	const admin::mm_admin_attempt_result_t attempt = admin::MM_EvaluateAdminAttempt(
+		CheckFlood(ent), password, gi.argv(1));
+	if (attempt == admin::mm_admin_attempt_result_t::Throttled)
+		return;
+
+	if (attempt == admin::mm_admin_attempt_result_t::InvalidCredentials) {
 		gi.Client_Print(ent, PRINT_HIGH, "Invalid administration password.\n");
 		return;
 	}

@@ -463,6 +463,7 @@ static bool G_alternate_flystep(gentity_t *ent, vec3_t move, bool relink, gentit
 
 // flying monsters don't step up
 static bool G_flystep(gentity_t *ent, vec3_t move, bool relink, gentity_t *current_bad) {
+	const int32_t ent_generation = ent->spawn_count;
 	if (ent->monsterinfo.aiflags & AI_ALTERNATE_FLY) {
 		if (G_alternate_flystep(ent, move, relink, current_bad))
 			return true;
@@ -568,13 +569,16 @@ static bool G_flystep(gentity_t *ent, vec3_t move, bool relink, gentity_t *curre
 				if (relink) {
 					gi.linkentity(ent);
 					G_TouchTriggers(ent);
+					if (!ent->inuse || ent->spawn_count != ent_generation)
+						return false;
 				}
 
 				return true;
 			}
 		}
 
-		G_Impact(ent, trace);
+		if (!G_Impact(ent, trace))
+			return false;
 
 		if (!ent->enemy)
 			break;
@@ -596,6 +600,10 @@ pr_global_struct->trace_normal is set to the normal of the blocking wall
 // FIXME since we need to test end position contents here, can we avoid doing
 // it again later in catagorize position?
 static bool G_movestep(gentity_t *ent, vec3_t move, bool relink) {
+	const int32_t ent_generation = ent->spawn_count;
+	const auto ent_is_current = [&]() {
+		return ent->inuse && ent->spawn_count == ent_generation;
+	};
 	gentity_t *current_bad = nullptr;
 
 	// PMM - who cares about bad areas if you're dead?
@@ -709,8 +717,11 @@ static bool G_movestep(gentity_t *ent, vec3_t move, bool relink) {
 			ent->s.origin += move;
 			if (relink) {
 				gi.linkentity(ent);
-				if (notGT(GT_HORDE))
+				if (notGT(GT_HORDE)) {
 					G_TouchTriggers(ent);
+					if (!ent_is_current())
+						return false;
+				}
 			}
 			ent->groundentity = nullptr;
 			return true;
@@ -776,8 +787,11 @@ static bool G_movestep(gentity_t *ent, vec3_t move, bool relink) {
 			// and is trying to correct
 			if (relink) {
 				gi.linkentity(ent);
-				if (notGT(GT_HORDE))
+				if (notGT(GT_HORDE)) {
 					G_TouchTriggers(ent);
+					if (!ent_is_current())
+						return false;
+				}
 			}
 			return true;
 		}
@@ -821,16 +835,19 @@ static bool G_movestep(gentity_t *ent, vec3_t move, bool relink) {
 		// [Paril-KEX] this is something N64 does to avoid doors opening
 		// at the start of a level, which triggers some monsters to spawn.
 		if (notGT(GT_HORDE)) {
-			if (!level.is_n64 || level.time > FRAME_TIME_S)
+			if (!level.is_n64 || level.time > FRAME_TIME_S) {
 				G_TouchTriggers(ent);
+				if (!ent_is_current())
+					return false;
+			}
 		}
 	}
 
 	if (stepped)
 		ent->s.renderfx |= RF_STAIR_STEP;
 
-	if (trace.fraction < 1.f)
-		G_Impact(ent, trace);
+	if (trace.fraction < 1.f && !G_Impact(ent, trace))
+		return false;
 
 	return true;
 }
@@ -914,6 +931,10 @@ static bool G_StepDirection(gentity_t *ent, float yaw, float dist, bool allow_no
 
 	if (!ent->inuse)
 		return true; // PGM g_touchtrigger free problem
+	const int32_t ent_generation = ent->spawn_count;
+	const auto ent_is_current = [&]() {
+		return ent->inuse && ent->spawn_count == ent_generation;
+	};
 
 	float old_ideal_yaw = ent->ideal_yaw;
 	float old_current_yaw = ent->s.angles[YAW];
@@ -928,9 +949,9 @@ static bool G_StepDirection(gentity_t *ent, float yaw, float dist, bool allow_no
 
 	oldorigin = ent->s.origin;
 	if (G_movestep(ent, move, false)) {
+		if (!ent_is_current())
+			return true;
 		ent->monsterinfo.aiflags &= ~AI_BLOCKED;
-		if (!ent->inuse)
-			return true; // PGM g_touchtrigger free problem
 
 		if (!M_ClassnameStartsWith(ent, "monster_widow", 13)) {
 			if (!FacingIdeal(ent)) {
@@ -942,14 +963,24 @@ static bool G_StepDirection(gentity_t *ent, float yaw, float dist, bool allow_no
 			}
 		}
 		gi.linkentity(ent);
-		if (notGT(GT_HORDE))
+		const int32_t touch_generation = ent->spawn_count;
+		if (notGT(GT_HORDE)) {
 			G_TouchTriggers(ent);
-		G_TouchProjectiles(ent, oldorigin);
+			if (!ent->inuse || ent->spawn_count != touch_generation)
+				return true;
+		}
+		if (!G_TouchProjectiles(ent, oldorigin))
+			return true;
 		return true;
 	}
+	if (!ent_is_current())
+		return true;
 	gi.linkentity(ent);
-	if (notGT(GT_HORDE))
+	if (notGT(GT_HORDE)) {
 		G_TouchTriggers(ent);
+		if (!ent_is_current())
+			return true;
+	}
 	ent->ideal_yaw = old_ideal_yaw;
 	ent->s.angles[YAW] = old_current_yaw;
 	return false;
@@ -1048,13 +1079,17 @@ static bool G_NewChaseDir(gentity_t *actor, vec3_t pos, float dist) {
 
 	if (brandom()) /*randomly determine direction of search*/
 	{
-		for (tdir = 0; tdir <= 315; tdir += 45)
-			if (tdir != turnaround && G_StepDirection(actor, tdir, dist, false))
+		for (int32_t direction = 0; direction <= 315; direction += 45) {
+			const float candidate_direction = static_cast<float>(direction);
+			if (candidate_direction != turnaround && G_StepDirection(actor, candidate_direction, dist, false))
 				return true;
+		}
 	} else {
-		for (tdir = 315; tdir >= 0; tdir -= 45)
-			if (tdir != turnaround && G_StepDirection(actor, tdir, dist, false))
+		for (int32_t direction = 315; direction >= 0; direction -= 45) {
+			const float candidate_direction = static_cast<float>(direction);
+			if (candidate_direction != turnaround && G_StepDirection(actor, candidate_direction, dist, false))
 				return true;
+		}
 	}
 
 	if (turnaround != DI_NODIR && G_StepDirection(actor, turnaround, dist, false))
@@ -1394,7 +1429,10 @@ bool M_walkmove(gentity_t *ent, float yaw, float dist) {
 	move[2] = 0;
 
 	// PMM
+	const int32_t ent_generation = ent->spawn_count;
 	retval = G_movestep(ent, move, true);
+	if (!ent->inuse || ent->spawn_count != ent_generation)
+		return false;
 	ent->monsterinfo.aiflags &= ~AI_BLOCKED;
 	return retval;
 }

@@ -111,9 +111,23 @@ also owns bare `say_team`, so that form follows the projected engine red/blue
 team and cannot apply MuffMode's room-local logical-team filtering.
 `say_world` is always map-wide.
 
-MuffMode stores server-side player preference files in `baseq2/pcfg/sid-<encoded-social-id>.cfg`, using a safe hex encoding of the engine-provided social ID. Missing or unusually long social IDs keep session-only preferences instead of using fallback filenames. These files are loaded through a restricted player-config parser, not through the general server command buffer. Supported entries are `id`, `timer`, `infohud`, `fm`, `announcer`, `kb`, `followview`, `followkiller`, `followleader`, `followpowerup`, `eskin`, and `tskin`.
+MuffMode stores each server-side version-2 player profile in `baseq2/pcfg/profiles/sid-<encoded-social-id>.json`, using a safe hex encoding of the engine-provided social ID and a directory that cannot collide with WORR's legacy filename scheme. Missing or unusually long social IDs keep session-only state instead of using fallback filenames. The versioned JSON schema records current, original, and up to 16 previous player-name aliases; first-seen, last-seen, and last-updated timestamps; display, audio, follow, and skin preferences; a custom weapon preference order; per-gametype skill ratings and latest rating changes; and aggregate match totals for wins, losses, draws, abandons, play time, and best rating. Profile data never grants administrator or ban authority.
 
-The in-game **Player Config** menu exposes the same saved preferences through separate Display & Audio, Spectator & Follow, and Skin Overrides pages. The optional voice announcer defaults to off and can be enabled with `announcer on` or from Display & Audio; stock fallback cues remain available where defined. Free-form skin paths are still entered with `eskin <model/skin>` and `tskin <model/skin>`.
+The JSON profile in `baseq2/pcfg/profiles` is the canonical file. When it is missing, MuffMode performs a one-time import from either the previous root-level `baseq2/pcfg/sid-<encoded-social-id>.json` location or a matching WORR profile that uses WORR's older sanitized-social-ID `.json` filename, then publishes the migrated version-2 profile in the canonical directory. A legacy document's full `socialID` must exactly match the authenticated identity, so sanitizer collisions are never trusted. When the canonical path is absent and no usable legacy JSON profile can migrate, MuffMode can seed the new profile from the older `baseq2/pcfg/sid-<encoded-social-id>.cfg` preference file; subsequent saves update JSON. Corrupt canonical JSON and canonical files whose stored identity does not match the authenticated social ID are quarantined before recovery without importing a stale `.cfg` over them. Profiles with a newer unsupported schema are left untouched rather than guessed at. Retained clients reload transactionally across map and gametype changes, so an unreadable profile cannot erase the live session state. A client whose current profile could not be loaded remains playable with session-only settings, but persistence stays disabled and any match containing that player is unranked until a later successful load.
+
+Writes use unique temporary files, durable atomic replacement, and a bounded per-profile interprocess lock. Accepted preference changes are coalesced and debounced in bounded memory, then persisted by a fair frame pump. Each normal save merges only the changed preference fields into the latest profile document and preserves unknown extension keys, so delayed work from one connection cannot overwrite an unrelated setting written elsewhere; if the document must be recreated, the complete trusted pending preference snapshot is restored instead of defaulting untouched settings. Failed attempts retry with backoff, merge into later profile work, and use an exact-generation check so an older delayed writer cannot clear newer choices. Match-result failures retain the exact computed result in per-identity FIFO order and retry with bounded backoff and fair per-frame work instead of recalculating Elo. Settlement admission is also bounded: if the server cannot guarantee queue space for every required profile result, the match becomes sticky-unranked and no Elo update is applied. Non-Duel departures likewise make the whole match sticky-unranked so an early quitter can never receive Elo before a later bot, failed profile load, or persistence-capacity failure invalidates the remaining result; an exact two-player Duel forfeit still settles both sides atomically and ends immediately.
+
+During reconnect recovery, the reserved gameplay snapshot remains authoritative for settling and exporting the match that was already in progress. Once that match closes, MuffMode reconciles the admitted result onto the reconnecting client's current profile state. A successfully loaded reconnect profile supplies the next match's preference base; if that load failed, the trusted reserved preferences and weapon order remain in place. Changes made during the reinstatement delay are layered over either base.
+
+The in-game **Player Config** menu exposes the same saved preferences through separate Display & Audio, Spectator & Follow, and Skin Overrides pages. Inventory-menu controls remain available during intermission so Player Config and Player Stats can be reviewed after the match. The optional voice announcer defaults to off and can be enabled with `announcer on` or from Display & Audio; stock fallback cues remain available where defined. Free-form skin paths are still entered with `eskin <model/skin>` and `tskin <model/skin>`.
+
+## Match Statistics Exports
+
+Completed singleton matches in the normal WORR-supported gametypes can produce a versioned structured record at `baseq2/matches/<sanitized-match-id>.json`, an optional companion HTML report at the same stem, and the atomic `baseq2/matches/catalog.json` artifact index. Every intermission path freezes one exact result before client state can change. The match record includes server and listen-host attribution, match and team totals, every participant including players who departed before the end, the settled win/loss/draw/abandon/no-contest result, rating results, weapon and damage statistics, deaths and spawns, item timing, medals, CTF actions, and bounded event and death logs with explicit truncation markers. Serialization and writes normally run in the background, report each success or failure, and fall back to a synchronous write if the bounded queue is full. JSON and catalog publication are the required pair; an HTML failure is reported but does not discard a valid JSON match. Catalog access is interprocess-locked, strictly size- and structure-bounded, quarantines malformed data, keeps `latest` chronological even when jobs complete out of order, and retains at most 4,096 artifact entries within a 16 MiB catalog; the oldest entries are pruned first without deleting their standalone match files.
+
+Arena Rooms run multiple independent room series at once, so they remain unranked and are not exported; their live Player Stats menu continues to use room-local counters. For the same reason, MuffMode's `MATCH_LOGGING_STATUS_API_V1` smoke status validates the singleton match schema and its real atomic catalog write path, but does not advertise WORR tournament-series fields.
+
+These artifacts are controlled by the `g_statex_*` cvars below. They are independent of `g_matchstats`, which controls only the live in-game match-statistics menu.
 
 ## Vote Commands
 
@@ -211,8 +225,8 @@ Deathmatch respawns use a WORR-style danger score instead of raw farthest-only m
 | Cvar | Default | Purpose |
 | --- | --- | --- |
 | `hostname` | `Welcome to Muff Mode!` | Server name shown in menus. Keep it short for display. |
-| `maxclients` | engine default | Maximum connected clients. |
-| `maxplayers` | `16` | Maximum active players; capped to `maxclients`. |
+| `maxclients` | engine default | Connected client slots allocated by the engine and game. MuffMode clamps this to `1..128` during `PreInit`, before the engine sizes its client slab. |
+| `maxplayers` | `16` | Maximum active players; capped to the allocated `game.maxclients`. Spectators may occupy the remaining connected slots. |
 | `minplayers` | `2` | Minimum active players. |
 | `deathmatch` | `1` | Enables deathmatch mode. |
 | `g_gametype` | `1` | Current gametype index. |
@@ -225,11 +239,19 @@ Deathmatch respawns use a WORR-style danger score instead of raw farthest-only m
 | `mercylimit` | `0` | Score gap to end match; `0` disables. |
 | `noplayerstime` | `10` | Minutes with no players before forcing a map change; `0` disables. |
 
+The KEX lobby capacity is separate from `maxclients`. Packaged servers request
+the same value with `kexmultiplayer maxplayers`, because the stock game-module
+API does not expose the active lobby provider's limit. Keep the two configured
+values aligned, but expect a provider or engine build to enforce a lower
+service-specific ceiling. The shared Quake II protocol limit remains 256;
+MuffMode's supported connected-client ceiling is 128.
+
 ## Access And Player Policy
 
 | Cvar | Default | Purpose |
 | --- | --- | --- |
 | `g_allow_admin` | `1` | Allows admin powers. |
+| `admin_password` | empty | Exact, case-sensitive password accepted by `admin <password>`. Empty disables password authentication. Attempts share the client flood history and settings; `flood_msgs <= 0` disables this throttle. |
 | `g_allow_custom_skins` | `1` | Allows custom player models and skins. |
 | `g_allow_skin_overrides` | `1` | Allows players to re-skin enemies/teammates on their own screen via the `eskin`/`tskin` commands (team games; in duel, `eskin` re-skins your opponent). |
 | `g_allow_forfeit` | `1` | Allows Duel forfeits. |
@@ -240,9 +262,9 @@ Deathmatch respawns use a WORR-style danger score instead of raw farthest-only m
 | `g_allow_techs` | `auto` | Controls tech pickups in FFA/TDM/CTF/Horde. `auto` enables techs by default in CTF and Horde (off in FFA/TDM); votes can force `0` or `1` in any of those modes. |
 | `g_allow_vote_midgame` | `0` | Allows votes during active matches. |
 | `g_allow_voting` | `1` | Enables voting globally. |
-| `flood_msgs` | `4` | Messages allowed within the flood window; values above the ten-entry history capacity are clamped to `10`, and values at or below `0` disable chat flood protection. |
-| `flood_persecond` | `4` | Length of the chat flood-detection window in seconds. |
-| `flood_waitdelay` | `10` | Seconds a client must wait after triggering chat flood protection. |
+| `flood_msgs` | `4` | Flood-controlled client actions (including chat, authentication attempts, gestures/pings, `motd`, and `mymap`) allowed within the shared window; values above the ten-entry history capacity are clamped to `10`, and values at or below `0` disable this protection. |
+| `flood_persecond` | `4` | Length of the shared client flood-detection window in seconds. |
+| `flood_waitdelay` | `10` | Seconds a client must wait after triggering the shared client flood protection. |
 | `g_inactivity` | `120` | Seconds before inactive players are moved to spectators. |
 | `g_match_lock` | `0` | Prevents joining while a match is active. |
 | `g_owner_auto_join` | `1` | Auto-joins lobby owner on server start. |
@@ -497,7 +519,7 @@ uncapped by default.
 | `g_dm_exec_level_cfg` | `0` | Executes level-specific configs when enabled. |
 | `g_loc` | `1` | Enables location-backed teammate callouts, including the `loc` command and Freeze Tag frozen help markers. |
 | `g_loc_items` | `1` | Allows location callouts to derive a fallback location from visible weapons, powerups, or mega health when no map `.loc` file exists. |
-| `g_motd_filename` | `motd.txt` | Message of the day file. |
+| `g_motd_filename` | `motd.txt` | Message of the day file (maximum 256 KiB). Client output uses UTF-8-safe 900-byte chunks: `motd` is capped at eight messages and the automatic join preview at one, with a truncation notice for longer text. |
 | `g_entity_override_dir` | `maps` | Directory for entity override `.ent` files. |
 | `g_entity_override_load` | `1` | Loads entity override files on map load. |
 | `g_entity_override_save` | `0` | Saves entity override files when none exist. |
@@ -695,11 +717,14 @@ dedicated console can use `sv load_mappool` and `sv load_mapcycle`.
 | `g_frames_per_frame` | `1` | Game frames run per server frame, clamped to `0..64`; `0` intentionally pauses game simulation. Useful for controlled testing and performance tuning. |
 | `g_huntercam` | `1` | Enables huntercam spectator behavior. |
 | `g_item_bobbing` | `1` | Enables item bobbing. |
-| `g_matchstats` | `0` | Enables match statistics menu/reporting features. |
+| `g_matchstats` | `0` | Enables the live in-game match-statistics menu. It does not control completed-match artifact exports. |
 | `g_muffmode_debug` | `0` | Enables `muffmode_debug.log` output. |
 | `g_select_empty` | `0` | Allows selecting weapons without ammo. |
 | `g_showhelp` | `1` | Prints quick explanations for game modifications. |
 | `g_showmotd` | `1` | Shows message of the day behavior when enabled. |
+| `g_statex_enabled` | `1` | Writes completed singleton-match JSON artifacts and maintains `baseq2/matches/catalog.json`; concurrent Arena room series are excluded. |
+| `g_statex_export_html` | `1` | Writes a companion HTML report for each exported match. JSON and the catalog remain enabled when this is `0`. |
+| `g_statex_humans_present` | `1` | Exports only matches with at least one human participant; set to `0` to include bot-only matches. |
 | `g_verbose` | `0` | Enables extra console diagnostics. |
 
 ## Drop Command Flags
@@ -735,6 +760,14 @@ When `g_gametype_cfg` is enabled, MuffMode executes a config named for the activ
 | NadeFest | `gt-NADEFEST.cfg` |
 
 These files can contain any server commands, cvar settings, map lists, or other gametype-specific setup. For examples, see the [MuffMode Server Configs repository](https://github.com/ozy24/muffmode-server-configs).
+
+For a session already capped at the four local/splitscreen slots, MuffMode
+uses the already allocated client capacity as authority and loads at most 4,096
+lines / 4 MiB, including bytes drained from an overlong physical line. It skips `kexmultiplayer` and
+rejects every executable `maxclients` assignment whose supplied value is
+malformed, dynamic, below `1`, or above `4`. This applies to direct commands
+and `set`, `seta`, `sets`, `cvar_set`, and `cvar_forceset`, including compound
+semicolon-separated lines; semicolons inside quoted arguments remain data.
 
 Set `roundlimit 0` after loading `gt-HORDE.cfg` to run endless Horde. See [Horde Late-Wave & Endless](#horde-late-wave--endless).
 

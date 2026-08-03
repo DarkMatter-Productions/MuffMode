@@ -134,10 +134,10 @@ void TeleportPlayer(gentity_t *player, vec3_t origin, vec3_t angles)
 
 	gi.linkentity(player);
 
-	KillBox(player, !!player->client);
+	if (!KillBox(player, !!player->client))
+		return;
 
-	if (player->client->owned_sphere) {
-		gentity_t *sphere = player->client->owned_sphere;
+	if (gentity_t *sphere = G_ResolveOwnedSphere(player->client)) {
 		sphere->s.origin = player->s.origin;
 		sphere->s.origin[2] = player->absmax[2];
 		sphere->s.angles[YAW] = player->s.angles[YAW];

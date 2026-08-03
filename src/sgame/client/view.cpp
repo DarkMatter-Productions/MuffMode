@@ -836,7 +836,8 @@ static void G_SetClientEffects(gentity_t *ent) {
 	if (ent->client->pu_time_double > level.time)
 		if (G_PowerUpExpiring(ent->client->pu_time_double))
 			ent->s.effects |= EF_DOUBLE;
-	if ((ent->client->owned_sphere) && (ent->client->owned_sphere->spawnflags == SF_SPHERE_DEFENDER))
+	if (gentity_t *sphere = G_ResolveOwnedSphere(ent->client);
+		sphere && sphere->spawnflags == SF_SPHERE_DEFENDER)
 		ent->s.effects |= EF_HALF_DAMAGE;
 	if (ent->client->tracker_pain_time > level.time)
 		ent->s.effects |= EF_TRACKERTRAIL;
@@ -1611,9 +1612,11 @@ void ClientEndServerFrame(gentity_t *ent) {
 	current_client = e->client;
 
 	if (deathmatch->integer) {
-		const int raw_limit = level.match_state >= MATCH_IN_PROGRESS ? GT_ScoreLimit() : 0;
+		const int raw_limit = level.match_state == MATCH_IN_PROGRESS ? GT_ScoreLimit() : 0;
 		const int limit = raw_limit > 0 ? raw_limit : 0;
-		ent->client->ps.stats[STAT_SCORELIMIT] = limit;
+		// Small white text under the miniscore: the stat carries the configstring index, not the
+		// number itself (stat_string, not num).
+		ent->client->ps.stats[STAT_SCORELIMIT] = limit > 0 ? CONFIG_STORY_SCORELIMIT : 0;
 		const char *scorelimit_text = gi.get_configstring(CONFIG_STORY_SCORELIMIT);
 		const auto configured_limit = MM_ParseUInt32Arg(scorelimit_text);
 		const bool matches_configstring = limit > 0

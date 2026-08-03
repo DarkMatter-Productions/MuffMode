@@ -49,7 +49,8 @@ When `g_gametype_cfg` is `1`, Muff Mode automatically executes the matching `gt-
 
 ## How To Customize
 
-- Change `hostname`, `maxclients`, `maxplayers`, passwords, and voting policy in `server-base.cfg`.
+- Keep `maxclients` and `kexmultiplayer maxplayers` aligned in `server-base.cfg`: the first allocates engine/game client slots, while the second requests the separate KEX lobby capacity. MuffMode cannot query the lobby provider, and a provider may enforce a lower service-specific limit.
+- Change the active-player `maxplayers` limit in each `gt-*.cfg`; these mode limits may intentionally be lower than the connected-client/lobby capacity.
 - Change mode-specific limits, map lists, rulesets, item toggles, and team settings in the matching `gt-*.cfg`.
 - Keep map lists short at first, then expand once you know which maps fit your players.
 - Use `g_votable_gametypes` and `g_votable_rulesets` to keep public votes focused.

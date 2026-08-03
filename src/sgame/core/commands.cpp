@@ -1,6 +1,8 @@
 // Copyright (c) ZeniMax Media Inc.
 // Licensed under the GNU General Public License 2.0.
 #include "g_local.h"
+#include "muffmode/mm_client_profile.h"
+#include "muffmode/mm_player_stats.h"
 #include "debug_log.h"
 #include "muffmode/mm_admin.h"
 #include "muffmode/mm_arena.h"
@@ -417,7 +419,8 @@ static void Cmd_CheckPOI_f(gentity_t *self) {
 // [Paril-KEX]
 static void Cmd_Target_f(gentity_t *ent) {
 	ent->target = gi.argv(1);
-	G_UseTargets(ent, ent);
+	if (!G_UseTargets(ent, ent))
+		return;
 	ent->target = nullptr;
 }
 
@@ -1132,9 +1135,9 @@ static void Cmd_Kill_f(gentity_t *ent) {
 	if (ent->client->tracker_pain_time)
 		RemoveAttackingPainDaemons(ent);
 
-	if (ent->client->owned_sphere) {
-		G_FreeEntity(ent->client->owned_sphere);
-		ent->client->owned_sphere = nullptr;
+	if (gentity_t *sphere = G_ResolveOwnedSphere(ent->client)) {
+		G_FreeEntity(sphere);
+		G_ClearOwnedSphere(ent->client);
 	}
 
 	// [Paril-KEX] don't allow kill to take points away in TDM
@@ -1308,7 +1311,7 @@ PlayersList
 static void PlayersList(gentity_t *ent, bool ranked) {
 	size_t	i, count;
 	static std::string	small, large;
-	int		index[MAX_CLIENTS_KEX] = { 0 };
+	int		index[MAX_LOBBY_PLAYERS] = { 0 };
 
 	small.clear();
 	large.clear();
@@ -1391,7 +1394,7 @@ Cmd_PlayersJoinTime_f
 static void Cmd_PlayersJoinTime_f(gentity_t *ent) {
 	size_t	i, count;
 	static std::string	small, large;
-	int		index[MAX_CLIENTS_KEX] = { 0 };
+	int		index[MAX_LOBBY_PLAYERS] = { 0 };
 
 	small.clear();
 	large.clear();
@@ -1787,7 +1790,10 @@ static void Cmd_ListMonsters_f(gentity_t *ent) {
 	if (!g_debug_monster_kills->integer)
 		return;
 
-	for (size_t i = 0; i < level.total_monsters; i++) {
+	const size_t registered_count = std::min(
+		static_cast<size_t>(std::max(0, level.total_monsters)),
+		level.monsters_registered.size());
+	for (size_t i = 0; i < registered_count; i++) {
 		gentity_t *e = level.monsters_registered[i];
 
 		if (!e || !e->inuse)
@@ -1876,6 +1882,14 @@ static void Cmd_KillBeep_f(gentity_t *ent) {
 	MM_CmdKillBeep(ent);
 }
 
+static void Cmd_SetWeaponPref_f(gentity_t *ent) {
+	MM_CmdSetWeaponPref(ent);
+}
+
+static void Cmd_SkillRating_f(gentity_t *ent) {
+	MM_CmdSkillRating(ent);
+}
+
 // [MuffMode] Per-viewer skin override bodies live in muffmode/mm_skin
 static void Cmd_EnemySkin_f(gentity_t *ent) {
 	MM_CmdEnemySkin(ent);
@@ -1913,12 +1927,14 @@ static void Cmd_Stats_f(gentity_t *ent) {
 		}
 	}
 
+	const uint32_t ghost_capacity = min(
+		game.maxclients, static_cast<uint32_t>(q_countof(level.ghosts)));
 	uint32_t i;
-	for (i = 0, g = level.ghosts; i < MAX_CLIENTS_KEX; i++, g++)
+	for (i = 0, g = level.ghosts; i < ghost_capacity; i++, g++)
 		if (g->ent)
 			break;
 
-	if (i == MAX_CLIENTS_KEX) {
+	if (i == ghost_capacity) {
 		if (!text.length())
 			text = "No statistics available.\n";
 
@@ -1928,7 +1944,7 @@ static void Cmd_Stats_f(gentity_t *ent) {
 
 	text += "  #|Name            |Score|Kills|Death|BasDf|CarDf|Effcy|\n";
 
-	for (i = 0, g = level.ghosts; i < MAX_CLIENTS_KEX; i++, g++) {
+	for (i = 0, g = level.ghosts; i < ghost_capacity; i++, g++) {
 		if (!*g->netname)
 			continue;
 
@@ -2434,14 +2450,14 @@ cmds_t client_cmds[] = {
 	{"id",				Cmd_CrosshairID_f,		CF_ALLOW_SPEC | CF_ALLOW_DEAD},
 	{"immortal",		Cmd_Immortal_f,			CF_ALLOW_SPEC | CF_CHEAT_PROTECT},
 	{"invdrop",			Cmd_InvDrop_f,			CF_NONE},
-	{"inven",			Cmd_Inven_f,			CF_ALLOW_DEAD | CF_ALLOW_SPEC},
-	{"invnext",			Cmd_InvNext_f,			CF_ALLOW_SPEC | CF_ALLOW_DEAD},	//spec for menu up/down, dead for horde spectators
+	{"inven",			Cmd_Inven_f,			CF_ALLOW_DEAD | CF_ALLOW_INT | CF_ALLOW_SPEC},
+	{"invnext",			Cmd_InvNext_f,			CF_ALLOW_SPEC | CF_ALLOW_DEAD | CF_ALLOW_INT},	//spec for menu up/down, dead for horde spectators
 	{"invnextp",		Cmd_InvNextP_f,			CF_NONE},
 	{"invnextw",		Cmd_InvNextW_f,			CF_NONE},
-	{"invprev",			Cmd_InvPrev_f,			CF_ALLOW_SPEC | CF_ALLOW_DEAD},	//spec for menu up/down, dead for horde spectators
+	{"invprev",			Cmd_InvPrev_f,			CF_ALLOW_SPEC | CF_ALLOW_DEAD | CF_ALLOW_INT},	//spec for menu up/down, dead for horde spectators
 	{"invprevp",		Cmd_InvPrevP_f,			CF_NONE},
 	{"invprevw",		Cmd_InvPrevW_f,			CF_NONE},
-	{"invuse",			Cmd_InvUse_f,			CF_ALLOW_SPEC},	//spec for menu up/down
+	{"invuse",			Cmd_InvUse_f,			CF_ALLOW_SPEC | CF_ALLOW_INT},	//spec for menu up/down
 	{"kb",				Cmd_KillBeep_f,			CF_ALLOW_SPEC | CF_ALLOW_DEAD},
 	{"kill",			Cmd_Kill_f,				CF_NONE},
 	{"kill_ai",			Cmd_Kill_AI_f,			CF_CHEAT_PROTECT},
@@ -2480,11 +2496,13 @@ cmds_t client_cmds[] = {
 	{"setpoi",			Cmd_SetPOI_f,			CF_ALLOW_SPEC | CF_CHEAT_PROTECT},
 	{"setmap",			Cmd_SetMap_f,			CF_ADMIN_ONLY | CF_ALLOW_INT | CF_ALLOW_SPEC},
 	{"setteam",			Cmd_SetTeam_f,			CF_ADMIN_ONLY | CF_ALLOW_INT | CF_ALLOW_SPEC},
+	{"setweaponpref",	Cmd_SetWeaponPref_f,	CF_ALLOW_DEAD | CF_ALLOW_INT | CF_ALLOW_SPEC},
 	{"shuffle",			Cmd_Shuffle_f,			CF_ADMIN_ONLY | CF_ALLOW_INT | CF_ALLOW_SPEC},
 	{"spawn",			Cmd_Spawn_f,			CF_ADMIN_ONLY | CF_ALLOW_SPEC},
 	{"specinvite",		Cmd_SpecInvite_f,		CF_ALLOW_DEAD | CF_ALLOW_SPEC},
 	{"specrevoke",		Cmd_SpecRevoke_f,		CF_ALLOW_DEAD | CF_ALLOW_SPEC},
 	{"specwho",			Cmd_SpecWho_f,			CF_ALLOW_DEAD | CF_ALLOW_SPEC},
+	{"sr",				Cmd_SkillRating_f,		CF_ALLOW_DEAD | CF_ALLOW_INT | CF_ALLOW_SPEC},
 	{"startmatch",		Cmd_StartMatch_f,		CF_ADMIN_ONLY | CF_ALLOW_INT | CF_ALLOW_SPEC},
 	{"stats",			Cmd_Stats_f,			CF_ALLOW_INT | CF_ALLOW_SPEC},
 	{"target",			Cmd_Target_f,			CF_ALLOW_DEAD | CF_ALLOW_SPEC | CF_CHEAT_PROTECT},

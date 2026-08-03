@@ -6,15 +6,20 @@
 #include "muffmode/mm_freezetag.h"
 #include "muffmode/mm_ghost.h"
 #include "muffmode/mm_match.h"
+#include "muffmode/mm_match_stats.h"
 #include "muffmode/mm_message_budget.h"
 #include "muffmode/mm_parse.h"
+#include "muffmode/mm_pconfig.h"
+#include "muffmode/mm_player_stats.h"
 #include "muffmode/mm_skin.h"
 #include "muffmode/mm_spawn_rules.h"
 #include "muffmode/mm_util.h"
 
 #include <algorithm>
 #include <array>
+#include <memory>
 #include <string>
+#include <vector>
 
 extern cvar_t *g_auto_ghost_max;
 extern cvar_t *g_auto_ghost_time;
@@ -35,7 +40,7 @@ constexpr gtime_t AUTO_GHOST_PLACEMENT_RETRY_TIME = 3_sec;
 constexpr gtime_t AUTO_GHOST_EXPIRE_PULSE_TIME = 700_ms;
 } // namespace muffmode::ghost
 
-static_assert(MM_GHOST_MAX_CLIENT_CAPACITY == MAX_CLIENTS_KEX);
+static_assert(MM_GHOST_MAX_CLIENT_CAPACITY == MAX_LOBBY_PLAYERS);
 static_assert(MM_GHOST_PLAYER_SKIN_CONFIGSTRING_VALUE_BYTES == CS_MAX_STRING_LENGTH);
 
 namespace muffmode::ghost::snapshot {
@@ -44,6 +49,18 @@ enum class AutoGhostPhase : uint8_t {
 	Reserved,
 	Reinstating,
 	Expiring
+};
+
+struct SavedProfileAuthority {
+	float rating = MM_PLAYER_STATS_DEFAULT_RATING;
+	int32_t rating_change = 0;
+	uint32_t stats_serial = 0;
+	uint8_t stats_outcome = 0;
+	bool stats_suspended = false;
+	bool persistence_ready = false;
+	client_config_t config{};
+	std::array<item_id_t, IT_TOTAL> weapon_prefs{};
+	uint8_t weapon_pref_count = 0;
 };
 
 struct EntityLifeSnapshot {
@@ -96,12 +113,21 @@ struct AutoGhostSnapshot {
 	bool inventory_released = false;
 };
 
-std::array<AutoGhostSnapshot, MAX_CLIENTS> auto_ghosts;
+static void ResetAutoGhostSnapshot(AutoGhostSnapshot &snapshot)
+{
+	static const AutoGhostSnapshot empty_snapshot;
+	snapshot = empty_snapshot;
+}
+
+std::array<AutoGhostSnapshot, MM_GHOST_MAX_CLIENT_CAPACITY> auto_ghosts;
 
 struct ReconnectClientState {
 	char userinfo[MAX_INFO_STRING]{};
 	char social_id[MAX_INFO_VALUE]{};
 	client_config_t config{};
+	std::array<item_id_t, IT_TOTAL> weapon_prefs{};
+	uint8_t weapon_pref_count = 0;
+	bool profile_persistence_ready = false;
 	bool admin = false;
 	int32_t ping = 0;
 	gtime_t inactivity_time;
@@ -126,6 +152,18 @@ struct RestorePlacement {
 
 mm_ghost_skin_sync_scheduler_t<MM_GHOST_MAX_CLIENT_CAPACITY> deferred_skin_sync;
 std::array<bool, MM_GHOST_MAX_CLIENT_CAPACITY> deferred_abort_spawns{};
+
+struct DeferredProfileReconciliation {
+	bool valid = false;
+	int32_t spawn_count = 0;
+	uint32_t match_serial = 0;
+	char social_id[MAX_INFO_VALUE]{};
+	SavedProfileAuthority reconnect_profile{};
+	SavedProfileAuthority installed_profile{};
+};
+
+std::array<DeferredProfileReconciliation, MM_GHOST_MAX_CLIENT_CAPACITY>
+	deferred_profile_reconciliations{};
 size_t pending_restore_commit_cursor = 0;
 
 struct GhostDiagnostics {
@@ -170,6 +208,7 @@ void ClearTransientClientReferences(gclient_t &client)
 	client.follow_target = nullptr;
 	client.follow_update = false;
 	client.owned_sphere = nullptr;
+	client.owned_sphere_generation = 0;
 	client.tracker_pain_time = 0_ms;
 	client.inmenu = false;
 	client.menu = nullptr;
@@ -192,8 +231,10 @@ void ClearTransientClientReferences(gclient_t &client)
 
 size_t GhostSlotCapacity()
 {
-	const size_t configured = game.maxclients ? static_cast<size_t>(game.maxclients) : MAX_CLIENTS_KEX;
-	return std::min({ configured, static_cast<size_t>(MAX_CLIENTS_KEX), static_cast<size_t>(MAX_CLIENTS) });
+	const size_t configured = game.maxclients
+		? static_cast<size_t>(game.maxclients)
+		: auto_ghosts.size();
+	return std::min(configured, auto_ghosts.size());
 }
 
 int AutoGhostDurationSeconds()
@@ -228,7 +269,7 @@ int GhostIndex(const ghost_t *ghost)
 		return -1;
 
 	const ptrdiff_t index = ghost - level.ghosts;
-	if (index < 0 || index >= static_cast<ptrdiff_t>(MAX_CLIENTS))
+	if (index < 0 || index >= static_cast<ptrdiff_t>(auto_ghosts.size()))
 		return -1;
 
 	return static_cast<int>(index);
@@ -417,7 +458,21 @@ void ClearSnapshot(size_t index, bool release_match_items = false)
 		ReleaseExpiredMatchItems(auto_ghosts[index]);
 
 	RemovePlaceholder(index);
-	auto_ghosts[index] = AutoGhostSnapshot{};
+	ResetAutoGhostSnapshot(auto_ghosts[index]);
+}
+
+void SettleSnapshotDeparture(size_t index)
+{
+	if (index >= auto_ghosts.size())
+		return;
+
+	auto &snapshot = auto_ghosts[index];
+	if (!snapshot.valid || !SnapshotBelongsToCurrentMatchId(snapshot))
+		return;
+
+	gentity_t *slot = level.ghosts[index].ent;
+	if (IsClientSlot(slot) && slot->client)
+		MM_PlayerStats_OnReservedClientExpired(slot, &snapshot.client);
 }
 
 void ReleaseExpiredMatchItems(const AutoGhostSnapshot &snapshot)
@@ -494,7 +549,10 @@ void DropSnapshotFlag(size_t index, item_id_t flag_id)
 		ent->client->pers.inventory[IT_FLAG_RED] = flag_id == IT_FLAG_RED ? snapshot.client.pers.inventory[IT_FLAG_RED] : 0;
 		ent->client->pers.inventory[IT_FLAG_BLUE] = flag_id == IT_FLAG_BLUE ? snapshot.client.pers.inventory[IT_FLAG_BLUE] : 0;
 		ent->client->pers.team_state.flag_pickup_time = snapshot.client.pers.team_state.flag_pickup_time;
+		ent->client->resp.ctf_flagsince = snapshot.client.resp.ctf_flagsince;
 		CTF_DeadDropFlag(ent);
+		snapshot.client.pers.match = ent->client->pers.match;
+		MM_MatchStats_ClientEnd(ent);
 	} else {
 		CTF_ResetTeamFlag(flag_id == IT_FLAG_RED ? TEAM_RED : TEAM_BLUE);
 	}
@@ -521,6 +579,7 @@ void ExpireSnapshot(size_t index)
 		return;
 	}
 
+	SettleSnapshotDeparture(index);
 	level.ghosts[index].code = 0;
 	ClearSnapshot(index, true);
 }
@@ -536,6 +595,7 @@ void DiscardStaleSnapshot(size_t index)
 
 	// A round/world reload has already recreated flags and Techs. Releasing an
 	// older snapshot into that new world would reset current-round item state.
+	SettleSnapshotDeparture(index);
 	level.ghosts[index].code = 0;
 	ClearSnapshot(index, false);
 }
@@ -758,6 +818,7 @@ void SanitizeRestoredClient(gentity_t *ent, int ghost_index)
 	client->follow_target = nullptr;
 	client->follow_update = false;
 	client->owned_sphere = nullptr;
+	client->owned_sphere_generation = 0;
 	client->grapple_ent = nullptr;
 	client->grapple_state = GRAPPLE_STATE_FLY;
 	client->tracker_pain_time = 0_ms;
@@ -790,6 +851,10 @@ ReconnectClientState CaptureReconnectClientState(const gclient_t &client)
 	muffmode::CopyString(state.userinfo, client.pers.userinfo);
 	muffmode::CopyString(state.social_id, client.pers.social_id);
 	state.config = client.sess.pc;
+	state.weapon_prefs = client.sess.weapon_prefs;
+	state.weapon_pref_count = client.sess.weapon_pref_count;
+	state.profile_persistence_ready =
+		client.sess.profile_persistence_ready;
 	state.admin = client.sess.admin;
 	state.ping = client.ping;
 	state.inactivity_time = client.sess.inactivity_time;
@@ -805,10 +870,23 @@ ReconnectClientState CaptureReconnectClientState(const gclient_t &client)
 	return state;
 }
 
-void ApplyReconnectClientState(gentity_t *ent, const ReconnectClientState &state)
+void ApplyReconnectClientState(gentity_t *ent, const ReconnectClientState &state,
+	bool preserve_snapshot_profile_state = false)
 {
 	gclient_t *client = ent->client;
-	client->sess.pc = state.config;
+	// A successful reconnect load owns the latest preferences. If that load
+	// failed, keep a trusted reservation's hydrated snapshot instead of
+	// replacing it with the new connection's defaults. Rating readiness remains
+	// the old match's authority until that match lifecycle closes.
+	if (!preserve_snapshot_profile_state || state.profile_persistence_ready) {
+		client->sess.pc = state.config;
+		client->sess.weapon_prefs = state.weapon_prefs;
+		client->sess.weapon_pref_count = state.weapon_pref_count;
+	}
+	if (!preserve_snapshot_profile_state) {
+		client->sess.profile_persistence_ready =
+			state.profile_persistence_ready;
+	}
 	client->sess.admin = MM_GhostRestoreAdminState(state.admin, ent == &g_entities[1]);
 	client->sess.is_a_bot = false;
 	client->ping = state.ping;
@@ -831,6 +909,19 @@ void ApplyReconnectClientState(gentity_t *ent, const ReconnectClientState &state
 	client->ps.pmove.delta_angles = client->ps.viewangles - client->resp.cmd_angles;
 	client->old_pmove = client->ps.pmove;
 	AngleVectors(client->v_angle, client->v_forward, nullptr, nullptr);
+}
+
+void ReapplyRestoredFollowLeader(gentity_t *ent)
+{
+	if (!ent || !ent->client || !ent->client->sess.pc.follow_leader ||
+		!ClientIsPlaying(ent->client) || !ent->client->eliminated) {
+		return;
+	}
+
+	// Clearing cross-connection references also clears the queued camera target.
+	// Applying the unchanged value rebuilds only that local queue; skin updates
+	// remain on the bounded deferred reconnect lane.
+	MM_PConfigSetBool(ent, mm_pconfig_bool_setting_t::follow_leader, true);
 }
 
 bool FindRestorePlacement(gentity_t *ent, const EntityLifeSnapshot &snapshot,
@@ -986,17 +1077,187 @@ struct SavedSessionMembership {
 	int wins{};
 	int losses{};
 	gtime_t team_join_time{};
+	int32_t score{};
+	int32_t old_score{};
+	int32_t round_start_score{};
+	int32_t round_dmg{};
 };
 
-SavedSessionMembership CaptureSavedSessionMembership(const client_session_t &source)
+SavedSessionMembership CaptureSavedSessionMembership(const gclient_t &source)
 {
 	return {
-		source.team,
-		source.duel_queued,
-		source.wins,
-		source.losses,
-		source.team_join_time
+		source.sess.team,
+		source.sess.duel_queued,
+		source.sess.wins,
+		source.sess.losses,
+		source.sess.team_join_time,
+		source.resp.score,
+		source.resp.old_score,
+		source.resp.round_start_score,
+		source.resp.round_dmg
 	};
+}
+
+SavedProfileAuthority CaptureSavedProfileAuthority(const gclient_t &source)
+{
+	return {
+		source.sess.skill_rating,
+		source.sess.skill_rating_change,
+		source.sess.stats_saved_match_serial,
+		source.sess.stats_saved_match_outcome,
+		source.sess.stats_reconnect_suspended,
+		source.sess.profile_persistence_ready,
+		source.sess.pc,
+		source.sess.weapon_prefs,
+		source.sess.weapon_pref_count
+	};
+}
+
+void ApplySavedProfileAuthority(
+	gclient_t &destination, const SavedProfileAuthority &saved)
+{
+	const bool reconnect_profile_ready =
+		destination.sess.profile_persistence_ready;
+	destination.sess.skill_rating = saved.rating;
+	destination.sess.skill_rating_change = saved.rating_change;
+	destination.sess.stats_saved_match_serial = saved.stats_serial;
+	destination.sess.stats_saved_match_outcome = saved.stats_outcome;
+	destination.sess.stats_reconnect_suspended = saved.stats_suspended;
+	destination.sess.profile_persistence_ready = saved.persistence_ready;
+	if (!reconnect_profile_ready) {
+		destination.sess.pc = saved.config;
+		destination.sess.weapon_prefs = saved.weapon_prefs;
+		destination.sess.weapon_pref_count = saved.weapon_pref_count;
+	}
+}
+
+client_config_t MergePostRestoreConfig(
+	const SavedProfileAuthority &reconnect,
+	const SavedProfileAuthority &installed,
+	const gclient_t &current)
+{
+	client_config_t merged = reconnect.config;
+	const client_config_t &live = current.sess.pc;
+	const client_config_t &baseline = installed.config;
+	if (live.show_id != baseline.show_id)
+		merged.show_id = live.show_id;
+	if (live.show_timer != baseline.show_timer)
+		merged.show_timer = live.show_timer;
+	if (live.show_match_info != baseline.show_match_info)
+		merged.show_match_info = live.show_match_info;
+	if (live.show_fragmessages != baseline.show_fragmessages)
+		merged.show_fragmessages = live.show_fragmessages;
+	if (live.killbeep_num != baseline.killbeep_num)
+		merged.killbeep_num = live.killbeep_num;
+	if (live.follow_killer != baseline.follow_killer)
+		merged.follow_killer = live.follow_killer;
+	if (live.follow_leader != baseline.follow_leader)
+		merged.follow_leader = live.follow_leader;
+	if (live.follow_powerup != baseline.follow_powerup)
+		merged.follow_powerup = live.follow_powerup;
+	if (live.follow_first_person != baseline.follow_first_person)
+		merged.follow_first_person = live.follow_first_person;
+	if (live.announcer_enabled != baseline.announcer_enabled)
+		merged.announcer_enabled = live.announcer_enabled;
+	if (!std::equal(std::begin(live.enemy_skin), std::end(live.enemy_skin),
+			std::begin(baseline.enemy_skin))) {
+		muffmode::CopyString(merged.enemy_skin, live.enemy_skin);
+	}
+	if (!std::equal(std::begin(live.team_skin), std::end(live.team_skin),
+			std::begin(baseline.team_skin))) {
+		muffmode::CopyString(merged.team_skin, live.team_skin);
+	}
+	return merged;
+}
+
+size_t DeferredProfileIndex(const gentity_t *ent)
+{
+	if (!ent || ent <= g_entities)
+		return deferred_profile_reconciliations.size();
+	const ptrdiff_t index = ent - g_entities - 1;
+	return index >= 0 &&
+		index < static_cast<ptrdiff_t>(deferred_profile_reconciliations.size())
+		? static_cast<size_t>(index)
+		: deferred_profile_reconciliations.size();
+}
+
+void ClearDeferredProfileReconciliation(gentity_t *ent)
+{
+	const size_t index = DeferredProfileIndex(ent);
+	if (index < deferred_profile_reconciliations.size())
+		deferred_profile_reconciliations[index] = {};
+}
+
+void QueueDeferredProfileReconciliation(
+	gentity_t *ent, const SavedProfileAuthority &reconnect_profile)
+{
+	const size_t index = DeferredProfileIndex(ent);
+	if (index >= deferred_profile_reconciliations.size() || !ent->client ||
+		!ent->client->pers.social_id[0]) {
+		return;
+	}
+
+	auto &pending = deferred_profile_reconciliations[index];
+	pending = {};
+	pending.valid = true;
+	pending.spawn_count = ent->spawn_count;
+	pending.match_serial = MM_PlayerStats_CurrentMatchSerial();
+	muffmode::CopyString(pending.social_id, ent->client->pers.social_id);
+	pending.reconnect_profile = reconnect_profile;
+	pending.installed_profile = CaptureSavedProfileAuthority(*ent->client);
+}
+
+void ReconcileDeferredProfiles()
+{
+	for (size_t i = 0; i < deferred_profile_reconciliations.size(); ++i) {
+		auto pending = deferred_profile_reconciliations[i];
+		deferred_profile_reconciliations[i] = {};
+		if (!pending.valid || i >= static_cast<size_t>(game.maxclients))
+			continue;
+
+		gentity_t *ent = &g_entities[i + 1];
+		if (!ent->client || !ent->client->pers.connected ||
+			ent->spawn_count != pending.spawn_count ||
+			pending.match_serial != MM_PlayerStats_CurrentMatchSerial() ||
+			std::string_view(ent->client->pers.social_id) != pending.social_id) {
+			continue;
+		}
+
+		const SavedProfileAuthority &preference_base =
+			MM_GhostReconnectPreferencesUseInstalledProfile(
+				pending.reconnect_profile.persistence_ready)
+			? pending.installed_profile
+			: pending.reconnect_profile;
+		SavedProfileAuthority reconciled = pending.reconnect_profile;
+		reconciled.config = MergePostRestoreConfig(
+			preference_base, pending.installed_profile, *ent->client);
+		reconciled.weapon_prefs = preference_base.weapon_prefs;
+		reconciled.weapon_pref_count = preference_base.weapon_pref_count;
+		const bool weapon_preferences_changed =
+			ent->client->sess.weapon_pref_count !=
+				pending.installed_profile.weapon_pref_count ||
+			!std::equal(ent->client->sess.weapon_prefs.begin(),
+				ent->client->sess.weapon_prefs.end(),
+				pending.installed_profile.weapon_prefs.begin());
+		if (weapon_preferences_changed) {
+			reconciled.weapon_prefs = ent->client->sess.weapon_prefs;
+			reconciled.weapon_pref_count =
+				ent->client->sess.weapon_pref_count;
+		}
+
+		ent->client->sess.skill_rating = reconciled.rating;
+		ent->client->sess.skill_rating_change = reconciled.rating_change;
+		ent->client->sess.stats_saved_match_serial = reconciled.stats_serial;
+		ent->client->sess.stats_saved_match_outcome = reconciled.stats_outcome;
+		ent->client->sess.stats_reconnect_suspended =
+			reconciled.stats_suspended;
+		ent->client->sess.profile_persistence_ready =
+			reconciled.persistence_ready;
+		ent->client->sess.pc = reconciled.config;
+		ent->client->sess.weapon_prefs = reconciled.weapon_prefs;
+		ent->client->sess.weapon_pref_count = reconciled.weapon_pref_count;
+		MM_PlayerStats_OnClientResume(ent);
+	}
 }
 
 void RestoreSavedSessionMembership(
@@ -1020,6 +1281,19 @@ void RestoreSavedSessionMembership(
 	destination.wins = saved->wins;
 	destination.losses = saved->losses;
 	destination.team_join_time = saved->team_join_time;
+}
+
+void RestoreSavedRespawnScoring(
+	client_respawn_t &destination, const SavedSessionMembership *saved,
+	const mm_ghost_session_membership_policy_t &policy)
+{
+	if (!saved || !policy.reapply_saved_membership)
+		return;
+
+	destination.score = saved->score;
+	destination.old_score = saved->old_score;
+	destination.round_start_score = saved->round_start_score;
+	destination.round_dmg = saved->round_dmg;
 }
 
 void RestartPendingRestoreTarget(gentity_t *target, const char *reason,
@@ -1078,7 +1352,10 @@ void RestartPendingRestoreTarget(gentity_t *target, const char *reason,
 	if (membership_policy.reapply_saved_membership) {
 		RestoreSavedSessionMembership(target->client->sess, saved_membership,
 			membership_policy);
+		RestoreSavedRespawnScoring(target->client->resp, saved_membership,
+			membership_policy);
 		P_PublishEngineTeam(target);
+		CalculateRanks();
 	}
 	target->client->pers.connected = true;
 	target->client->pers.ingame = true;
@@ -1255,6 +1532,8 @@ void ReleaseTimedOutInventory(size_t index)
 	if (IsAutoGhostPlaceholder(ent)) {
 		CopySnapshotDropStateToEntity(snapshot, ent);
 		TossClientItems(ent);
+		snapshot.client.pers.match = ent->client->pers.match;
+		MM_MatchStats_ClientEnd(ent);
 
 		// Tossing is policy-sensitive: combat-disabled phases can skip everything,
 		// and Horde may deliberately keep Techs on death. Treat only inventory that
@@ -1321,6 +1600,7 @@ bool StartAutoGhostTimeout(gentity_t *ent)
 		ent->client->resp.netname, G_TimeString(timeout_seconds * 1000, false));
 	gi.positioned_sound(world->s.origin, world, CHAN_RELIABLE | CHAN_NO_PHS_ADD | CHAN_AUX,
 		gi.soundindex("world/klaxon2.wav"), 1, ATTN_NONE, 0);
+	MM_MatchStats_LogEvent("MATCH TIMEOUT STARTED");
 	return true;
 }
 
@@ -1377,7 +1657,7 @@ bool CaptureActivePlayerSnapshot(gentity_t *ent, bool start_auto_timeout)
 		GenerateGhostCode(static_cast<size_t>(ghost_index));
 
 	auto &snapshot = auto_ghosts[ghost_index];
-	snapshot = AutoGhostSnapshot{};
+	ResetAutoGhostSnapshot(snapshot);
 	snapshot.valid = true;
 	snapshot.match_id = level.match_id;
 	snapshot.round_epoch = level.round_epoch;
@@ -1430,7 +1710,9 @@ RestoreSnapshotResult RestoreSnapshot(gentity_t *ent, int ghost_index, bool manu
 	}
 
 	const ReconnectClientState reconnect = CaptureReconnectClientState(*ent->client);
-	const gclient_t current_client = *ent->client;
+	const SavedProfileAuthority reconnect_profile =
+		CaptureSavedProfileAuthority(*ent->client);
+	const auto current_client = std::make_unique<gclient_t>(*ent->client);
 	*ent->client = snapshot.client;
 	// Defend older/in-memory snapshots too: pointers and authority never cross
 	// the disconnect boundary, even if the snapshot predates this sanitizer.
@@ -1439,7 +1721,7 @@ RestoreSnapshotResult RestoreSnapshot(gentity_t *ent, int ghost_index, bool manu
 
 	RestorePlacement placement{};
 	if (!FindRestorePlacement(ent, snapshot.entity, placement)) {
-		*ent->client = current_client;
+		*ent->client = *current_client;
 		IncrementDiagnostic(diagnostics.restore_retries);
 		return RestoreSnapshotResult::Retry;
 	}
@@ -1451,7 +1733,7 @@ RestoreSnapshotResult RestoreSnapshot(gentity_t *ent, int ghost_index, bool manu
 	RestoreEntityLife(ent, snapshot.entity);
 	SanitizeRestoredClient(ent, ghost_index);
 	ApplyRestorePlacement(ent, placement);
-	ApplyReconnectClientState(ent, reconnect);
+	ApplyReconnectClientState(ent, reconnect, true);
 
 	P_AssignClientSkinnum(ent);
 	P_ForceFogTransition(ent, true, true);
@@ -1460,6 +1742,9 @@ RestoreSnapshotResult RestoreSnapshot(gentity_t *ent, int ghost_index, bool manu
 	level.ghosts[ghost_index].code = 0;
 	ClearSnapshot(static_cast<size_t>(ghost_index));
 	UpdateGhostStatsFromEntity(ent, level.ghosts[ghost_index]);
+	MM_MatchStats_ClientBegin(ent);
+	MM_PlayerStats_OnClientResume(ent);
+	QueueDeferredProfileReconciliation(ent, reconnect_profile);
 	QueueDeferredSkinSync(ent);
 
 	if (level.timeout_auto && !level.timeout_resuming && level.timeout_in_place > 0_ms &&
@@ -1480,6 +1765,7 @@ RestoreSnapshotResult RestoreSnapshot(gentity_t *ent, int ghost_index, bool manu
 		gi.LocClient_Print(ent, PRINT_HIGH, "Your match state has been restored from auto-ghost.\n");
 
 	CalculateRanks();
+	ReapplyRestoredFollowLeader(ent);
 	IncrementDiagnostic(diagnostics.restore_successes);
 	return RestoreSnapshotResult::Restored;
 }
@@ -1608,12 +1894,17 @@ void AbortPendingRestore(size_t index, const char *reason, bool release_match_it
 	if (snapshot.phase == AutoGhostPhase::Reinstating)
 		IncrementDiagnostic(diagnostics.restore_aborts);
 	SavedSessionMembership saved_membership{};
+	SavedProfileAuthority saved_profile{};
 	// A new round/world invalidates exact combat state, but not the authenticated
 	// team reservation inside the same match. Preserve that membership so the
 	// ordinary abort path cannot strand a reconnect as a spectator in a lock.
 	const bool preserve_saved_membership = SnapshotBelongsToCurrentMatchId(snapshot);
-	if (preserve_saved_membership)
-		saved_membership = CaptureSavedSessionMembership(snapshot.client.sess);
+	if (preserve_saved_membership) {
+		saved_membership = CaptureSavedSessionMembership(snapshot.client);
+		saved_profile = CaptureSavedProfileAuthority(snapshot.client);
+	}
+	const bool preserve_snapshot_profile_authority =
+		preserve_saved_membership && MM_PlayerStats_IsMatchOpen();
 	gentity_t *target = nullptr;
 	if (snapshot.phase == AutoGhostPhase::Reinstating &&
 		snapshot.pending_entnum > 0 &&
@@ -1623,9 +1914,13 @@ void AbortPendingRestore(size_t index, const char *reason, bool release_match_it
 			candidate->inuse && candidate->client && candidate->client->pers.connected)
 			target = candidate;
 	}
-
+	SavedProfileAuthority reconnect_profile{};
+	if (target)
+		reconnect_profile = CaptureSavedProfileAuthority(*target->client);
 	if (release_match_items)
 		ReleaseExpiredMatchItems(snapshot);
+	if (!target)
+		SettleSnapshotDeparture(index);
 	level.ghosts[index].code = 0;
 	ClearSnapshot(index, false);
 	level.ghosts[index] = ghost_t{};
@@ -1635,6 +1930,17 @@ void AbortPendingRestore(size_t index, const char *reason, bool release_match_it
 
 	RestartPendingRestoreTarget(target, reason, resume_auto_timeout,
 		preserve_saved_membership ? &saved_membership : nullptr);
+	if (preserve_saved_membership && target->client &&
+		target->client->pers.connected) {
+		if (preserve_snapshot_profile_authority) {
+			ApplySavedProfileAuthority(*target->client, saved_profile);
+			MM_MatchStats_ClientBegin(target);
+		}
+		MM_PlayerStats_OnClientResume(target);
+		if (preserve_snapshot_profile_authority)
+			QueueDeferredProfileReconciliation(target, reconnect_profile);
+		ReapplyRestoredFollowLeader(target);
+	}
 }
 
 bool CancelPendingRestoreForTarget(gentity_t *ent, bool &target_is_placeholder)
@@ -1660,6 +1966,9 @@ bool BeginRestoreDelay(gentity_t *ent, int ghost_index, bool manual)
 		return false;
 	if (snapshot.phase == AutoGhostPhase::Reinstating)
 		return EntityMatchesPendingRestore(snapshot, ent);
+	// A newer connection supersedes any reconnect base retained by an earlier
+	// committed restore in this slot.
+	ClearDeferredProfileReconciliation(ent);
 
 	snapshot.phase = AutoGhostPhase::Reinstating;
 	snapshot.phase_elapsed = 0_ms;
@@ -1829,9 +2138,14 @@ void MM_Ghost_ClearAll(bool restart_pending_clients) {
 	struct PendingRestoreRestart {
 		gentity_t *target = nullptr;
 		ghost_snapshot::SavedSessionMembership saved_membership{};
+		ghost_snapshot::SavedProfileAuthority saved_profile{};
+		ghost_snapshot::SavedProfileAuthority reconnect_profile{};
 	};
-	std::array<PendingRestoreRestart, MM_GHOST_MAX_CLIENT_CAPACITY> pending_targets{};
-	size_t pending_target_count = 0;
+	const bool preserve_snapshot_profile_authority =
+		MM_PlayerStats_IsMatchOpen();
+	std::vector<PendingRestoreRestart> pending_targets;
+	if (restart_pending_clients)
+		pending_targets.reserve(ghost_snapshot::GhostSlotCapacity());
 	for (size_t i = 0; i < ghost_snapshot::GhostSlotCapacity(); i++) {
 		const auto &snapshot = ghost_snapshot::auto_ghosts[i];
 		if (snapshot.valid &&
@@ -1840,18 +2154,22 @@ void MM_Ghost_ClearAll(bool restart_pending_clients) {
 				ghost_snapshot::diagnostics.restore_aborts);
 			if (restart_pending_clients) {
 				if (gentity_t *target = ghost_snapshot::PendingRestoreTarget(snapshot))
-					pending_targets[pending_target_count++] = {
+					pending_targets.push_back({
 						target,
-						ghost_snapshot::CaptureSavedSessionMembership(snapshot.client.sess)
-					};
+						ghost_snapshot::CaptureSavedSessionMembership(snapshot.client),
+						ghost_snapshot::CaptureSavedProfileAuthority(snapshot.client),
+						ghost_snapshot::CaptureSavedProfileAuthority(*target->client)
+					});
 			}
 		}
 	}
 
 	for (size_t i = 0; i < ghost_snapshot::GhostSlotCapacity(); i++)
 		ghost_snapshot::ClearSnapshot(i);
-	std::fill(ghost_snapshot::auto_ghosts.begin(), ghost_snapshot::auto_ghosts.end(),
-		ghost_snapshot::AutoGhostSnapshot{});
+	for (size_t i = ghost_snapshot::GhostSlotCapacity();
+		i < ghost_snapshot::auto_ghosts.size(); ++i) {
+		ghost_snapshot::ResetAutoGhostSnapshot(ghost_snapshot::auto_ghosts[i]);
+	}
 	// A map load discards every old marker. A same-map reset must retain a genuine
 	// connected spawn retry even when its snapshot was already cleared on an
 	// earlier abort; otherwise disconnect could recapture its zeroed limbo state.
@@ -1880,12 +2198,31 @@ void MM_Ghost_ClearAll(bool restart_pending_clients) {
 	// Match start/reset rebuilds the world immediately after this call. Return a
 	// connected client that was inside the reinstatement delay to the ordinary
 	// spawn path first, without releasing snapshot-owned items into the old world.
-	for (size_t i = 0; i < pending_target_count; i++) {
-		gentity_t *target = pending_targets[i].target;
+	for (auto &pending_target : pending_targets) {
+		gentity_t *target = pending_target.target;
 		if (!target || !target->client || !target->client->pers.connected)
 			continue;
 		ghost_snapshot::RestartPendingRestoreTarget(target, nullptr, false,
-			&pending_targets[i].saved_membership, true);
+			&pending_target.saved_membership, true);
+		if (!target->client || !target->client->pers.connected)
+			continue;
+		if (preserve_snapshot_profile_authority) {
+			ghost_snapshot::ApplySavedProfileAuthority(
+				*target->client, pending_target.saved_profile);
+			MM_MatchStats_ClientBegin(target);
+		}
+		MM_PlayerStats_OnClientResume(target);
+		if (preserve_snapshot_profile_authority) {
+			ghost_snapshot::QueueDeferredProfileReconciliation(
+				target, pending_target.reconnect_profile);
+		}
+	}
+	if (!restart_pending_clients) {
+		std::fill(ghost_snapshot::deferred_profile_reconciliations.begin(),
+			ghost_snapshot::deferred_profile_reconciliations.end(),
+			ghost_snapshot::DeferredProfileReconciliation{});
+	} else if (!preserve_snapshot_profile_authority) {
+		ghost_snapshot::ReconcileDeferredProfiles();
 	}
 
 	// A normal abort restart may assign a fresh code or queue presentation work.
@@ -2088,6 +2425,76 @@ bool MM_Ghost_IsReservedSlot(gentity_t *slot) {
 	return false;
 }
 
+gclient_t *MM_Ghost_ReservedClientState(gentity_t *slot) {
+	if (!slot)
+		return nullptr;
+
+	for (size_t i = 0; i < ghost_snapshot::GhostSlotCapacity(); i++) {
+		auto &snapshot = ghost_snapshot::auto_ghosts[i];
+		if (snapshot.valid && level.ghosts[i].ent == slot &&
+			ghost_snapshot::SnapshotBelongsToCurrentMatchId(snapshot)) {
+			return &snapshot.client;
+		}
+	}
+
+	return nullptr;
+}
+
+const gclient_t *MM_Ghost_ReservedClientState(const gentity_t *slot) {
+	if (!slot)
+		return nullptr;
+
+	for (size_t i = 0; i < ghost_snapshot::GhostSlotCapacity(); i++) {
+		const auto &snapshot = ghost_snapshot::auto_ghosts[i];
+		if (snapshot.valid && level.ghosts[i].ent == slot &&
+			ghost_snapshot::SnapshotBelongsToCurrentMatchId(snapshot)) {
+			return &snapshot.client;
+		}
+	}
+
+	return nullptr;
+}
+
+size_t MM_Ghost_ActivePlayingReservationCount() {
+	size_t count = 0;
+	for (size_t i = 0; i < ghost_snapshot::GhostSlotCapacity(); i++) {
+		const auto &snapshot = ghost_snapshot::auto_ghosts[i];
+		if (ghost_snapshot::SnapshotMatchesCurrentMatch(snapshot) &&
+			snapshot.client.sess.team != TEAM_NONE &&
+			snapshot.client.sess.team != TEAM_SPECTATOR) {
+			++count;
+		}
+	}
+	return count;
+}
+
+size_t MM_Ghost_ActiveHumanPlayingReservationCount() {
+	size_t count = 0;
+	for (size_t i = 0; i < ghost_snapshot::GhostSlotCapacity(); i++) {
+		const auto &snapshot = ghost_snapshot::auto_ghosts[i];
+		if (ghost_snapshot::SnapshotMatchesCurrentMatch(snapshot) &&
+			snapshot.client.sess.team != TEAM_NONE &&
+			snapshot.client.sess.team != TEAM_SPECTATOR &&
+			!snapshot.client.sess.is_a_bot &&
+			!(snapshot.entity.svflags & SVF_BOT)) {
+			++count;
+		}
+	}
+	return count;
+}
+
+size_t MM_Ghost_ActivePlayingReservationCountForTeam(team_t team) {
+	size_t count = 0;
+	for (size_t i = 0; i < ghost_snapshot::GhostSlotCapacity(); i++) {
+		const auto &snapshot = ghost_snapshot::auto_ghosts[i];
+		if (ghost_snapshot::SnapshotMatchesCurrentMatch(snapshot) &&
+			snapshot.client.sess.team == team) {
+			++count;
+		}
+	}
+	return count;
+}
+
 bool MM_Ghost_ReservedClientCountsForRound(const gentity_t *slot, team_t team) {
 	if (!slot || !slot->client)
 		return false;
@@ -2191,8 +2598,10 @@ bool MM_Ghost_TryRestore(gentity_t *ent) {
 		return false;
 
 	const int ghost_index = ghost_snapshot::FindSnapshotForSocialId(ent->client->pers.social_id);
-	if (ghost_index < 0)
+	if (ghost_index < 0) {
+		ghost_snapshot::ClearDeferredProfileReconciliation(ent);
 		return false;
+	}
 
 	return ghost_snapshot::BeginRestoreDelay(ent, ghost_index, false);
 }
@@ -2217,6 +2626,12 @@ MM_Ghost_RunFrame
 ================
 */
 void MM_Ghost_RunFrame() {
+	if (MM_GhostShouldDeferSnapshotCleanup(
+			level.intermission_queued != 0_ms,
+			MM_MatchStats_IsCollecting())) {
+		return;
+	}
+
 	if (!MM_GhostMayRunRestoreCommit(
 			level.match_state == matchst_t::MATCH_IN_PROGRESS,
 			level.intermission_time != 0_ms,

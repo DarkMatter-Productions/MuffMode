@@ -11,6 +11,7 @@
 #include "muffmode/mm_lms.h"
 #include "muffmode/mm_red_rover_rules.h"
 #include "muffmode/mm_scoreboard_layout.h"
+#include "muffmode/mm_statusbar.h"
 #include "muffmode/mm_vote_menu.h"
 
 void MultiplayerScoreboard(gentity_t *ent);
@@ -349,7 +350,7 @@ TeamsScoreboardMessage
 void TeamsScoreboardMessage(gentity_t *ent, gentity_t *killer) {
 	uint32_t	i, j, k, n;
 	uint8_t		sorted[2][MAX_CLIENTS];
-	int8_t		sortedscores[2][MAX_CLIENTS];
+	int32_t		sortedscores[2][MAX_CLIENTS];
 	int			score;
 	uint8_t		total[2];
 	uint8_t		total_living[2];
@@ -884,7 +885,9 @@ static void G_SetGametypeStats(gentity_t *ent) {
 	else
 		ent->client->ps.stats[STAT_LIVES] = 0;
 	
-	if (deathmatch->integer && level.match_state >= MATCH_WARMUP_DELAYED && level.match_state < MATCH_COUNTDOWN) {
+	// [MuffMode] Transient notice, not a warmup fixture: MM_MatchInfoHud_Show arms a 5 second
+	// window on team join and on gametype/ruleset changes.
+	if (deathmatch->integer && MM_MatchInfoHud_Visible(ent)) {
 		gi.configstring(CONFIG_GAMETYPE_HUD, G_Fmt("Gametype: {}", level.gametype_name).data());
 		gi.configstring(CONFIG_RULESET_HUD, G_Fmt("Ruleset: {}", rs_long_name[game.ruleset]).data());
 		ent->client->ps.stats[STAT_GAMETYPE_HUD] = CONFIG_GAMETYPE_HUD;
@@ -894,19 +897,9 @@ static void G_SetGametypeStats(gentity_t *ent) {
 		ent->client->ps.stats[STAT_RULESET_HUD] = 0;
 	}
 
-	if (deathmatch->integer && level.match_state == MATCH_IN_PROGRESS) {
-		const int limit = GT_ScoreLimit() > 0 ? GT_ScoreLimit() : 0;
-
-		if (limit > 0) {
-			ent->client->ps.stats[STAT_ROUND_NUMBER] = limit;
-			ent->client->ps.stats[STAT_SCORELIMIT] = 0;
-		} else {
-			ent->client->ps.stats[STAT_ROUND_NUMBER] = 0;
-			ent->client->ps.stats[STAT_SCORELIMIT] = 0;
-		}
-	} else {
-		ent->client->ps.stats[STAT_ROUND_NUMBER] = 0;
-	}
+	// [MuffMode] The match limit below the miniscore rides on STAT_SCORELIMIT as small white
+	// text (ClientEndServerFrame owns it); STAT_ROUND_NUMBER no longer carries it.
+	ent->client->ps.stats[STAT_ROUND_NUMBER] = 0;
 
 	if (level.match_state == MATCH_IN_PROGRESS) {
 		if (GT(GT_HORDE)) {
@@ -949,11 +942,15 @@ static void G_SetGametypeStats(gentity_t *ent) {
 			}
 		}
 
+		// [MuffMode] Strike draws OFFENSE/DEFENSE on the gametype row; the join notice must not
+		// print over it when a player joins mid-match.
+		if (GT(GT_STRIKE) && ent->client->ps.stats[STAT_ARENA_ROLE])
+			ent->client->ps.stats[STAT_GAMETYPE_HUD] = 0;
+
 	} else {
 		ent->client->ps.stats[STAT_HORDE_REMAINING] = 0;
 		ent->client->ps.stats[STAT_HORDE_WAVE] = 0;
 		ent->client->ps.stats[STAT_ARENA_ROLE] = 0;
-		ent->client->ps.stats[STAT_ROUND_NUMBER] = 0;
 	}
 
 	// stat for text on what we're doing for respawn
@@ -1077,7 +1074,7 @@ static void SetCrosshairIDView(gentity_t *ent) {
 	best = nullptr;
 	for (uint32_t i = 1; i <= game.maxclients; i++) {
 		who = g_entities + i;
-		if (!who->inuse || who->solid == SOLID_NOT)
+		if (!who->inuse || !who->client || who->solid == SOLID_NOT)
 			continue;
 		if (GT(GT_ARENA) && !MM_Arena_SameArena(ent, who))
 			continue;
@@ -1094,7 +1091,7 @@ static void SetCrosshairIDView(gentity_t *ent) {
 			best = who;
 		}
 	}
-	if (bd > 0.90f) {
+	if (best && best->client && bd > 0.90f) {
 		ent->client->ps.stats[STAT_CROSSHAIR_ID_VIEW] = (best - g_entities);
 		if (best->client->sess.team == TEAM_RED)
 			ent->client->ps.stats[STAT_CROSSHAIR_ID_VIEW_COLOR] = ii_teams_red_tiny;
@@ -1104,10 +1101,11 @@ static void SetCrosshairIDView(gentity_t *ent) {
 }
 
 
-// Miniscore rows (team logos / FFA avatars + num(3) scores) stay visible from warmup through match play.
+// Miniscore rows (team logos / FFA avatars + num(3) scores) only track a live match: hidden
+// through every warmup stage, the pre-match countdown, and intermission.
 static bool MiniscoreHudActive()
 {
-	return level.match_state >= MATCH_WARMUP_DELAYED && level.match_state <= MATCH_IN_PROGRESS;
+	return level.match_state == MATCH_IN_PROGRESS && !level.intermission_time;
 }
 
 static void CTF_SetStats(gentity_t *ent, bool blink) {
@@ -1181,10 +1179,14 @@ static void CTF_SetStats(gentity_t *ent, bool blink) {
 			p2 = ii_ctf_blue_dropped; // must be dropped
 	}
 
-	ent->client->ps.stats[STAT_MINISCORE_FIRST_PIC] = p1;
-	ent->client->ps.stats[STAT_MINISCORE_SECOND_PIC] = p2;
+	// Flag state above is computed unconditionally (it can return a stray flag to base); only the
+	// miniscore rows themselves follow the warmup/intermission gate.
+	const bool miniscore_visible = MiniscoreHudActive();
 
-	if (level.ctf_last_flag_capture && level.time - level.ctf_last_flag_capture < 5_sec) {
+	ent->client->ps.stats[STAT_MINISCORE_FIRST_PIC] = miniscore_visible ? p1 : 0;
+	ent->client->ps.stats[STAT_MINISCORE_SECOND_PIC] = miniscore_visible ? p2 : 0;
+
+	if (miniscore_visible && level.ctf_last_flag_capture && level.time - level.ctf_last_flag_capture < 5_sec) {
 		if (level.ctf_last_capture_team == TEAM_RED)
 			if (blink)
 				ent->client->ps.stats[STAT_MINISCORE_FIRST_PIC] = p1;
@@ -1320,6 +1322,10 @@ static void SetMiniScoreStats(gentity_t *ent) {
 			if (MiniscoreHudActive()) {
 				ent->client->ps.stats[STAT_MINISCORE_FIRST_PIC] = ii_teams_red_default;
 				ent->client->ps.stats[STAT_MINISCORE_SECOND_PIC] = ii_teams_blue_default;
+			} else {
+				// stale team logos would otherwise survive into warmup / intermission
+				ent->client->ps.stats[STAT_MINISCORE_FIRST_PIC] = 0;
+				ent->client->ps.stats[STAT_MINISCORE_SECOND_PIC] = 0;
 			}
 		} else {
 			int16_t pic1 = 0, pic2 = 0;
@@ -1394,8 +1400,6 @@ void G_SetStats(gentity_t *ent) {
 	bool			minhud = notGT(GT_ARENA) &&
 		((g_instagib->integer || GT(GT_INSTAGIB)) ||
 		 (g_nadefest->integer || GT(GT_NADEFEST)));
-	int32_t			img_index = ent->client->pers.skin_icon_index;
-
 	//
 	// health
 	//
@@ -1522,7 +1526,11 @@ void G_SetStats(gentity_t *ent) {
 				break;
 			}
 
-			G_SetPowerupStat((uint16_t *)&ent->client->ps.stats[STAT_POWERUP_INFO_START], powerup->powerup_wheel_index, val);
+			G_SetPowerupStat(
+				(uint16_t *)&ent->client->ps.stats[STAT_AMMO_INFO_START],
+				(uint16_t *)&ent->client->ps.stats[STAT_POWERUP_INFO_START],
+				powerup->powerup_wheel_index,
+				val);
 		}
 
 		ent->client->ps.stats[STAT_POWERUP_ICON] = 0;
@@ -1531,17 +1539,17 @@ void G_SetStats(gentity_t *ent) {
 		//
 		// timers
 		//
-		if (ent->client->owned_sphere) {
-			if (ent->client->owned_sphere->spawnflags == SF_SPHERE_DEFENDER) // defender
+		if (gentity_t *sphere = G_ResolveOwnedSphere(ent->client)) {
+			if (sphere->spawnflags == SF_SPHERE_DEFENDER) // defender
 				ent->client->ps.stats[STAT_POWERUP_ICON] = gi.imageindex("p_defender");
-			else if (ent->client->owned_sphere->spawnflags == SF_SPHERE_HUNTER) // hunter
+			else if (sphere->spawnflags == SF_SPHERE_HUNTER) // hunter
 				ent->client->ps.stats[STAT_POWERUP_ICON] = gi.imageindex("p_hunter");
-			else if (ent->client->owned_sphere->spawnflags == SF_SPHERE_VENGEANCE) // vengeance
+			else if (sphere->spawnflags == SF_SPHERE_VENGEANCE) // vengeance
 				ent->client->ps.stats[STAT_POWERUP_ICON] = gi.imageindex("p_vengeance");
 			else // error case
 				ent->client->ps.stats[STAT_POWERUP_ICON] = gi.imageindex("i_fixme");
 
-			ent->client->ps.stats[STAT_POWERUP_TIME] = ceil(ent->client->owned_sphere->wait - level.time.seconds());
+			ent->client->ps.stats[STAT_POWERUP_TIME] = ceil(sphere->wait - level.time.seconds());
 		} else {
 			powerup_info_t *best_powerup = nullptr;
 
@@ -1699,11 +1707,12 @@ void G_SetStats(gentity_t *ent) {
 	// set & run the health bar stuff
 	for (size_t i = 0; i < MAX_HEALTH_BARS; i++) {
 		byte *health_byte = reinterpret_cast<byte *>(&ent->client->ps.stats[STAT_HEALTH_BARS]) + i;
+		gentity_t *const bar = level.health_bar_entities[i];
 
-		if (!level.health_bar_entities[i])
+		if (!bar || !bar->inuse)
 			*health_byte = 0;
-		else if (level.health_bar_entities[i]->timestamp) {
-			if (level.health_bar_entities[i]->timestamp < level.time) {
+		else if (bar->timestamp) {
+			if (bar->timestamp < level.time) {
 				level.health_bar_entities[i] = nullptr;
 				*health_byte = 0;
 				continue;
@@ -1711,16 +1720,21 @@ void G_SetStats(gentity_t *ent) {
 
 			*health_byte = 0b10000000;
 		} else {
+			if (!bar->enemy) {
+				level.health_bar_entities[i] = nullptr;
+				*health_byte = 0;
+				continue;
+			}
 			// enemy dead
-			if (!level.health_bar_entities[i]->enemy->inuse || level.health_bar_entities[i]->enemy->health <= 0) {
+			if (!bar->enemy->inuse || bar->enemy->health <= 0) {
 				// hack for Makron
-				if (level.health_bar_entities[i]->enemy->monsterinfo.aiflags & AI_DOUBLE_TROUBLE) {
+				if (bar->enemy->monsterinfo.aiflags & AI_DOUBLE_TROUBLE) {
 					*health_byte = 0b10000000;
 					continue;
 				}
 
-				if (level.health_bar_entities[i]->delay) {
-					level.health_bar_entities[i]->timestamp = level.time + gtime_t::from_sec(level.health_bar_entities[i]->delay);
+				if (bar->delay) {
+					bar->timestamp = level.time + gtime_t::from_sec(bar->delay);
 					*health_byte = 0b10000000;
 				} else {
 					level.health_bar_entities[i] = nullptr;
@@ -1728,12 +1742,20 @@ void G_SetStats(gentity_t *ent) {
 				}
 
 				continue;
-			} else if (level.health_bar_entities[i]->spawnflags.has(SPAWNFLAG_HEALTHBAR_PVS_ONLY) && !gi.inPVS(ent->s.origin, level.health_bar_entities[i]->enemy->s.origin, true)) {
+			} else if (bar->spawnflags.has(SPAWNFLAG_HEALTHBAR_PVS_ONLY) && !gi.inPVS(ent->s.origin, bar->enemy->s.origin, true)) {
 				*health_byte = 0;
 				continue;
 			}
 
-			float health_remaining = ((float)level.health_bar_entities[i]->enemy->health) / level.health_bar_entities[i]->enemy->max_health;
+			if (bar->enemy->max_health <= 0) {
+				level.health_bar_entities[i] = nullptr;
+				*health_byte = 0;
+				continue;
+			}
+			const float health_remaining = clamp(
+				static_cast<float>(bar->enemy->health) /
+					static_cast<float>(bar->enemy->max_health),
+				0.0f, 1.0f);
 			*health_byte = ((byte)(health_remaining * 0b01111111)) | 0b10000000;
 		}
 	}

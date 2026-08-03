@@ -213,6 +213,8 @@ void MM_SendEffectivePlayerSkin(gentity_t *viewer, gentity_t *target) {
 void MM_CmdSkinOverride(gentity_t *ent, bool is_enemy, const char *label, const char *affected_players, const char *command) {
 	if (!MM_IsClientEntity(ent))
 		return;
+	if (CheckFlood(ent))
+		return;
 
 	if (!g_allow_skin_overrides->integer) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "Skin overrides are disabled on this server.\n");
@@ -251,8 +253,15 @@ void MM_CmdSkinOverride(gentity_t *ent, bool is_enemy, const char *label, const 
 	const char *skin = gi.argv(1);
 
 	if (muffmode::pconfig::IsDisableToken(skin)) {
+		if (!store[0]) {
+			gi.LocClient_Print(ent, PRINT_HIGH,
+				"{} skin override is already off.\n", label);
+			return;
+		}
 		store[0] = 0;
-		MM_ClientSavePConfigOrWarn(ent);
+		MM_ClientSavePConfigOrWarn(ent,
+			is_enemy ? MM_CLIENT_PROFILE_PREFERENCE_ENEMY_SKIN :
+				MM_CLIENT_PROFILE_PREFERENCE_TEAM_SKIN);
 		MM_RefreshSkinOverridesForViewer(ent);
 		gi.LocClient_Print(ent, PRINT_HIGH, "{} skin override cleared. Only your view changes; {} now use their normal skins for you.\n", label, affected_players);
 		return;
@@ -270,9 +279,16 @@ void MM_CmdSkinOverride(gentity_t *ent, bool is_enemy, const char *label, const 
 		gi.LocClient_Print(ent, PRINT_HIGH, "{} is too long for player skin configstrings.\n", skin);
 		return;
 	}
+	if (std::strcmp(store, skin) == 0) {
+		gi.LocClient_Print(ent, PRINT_HIGH,
+			"{} skin override is already '{}'.\n", label, skin);
+		return;
+	}
 
 	Q_strlcpy(store, skin, MAX_QPATH);
-	MM_ClientSavePConfigOrWarn(ent);
+	MM_ClientSavePConfigOrWarn(ent,
+		is_enemy ? MM_CLIENT_PROFILE_PREFERENCE_ENEMY_SKIN :
+			MM_CLIENT_PROFILE_PREFERENCE_TEAM_SKIN);
 	MM_RefreshSkinOverridesForViewer(ent);
 	gi.LocClient_Print(ent, PRINT_HIGH, "{} skin override set to '{}'. Only your view changes; {} will use that skin for you.\n", label, skin, affected_players);
 }

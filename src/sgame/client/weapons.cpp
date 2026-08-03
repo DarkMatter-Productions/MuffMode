@@ -5,7 +5,9 @@
 #include "g_local.h"
 #include "monsters/m_player.h"
 #include "muffmode/mm_arena.h"
+#include "muffmode/mm_client_profile.h"
 #include "muffmode/mm_freezetag.h"
+#include "muffmode/mm_match_stats.h"
 // [MuffMode] Per-ruleset weapon tuning hooks (MM_Ruleset_*)
 #include "muffmode/mm_ruleset_weapons.h"
 
@@ -115,8 +117,17 @@ bool InfiniteAmmoOn(gitem_t *item) {
 Stats_AddShot
 ================
 */
-static void Stats_AddShot(gentity_t *ent) {
+static void Stats_AddShot(gentity_t *ent, uint32_t count = 1) {
+	if (!ent || !ent->client || !count)
+		return;
+	// Preserve the legacy live-stat event count. Hitscan pellets are already
+	// counted individually in fire_lead; the export records projectile count.
 	MS_Adjust(ent->client, MSTAT_SHOTS, 1);
+	const item_id_t weapon = ent->client->pers.weapon
+		? ent->client->pers.weapon->id
+		: IT_NULL;
+	MM_MatchStats_RecordShot(ent->client,
+		MM_MatchStats_WeaponForItem(weapon), count);
 }
 
 /*
@@ -543,28 +554,10 @@ void NoAmmoWeaponChange(gentity_t *ent, bool sound) {
 		}
 	}
 
-	constexpr item_id_t no_ammo_order[] = {
-		IT_WEAPON_DISRUPTOR,
-		IT_WEAPON_BFG,
-		IT_WEAPON_RAILGUN,
-		IT_WEAPON_PLASMABEAM,
-		IT_WEAPON_IONRIPPER,
-		IT_WEAPON_HYPERBLASTER,
-		IT_WEAPON_ETF_RIFLE,
-		IT_WEAPON_CHAINGUN,
-		IT_WEAPON_MACHINEGUN,
-		IT_WEAPON_SSHOTGUN,
-		IT_WEAPON_SHOTGUN,
-		IT_WEAPON_PHALANX,
-		IT_WEAPON_RLAUNCHER,
-		IT_WEAPON_GLAUNCHER,
-		IT_WEAPON_PROXLAUNCHER,
-		IT_AMMO_GRENADES,
-		IT_WEAPON_BLASTER,
-		IT_WEAPON_CHAINFIST
-	};
-
-	for (size_t i = 0; i < q_countof(no_ammo_order); i++) {
+	std::array<item_id_t, IT_TOTAL> no_ammo_order{};
+	const size_t no_ammo_count = MM_ClientProfileBuildWeaponOrder(
+		ent->client, no_ammo_order.data(), no_ammo_order.size());
+	for (size_t i = 0; i < no_ammo_count; i++) {
 		gitem_t *item = GetItemByIndex(no_ammo_order[i]);
 
 		if (!item) {
@@ -816,7 +809,7 @@ void Use_Weapon(gentity_t *ent, gitem_t *item) {
 
 	if (result == weap_switch_t::valid)
 		ent->client->newweapon = wanted; // change to this weapon when down
-	else if ((result = Weapon_AttemptSwitch(ent, wanted, true)) == weap_switch_t::no_weapon && wanted != ent->client->pers.weapon && wanted != ent->client->newweapon)
+	else if (Weapon_AttemptSwitch(ent, wanted, true) == weap_switch_t::no_weapon && wanted != ent->client->pers.weapon && wanted != ent->client->newweapon)
 		gi.LocClient_Print(ent, PRINT_HIGH, "$g_out_of_item", wanted->pickup_name);
 }
 
@@ -1088,7 +1081,9 @@ static inline weapon_ready_state_t Weapon_HandleReady(gentity_t *ent, int FRAME_
 Weapon_HandleFiring
 ================
 */
-static inline void Weapon_HandleFiring(gentity_t *ent, int32_t FRAME_IDLE_FIRST, std::function<void()> fire_handler) {
+[[nodiscard]] static inline bool Weapon_HandleFiring(gentity_t *ent,
+	int32_t FRAME_IDLE_FIRST, std::function<void()> fire_handler) {
+	const int32_t ent_generation = ent->spawn_count;
 	Weapon_SetFinished(ent);
 
 	if (ent->client->weapon_fire_buffered) {
@@ -1097,6 +1092,8 @@ static inline void Weapon_HandleFiring(gentity_t *ent, int32_t FRAME_IDLE_FIRST,
 	}
 
 	fire_handler();
+	if (!ent->inuse || ent->spawn_count != ent_generation)
+		return false;
 
 	if (ent->client->ps.gunframe == FRAME_IDLE_FIRST) {
 		ent->client->weaponstate = WEAPON_READY;
@@ -1104,6 +1101,7 @@ static inline void Weapon_HandleFiring(gentity_t *ent, int32_t FRAME_IDLE_FIRST,
 	}
 
 	ent->client->weapon_think_time = level.time + Weapon_AnimationTime(ent);
+	return true;
 }
 
 /*
@@ -1128,6 +1126,7 @@ void Weapon_Generic(gentity_t *ent, int FRAME_ACTIVATE_LAST, int FRAME_FIRE_LAST
 	else if (const auto state = Weapon_HandleReady(ent, FRAME_FIRE_FIRST, FRAME_IDLE_FIRST, FRAME_IDLE_LAST, pause_frames);
 		state != weapon_ready_state_t::none) {
 		if (state == weapon_ready_state_t::firing) {
+			const int32_t ent_generation = ent->spawn_count;
 			ent->client->ps.gunframe = FRAME_FIRE_FIRST;
 			ent->client->weapon_fire_buffered = false;
 
@@ -1141,6 +1140,8 @@ void Weapon_Generic(gentity_t *ent, int FRAME_ACTIVATE_LAST, int FRAME_FIRE_LAST
 				if (ent->client->ps.gunframe == fire_frames[n]) {
 					Weapon_PowerupSound(ent);
 					fire(ent);
+					if (!ent->inuse || ent->spawn_count != ent_generation)
+						return;
 					break;
 				}
 			}
@@ -1163,7 +1164,7 @@ void Weapon_Generic(gentity_t *ent, int FRAME_ACTIVATE_LAST, int FRAME_FIRE_LAST
 	if (ent->client->weaponstate == WEAPON_FIRING && ent->client->weapon_think_time <= level.time) {
 		ent->client->last_firing_time = level.time + COOP_DAMAGE_FIRING_TIME;
 		ent->client->ps.gunframe++;
-		Weapon_HandleFiring(ent, FRAME_IDLE_FIRST, [&]() {
+		if (!Weapon_HandleFiring(ent, FRAME_IDLE_FIRST, [&]() {
 			for (int n = 0; fire_frames[n]; n++) {
 				if (ent->client->ps.gunframe == fire_frames[n]) {
 					Weapon_PowerupSound(ent);
@@ -1171,7 +1172,8 @@ void Weapon_Generic(gentity_t *ent, int FRAME_ACTIVATE_LAST, int FRAME_FIRE_LAST
 					break;
 				}
 			}
-			});
+			}))
+			return;
 	}
 }
 
@@ -1199,7 +1201,9 @@ void Weapon_Repeating(gentity_t *ent, int FRAME_ACTIVATE_LAST, int FRAME_FIRE_LA
 
 	if (ent->client->weaponstate == WEAPON_FIRING && ent->client->weapon_think_time <= level.time) {
 		ent->client->last_firing_time = level.time + COOP_DAMAGE_FIRING_TIME;
-		Weapon_HandleFiring(ent, FRAME_IDLE_FIRST, [&]() { fire(ent); });
+		if (!Weapon_HandleFiring(
+				ent, FRAME_IDLE_FIRST, [&]() { fire(ent); }))
+			return;
 
 		if (ent->client->weapon_thunk)
 			ent->client->weapon_think_time += FRAME_TIME_S;
@@ -1234,6 +1238,7 @@ static void Weapon_HandGrenade_Fire(gentity_t *ent, bool held) {
 
 	fire_handgrenade(ent, start, dir, damage, speed, timer, radius, held);
 
+	Stats_AddShot(ent);
 	RemoveAmmo(ent, 1);
 }
 
@@ -1245,7 +1250,6 @@ void Throw_Generic(gentity_t *ent, int FRAME_FIRE_LAST, int FRAME_IDLE_LAST, int
 	// when we die, just toss what we had in our hands.
 	if (ent->health <= 0) {
 		fire(ent, true);
-		MS_Adjust(ent->client, MSTAT_SHOTS, 1);
 		return;
 	}
 
@@ -1344,7 +1348,6 @@ void Throw_Generic(gentity_t *ent, int FRAME_FIRE_LAST, int FRAME_IDLE_LAST, int
 					Weapon_PowerupSound(ent);
 					ent->client->weapon_sound = 0;
 					fire(ent, true);
-					MS_Adjust(ent->client, MSTAT_SHOTS, 1);
 
 					ent->client->grenade_blew_up = true;
 
@@ -1370,7 +1373,6 @@ void Throw_Generic(gentity_t *ent, int FRAME_FIRE_LAST, int FRAME_IDLE_LAST, int
 					Weapon_PowerupSound(ent);
 					ent->client->weapon_sound = 0;
 					fire(ent, false);
-					MS_Adjust(ent->client, MSTAT_SHOTS, 1);
 
 					if (!EXPLODE || !ent->client->grenade_blew_up)
 						ent->client->grenade_finished_time = level.time + grenade_wait_time;
@@ -1474,6 +1476,7 @@ static void Weapon_GrenadeLauncher_Fire(gentity_t *ent) {
 
 	PlayerNoise(ent, start, PNOISE_WEAPON);
 
+	Stats_AddShot(ent);
 	RemoveAmmo(ent, 1);
 }
 
@@ -1544,6 +1547,7 @@ static void Weapon_RocketLauncher_Fire(gentity_t *ent) {
 
 	PlayerNoise(ent, start, PNOISE_WEAPON);
 
+	Stats_AddShot(ent);
 	RemoveAmmo(ent, 1);
 }
 
@@ -1786,6 +1790,7 @@ static void Weapon_Machinegun_Fire(gentity_t *ent) {
 
 	PlayerNoise(ent, start, PNOISE_WEAPON);
 
+	Stats_AddShot(ent);
 	RemoveAmmo(ent, 1);
 
 	ent->client->anim_priority = ANIM_ATTACK;
@@ -1867,7 +1872,7 @@ static void Weapon_Chaingun_Fire(gentity_t *ent) {
 
 		PlayerNoise(ent, start, PNOISE_WEAPON);
 
-		Stats_AddShot(ent);
+		Stats_AddShot(ent, static_cast<uint32_t>(shots));
 		RemoveAmmo(ent, shots);
 
 		ent->client->weapon_sound = gi.soundindex("weapons/chngnl1a.wav");
@@ -1996,7 +2001,7 @@ static void Weapon_Chaingun_Fire(gentity_t *ent) {
 
 	PlayerNoise(ent, start, PNOISE_WEAPON);
 
-	Stats_AddShot(ent);
+	Stats_AddShot(ent, static_cast<uint32_t>(shots));
 	RemoveAmmo(ent, shots);
 }
 
@@ -2047,7 +2052,7 @@ static void Weapon_Shotgun_Fire(gentity_t *ent) {
 
 	PlayerNoise(ent, start, PNOISE_WEAPON);
 
-	Stats_AddShot(ent);
+	Stats_AddShot(ent, static_cast<uint32_t>(pellets));
 	RemoveAmmo(ent, 1);
 }
 
@@ -2109,7 +2114,7 @@ static void Weapon_SuperShotgun_Fire(gentity_t *ent) {
 
 	PlayerNoise(ent, start, PNOISE_WEAPON);
 
-	Stats_AddShot(ent);
+	Stats_AddShot(ent, static_cast<uint32_t>(pellets));
 	RemoveAmmo(ent, 2);
 }
 
@@ -2630,7 +2635,10 @@ static bool Weapon_Q1PlasmaBeamDischarge(gentity_t *ent, int cells) {
 	Stats_AddShot(ent);
 	RemoveAmmo(ent, cells);
 	NoAmmoWeaponChange(ent, false);
+	const int32_t discharge_generation = ent->spawn_count;
 	T_RadiusDamage(ent, ent, (float)damage, world, (float)(damage + 40), DAMAGE_ENERGY, MOD_PLASMABEAM);
+	if (!ent->inuse || ent->spawn_count != discharge_generation)
+		return true;
 	PlayerNoise(ent, ent->s.origin, PNOISE_WEAPON);
 	return true;
 }
@@ -2781,7 +2789,7 @@ static void Weapon_IonRipper_Fire(gentity_t *ent) {
 
 		PlayerNoise(ent, start, PNOISE_WEAPON);
 
-		Stats_AddShot(ent);
+		Stats_AddShot(ent, static_cast<uint32_t>(projectile_count));
 		RemoveAmmo(ent, 1);
 		return;
 	}
@@ -2858,7 +2866,7 @@ static void Weapon_Phalanx_Fire(gentity_t *ent) {
 		gi.WriteByte(MZ_PHALANX2 | is_silenced);
 		gi.multicast(ent->s.origin, MULTICAST_PVS, false);
 
-		Stats_AddShot(ent);
+		Stats_AddShot(ent, 2);
 		RemoveAmmo(ent, 1);
 	} else {
 		v[PITCH] = ent->client->v_angle[PITCH];

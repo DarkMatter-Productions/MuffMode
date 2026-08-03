@@ -75,15 +75,17 @@ bool func_clock_elapsed(const gentity_t *self)
 		(self->spawnflags.has(SPAWNFLAG_TIMER_DOWN) && self->health < self->wait);
 }
 
-void func_clock_fire_pathtarget(gentity_t *self)
+[[nodiscard]] bool func_clock_fire_pathtarget(gentity_t *self)
 {
 	if (!self->pathtarget)
-		return;
+		return true;
 
 	const char *saved_target = self->target;
 	self->target = self->pathtarget;
-	G_UseTargets(self, self->activator);
+	if (!G_UseTargets(self, self->activator))
+		return false;
 	self->target = saved_target;
+	return true;
 }
 
 } // namespace
@@ -137,11 +139,13 @@ If START_OFF, this entity must be used before it starts
 */
 static THINK(func_clock_think) (gentity_t *self) -> void
 {
-	if (!self->enemy) {
-		self->enemy = G_FindByString<&gentity_t::targetname>(nullptr, self->target);
-		if (!self->enemy)
-			return;
-	}
+	// Re-resolve the display every tick. A saved raw pointer can otherwise name
+	// a recycled map-entity slot long after the original target was removed.
+	gentity_t *const display =
+		G_FindByString<&gentity_t::targetname>(nullptr, self->target);
+	if (!display || !display->use)
+		return;
+	self->enemy = display;
 
 	if (self->spawnflags.has(SPAWNFLAG_TIMER_UP)) {
 		func_clock_format_countdown(self);
@@ -153,11 +157,15 @@ static THINK(func_clock_think) (gentity_t *self) -> void
 		func_clock_format_time_of_day(self);
 	}
 
-	self->enemy->message = self->clock_message;
-	self->enemy->use(self->enemy, self, self);
+	const int32_t self_generation = self->spawn_count;
+	display->message = self->clock_message;
+	display->use(display, self, self);
+	if (!self->inuse || self->spawn_count != self_generation)
+		return;
 
 	if (func_clock_elapsed(self)) {
-		func_clock_fire_pathtarget(self);
+		if (!func_clock_fire_pathtarget(self))
+			return;
 
 		if (!self->spawnflags.has(SPAWNFLAG_TIMER_MULTI_USE))
 			return;

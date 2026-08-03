@@ -6,14 +6,19 @@
 #include "bots/bot_includes.h"
 #include "muffmode/mm_arena.h"
 #include "muffmode/mm_captain.h"
+#include "muffmode/mm_client_profile.h"
+#include "muffmode/mm_client_refs.h"
 #include "muffmode/mm_freezetag.h"
 #include "muffmode/mm_ghost.h"
 #include "muffmode/mm_horde.h"
 #include "muffmode/mm_horde_ai_rules.h"
 #include "muffmode/mm_lms.h"
+#include "muffmode/mm_match_stats.h"
 #include "muffmode/mm_menu.h"
+#include "muffmode/mm_motd.h"
 #include "muffmode/mm_parse.h"
 #include "muffmode/mm_pconfig.h"
+#include "muffmode/mm_player_stats.h"
 #include "muffmode/mm_ruleset.h"
 #include "muffmode/mm_spawn_rules.h"
 #include "muffmode/mm_spawn_loadout.h"
@@ -90,7 +95,16 @@ void InitClientPersistant(gentity_t *ent, gclient_t *client) {
 	char userinfo[MAX_INFO_STRING];
 	Q_strlcpy(userinfo, client->pers.userinfo, sizeof(userinfo));
 
+	// [MuffMode] Deathmatch respawns and FreezeTag thaws rebuild the
+	// persistent client block. Keep the current match counters for an
+	// already-connected participant; fresh connections still start clean.
+	const bool preserve_match_stats = MM_MatchStats_IsCollecting() && client->pers.connected;
+	const mm_match_player_stats_t match_stats =
+		preserve_match_stats ? client->pers.match : mm_match_player_stats_t{};
+
 	memset(&client->pers, 0, sizeof(client->pers));
+	if (preserve_match_stats)
+		client->pers.match = match_stats;
 	if (GhostAbortSpawnUsesDeferredPresentation(ent))
 		ClientUserinfoChangedForRestore(ent, userinfo);
 	else
@@ -305,6 +319,8 @@ void CopyToBodyQue(gentity_t *ent) {
 	gentity_t *body;
 
 	// grab a body que and cycle to the next one
+	if (level.body_que < 0 || level.body_que >= BODY_QUEUE_SIZE)
+		level.body_que = 0;
 	body = &g_entities[game.maxclients + level.body_que + 1];
 	level.body_que = (level.body_que + 1) % BODY_QUEUE_SIZE;
 
@@ -1136,8 +1152,8 @@ void ClientSpawn(gentity_t *ent) {
 
 	gi.linkentity(ent);
 
-	if (!KillBox(ent, true, MOD_TELEFRAG_SPAWN)) { // could't spawn in?
-	}
+	if (!KillBox(ent, true, MOD_TELEFRAG_SPAWN)) // couldn't spawn in?
+		return;
 
 	// my tribute to cash's level-specific hacks. I hope I live
 	// up to his trailblazing cheese.
@@ -1157,6 +1173,8 @@ void ClientSpawn(gentity_t *ent) {
 
 	if (was_waiting_for_respawn)
 		G_PostRespawn(ent);
+
+	MM_MatchStats_RecordSpawn(client);
 }
 
 /*
@@ -1321,7 +1339,7 @@ static void G_SetLevelEntry() {
 ClientIsPlaying
 =================
 */
-bool ClientIsPlaying(gclient_t *cl) {
+bool ClientIsPlaying(const gclient_t *cl) {
 	if (!cl) return false;
 
 	if (!deathmatch->integer)
@@ -1370,6 +1388,10 @@ to be placed into the game.  This will happen every level load.
 */
 void ClientBegin(gentity_t *ent) {
 	ent->client = game.clients + (ent - g_entities - 1);
+	const bool retained_level_client = !ent->client->pers.spawned &&
+		!ent->client->sess.is_a_bot &&
+		MM_ClientProfileCanPersistIdentity(ent->client->pers.social_id) &&
+		!MM_Ghost_ReservedClientState(ent);
 	ent->client->awaiting_respawn = false;
 	ent->client->respawn_timeout = 0_ms;
 
@@ -1393,6 +1415,15 @@ void ClientBegin(gentity_t *ent) {
 	// [Paril-KEX] we're always connected by this point...
 	ent->client->pers.connected = true;
 
+	// ClientConnect is not repeated for retained clients. Reload a persistent
+	// profile so a map that changes gametype selects the correct rating. An
+	// identity that cannot form a canonical profile remains session-only and
+	// deliberately keeps its preferences across the map change.
+	if (retained_level_client) {
+		MM_ClientInitPConfig(ent);
+		MM_PlayerStats_OnProfileLoaded(ent);
+	}
+
 	// A reconnect reservation already has current connection identity and loaded
 	// preferences from ClientConnect. Enter the restore delay before ordinary
 	// ClientBegin republishes canonical skins or applies viewer-wide overrides;
@@ -1408,10 +1439,6 @@ void ClientBegin(gentity_t *ent) {
 		Q_strlcpy(userinfo, ent->client->pers.userinfo, sizeof(userinfo));
 		ClientUserinfoChanged(ent, userinfo);
 	}
-
-	// Reload persisted preferences here every ClientBegin.
-	if (!(ent->svflags & SVF_BOT))
-		MM_ClientInitPConfig(ent);
 
 	if (deathmatch->integer) {
 		ClientBeginDeathmatch(ent);
@@ -1635,6 +1662,9 @@ gentity_t *ClientChooseSlot(const char *userinfo, const char *social_id, bool is
 	char derived_social_id[MAX_INFO_VALUE]{};
 	social_id = RuntimeTestSocialId(userinfo, social_id, is_bot, derived_social_id);
 #endif
+	// Retail providers may supply no account identity. Slot selection logs and
+	// reconnect helpers still require a valid C string.
+	social_id = social_id && social_id[0] ? social_id : "";
 	if (!cinematic && deathmatch->integer && !is_bot)
 		if (gentity_t *slot = MM_Ghost_ChooseReconnectSlot(social_id, ignore, num_ignore))
 			return slot;
@@ -1664,6 +1694,9 @@ bool ClientConnect(gentity_t *ent, char *userinfo, const char *social_id, bool i
 	char derived_social_id[MAX_INFO_VALUE]{};
 	social_id = RuntimeTestSocialId(userinfo, social_id, is_bot, derived_social_id);
 #endif
+	// Retail providers may represent an unavailable account identity with a null
+	// pointer. Normalize it once before any C-string consumer sees it.
+	social_id = social_id && social_id[0] ? social_id : "";
 	// they can connect
 	ent->client = game.clients + (ent - g_entities - 1);
 	MM_Ghost_CancelAbortSpawn(ent);
@@ -1745,7 +1778,16 @@ bool ClientConnect(gentity_t *ent, char *userinfo, const char *social_id, bool i
 	CalculateRanks();
 
 	// [MuffMode] Player config persistence lives in muffmode/mm_pconfig
+	// Client slots are reusable, so a fresh connection starts from known profile
+	// defaults. Retained map-change clients bypass ClientConnect; their existing
+	// state is therefore available to the transactional reload in ClientBegin.
+	ent->client->sess.pc = MM_DefaultClientConfig();
+	ent->client->sess.profile_persistence_ready = false;
+	ent->client->sess.skill_rating = MM_ClientProfileDefaultRating();
+	ent->client->sess.skill_rating_change = 0;
+	MM_ClientProfileClearWeaponPreferences(ent->client);
 	MM_ClientInitPConfig(ent);
+	MM_PlayerStats_OnProfileLoaded(ent);
 
 	// [Paril-KEX] force a state update
 	ent->sv.init = false;
@@ -1769,6 +1811,18 @@ Will not be called between levels.
 void ClientDisconnect(gentity_t *ent) {
 	if (!ent->client)
 		return;
+
+	// Raw references to this reusable client slot must end with this lifetime.
+	MM_ClearDepartingClientReferences(ent);
+	// A grapple entity is owned by this exact client generation and must not
+	// remain allocated after either a normal disconnect or snapshot capture.
+	Weapon_Grapple_DoReset(ent->client);
+
+	// Pause clocks before a reconnect ghost copies the session. A successful
+	// reservation remains unsettled until it expires or the match ends.
+	MM_PlayerStats_OnClientPause(ent);
+	MM_MatchStats_ClientEnd(ent);
+
 	const bool abort_spawn_pending = MM_Ghost_IsAbortSpawnPending(ent);
 	MM_Ghost_CancelAbortSpawn(ent);
 
@@ -1777,9 +1831,13 @@ void ClientDisconnect(gentity_t *ent) {
 	const bool auto_ghosted =
 		MM_GhostDisconnectMayCaptureSnapshot(abort_spawn_pending) &&
 		notGT(GT_ARENA) && MM_Ghost_CaptureDisconnect(ent);
+	if (!auto_ghosted)
+		MM_PlayerStats_OnClientDisconnect(ent);
 	MM_Arena_OnClientDisconnect(ent);
 	if (!auto_ghosted) {
 		TossClientItems(ent);
+		// Item drops can add final CTF statistics after participation stopped.
+		MM_MatchStats_ClientEnd(ent);
 	}
 	PlayerTrail_Destroy(ent);
 
@@ -1787,10 +1845,9 @@ void ClientDisconnect(gentity_t *ent) {
 	if (ent->client->tracker_pain_time)
 		RemoveAttackingPainDaemons(ent);
 
-	if (ent->client->owned_sphere) {
-		if (ent->client->owned_sphere->inuse)
-			G_FreeEntity(ent->client->owned_sphere);
-		ent->client->owned_sphere = nullptr;
+	if (gentity_t *sphere = G_ResolveOwnedSphere(ent->client)) {
+		G_FreeEntity(sphere);
+		G_ClearOwnedSphere(ent->client);
 	}
 
 	// send effect
@@ -2055,7 +2112,16 @@ static bool HandleMenuMovement(gentity_t *ent, usercmd_t *ucmd) {
 		}
 	}
 
-	if (ent->client->latched_buttons & (BUTTON_ATTACK | BUTTON_JUMP)) {
+	const button_t selection_buttons =
+		ent->client->latched_buttons & (BUTTON_ATTACK | BUTTON_JUMP);
+	if (selection_buttons) {
+		// The menu owns these presses. Consume them before a selection callback
+		// can close the menu, and keep suppressing them until the player releases
+		// the buttons so they cannot also fire, jump, or change follow target.
+		ent->client->menu_captured_buttons |= selection_buttons;
+		ent->client->latched_buttons &= ~(BUTTON_ATTACK | BUTTON_JUMP);
+		ent->client->buttons &= ~selection_buttons;
+		ent->client->cmd.buttons &= ~selection_buttons;
 		P_Menu_Select(ent);
 		return true;
 	}
@@ -2221,10 +2287,12 @@ void ClientThink(gentity_t *ent, usercmd_t *ucmd) {
 
 	// [Paril-KEX] pass buttons through even if we are in intermission or
 	// following.
+	client->menu_captured_buttons &= ucmd->buttons;
 	client->oldbuttons = client->buttons;
-	client->buttons = ucmd->buttons;
+	client->buttons = ucmd->buttons & ~client->menu_captured_buttons;
 	client->latched_buttons |= client->buttons & ~client->oldbuttons;
 	client->cmd = *ucmd;
+	client->cmd.buttons = client->buttons;
 
 	if (!client->initial_menu_shown && client->initial_menu_delay && level.time > client->initial_menu_delay) {
 		if (!ClientIsPlaying(client) && (!client->sess.initialised || client->sess.inactive)) {
@@ -2277,7 +2345,7 @@ void ClientThink(gentity_t *ent, usercmd_t *ucmd) {
 		if (ent->client->resp.motd_mod_count != game.motd_mod_count) {
 			if (level.time >= ent->client->sess.team_join_time + delay) {
 				if (g_showmotd->integer && game.motd.size()) {
-					gi.LocCenter_Print(ent, "{}", game.motd.c_str());
+					MM_ShowAutomaticMOTD(ent);
 					delay += 5_sec;
 					ent->client->resp.motd_mod_count = game.motd_mod_count;
 				}
@@ -2339,6 +2407,19 @@ void ClientThink(gentity_t *ent, usercmd_t *ucmd) {
 	if (MM_FreezeTag_ClientThink(ent, ucmd))
 		return;
 
+	// [MuffMode] The rerelease only routed usercmd menu controls for spectators,
+	// but MuffMode exposes the join/vote/config menus to live players too.
+	const bool menu_captures_usercmd = MM_MenuCapturesUsercmd(
+		client->menu != nullptr,
+		ClientIsPlaying(client) ? mm_menu_client_state_t::Playing : mm_menu_client_state_t::Spectator);
+	const bool menu_captures_attack = menu_captures_usercmd &&
+		(client->latched_buttons & BUTTON_ATTACK);
+	if (menu_captures_usercmd) {
+		HandleMenuMovement(ent, ucmd);
+		if (menu_captures_attack)
+			client->weapon_thunk = true;
+	}
+
 	if (ent->client->follow_target) {
 		client->resp.cmd_angles = ucmd->angles;
 		ent->movetype = MOVETYPE_FREECAM;
@@ -2348,11 +2429,8 @@ void ClientThink(gentity_t *ent, usercmd_t *ucmd) {
 		memset(&pm, 0, sizeof(pm));
 
 		if (ent->movetype == MOVETYPE_FREECAM) {
-			if (ent->client->menu) {
+			if (menu_captures_usercmd) {
 				client->ps.pmove.pm_type = PM_FREEZE;
-
-				// [Paril-KEX] handle menu movement
-				HandleMenuMovement(ent, ucmd);
 			} else if (ent->client->awaiting_respawn)
 				client->ps.pmove.pm_type = PM_FREEZE;
 			else if (!MM_Arena_FreecamAllowed(ent))
@@ -2401,6 +2479,13 @@ void ClientThink(gentity_t *ent, usercmd_t *ucmd) {
 			pm.snapinitial = true;
 
 		pm.cmd = *ucmd;
+		pm.cmd.buttons = client->buttons;
+		if (menu_captures_usercmd) {
+			// Forward/back navigates the menu, while attack/jump selects. Do not
+			// replay those same inputs into live-player movement on this frame.
+			pm.cmd.forwardmove = 0;
+			pm.cmd.buttons &= ~(BUTTON_ATTACK | BUTTON_JUMP);
+		}
 		pm.player = ent;
 		pm.trace = G_PM_Trace;
 		pm.clip = G_PM_Clip;
@@ -2498,9 +2583,13 @@ void ClientThink(gentity_t *ent, usercmd_t *ucmd) {
 		ent->gravity = 1.0;
 
 		if (ent->movetype != MOVETYPE_NOCLIP) {
+			const int32_t touch_generation = ent->spawn_count;
 			G_TouchTriggers(ent);
+			if (!ent->inuse || ent->spawn_count != touch_generation)
+				return;
 			if (ent->movetype != MOVETYPE_FREECAM)
-				G_TouchProjectiles(ent, old_origin);
+				if (!G_TouchProjectiles(ent, old_origin))
+					return;
 		}
 
 		// touch other objects
@@ -2558,8 +2647,8 @@ void ClientThink(gentity_t *ent, usercmd_t *ucmd) {
 	}
 
 	if (!ClientIsPlaying(client) || (client->eliminated && !client->sess.is_a_bot)) {
-		if (!HandleMenuMovement(ent, ucmd)) {
-			if (ucmd->buttons & BUTTON_JUMP) {
+		if (!menu_captures_usercmd) {
+			if (client->buttons & BUTTON_JUMP) {
 				if (!(client->ps.pmove.pm_flags & PMF_JUMP_HELD)) {
 					client->ps.pmove.pm_flags |= PMF_JUMP_HELD;
 					if (client->follow_target)
@@ -2961,7 +3050,7 @@ void ClientBeginServerFrame(gentity_t *ent) {
 	}
 
 	// run weapon animations if it hasn't been done by a ucmd_t
-	if (!client->weapon_thunk && ClientIsPlaying(client) && !client->eliminated)
+	if (!client->weapon_thunk && ClientIsPlaying(client) && !client->eliminated && !client->menu)
 		Think_Weapon(ent);
 	else
 		client->weapon_thunk = false;

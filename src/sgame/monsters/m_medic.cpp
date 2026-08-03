@@ -170,6 +170,13 @@ void M_SetupReinforcements(const char *reinforcements, reinforcement_list_t &lis
 				gi.Com_PrintFmt("{}: skipping malformed reinforcement '{}'\n", __FUNCTION__, entry);
 			continue;
 		}
+		// [MuffMode] uint8_t index 255 is reserved as the empty-selection marker.
+		if (parsed.size() >= UINT8_MAX) {
+			gi.Com_PrintFmt(
+				"{}: reinforcement list exceeds representable index range; ignoring remaining entries\n",
+				__FUNCTION__);
+			break;
+		}
 
 		const std::string classname(spec->classname);
 		reinforcement_t reinforcement{};

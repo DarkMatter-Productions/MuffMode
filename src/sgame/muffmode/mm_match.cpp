@@ -15,6 +15,8 @@
 #include "muffmode/mm_lms.h"
 #include "muffmode/mm_lms_rules.h"
 #include "muffmode/mm_match.h"
+#include "muffmode/mm_match_stats.h"
+#include "muffmode/mm_player_stats.h"
 #include "muffmode/mm_red_rover_rules.h"
 #include "muffmode/mm_strike.h"
 #include "muffmode/mm_team.h"
@@ -22,9 +24,17 @@
 #include "monsters/m_player.h"	// corpse frames on match reset
 
 #include <algorithm>
+#include <chrono>
+#include <cstdint>
 #include <cstdlib>
 #include <iterator>
 #include <limits>
+
+#ifdef _WIN32
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
 
 extern cvar_t *g_horde_champions;
 extern cvar_t *g_horde_champion_max_per_run;
@@ -265,10 +275,9 @@ static void PreparePlayersForLegacyWorldReset()
 {
 	for (auto ec : active_clients()) {
 		Weapon_Grapple_DoReset(ec->client);
-		if (ec->client->owned_sphere) {
-			if (ec->client->owned_sphere->inuse)
-				G_FreeEntity(ec->client->owned_sphere);
-			ec->client->owned_sphere = nullptr;
+		if (gentity_t *sphere = G_ResolveOwnedSphere(ec->client)) {
+			G_FreeEntity(sphere);
+			G_ClearOwnedSphere(ec->client);
 		}
 		ec->client->trail_head = nullptr;
 		ec->client->trail_tail = nullptr;
@@ -519,11 +528,47 @@ SetMatchId
 */
 namespace muffmode::match {
 
+static uint64_t MixMatchIdEntropy(uint64_t value) noexcept
+{
+	value += 0x9e3779b97f4a7c15ULL;
+	value = (value ^ (value >> 30)) * 0xbf58476d1ce4e5b9ULL;
+	value = (value ^ (value >> 27)) * 0x94d049bb133111ebULL;
+	return value ^ (value >> 31);
+}
+
+static uint64_t MatchIdProcessEntropy() noexcept
+{
+	static const uint64_t entropy = []() noexcept {
+#ifdef _WIN32
+		const uint64_t process_id = static_cast<uint64_t>(_getpid());
+#else
+		const uint64_t process_id = static_cast<uint64_t>(getpid());
+#endif
+		const uint64_t system_ticks = static_cast<uint64_t>(
+			std::chrono::system_clock::now().time_since_epoch().count());
+		const uint64_t steady_ticks = static_cast<uint64_t>(
+			std::chrono::steady_clock::now().time_since_epoch().count());
+		const uint64_t stack_entropy = static_cast<uint64_t>(
+			reinterpret_cast<uintptr_t>(&process_id));
+		return MixMatchIdEntropy(process_id ^ MixMatchIdEntropy(system_ticks) ^
+			MixMatchIdEntropy(steady_ticks) ^ stack_entropy);
+	}();
+	return entropy;
+}
+
 void SetMatchId()
 {
-	//level.match_id = gt_short_name_upper[g_gametype->integer];
-	//level.match_id += "-";
-	level.match_id = stime();
+	using namespace std::chrono;
+	static uint64_t serial = 0;
+	if (++serial == 0)
+		++serial;
+	const int64_t epoch_microseconds = duration_cast<microseconds>(
+		system_clock::now().time_since_epoch()).count();
+	const int gametype = clamp(MM_EFFECTIVE_GT, static_cast<int>(GT_NONE),
+		static_cast<int>(GT_NUM_GAMETYPES) - 1);
+	level.match_id = fmt::format("{}_{}_{}_{:016x}",
+		gt_short_name_upper[gametype], epoch_microseconds, serial,
+		MatchIdProcessEntropy());
 }
 
 } // namespace muffmode::match
@@ -537,6 +582,7 @@ Starts a match
 */
 void Match_Start() {
 	MM_Announcer_OnMatchReset();
+	MM_Duel_ResetFinalResult();
 	if (!deathmatch->integer)
 		return;
 	if (GT(GT_ARENA)) {
@@ -593,6 +639,8 @@ void Match_Start() {
 	}
 
 	match::SetMatchId();
+	MM_MatchStats_Init();
+	MM_PlayerStats_OnMatchStart();
 
 	gi.LocBroadcast_Print(PRINT_TTS, "Match ID: {}\n", level.match_id.c_str());
 
@@ -623,6 +671,7 @@ Match_Reset
 */
 void Match_Reset() {
 	MM_Announcer_OnMatchReset();
+	MM_Duel_ResetFinalResult();
 	if (GT(GT_ARENA)) {
 		// [MuffMode] Reset all independent room series without projecting
 		// them through the legacy singleton match state.
@@ -634,8 +683,10 @@ void Match_Reset() {
 	//	return;
 	//}
 
+	MM_PlayerStats_OnMatchAbort();
 	MM_Ghost_ClearAll(true);
 	match::ResetEntities(true, false, true);
+	MM_MatchStats_Reset();
 	UnReadyAll();
 	ValidateCaptains();
 
@@ -1040,7 +1091,8 @@ void TickRoundState() {
 				}
 			}
 
-			if (MM_LMSRoundHasWinner(active, participants)) {
+			if (MM_LMSRoundHasWinner(active, participants) &&
+				survivor && survivor->client) {
 				G_AdjustPlayerScore(survivor->client, 1, false, 0);
 				gi.LocBroadcast_Print(PRINT_CENTER, "{} wins the round!\n", survivor->client->resp.netname);
 				MM_Announce(mm_announce_event_t::RoundWon, world);
@@ -1324,7 +1376,20 @@ void TickWarmupState() {
 		if (level.intermission_queued || level.intermission_time)
 			return;
 
+		// A reconnect reservation remains an active match participant even though
+		// it is deliberately excluded from the connected-player rank counts.
+		if (level.match_state == matchst_t::MATCH_IN_PROGRESS &&
+			MM_Ghost_HasActiveReservations())
+			return;
+
 		if (level.match_state != matchst_t::MATCH_NONE) {
+			// Do not silently discard a live match when its final player leaves.
+			// Departure settlement is exact-once; the frozen archive still contains
+			// disconnected players and can therefore produce the final artifact.
+			if (level.match_state == matchst_t::MATCH_IN_PROGRESS) {
+				MM_PlayerStats_OnMatchEnd();
+				MM_MatchStats_End();
+			}
 			level.match_state = matchst_t::MATCH_NONE;
 			level.match_state_timer = 0_sec;
 			level.warmup_requisite = warmupreq_t::WARMUP_REQ_NONE;
@@ -1399,7 +1464,7 @@ void TickWarmupState() {
 			not_enough = true;
 		}
 	} else if (GT(GT_DUEL)) {
-		if (level.num_playing_clients != 2)
+		if (MM_Duel_OccupiedSlots() != 2)
 			not_enough = true;
 	} else if (level.num_playing_clients < min_players) {
 		not_enough = true;
@@ -1608,6 +1673,7 @@ void FinishTimeout() {
 	level.countdown_check = 0_sec;
 	gi.Broadcast_Print(PRINT_CENTER, "Timeout has ended.\n");
 	gi.positioned_sound(world->s.origin, world, CHAN_RELIABLE | CHAN_NO_PHS_ADD | CHAN_AUX, gi.soundindex("misc/tele_up.wav"), 1, ATTN_NONE, 0);
+	MM_MatchStats_LogEvent("MATCH TIMEOUT ENDED");
 }
 
 } // namespace muffmode::match
@@ -1653,7 +1719,7 @@ Ends a timeout session.
 ==================
 */
 void MM_CmdTimeIn(gentity_t *ent) {
-	if (!match::IsConnectedClientEntity(ent))
+	if (!ent || !ent->client || !match::IsConnectedClientEntity(ent))
 		return;
 
 	if (!MM_IsExactArgcValid(gi.argc(), 1)) {
@@ -1724,4 +1790,5 @@ void MM_CmdTimeOut(gentity_t *ent) {
 	gi.LocBroadcast_Print(PRINT_CENTER, "{} called a timeout!\n{} has been granted.", ent->client->resp.netname, G_TimeString(timeout_seconds * 1000, false));
 	gi.positioned_sound(world->s.origin, world, CHAN_RELIABLE | CHAN_NO_PHS_ADD | CHAN_AUX, gi.soundindex("world/klaxon2.wav"), 1, ATTN_NONE, 0);
 	ent->client->pers.timeout_used = true;
+	MM_MatchStats_LogEvent("MATCH TIMEOUT STARTED");
 }

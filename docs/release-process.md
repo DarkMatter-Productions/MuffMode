@@ -129,8 +129,8 @@ Run from a Visual Studio developer shell:
 .\scripts\release.ps1 -VersionMode auto
 ```
 
-Use `-SkipBuild` only when `build\msbuild\x64\Release\game_x64.dll` already exists.
-Use `-SkipUpdaterBuild` only when `MuffModeUpdater.exe` already exists under the updater publish output.
+Normal `release.ps1` builds compile with warnings as errors. Use `-SkipBuild` only when `build\msbuild\x64\Release\game_x64.dll` already exists. Published skipped-build paths also require `muffmode-build-receipt.json` beside the DLL, binding its SHA-256 digest, strict build setting, and source commit. A normal `release.ps1` build writes this receipt automatically; the release workflow writes it immediately after the strict build. A local unpublished package may reuse a DLL without a receipt, but emits a warning and cannot be promoted with `-CreateGitHubRelease` until rebuilt through a receipt-producing path.
+Use `-SkipUpdaterBuild` only for a local, unpublished package when `MuffModeUpdater.exe` already exists under the updater publish output. GitHub Actions and `-CreateGitHubRelease` reject updater reuse because that executable has no commit-bound build receipt.
 Use `-SkipInstaller` only when you intentionally want to create the zip without the Windows installer asset.
 
 The package and generated release files are written to `dist/release`.
@@ -165,7 +165,11 @@ See the [Updater Guide](updater-guide.md) for the updater workflow and local ver
 
 ## Publish From GitHub Actions
 
-Use the **Release Muff Mode** workflow in GitHub Actions for normal releases. It runs [scripts/release.ps1](../scripts/release.ps1), updates and commits version files when requested, builds the DLL, publishes the updater, builds the Windows installer, creates the GitHub release, uploads the package zip, installer, map-source archive, and supplemental original-map archive, and posts the Discord announcement.
+Use the **Release Muff Mode** workflow in GitHub Actions for normal releases. It validates free-form dispatch values through step-scoped environment variables, requires `previous_tag` to resolve through the exact local `refs/tags` namespace, updates and commits version files when requested, resolves the resulting commit to an immutable SHA, and checks out and verifies that exact SHA in the build job. Every third-party action is pinned to a reviewed commit, Node.js, .NET, Copilot CLI, Inno Setup, and vcpkg are fixed and runtime-checked where applicable, and release credentials are not exposed during tool installation. The workflow reruns the tooling/dependency/regression contracts plus host and updater tests, builds the Release x64 DLL with warnings as errors, and records the exact DLL hash in a commit-bound build receipt. Packaging then runs [scripts/release.ps1](../scripts/release.ps1) with `-SkipBuild` so the verified strict DLL is reused instead of being replaced by a second non-strict build. The workflow publishes a freshly built updater, builds the Windows installer with the verified compiler path, creates or verifies the exact version tag at the packaged SHA, publishes with `--verify-tag`, uploads the package zip, installer, map-source archive, and supplemental original-map archive, and posts the Discord announcement.
+
+Every package records the exact source commit and whether its source tree was dirty in `rerelease/baseq2/muffmode-version.json`. Release output also includes a provenance JSON document that binds the clean source commit to every binary asset's name, size, and SHA-256 digest, plus a standard `SHA256SUMS.txt` covering those assets and the provenance document. The publish job derives the one exact asset set from the selected version and channel, requires every provenance property and asset record exactly once, recomputes every digest, and rejects missing, duplicate, extra, dirty, or commit-mismatched metadata before uploading any GitHub release asset. Local `-CreateGitHubRelease` publishing likewise targets the recorded commit explicitly. `-Prerelease` cannot be combined with `-Channel stable`, because the updater intentionally recognizes prereleases only by their `-alpha`, `-beta`, or `-rc` package suffix.
+
+Protect `v*` release tags against update and deletion in repository tag rules. The publisher handles a benign create race by re-reading the tag and accepting it only when annotated-tag peeling reaches the packaged source commit, but tag protection is what prevents another writer from moving the ref between verification and release creation.
 
 GitHub's workflow graph shows jobs, not individual steps. This workflow is intentionally split into visible release jobs: **Preflight**, **Resolve Version**, **Build And Package**, **Publish GitHub Release**, and **Announce On Discord**.
 
@@ -173,7 +177,7 @@ Use the separate **Validate Release Workflow** action when you only want to veri
 
 ## Release Go/No-Go
 
-Before publishing, run the hardening gates in [Hardening Guide](hardening-guide.md). A release is blocked if dependency notices are stale, generated artifacts are tracked, required tests fail, CodeQL/analysis findings are untriaged, sanitizer support regresses, or the package is missing `LICENSE` / `THIRD_PARTY_NOTICES.md`.
+Before publishing, run the hardening gates in [Hardening Guide](hardening-guide.md). The release workflow repeats its release-local dependency, tooling, corpus, host-test, updater-test, and strict-build subset against the exact package commit. A release is blocked if dependency notices are stale, generated artifacts are tracked, required tests fail, CodeQL/analysis findings are untriaged, sanitizer support regresses, or the package is missing `LICENSE` / `THIRD_PARTY_NOTICES.md`.
 
 Required repository secrets:
 
@@ -190,7 +194,7 @@ Optional repository variables:
 | `DISCORD_RELEASE_MENTIONS` | Text appended to the Discord announcement headline. Defaults to `<@&1424165484491964667> <@&1390287267276525628>` for the `@quake2` and `@playtester` roles. Use Discord role mention IDs such as `<@&123456789>` if you want actual role notifications. |
 | `DISCORD_FEEDBACK_CHANNEL` | Channel link used in the feedback line. Defaults to `<#1509926054175834133>` for `#muffmode`. |
 
-`RELEASE_BOT_TOKEN` is accepted as a legacy fallback for Copilot authentication, but the built-in `GITHUB_TOKEN` now handles version-file commits and `gh release create`. If no Copilot token is present, the workflow warns during preflight and ships without localized README translations (English README only) -- unless `require_copilot` is checked, in which case it fails instead. Because releases created with `GITHUB_TOKEN` do not trigger other workflows, this release workflow posts the Discord announcement itself after the GitHub release is published. The separate **Broadcast Release To Discord** workflow remains useful for releases published manually through GitHub.
+`RELEASE_BOT_TOKEN` is accepted as a legacy fallback for Copilot authentication, but the built-in `GITHUB_TOKEN` handles version-file commits and `gh release create`. Write permission is granted only to those version and publish jobs; the build job is read-only. GitHub and Copilot tokens are scoped to their consuming steps and are not exposed while release tools are installed and verified. If no Copilot token is present, the package step warns and ships without localized README translations (English README only) -- unless `require_copilot` is checked, in which case it fails instead. Because releases created with `GITHUB_TOKEN` do not trigger other workflows, this release workflow posts the Discord announcement itself after the GitHub release is published. The separate **Broadcast Release To Discord** workflow remains useful for releases published manually through GitHub.
 
 Workflow inputs:
 
@@ -205,7 +209,7 @@ Workflow inputs:
 | `require_copilot` | Fails the release if Copilot authentication is unavailable, instead of falling back to a deterministic English-only README with no localized translations. Leave disabled to allow that fallback. |
 | `release_intro` | Optional manual intro for the GitHub release notes and Discord announcement. Leave blank to let the script generate one from the most significant changelog entries. |
 
-The release workflow installs the current standalone GitHub Copilot CLI with `npm install -g @github/copilot` and, when a Copilot token is configured, exports `COPILOT_GITHUB_TOKEN` and primes `copilot --help` before generating the end-user HTML README and its localized German, Polish, French, Hungarian, and Bulgarian siblings. Without a token, it falls back to a deterministic English-only README and skips the localized siblings entirely (unless `require_copilot` is checked).
+The release workflow downloads the self-contained Windows x64 GitHub Copilot CLI `1.0.77` platform tarball once, verifies its bytes against the reviewed SHA-512 integrity value, extracts and runs that exact executable without npm dependency resolution, and installs the reviewed Inno Setup `6.7.1` Chocolatey package. Its workflow contract rejects unpinned or re-fetched Copilot replacements. The workflow primes `copilot --help` before any Copilot credential or shell-visible `GH_TOKEN` is made available to later build steps. When a Copilot token is configured, `COPILOT_GITHUB_TOKEN` exists only inside the package step that generates the end-user HTML README and its localized German, Polish, French, Hungarian, and Bulgarian siblings. Without a token, packaging falls back to a deterministic English-only README and skips the localized siblings entirely (unless `require_copilot` is checked).
 
 ## Publish Locally
 
@@ -215,12 +219,14 @@ After committing version changes and ensuring the working tree is clean:
 .\scripts\release.ps1 -VersionMode auto -CreateGitHubRelease
 ```
 
-The script creates `v<version>`, uploads the package zip, Windows installer, map-source archive, and supplemental original-map archive, and uses the generated changelog as release notes. Stable releases pass `--latest`; beta, alpha, and release-candidate builds pass `--prerelease --latest=false` because GitHub rejects releases that are both latest and prerelease.
+The script creates `v<version>` at the packaged source commit, or rejects an existing tag that peels to any other commit, then publishes with `--verify-tag`. It uploads the package zip, Windows installer, map-source archive, and supplemental original-map archive, and uses the generated changelog as release notes. Stable releases pass `--latest`; beta, alpha, and release-candidate builds pass `--prerelease --latest=false` because GitHub rejects releases that are both latest and prerelease.
 
 ## Changelog Scope
 
 The changelog is generated from [docs/changelog.md](changelog.md). Rows marked `Unreleased` are used for local package builds before release stamping; rows stamped with the target release version are used after `-UpdateVersionFiles` commits the release metadata. Pass `-PreviousTag v0.22.15` to override the compare link start tag.
 
 The compare link still uses `<previous-release-tag>...v<target-version>` so GitHub can show the exact commits, but public release wording comes from the grouped ledger rows. This keeps release details stable even when a feature arrives through several commits or when a commit contains both user-facing and internal work.
+
+`-PreviousTag` must name an existing exact local tag; branches, `HEAD` aliases, and raw commit IDs are not accepted as changelog boundaries.
 
 If `-ReleaseIntro` or `MUFFMODE_RELEASE_INTRO` is supplied, that text becomes the release-note intro and Discord intro. During a local interactive Windows release run, the script also tries to show a small text box seeded with the generated intro so maintainers can replace it before packaging. Use `-NoIntroPrompt` for unattended local builds.

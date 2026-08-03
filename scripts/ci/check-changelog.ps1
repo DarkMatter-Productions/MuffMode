@@ -1,5 +1,7 @@
 [CmdletBinding()]
-param()
+param(
+    [string]$ChangedSince
+)
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
@@ -156,12 +158,31 @@ foreach ($entry in $entries) {
     }
 }
 
-if ($env:GITHUB_BASE_REF) {
+$comparisonRef = $ChangedSince
+if ([string]::IsNullOrWhiteSpace($comparisonRef) -and $env:GITHUB_BASE_REF) {
     $baseRef = "refs/remotes/origin/$($env:GITHUB_BASE_REF)"
     $refSpec = "+refs/heads/$($env:GITHUB_BASE_REF):$baseRef"
     git fetch --no-tags --depth=1 origin $refSpec
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not fetch changelog comparison ref $baseRef."
+    }
+    $comparisonRef = $baseRef
+}
 
-    $diffFiles = @(git diff --name-only --diff-filter=ACMRT $baseRef HEAD)
+if (-not [string]::IsNullOrWhiteSpace($comparisonRef) -and $comparisonRef -match '^0+$') {
+    throw "Changelog comparison ref is an all-zero new-branch sentinel. Resolve a real merge base before running this gate."
+}
+
+if (-not [string]::IsNullOrWhiteSpace($comparisonRef)) {
+    git rev-parse --verify --quiet "$comparisonRef^{commit}" | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Changelog comparison ref is not available: $comparisonRef"
+    }
+
+    $diffFiles = @(git diff --name-only --diff-filter=ACMRT $comparisonRef HEAD)
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not compare changelog coverage against $comparisonRef."
+    }
     $implementationFiles = @($diffFiles | Where-Object { Test-ImplementationPath $_ })
     if ($implementationFiles.Count -gt 0) {
         $changedChangelog = @($diffFiles | Where-Object { ($_ -replace '\\', '/') -eq "docs/changelog.md" }).Count -gt 0

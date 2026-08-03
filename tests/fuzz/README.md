@@ -4,7 +4,7 @@ These are first-wave libFuzzer targets for phase three. They intentionally start
 
 Initial targets:
 
-- `fuzz_numeric_parsers.cpp`: integer, non-negative integer, finite float and gametype cfg integer parsers.
+- `fuzz_numeric_parsers.cpp`: integer, non-negative integer, finite float and gametype cfg integer parsers, plus the entity-string field-value helpers (escape expansion and RGBA packing) that BSP and `.ent` data reaches directly.
 
 Planned targets:
 

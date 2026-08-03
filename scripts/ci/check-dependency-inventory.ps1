@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
-    [string]$InventoryPath = "docs-dev/robustness/dependency-inventory.json"
+    [string]$InventoryPath = "docs-dev/robustness/dependency-inventory.json",
+    [string]$ManifestPath = "vcpkg.json"
 )
 
 $ErrorActionPreference = "Stop"
@@ -65,20 +66,161 @@ foreach ($requiredDoc in @(
     }
 }
 
-$vcpkgPath = Join-Path $repoRoot "vcpkg.json"
+$vcpkgPath = if ([System.IO.Path]::IsPathRooted($ManifestPath)) {
+    [System.IO.Path]::GetFullPath($ManifestPath)
+}
+else {
+    [System.IO.Path]::GetFullPath((Join-Path $repoRoot $ManifestPath))
+}
+
+function ConvertTo-NormalizedVcpkgDependency {
+    param([object]$Dependency)
+
+    if ($Dependency -is [string]) {
+        $name = ([string]$Dependency).Trim().ToLowerInvariant()
+        if ([string]::IsNullOrWhiteSpace($name)) {
+            Fail-Inventory "vcpkg dependency name cannot be empty."
+        }
+        return $name
+    }
+
+    $knownProperties = @("name", "features", "default-features", "host", "platform")
+    $unknownProperties = @($Dependency.PSObject.Properties.Name | Where-Object {
+        $knownProperties -notcontains $_
+    })
+    if ($unknownProperties.Count -ne 0) {
+        Fail-Inventory "vcpkg dependency '$($Dependency.name)' uses unreviewed properties: $($unknownProperties -join ', ')."
+    }
+
+    $name = ([string]$Dependency.name).Trim().ToLowerInvariant()
+    if ([string]::IsNullOrWhiteSpace($name)) {
+        Fail-Inventory "vcpkg dependency object contains no name."
+    }
+
+    $features = @($Dependency.features | ForEach-Object {
+        ([string]$_).Trim().ToLowerInvariant()
+    } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique)
+    $defaultFeaturesProperty = $Dependency.PSObject.Properties["default-features"]
+    $defaultFeatures = if ($defaultFeaturesProperty) { [bool]$defaultFeaturesProperty.Value } else { $true }
+    $hostProperty = $Dependency.PSObject.Properties["host"]
+    $isHostDependency = if ($hostProperty) { [bool]$hostProperty.Value } else { $false }
+    $platform = if ($Dependency.PSObject.Properties["platform"]) {
+        ([string]$Dependency.platform).Trim()
+    }
+    else {
+        ""
+    }
+
+    if ($features.Count -eq 0 -and $defaultFeatures -and -not $isHostDependency -and
+        [string]::IsNullOrWhiteSpace($platform)) {
+        return $name
+    }
+
+    return "$name|features=$($features -join ',')|default-features=$($defaultFeatures.ToString().ToLowerInvariant())|host=$($isHostDependency.ToString().ToLowerInvariant())|platform=$platform"
+}
+if (-not (Test-Path -LiteralPath $vcpkgPath -PathType Leaf)) {
+    Fail-Inventory "manifest file is missing: $ManifestPath"
+}
 $vcpkg = Get-Content -LiteralPath $vcpkgPath -Raw | ConvertFrom-Json
+$reviewedManifestProperties = @(
+    '$schema',
+    'name',
+    'version',
+    'dependencies',
+    'builtin-baseline'
+)
+$unreviewedManifestProperties = @($vcpkg.PSObject.Properties.Name | Where-Object {
+    $reviewedManifestProperties -notcontains $_
+})
+if ($unreviewedManifestProperties.Count -ne 0) {
+    Fail-Inventory "vcpkg.json uses unreviewed top-level properties: $($unreviewedManifestProperties -join ', ')."
+}
+$trackedVcpkgConfigurations = @(& git -C $repoRoot ls-files -- `
+    "vcpkg-configuration.json" "vcpkg-configuration.json5")
+if ($LASTEXITCODE -ne 0) {
+    Fail-Inventory "could not inspect tracked vcpkg registry configuration."
+}
+if ($trackedVcpkgConfigurations.Count -ne 0) {
+    Fail-Inventory "tracked vcpkg registry configuration is not represented in the dependency inventory: $($trackedVcpkgConfigurations -join ', ')."
+}
 if ($vcpkg.'builtin-baseline' -ne $inventory.dependency_policy.vcpkg_baseline) {
     Fail-Inventory "vcpkg.json baseline does not match dependency inventory."
 }
 
 $declaredDependencies = @($vcpkg.dependencies | ForEach-Object {
-    if ($_ -is [string]) { $_ } else { $_.name }
+    ConvertTo-NormalizedVcpkgDependency $_
 })
+$duplicateManifestDependencies = @($declaredDependencies | ForEach-Object { $_.Split('|')[0] } | Group-Object | Where-Object Count -gt 1)
+if ($duplicateManifestDependencies.Count -ne 0) {
+    Fail-Inventory "vcpkg.json contains duplicate dependencies: $($duplicateManifestDependencies.Name -join ', ')."
+}
 
-foreach ($dependency in @("fmt", "jsoncpp")) {
-    if ($declaredDependencies -notcontains $dependency) {
-        Fail-Inventory "vcpkg.json is missing dependency '$dependency'."
+$inventoryDependencies = @($inventory.packages | ForEach-Object {
+    $property = $_.PSObject.Properties["vcpkg_dependency"]
+    if ($property -and $null -ne $property.Value) {
+        ConvertTo-NormalizedVcpkgDependency $property.Value
     }
+})
+$duplicateInventoryDependencies = @($inventoryDependencies | ForEach-Object { $_.Split('|')[0] } | Group-Object | Where-Object Count -gt 1)
+if ($duplicateInventoryDependencies.Count -ne 0) {
+    Fail-Inventory "dependency inventory contains duplicate vcpkg dependencies: $($duplicateInventoryDependencies.Name -join ', ')."
+}
+
+$uninventoriedDependencies = @($declaredDependencies | Where-Object { $inventoryDependencies -notcontains $_ })
+$undeclaredDependencies = @($inventoryDependencies | Where-Object { $declaredDependencies -notcontains $_ })
+if ($uninventoriedDependencies.Count -ne 0 -or $undeclaredDependencies.Count -ne 0) {
+    $details = @()
+    if ($uninventoriedDependencies.Count -ne 0) {
+        $details += "manifest-only: $($uninventoriedDependencies -join ', ')"
+    }
+    if ($undeclaredDependencies.Count -ne 0) {
+        $details += "inventory-only: $($undeclaredDependencies -join ', ')"
+    }
+    Fail-Inventory "vcpkg manifest and inventory dependencies differ ($($details -join '; '))."
+}
+
+$declaredNuGetDependencies = @()
+$trackedProjectPaths = @(& git -C $repoRoot ls-files -- `
+    "*.csproj" "*.fsproj" "*.vbproj" "*.props" "*.targets")
+if ($LASTEXITCODE -ne 0) {
+    Fail-Inventory "could not enumerate tracked MSBuild dependency files."
+}
+$projectFiles = @($trackedProjectPaths | ForEach-Object {
+    Get-Item -LiteralPath (Join-Path $repoRoot $_)
+})
+foreach ($projectFile in $projectFiles) {
+    [xml]$projectXml = Get-Content -LiteralPath $projectFile.FullName -Raw
+    foreach ($reference in @($projectXml.SelectNodes("//*[local-name()='PackageReference']"))) {
+        $name = ([string]$reference.Include).Trim().ToLowerInvariant()
+        if ([string]::IsNullOrWhiteSpace($name)) {
+            $name = ([string]$reference.Update).Trim().ToLowerInvariant()
+        }
+        if ([string]::IsNullOrWhiteSpace($name)) {
+            Fail-Inventory "PackageReference in '$($projectFile.FullName)' has no Include or Update name."
+        }
+        $version = ([string]$reference.Version).Trim()
+        if ([string]::IsNullOrWhiteSpace($version)) {
+            $versionNode = $reference.SelectSingleNode("./*[local-name()='Version']")
+            if ($versionNode) {
+                $version = ([string]$versionNode.InnerText).Trim()
+            }
+        }
+        $declaredNuGetDependencies += "$name|version=$version"
+    }
+}
+$declaredNuGetDependencies = @($declaredNuGetDependencies | Sort-Object -Unique)
+$inventoryNuGetDependencies = @($inventory.dependency_policy.nuget_dependencies | ForEach-Object {
+    $name = ([string]$_.name).Trim().ToLowerInvariant()
+    $version = ([string]$_.version).Trim()
+    if ([string]::IsNullOrWhiteSpace($name)) {
+        Fail-Inventory "dependency inventory contains a NuGet dependency without a name."
+    }
+    "$name|version=$version"
+} | Sort-Object -Unique)
+$nugetDifferences = @(Compare-Object -ReferenceObject $inventoryNuGetDependencies -DifferenceObject $declaredNuGetDependencies)
+if ($nugetDifferences.Count -ne 0) {
+    $details = @($nugetDifferences | ForEach-Object { "$($_.SideIndicator) $($_.InputObject)" }) -join '; '
+    Fail-Inventory "project PackageReference declarations and inventory differ ($details)."
 }
 
 $fmtPackage = Get-InventoryPackage -Inventory $inventory -Name "fmt"

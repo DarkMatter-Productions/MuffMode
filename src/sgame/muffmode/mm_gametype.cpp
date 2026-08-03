@@ -4,12 +4,15 @@
 #include "g_local.h"
 #include "muffmode/mm_debug.h"
 #include "muffmode/mm_gametype.h"
+#include "muffmode/mm_gametype_cfg_rules.h"
 #include "muffmode/mm_maps.h"
 #include "muffmode/mm_parse.h"
+#include "muffmode/mm_statusbar.h"
 #include "muffmode/mm_team.h"
 #include "muffmode/mm_util.h"
 
 #include <cstdio>
+#include <cstring>
 #include <string>
 #include <string_view>
 
@@ -25,6 +28,7 @@ bool s_gt_teams_on = false;
 gametype_t s_gt_check = GT_NONE;
 
 constexpr int MM_MAX_GAMETYPE_CFG_LINES = 4096;
+constexpr size_t MM_MAX_GAMETYPE_CFG_BYTES = 4 * 1024 * 1024;
 
 constexpr gametype_avail_t k_gametype_availability[GT_NUM_GAMETYPES] = {
 	/* GT_NONE */ gametype_avail_t::Removed,
@@ -44,12 +48,17 @@ constexpr gametype_avail_t k_gametype_availability[GT_NUM_GAMETYPES] = {
 	/* GT_ARENA */ gametype_avail_t::Enabled,
 };
 
-// Sessions running at or below the splitscreen player cap cannot safely
-// apply gt-cfg lines that raise maxclients above that cap mid-match.
+// Sessions running at or below the splitscreen player cap cannot safely apply
+// gt-cfg assignments that move maxclients outside the active slot range.
 bool MM_IsSlotCappedSession()
 {
+	// Once the client slab has been allocated, game.maxclients is the
+	// authoritative capacity.  The cvar may be force-set or remain latched at a
+	// different value and must not relax filtering for the live allocation.
 	cvar_t *mc = gi.cvar("maxclients", nullptr, CVAR_NOFLAGS);
-	return mc && mc->integer <= (int)MAX_SPLIT_PLAYERS;
+	return MM_IsSlotCappedCapacity(
+		game.maxclients, mc ? mc->integer : 0,
+		static_cast<int>(MAX_SPLIT_PLAYERS));
 }
 
 bool MM_IsValidGametypeIndex(gametype_t gt)
@@ -77,119 +86,10 @@ const char *MM_SkipCfgWhitespace(const char *p)
 	return p;
 }
 
-bool MM_ConsumeCfgCommand(const char *&p, std::string_view command)
-{
-	const size_t len = command.size();
-	if (Q_strncasecmp(p, command.data(), len))
-		return false;
-
-	if (p[len] && !MM_IsAsciiWhitespace(p[len]))
-		return false;
-
-	p += len;
-	return true;
-}
-
-bool MM_ConsumeCfgTargetName(const char *&p, std::string_view name)
-{
-	p = MM_SkipCfgWhitespace(p);
-
-	const size_t len = name.size();
-	if (*p == '"')
-	{
-		const char *quoted = p + 1;
-		if (Q_strncasecmp(quoted, name.data(), len) || quoted[len] != '"')
-			return false;
-
-		p = quoted + len + 1;
-		if (*p && !MM_IsAsciiWhitespace(*p))
-			return false;
-		return true;
-	}
-
-	if (Q_strncasecmp(p, name.data(), len))
-		return false;
-
-	if (p[len] && !MM_IsAsciiWhitespace(p[len]))
-		return false;
-
-	p += len;
-	return true;
-}
-
-const char *MM_FindCfgCommentStart(const char *p)
-{
-	bool in_quotes = false;
-
-	for (const char *cursor = p; *cursor; cursor++)
-	{
-		if (*cursor == '"')
-		{
-			in_quotes = !in_quotes;
-			continue;
-		}
-
-		if (in_quotes)
-			continue;
-
-		const bool is_comment = *cursor == '#' || (cursor[0] == '/' && cursor[1] == '/');
-		if (!is_comment)
-			continue;
-
-		const char *end = cursor;
-		while (end > p && MM_IsAsciiWhitespace(end[-1]))
-			end--;
-
-		if (end == p || end < cursor)
-			return end;
-	}
-
-	return nullptr;
-}
-
 bool MM_IsCommentOrEmptyCfgLine(const char *line)
 {
 	line = MM_SkipCfgWhitespace(line);
 	return !*line || *line == '#' || (line[0] == '/' && line[1] == '/');
-}
-
-std::optional<int32_t> MM_ParseCfgIntValue(const char *p)
-{
-	p = MM_SkipCfgWhitespace(p);
-
-	const char *comment = MM_FindCfgCommentStart(p);
-	if (!comment)
-		return MM_ParseCfgIntArg(p);
-
-	std::string value(p, comment - p);
-	return MM_ParseCfgIntArg(value.c_str());
-}
-
-bool MM_TryParseMaxclientsTarget(const char *line, int *out_target)
-{
-	const char *p = MM_SkipCfgWhitespace(line);
-
-	if (MM_ConsumeCfgCommand(p, "seta") ||
-		MM_ConsumeCfgCommand(p, "set") ||
-		MM_ConsumeCfgCommand(p, "sets") ||
-		MM_ConsumeCfgCommand(p, "cvar_forceset") ||
-		MM_ConsumeCfgCommand(p, "cvar_set"))
-	{
-		p = MM_SkipCfgWhitespace(p);
-	}
-	else
-	{
-		return false;
-	}
-
-	if (!MM_ConsumeCfgTargetName(p, "maxclients"))
-		return false;
-	const auto target = MM_ParseCfgIntValue(p);
-	if (!target)
-		return false;
-
-	*out_target = *target;
-	return true;
 }
 
 bool MM_ShouldSkipGtCfgLine(const char *line)
@@ -197,29 +97,32 @@ bool MM_ShouldSkipGtCfgLine(const char *line)
 	if (!MM_IsSlotCappedSession())
 		return false;
 
-	const char *p = MM_SkipCfgWhitespace(line);
-
-	// Lobby/setup command; never appropriate during gametype change.
-	if (MM_ConsumeCfgCommand(p, "kexmultiplayer"))
-		return true;
-
-	int target = 0;
-	if (MM_TryParseMaxclientsTarget(line, &target))
-		return target < 1 || target > (int)MAX_SPLIT_PLAYERS;
-
-	return false;
+	return MM_GtCfgLineViolatesSlotCap(line ? line : "", (int)MAX_SPLIT_PLAYERS);
 }
 
-bool MM_IsOverlongCfgLine(FILE *f, std::string_view line)
+enum class cfg_line_read_result_t : uint8_t {
+	complete,
+	overlong,
+	byte_budget_exhausted
+};
+
+cfg_line_read_result_t MM_CheckCfgLineEnd(
+	FILE *f, std::string_view line, size_t &bytes_read)
 {
 	if (line.find('\n') != std::string_view::npos || std::feof(f))
-		return false;
+		return cfg_line_read_result_t::complete;
 
 	int ch = 0;
-	while ((ch = std::fgetc(f)) != '\n' && ch != EOF) {
+	while (bytes_read < MM_MAX_GAMETYPE_CFG_BYTES &&
+		(ch = std::fgetc(f)) != '\n' && ch != EOF) {
+		bytes_read++;
 	}
+	if (ch == '\n')
+		bytes_read++;
 
-	return true;
+	return bytes_read >= MM_MAX_GAMETYPE_CFG_BYTES && ch != '\n' && ch != EOF
+		? cfg_line_read_result_t::byte_budget_exhausted
+		: cfg_line_read_result_t::overlong;
 }
 
 void MM_TrimCfgLineEnd(char *line)
@@ -261,16 +164,25 @@ void MM_ExecGametypeCfg(gametype_t gt)
 		return;
 	}
 
-	gi.Com_PrintFmt("Loading gametype cfg (filtered for {} maxclients: skipping kexmultiplayer and maxclients > {}).\n",
-		MAX_SPLIT_PLAYERS, MAX_SPLIT_PLAYERS);
+	gi.Com_PrintFmt("Loading gametype cfg (filtered for a {}-slot capped session: skipping lobby setup, dynamic command expansion, and unsafe maxclients mutations).\n",
+		MAX_SPLIT_PLAYERS);
 
 	int skipped = 0;
 	int executed = 0;
 	int lines_read = 0;
+	size_t bytes_read = 0;
 	char line_buf[1024];
 
 	while (std::fgets(line_buf, sizeof(line_buf), file.get()))
 	{
+		bytes_read += std::strlen(line_buf);
+		if (bytes_read > MM_MAX_GAMETYPE_CFG_BYTES)
+		{
+			gi.Com_PrintFmt("WARNING: Stopping filtered gametype cfg load after {} bytes: {}\n",
+				MM_MAX_GAMETYPE_CFG_BYTES, path.c_str());
+			break;
+		}
+
 		lines_read++;
 		if (lines_read > MM_MAX_GAMETYPE_CFG_LINES)
 		{
@@ -279,7 +191,15 @@ void MM_ExecGametypeCfg(gametype_t gt)
 			break;
 		}
 
-		if (MM_IsOverlongCfgLine(file.get(), line_buf))
+		const cfg_line_read_result_t line_result =
+			MM_CheckCfgLineEnd(file.get(), line_buf, bytes_read);
+		if (line_result == cfg_line_read_result_t::byte_budget_exhausted)
+		{
+			gi.Com_PrintFmt("WARNING: Stopping filtered gametype cfg load after {} bytes while draining an overlong line: {}\n",
+				MM_MAX_GAMETYPE_CFG_BYTES, path.c_str());
+			break;
+		}
+		if (line_result == cfg_line_read_result_t::overlong)
 		{
 			skipped++;
 			continue;
@@ -321,9 +241,7 @@ bool MM_IsGametypeEnabled(gametype_t gt)
 
 gametype_t MM_CurrentGametype()
 {
-	const int current = g_gametype ? MM_EFFECTIVE_GT : (int)GT_FFA;
-	return (gametype_t)clamp(current, (int)GT_NONE,
-		(int)GT_NUM_GAMETYPES - 1);
+	return static_cast<gametype_t>(MM_GAMETYPE_BOUNDARY().effective_index);
 }
 
 int MM_CurrentGametypeFlags()
@@ -345,15 +263,32 @@ gametype_t MM_SanitizeGametype(gametype_t gt)
 
 void MM_SanitizeCurrentGametype()
 {
-	const gametype_t raw = (gametype_t)clamp(g_gametype->integer, (int)GT_FIRST, (int)GT_LAST);
-	const gametype_t sane = MM_SanitizeGametype(raw);
-
-	if (sane == raw)
+	if (!g_gametype)
 		return;
 
-	const char *reason = MM_GetGametypeAvailability(raw) == gametype_avail_t::Disabled ? "disabled" : "removed";
-	gi.Com_PrintFmt("g_gametype {} ({}) is {}; using {} ({}).\n",
-		(int)raw, gt_long_name[(int)raw], reason, (int)sane, gt_long_name[(int)sane]);
+	const int requested = g_gametype->integer;
+	const mm_gametype_boundary_t boundary = MM_ResolveGametypeBoundary(
+		requested, (int)GT_FIRST, (int)GT_LAST, (int)GT_ARENA,
+		(int)GT_FFA, MM_Arena_Active());
+	const gametype_t bounded = static_cast<gametype_t>(boundary.configured_index);
+	const gametype_t sane = MM_SanitizeGametype(bounded);
+
+	// Compare against the actual cvar integer, not its bounded endpoint. Otherwise
+	// -1 while FFA is active, or INT_MAX while Arena is active, survives forever.
+	if (requested == static_cast<int>(sane))
+		return;
+
+	if (!boundary.requested_in_range) {
+		gi.Com_PrintFmt("g_gametype {} is outside the supported range {}-{}; using {} ({}).\n",
+			requested, (int)GT_FIRST, (int)GT_LAST,
+			(int)sane, gt_long_name[(int)sane]);
+	} else {
+		const char *reason = MM_GetGametypeAvailability(bounded) ==
+			gametype_avail_t::Disabled ? "disabled" : "removed";
+		gi.Com_PrintFmt("g_gametype {} ({}) is {}; using {} ({}).\n",
+			(int)bounded, gt_long_name[(int)bounded], reason,
+			(int)sane, gt_long_name[(int)sane]);
+	}
 	gi.cvar_forceset("g_gametype", G_Fmt("{}", (int)sane).data());
 }
 
@@ -385,6 +320,9 @@ void MM_CheckRuleset()
 
 	muffmode::gametype::s_check_ruleset = g_ruleset->modified_count;
 
+	// re-arm the top-right match info notice for everyone already in the match
+	MM_MatchInfoHud_ShowAll();
+
 	gi.LocBroadcast_Print(PRINT_HIGH, "Ruleset: {}\n", rs_long_name[(int)game.ruleset]);
 }
 
@@ -393,8 +331,13 @@ void MM_ChangeGametype(gametype_t gt, bool force_cfg)
 	if (!MM_IsGametypeEnabled(gt)) {
 		const gametype_avail_t avail = MM_GetGametypeAvailability(gt);
 		const char *reason = avail == gametype_avail_t::Disabled ? "disabled" : "removed";
-		gi.Com_PrintFmt("Gametype {} ({}) is {} and cannot be selected.\n",
-			gt_short_name[(int)gt], gt_long_name[(int)gt], reason);
+		if (muffmode::gametype::MM_IsValidGametypeIndex(gt)) {
+			gi.Com_PrintFmt("Gametype {} ({}) is {} and cannot be selected.\n",
+				gt_short_name[(int)gt], gt_long_name[(int)gt], reason);
+		} else {
+			gi.Com_PrintFmt("Gametype index {} is {} and cannot be selected.\n",
+				(int)gt, reason);
+		}
 		return;
 	}
 
@@ -429,10 +372,20 @@ void MM_ChangeGametype(gametype_t gt, bool force_cfg)
 
 	if ((int)gt != g_gametype->integer)
 	{
-		const gametype_t old_gt = (gametype_t)g_gametype->integer;
-		MuffModeLog("GAMETYPE", "Changing gametype from %s (%d) to %s (%d)",
-			gt_short_name[(int)old_gt], (int)old_gt,
-			gt_short_name[(int)gt], (int)gt);
+		const int old_requested = g_gametype->integer;
+		const mm_gametype_boundary_t old_boundary = MM_ResolveGametypeBoundary(
+			old_requested, (int)GT_FIRST, (int)GT_LAST, (int)GT_ARENA,
+			(int)GT_FFA, MM_Arena_Active());
+		const gametype_t old_gt = static_cast<gametype_t>(old_boundary.configured_index);
+		if (old_boundary.requested_in_range) {
+			MuffModeLog("GAMETYPE", "Changing gametype from %s (%d) to %s (%d)",
+				gt_short_name[(int)old_gt], old_requested,
+				gt_short_name[(int)gt], (int)gt);
+		} else {
+			MuffModeLog("GAMETYPE", "Changing gametype from out-of-range %d (bounded to %s) to %s (%d)",
+				old_requested, gt_short_name[(int)old_gt],
+				gt_short_name[(int)gt], (int)gt);
+		}
 		gi.cvar_forceset("g_gametype", G_Fmt("{}", (int)gt).data());
 
 		// Force all clients through proper join flow after gametype change.
@@ -491,6 +444,9 @@ void MM_ChangeGametype(gametype_t gt, bool force_cfg)
 
 		MM_GTSetLongName();
 
+		// re-arm the top-right match info notice so the new gametype announces itself
+		MM_MatchInfoHud_ShowAll();
+
 		extern bool g_map_list_shuffled;
 		g_map_list_shuffled = false;
 
@@ -528,10 +484,14 @@ void MM_GTChanges()
 
 	if (muffmode::gametype::s_gt_g_gametype != g_gametype->modified_count)
 	{
-		const gametype_t raw = (gametype_t)clamp(g_gametype->integer, (int)GT_FIRST, (int)GT_LAST);
-		gt = MM_SanitizeGametype(raw);
+		const int requested = g_gametype->integer;
+		const mm_gametype_boundary_t boundary = MM_ResolveGametypeBoundary(
+			requested, (int)GT_FIRST, (int)GT_LAST, (int)GT_ARENA,
+			(int)GT_FFA, MM_Arena_Active());
+		gt = MM_SanitizeGametype(
+			static_cast<gametype_t>(boundary.configured_index));
 
-		if (gt != raw)
+		if (requested != static_cast<int>(gt))
 			gi.cvar_forceset("g_gametype", G_Fmt("{}", (int)gt).data());
 
 		if (gt != muffmode::gametype::s_gt_check)
@@ -561,6 +521,13 @@ void MM_GTChanges()
 			muffmode::gametype::s_gt_teamplay = teamplay->modified_count;
 			muffmode::gametype::s_gt_ctf = ctf->modified_count;
 			changed = true;
+		}
+		else
+		{
+			// A write of an invalid endpoint value can sanitize back to the
+			// already-active gametype. Consume the resulting modified count so the
+			// poller does not reprocess it forever.
+			muffmode::gametype::s_gt_g_gametype = g_gametype->modified_count;
 		}
 	}
 
@@ -798,7 +765,7 @@ void MM_GTSetLongName()
 				s = gt_long_name[GT_HORDE];
 			}
 		} else {
-			const gametype_t gt = (gametype_t)clamp(g_gametype->integer, (int)GT_FIRST, (int)GT_LAST);
+			const gametype_t gt = MM_CurrentGametype();
 			if (g_instagib->integer) {
 				s = "InstaGib";
 			} else if (g_vampiric_damage->integer) {

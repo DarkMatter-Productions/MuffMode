@@ -1295,7 +1295,9 @@ int MM_Horde_CountFighters()
 		fighters++;
 	}
 
-	const int max_fighters = clamp(g_horde_player_scale_max->integer, 1, 32);
+	const int client_capacity = max(1, static_cast<int>(game.maxclients));
+	const int max_fighters = clamp(
+		g_horde_player_scale_max->integer, 1, client_capacity);
 	return clamp(max(fighters, 1), 1, max_fighters);
 }
 
@@ -2561,7 +2563,7 @@ void CommitAuthoredSpawn(gentity_t *anchor, gentity_t *monster)
 	monster->itemtarget = anchor->itemtarget;
 
 	if (anchor->target || anchor->killtarget)
-		G_UseTargets(anchor, monster);
+		(void) G_UseTargets(anchor, monster);
 }
 
 void RecordSpawnFailure(bool warmup, bool boss)

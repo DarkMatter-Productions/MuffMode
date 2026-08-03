@@ -54,6 +54,9 @@ enum {
 	CONFIG_MATCH_STATE = CS_GENERAL,
 	CONFIG_TEAMINFO,
 	CONFIG_FOLLOW_PLAYER_NAME,
+	// Keep this protocol-wide reservation stable for configstring/demo
+	// compatibility. MuffMode only consumes the first MAX_LOBBY_PLAYERS follow
+	// names; mm_hud_stat_contracts.h safely reuses the remaining slots.
 	CONFIG_FOLLOW_PLAYER_NAME_END = CONFIG_FOLLOW_PLAYER_NAME + MAX_CLIENTS,
 
 	// nb: offset by 1 since NONE is zero
@@ -141,39 +144,61 @@ constexpr size_t BITS_PER_AMMO = 9;
 
 template<typename TI>
 constexpr size_t num_of_type_for_bits(size_t num_bits) {
-	return (num_bits + (sizeof(TI) * 8) - 1) / ((sizeof(TI) * 8) + 1);
+	constexpr size_t bits_per_type = sizeof(TI) * 8;
+	return (num_bits + bits_per_type - 1) / bits_per_type;
 }
 
 template<size_t bits_per_value>
 constexpr void set_compressed_integer(uint16_t *start, uint8_t id, uint16_t count) {
-	uint16_t bit_offset = bits_per_value * id;
-	uint16_t byte = bit_offset / 8;
-	uint16_t bit_shift = bit_offset % 8;
-	uint16_t mask = (bit_v<bits_per_value> -1) << bit_shift;
-	uint16_t *base = (uint16_t *)((uint8_t *)start + byte);
-	*base = (*base & ~mask) | ((count << bit_shift) & mask);
+	static_assert(bits_per_value > 0 && bits_per_value <= 16);
+
+	const size_t bit_offset = bits_per_value * id;
+	const size_t word_index = bit_offset / 16;
+	const size_t bit_shift = bit_offset % 16;
+	constexpr uint32_t value_mask = (uint32_t { 1 } << bits_per_value) - 1;
+	const uint32_t shifted_mask = value_mask << bit_shift;
+
+	uint32_t packed = start[word_index];
+	if (bit_shift + bits_per_value > 16)
+		packed |= static_cast<uint32_t>(start[word_index + 1]) << 16;
+	packed = (packed & ~shifted_mask) |
+		((static_cast<uint32_t>(count) & value_mask) << bit_shift);
+
+	start[word_index] = static_cast<uint16_t>(packed);
+	if (bit_shift + bits_per_value > 16)
+		start[word_index + 1] = static_cast<uint16_t>(packed >> 16);
 }
 
 template<size_t bits_per_value>
-constexpr uint16_t get_compressed_integer(uint16_t *start, uint8_t id) {
-	uint16_t bit_offset = bits_per_value * id;
-	uint16_t byte = bit_offset / 8;
-	uint16_t bit_shift = bit_offset % 8;
-	uint16_t mask = (bit_v<bits_per_value> -1) << bit_shift;
-	uint16_t *base = (uint16_t *)((uint8_t *)start + byte);
-	return (*base & mask) >> bit_shift;
+constexpr uint16_t get_compressed_integer(const uint16_t *start, uint8_t id) {
+	static_assert(bits_per_value > 0 && bits_per_value <= 16);
+
+	const size_t bit_offset = bits_per_value * id;
+	const size_t word_index = bit_offset / 16;
+	const size_t bit_shift = bit_offset % 16;
+	constexpr uint32_t value_mask = (uint32_t { 1 } << bits_per_value) - 1;
+
+	uint32_t packed = start[word_index];
+	if (bit_shift + bits_per_value > 16)
+		packed |= static_cast<uint32_t>(start[word_index + 1]) << 16;
+	return static_cast<uint16_t>((packed >> bit_shift) & value_mask);
 }
 
 constexpr size_t NUM_BITS_FOR_AMMO = 9;
-constexpr size_t NUM_AMMO_STATS = num_of_type_for_bits<uint16_t>(NUM_BITS_FOR_AMMO * AMMO_MAX);
+constexpr size_t NUM_AMMO_BITS = NUM_BITS_FOR_AMMO * AMMO_MAX;
+constexpr size_t NUM_AMMO_STATS = num_of_type_for_bits<uint16_t>(NUM_AMMO_BITS);
 // if this value is set on an STAT_AMMO_INFO_xxx, don't render ammo
 constexpr uint16_t AMMO_VALUE_INFINITE = bit_v<NUM_BITS_FOR_AMMO> -1;
 
 constexpr void G_SetAmmoStat(uint16_t *start, uint8_t ammo_id, uint16_t count) {
+	if (ammo_id >= AMMO_MAX)
+		return;
 	set_compressed_integer<NUM_BITS_FOR_AMMO>(start, ammo_id, count);
 }
 
-constexpr uint16_t G_GetAmmoStat(uint16_t *start, uint8_t ammo_id) {
+constexpr uint16_t G_GetAmmoStat(const uint16_t *start, uint8_t ammo_id) {
+	if (ammo_id >= AMMO_MAX)
+		return 0;
 	return get_compressed_integer<NUM_BITS_FOR_AMMO>(start, ammo_id);
 }
 
@@ -181,14 +206,57 @@ constexpr uint16_t G_GetAmmoStat(uint16_t *start, uint8_t ammo_id) {
 // 3 is the max you'll ever hold, and for some
 // (flashlight) it's to indicate on/off state
 constexpr size_t NUM_BITS_PER_POWERUP = 2;
-constexpr size_t NUM_POWERUP_STATS = num_of_type_for_bits<uint16_t>(NUM_BITS_PER_POWERUP * POWERUP_MAX);
+constexpr size_t NUM_BITS_PER_PACKED_STAT = sizeof(uint16_t) * 8;
 
-constexpr void G_SetPowerupStat(uint16_t *start, uint8_t powerup_id, uint16_t count) {
-	set_compressed_integer<NUM_BITS_PER_POWERUP>(start, powerup_id, count);
+// The Q2RE player-stat ABI fixes this primary block at three words. Expanding it
+// would move STAT_KEY_A and every later stat, so additional wheel values use the
+// otherwise-unused high bits of the final ammo word instead.
+constexpr size_t NUM_POWERUP_STATS = 3;
+constexpr size_t NUM_PRIMARY_POWERUP_VALUES =
+	(NUM_POWERUP_STATS * NUM_BITS_PER_PACKED_STAT) / NUM_BITS_PER_POWERUP;
+constexpr size_t NUM_POWERUP_VALUES = static_cast<size_t>(POWERUP_MAX);
+constexpr size_t NUM_SIDEBAND_POWERUP_VALUES =
+	NUM_POWERUP_VALUES > NUM_PRIMARY_POWERUP_VALUES
+		? NUM_POWERUP_VALUES - NUM_PRIMARY_POWERUP_VALUES
+		: 0;
+constexpr size_t NUM_AMMO_PADDING_BITS =
+	(NUM_AMMO_STATS * NUM_BITS_PER_PACKED_STAT) - NUM_AMMO_BITS;
+constexpr size_t POWERUP_SIDEBAND_FIRST_BIT = NUM_AMMO_BITS % NUM_BITS_PER_PACKED_STAT;
+
+static_assert(NUM_AMMO_STATS == 7, "Q2RE ammo stat ABI changed");
+static_assert(NUM_POWERUP_STATS == 3, "Q2RE powerup stat ABI changed");
+static_assert(NUM_SIDEBAND_POWERUP_VALUES * NUM_BITS_PER_POWERUP <= NUM_AMMO_PADDING_BITS,
+	"powerup wheel values no longer fit the ABI-compatible ammo sideband");
+
+constexpr void G_SetPowerupStat(uint16_t *ammo_start, uint16_t *powerup_start,
+	uint8_t powerup_id, uint16_t count) {
+	if (powerup_id >= POWERUP_MAX)
+		return;
+
+	if (powerup_id < NUM_PRIMARY_POWERUP_VALUES) {
+		set_compressed_integer<NUM_BITS_PER_POWERUP>(powerup_start, powerup_id, count);
+		return;
+	}
+
+	const size_t bit_shift = POWERUP_SIDEBAND_FIRST_BIT +
+		((powerup_id - NUM_PRIMARY_POWERUP_VALUES) * NUM_BITS_PER_POWERUP);
+	const uint16_t mask = static_cast<uint16_t>((bit_v<NUM_BITS_PER_POWERUP> - 1) << bit_shift);
+	uint16_t &sideband = ammo_start[NUM_AMMO_STATS - 1];
+	sideband = static_cast<uint16_t>((sideband & ~mask) | ((count << bit_shift) & mask));
 }
 
-constexpr uint16_t G_GetPowerupStat(uint16_t *start, uint8_t powerup_id) {
-	return get_compressed_integer<NUM_BITS_PER_POWERUP>(start, powerup_id);
+constexpr uint16_t G_GetPowerupStat(const uint16_t *ammo_start, const uint16_t *powerup_start,
+	uint8_t powerup_id) {
+	if (powerup_id >= POWERUP_MAX)
+		return 0;
+
+	if (powerup_id < NUM_PRIMARY_POWERUP_VALUES)
+		return get_compressed_integer<NUM_BITS_PER_POWERUP>(powerup_start, powerup_id);
+
+	const size_t bit_shift = POWERUP_SIDEBAND_FIRST_BIT +
+		((powerup_id - NUM_PRIMARY_POWERUP_VALUES) * NUM_BITS_PER_POWERUP);
+	const uint16_t mask = static_cast<uint16_t>((bit_v<NUM_BITS_PER_POWERUP> - 1) << bit_shift);
+	return (ammo_start[NUM_AMMO_STATS - 1] & mask) >> bit_shift;
 }
 
 // player_state->stats[] indexes
@@ -273,4 +341,9 @@ enum player_stat_t {
 	STAT_LAST
 };
 
+static_assert(STAT_AMMO_INFO_START == 34 && STAT_AMMO_INFO_END == 40,
+	"Q2RE ammo stat indices changed");
+static_assert(STAT_POWERUP_INFO_START == 41 && STAT_POWERUP_INFO_END == 43,
+	"Q2RE powerup stat indices changed");
+static_assert(STAT_KEY_A == 44, "Q2RE key stat ABI changed");
 static_assert(STAT_LAST <= MAX_STATS, "stats list overflow");

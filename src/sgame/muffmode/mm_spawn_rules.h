@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -254,6 +255,118 @@ inline mm_entity_lump_validation_t MM_ValidateEntityLump(
 	result.valid = true;
 	result.error = nullptr;
 	return result;
+}
+
+// Colour fields pack four numbers into one entity value, so the value is
+// re-tokenised per component. An overlong component is discarded rather than
+// truncated into a different number.
+constexpr size_t MM_ENTITY_COLOR_COMPONENT_CHARS = 32;
+
+// Bytes MM_UnescapeEntityValue produces for `value`, excluding the terminator.
+inline size_t MM_UnescapedEntityValueLength(std::string_view value) noexcept
+{
+	size_t length = 0;
+	for (size_t cursor = 0; cursor < value.size(); length++) {
+		// A backslash always consumes the byte after it -- including, for a
+		// trailing backslash, the terminator the caller still has to write.
+		cursor += value[cursor] == '\\' ? 2 : 1;
+	}
+	return length;
+}
+
+// Expand the entity-string escape grammar: "\n" becomes a newline and any other
+// "\<c>" becomes a lone backslash, with the escaped byte consumed either way.
+// Always terminates when capacity is non-zero and never writes past capacity;
+// returns the bytes written, excluding the terminator.
+inline size_t MM_UnescapeEntityValue(std::string_view value, char *out,
+	size_t capacity) noexcept
+{
+	if (!out || capacity == 0)
+		return 0;
+
+	size_t written = 0;
+	for (size_t cursor = 0; cursor < value.size() && written + 1 < capacity;) {
+		char expanded = value[cursor];
+		if (expanded == '\\') {
+			expanded = cursor + 1 < value.size() && value[cursor + 1] == 'n'
+				? '\n' : '\\';
+			cursor += 2;
+		} else {
+			cursor++;
+		}
+		out[written++] = expanded;
+	}
+
+	out[written] = '\0';
+	return written;
+}
+
+// Convert one colour component to a byte. Negatives and NaN fail the first
+// test and the ceiling keeps the conversion in range, which an unchecked cast
+// of an out-of-range float would not be.
+inline uint32_t MM_EntityColorChannel(float component) noexcept
+{
+	if (!(component > 0.0f))
+		return 0;
+	if (component >= 255.0f)
+		return 255;
+
+	return static_cast<uint32_t>(component);
+}
+
+// Pack authored RGBA components into the engine's 0xRRGGBBAA field encoding.
+// Authors write either 0..1 floats or 0..255 bytes; any component above 1 means
+// the tuple is already in byte range. Composing unsigned keeps the red channel,
+// which lands in the sign bit, out of signed shift and overflow territory.
+inline int32_t MM_PackEntityColorRgba(const std::array<float, 4> &components) noexcept
+{
+	bool unit_scale = true;
+	for (const float component : components) {
+		if (component > 1.0f) {
+			unit_scale = false;
+			break;
+		}
+	}
+
+	uint32_t packed = 0;
+	for (size_t channel = 0; channel < components.size(); channel++) {
+		const float scaled = unit_scale
+			? components[channel] * 255.0f : components[channel];
+		packed |= MM_EntityColorChannel(scaled) << (24 - 8 * channel);
+	}
+
+	return static_cast<int32_t>(packed);
+}
+
+// Not every "map" the engine spawns has a world. Demo playback, cinematics and
+// still-image screens start a server with no collision model, so the game module
+// is handed an empty entity lump -- the startup demo loop's "map demo1.dm2" is
+// the first one a listen server ever sees. Those loads must reset level state
+// without being validated or spawned like a real BSP map.
+inline bool MM_MapStateHasWorld(std::string_view mapname) noexcept
+{
+	using muffmode::spawn_rules::detail::EqualsAsciiI;
+
+	constexpr std::string_view WORLDLESS_EXTENSIONS[] = {
+		".cin", ".dm2", ".pcx", ".png"
+	};
+
+	// The engine strips a "$spawnpoint" suffix before the game module sees the
+	// name; tolerate one anyway so classification cannot depend on the caller.
+	const std::string_view name = mapname.substr(0, mapname.find('$'));
+	for (std::string_view extension : WORLDLESS_EXTENSIONS) {
+		// Match the engine's own length rule: the extension alone is a map name.
+		if (name.size() > extension.size() &&
+			EqualsAsciiI(name.substr(name.size() - extension.size()), extension)) {
+			return false;
+		}
+	}
+	return true;
+}
+
+inline bool MM_MapStateHasWorld(const char *mapname) noexcept
+{
+	return !mapname || MM_MapStateHasWorld(std::string_view(mapname));
 }
 
 // Replace the final path component of an absolute/relative file path in-place.

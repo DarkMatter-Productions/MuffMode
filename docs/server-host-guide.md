@@ -64,6 +64,11 @@ g_warmup_countdown 10
 map q2dm1
 ```
 
+This deliberately small example does not create a KEX lobby. If you raise
+`maxclients` for a lobby-hosted server, set `kexmultiplayer maxplayers` to the
+same requested capacity before creating the lobby. MuffMode supports up to 128
+connected slots, while the active lobby provider may enforce a lower limit.
+
 Run `doctor` after changing server settings. It checks common misconfigurations and reports suggested fixes.
 
 ## Optional Structured Map Pool
@@ -366,6 +371,11 @@ Examples:
 | NadeFest | `gt-NADEFEST.cfg` |
 
 Place these files in the active game directory. The system executes them only when the gametype actually changes.
+When the current session is limited to the four local/splitscreen slots,
+MuffMode loads the file through a bounded filter: every executable command
+segment is checked, `kexmultiplayer` is skipped, and supplied `maxclients`
+assignments outside `1` through `4` (including malformed or dynamic values)
+are rejected. Quoted text and comments are not mistaken for assignments.
 
 ## Admin Commands
 
@@ -402,7 +412,7 @@ Logs are written to `muffmode_debug.log` in the game directory. The default is `
 
 ## Host Checklist
 
-- Set `hostname`, `maxclients`, `maxplayers`, and passwords before going public.
+- Set `hostname`, connected-slot `maxclients`, active-player `maxplayers`, the separate KEX lobby capacity, and passwords before going public.
 - Add a short MOTD so casual players know what kind of server they joined.
 - Set `g_map_list` and optionally `g_map_pool`.
 - Decide whether players can vote during matches with `g_allow_vote_midgame`.

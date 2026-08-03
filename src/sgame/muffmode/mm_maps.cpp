@@ -4,9 +4,10 @@
 #include "g_local.h"
 #include "core/debug_log.h"
 #include "muffmode/mm_command_contracts.h"
-#include "muffmode/mm_items_rules.h"
 #include "muffmode/mm_map_pool.h"
 #include "muffmode/mm_maps.h"
+#include "muffmode/mm_message_budget.h"
+#include "muffmode/mm_reliable_text.h"
 #include "muffmode/mm_util.h"
 
 #include <algorithm>
@@ -347,33 +348,15 @@ void MM_HandleMapShuffleCvarChange()
 
 namespace muffmode::maps::queue {
 
-constexpr size_t MM_MAX_MAPQUEUE_ENTRIES = MAX_CLIENTS_KEX;
+constexpr size_t MM_MAX_MAPQUEUE_ENTRIES =
+	muffmode::maps::kMaxMyMapQueueEntries;
 
-struct mymap_modifier_t {
-	const char *name = nullptr;
-	int8_t game_locals_t::*setting = nullptr;
-};
-
-constexpr std::array<mymap_modifier_t, 6> k_mymap_modifiers = {{
-	{ "pu", &game_locals_t::item_inhibit_pu },
-	{ "pa", &game_locals_t::item_inhibit_pa },
-	{ "ht", &game_locals_t::item_inhibit_ht },
-	{ "ar", &game_locals_t::item_inhibit_ar },
-	{ "am", &game_locals_t::item_inhibit_am },
-	{ "wp", &game_locals_t::item_inhibit_wp },
-}};
-
-const mymap_modifier_t *MM_FindMyMapModifier(const char *name)
+void MM_NormalizeMyMapModifierModes(
+	muffmode::maps::mymap_modifier_modes_t &modes)
 {
-	if (!name || !*name)
-		return nullptr;
-
-	for (const auto &modifier : k_mymap_modifiers) {
-		if (muffmode::CStringEqualsI(name, modifier.name))
-			return &modifier;
-	}
-
-	return nullptr;
+	for (int8_t &mode : modes)
+		if (mode < -1 || mode > 1)
+			mode = 0;
 }
 
 void MM_MQ_Clear()
@@ -398,23 +381,27 @@ bool MM_MQ_Update()
 		return false;
 	}
 
-	std::vector<std::string> clean_queue;
+	std::vector<muffmode::maps::mymap_queue_entry_t> clean_queue;
 	clean_queue.reserve(std::min(game.mapqueue.size(), MM_MAX_MAPQUEUE_ENTRIES));
 
-	for (const auto &queued_map : game.mapqueue) {
+	for (const auto &queued_entry : game.mapqueue) {
 		if (clean_queue.size() >= MM_MAX_MAPQUEUE_ENTRIES)
 			break;
 		std::string resolved_map;
 		if (!muffmode::maps::ResolveConfiguredMap(
-				queued_map.c_str(), resolved_map)) {
+				queued_entry.map_name.c_str(), resolved_map)) {
 			continue;
 		}
 		if (std::any_of(clean_queue.begin(), clean_queue.end(),
-			[&resolved_map](const std::string &existing) {
-				return muffmode::maps::MapTokensEqual(existing, resolved_map);
+			[&resolved_map](const muffmode::maps::mymap_queue_entry_t &existing) {
+				return muffmode::maps::MapTokensEqual(existing.map_name, resolved_map);
 			}))
 			continue;
-		clean_queue.push_back(std::move(resolved_map));
+
+		muffmode::maps::mymap_queue_entry_t clean_entry = queued_entry;
+		clean_entry.map_name = std::move(resolved_map);
+		MM_NormalizeMyMapModifierModes(clean_entry.modifier_modes);
+		clean_queue.push_back(std::move(clean_entry));
 	}
 
 	if (clean_queue != game.mapqueue)
@@ -425,66 +412,102 @@ bool MM_MQ_Update()
 
 std::string MM_MQ_FormatList()
 {
-	std::string text;
+	return muffmode::maps::FormatMyMapQueueEntries(game.mapqueue);
+}
 
-	for (size_t i = 0; i < game.mapqueue.size(); i++) {
-		if (game.mapqueue[i].empty())
-			continue;
-		if (!text.empty())
-			text += " ";
-		text += game.mapqueue[i];
+template <typename Printer>
+void MM_PrintBoundedQueueText(
+	std::string_view text, size_t max_messages,
+	const char *budget_source, Printer &&printer)
+{
+	using namespace muffmode::reliable_text;
+	const size_t max_total_bytes = max_messages * kGuaranteedPrintContentBytes;
+	const std::string bounded = MakeBoundedPreview(text, max_total_bytes);
+	const chunk_plan_t plan = PlanChunks(
+		bounded, kMaxPrintPayloadBytes, max_messages);
+
+	mm_reliable_fanout_scope_t budget(
+		max_messages,
+		max_messages *
+			(kMaxPrintPayloadBytes + kReliablePrintAccountingOverheadBytes),
+		budget_source);
+	for (std::string_view chunk : plan.chunks) {
+		if (!MM_ReserveReliableFanoutMessage(
+			chunk.size() + kReliablePrintAccountingOverheadBytes)) {
+			break;
+		}
+		const std::string terminated(chunk);
+		printer(terminated.c_str());
 	}
-
-	return text;
 }
 
 void MM_MQ_PrintList(gentity_t *ent)
 {
 	std::string text = MM_MQ_FormatList();
-	gi.LocClient_Print(ent, PRINT_HIGH, "{}\n", text.empty() ? "(empty)" : text.c_str());
+	if (text.empty())
+		text = "(empty)";
+	text += "\n";
+	MM_PrintBoundedQueueText(
+		text, muffmode::reliable_text::kMaxMyMapQueueMessages,
+		"MyMap queue client response",
+		[ent](const char *chunk) {
+			gi.LocClient_Print(ent, PRINT_HIGH, "{}", chunk);
+		});
+}
+
+void MM_MQ_BroadcastAddedEntry()
+{
+	if (game.mapqueue.empty())
+		return;
+
+	std::string text = "MyMap queued => ";
+	text += muffmode::maps::FormatMyMapQueueEntry(game.mapqueue.back());
+	text += "\n";
+	MM_PrintBoundedQueueText(
+		text, 1, "MyMap queue add broadcast",
+		[](const char *chunk) {
+			gi.LocBroadcast_Print(PRINT_HIGH, "{}", chunk);
+		});
 }
 
 constexpr size_t MAX_MAP_LIST_DISPLAY = 512;
 
 void MM_PrintTruncatedMapList(gentity_t *ent)
 {
-	const std::string map_list_display = muffmode::TruncateWithEllipsis(muffmode::CvarString(g_map_list), MAX_MAP_LIST_DISPLAY);
+	const std::string map_list_display =
+		muffmode::reliable_text::MakeBoundedPreview(
+			muffmode::CvarString(g_map_list), MAX_MAP_LIST_DISPLAY, "...");
 	gi.LocClient_Print(ent, PRINT_HIGH, "{}\n", map_list_display.c_str());
 }
 
 void MM_PrintTruncatedMapSource(gentity_t *ent)
 {
 	const char *maps = muffmode::CvarString(g_map_list)[0] ? muffmode::CvarString(g_map_list) : muffmode::CvarString(g_map_pool);
-	const std::string display = muffmode::TruncateWithEllipsis(maps ? maps : "", MAX_MAP_LIST_DISPLAY);
+	const std::string display =
+		muffmode::reliable_text::MakeBoundedPreview(
+			maps ? maps : "", MAX_MAP_LIST_DISPLAY, "...");
 	gi.LocClient_Print(ent, PRINT_HIGH, "{}\n", display.c_str());
 }
 
 void MM_PrintTruncatedMapPool(gentity_t *ent)
 {
-	const std::string display = muffmode::TruncateWithEllipsis(muffmode::CvarString(g_map_pool), MAX_MAP_LIST_DISPLAY);
+	const std::string display =
+		muffmode::reliable_text::MakeBoundedPreview(
+			muffmode::CvarString(g_map_pool), MAX_MAP_LIST_DISPLAY, "...");
 	gi.LocClient_Print(ent, PRINT_HIGH, "{}\n", display.c_str());
-}
-
-bool MM_IsValidMyMapModifier(const char *modifier)
-{
-	if (!modifier || !modifier[0] || !modifier[1])
-		return false;
-
-	if (modifier[0] != '+' && modifier[0] != '-')
-		return false;
-
-	const char *name = modifier + 1;
-	return MM_FindMyMapModifier(name) != nullptr;
 }
 
 bool MM_MapQueueContains(const char *mapname)
 {
-	return std::any_of(game.mapqueue.begin(), game.mapqueue.end(), [mapname](const std::string &queued_map) {
-		return muffmode::maps::MapTokensEqual(queued_map, mapname);
+	if (!mapname)
+		return false;
+
+	return std::any_of(game.mapqueue.begin(), game.mapqueue.end(), [mapname](const muffmode::maps::mymap_queue_entry_t &queued_entry) {
+		return muffmode::maps::MapTokensEqual(queued_entry.map_name, mapname);
 	});
 }
 
-std::string s_next_mapqueue_return;
+muffmode::maps::mymap_pending_selection_t s_pending_map_load;
 
 } // namespace muffmode::maps::queue
 
@@ -512,7 +535,10 @@ int MM_MQ_Count()
 	return static_cast<int>(game.mapqueue.size());
 }
 
-bool MM_MQ_Add(gentity_t *ent, const char *mapname)
+bool MM_MQ_Add(
+	gentity_t *ent,
+	const char *mapname,
+	muffmode::maps::mymap_modifier_modes_t modifier_modes)
 {
 	if (!ent || !ent->client)
 		return false;
@@ -552,7 +578,8 @@ bool MM_MQ_Add(gentity_t *ent, const char *mapname)
 		return false;
 	}
 
-	game.mapqueue.push_back(std::move(resolved_map));
+	map_queue::MM_NormalizeMyMapModifierModes(modifier_modes);
+	game.mapqueue.push_back({ std::move(resolved_map), modifier_modes });
 	return true;
 }
 
@@ -560,28 +587,63 @@ const char *MM_MQ_Go_Next()
 {
 	if (!deathmatch || !deathmatch->integer)
 		return nullptr;
+
+	// Match_End can be reached again while intermission is already active.
+	// Keep the first transition stable instead of consuming another queue entry
+	// and replacing the modifiers paired with level.changemap.
+	if (map_queue::s_pending_map_load.active())
+		return map_queue::s_pending_map_load.map_name().c_str();
+
 	MM_HandleMapPoolCvarChanges();
 
 	if (!map_queue::MM_MQ_Update())
 		return nullptr;
 
 	while (!game.mapqueue.empty()) {
-		if (!MM_IsSafeMapToken(game.mapqueue.front().c_str())) {
+		if (!MM_IsSafeMapToken(game.mapqueue.front().map_name.c_str())) {
 			game.mapqueue.erase(game.mapqueue.begin());
 			continue;
 		}
 
-		map_queue::s_next_mapqueue_return = game.mapqueue.front();
-		game.mapqueue.erase(game.mapqueue.begin());
-		return map_queue::s_next_mapqueue_return.c_str();
+		muffmode::maps::mymap_queue_entry_t selected_entry;
+		if (!muffmode::maps::PopMyMapQueueFront(
+				game.mapqueue, selected_entry)) {
+			return nullptr;
+		}
+
+		// Selection and application are separate phases. The engine may replace
+		// or fail this transition, so keep the modes private until SpawnEntities
+		// confirms the canonical target map.
+		if (!map_queue::s_pending_map_load.Arm(std::move(selected_entry)))
+			return map_queue::s_pending_map_load.map_name().c_str();
+		return map_queue::s_pending_map_load.map_name().c_str();
 	}
 
 	return nullptr;
 }
 
+bool MM_MQ_TakePendingModifiersForMap(
+	const char *mapname,
+	muffmode::maps::mymap_modifier_modes_t &modifier_modes) noexcept
+{
+	const std::string_view loaded_map = mapname
+		? std::string_view(mapname)
+		: std::string_view {};
+	return map_queue::s_pending_map_load.TakeForMap(
+		loaded_map, modifier_modes) ==
+		muffmode::maps::mymap_pending_load_result_t::matched;
+}
+
+void MM_MQ_CancelPendingMapLoad() noexcept
+{
+	map_queue::s_pending_map_load.Cancel();
+}
+
 void MM_CmdMapList(gentity_t *ent)
 {
 	if (!ent || !ent->client)
+		return;
+	if (CheckFlood(ent))
 		return;
 
 	if (!MM_IsExactArgcValid(gi.argc(), 1)) {
@@ -609,9 +671,11 @@ void MM_CmdMapList(gentity_t *ent)
 		if (structured_cycle) {
 			const std::vector<std::string> cycle =
 				MM_CollectStructuredMapCycle();
-			const std::string display = muffmode::TruncateWithEllipsis(
+			const std::string display =
+				muffmode::reliable_text::MakeBoundedPreview(
 				join_strings(cycle, " "),
-				map_queue::MAX_MAP_LIST_DISPLAY);
+				map_queue::MAX_MAP_LIST_DISPLAY,
+				"...");
 			gi.LocClient_Print(
 				ent, PRINT_HIGH,
 				"Structured map cycle: {} maps ({} selection):\n{}\n",
@@ -654,6 +718,8 @@ void MM_CmdMyMap(gentity_t *ent)
 {
 	if (!ent || !ent->client)
 		return;
+	if (CheckFlood(ent))
+		return;
 	MM_HandleMapPoolCvarChanges();
 
 	if (!muffmode::CvarInteger(g_allow_mymap)) {
@@ -683,9 +749,16 @@ void MM_CmdMyMap(gentity_t *ent)
 		return;
 	}
 
+	muffmode::maps::mymap_modifier_modes_t modifier_modes {};
 	for (int i = 2; i < gi.argc(); i++) {
-		if (!map_queue::MM_IsValidMyMapModifier(gi.argv(i))) {
-			gi.LocClient_Print(ent, PRINT_HIGH, "Invalid MyMap modifier: {}\n", gi.argv(i));
+		if (!muffmode::maps::ApplyMyMapModifierToken(
+				modifier_modes, gi.argv(i) ? gi.argv(i) : "")) {
+			const std::string modifier =
+				muffmode::reliable_text::MakeBoundedPreview(
+					gi.argv(i) ? gi.argv(i) : "", 128, "...");
+			gi.LocClient_Print(
+				ent, PRINT_HIGH, "Invalid MyMap modifier: {}\n",
+				modifier.c_str());
 			return;
 		}
 	}
@@ -697,24 +770,11 @@ void MM_CmdMyMap(gentity_t *ent)
 		return;
 	}
 
-	if (!MM_MQ_Add(ent, gi.argv(1)))
+	if (!MM_MQ_Add(ent, gi.argv(1), modifier_modes))
 		return;
 
-	MM_ClearItemInhibitFlags();
-
-	for (int i = 2; i < gi.argc(); i++) {
-		const char *s = gi.argv(i);
-		if (!s || !s[0])
-			continue;
-		int num = 0;
-		if (s[0] == '+') { num = 1; s++; }
-		else if (s[0] == '-') { num = -1; s++; }
-		else continue;
-		if (const auto *modifier = map_queue::MM_FindMyMapModifier(s))
-			game.*(modifier->setting) = static_cast<int8_t>(num);
-	}
-
-	std::string text = map_queue::MM_MQ_FormatList();
-	if (!text.empty())
-		gi.LocBroadcast_Print(PRINT_HIGH, "MyMap Queue => {}\n", text.c_str());
+	// Broadcast only the bounded delta.  Re-sending the entire growing queue on
+	// every add amplifies a same-frame burst across all reliable client streams;
+	// the full queue remains available through an explicit `mymap` request.
+	map_queue::MM_MQ_BroadcastAddedEntry();
 }

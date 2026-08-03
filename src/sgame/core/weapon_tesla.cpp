@@ -3,6 +3,7 @@
 // Tesla mine projectile behavior.
 #include "g_local.h"
 #include "muffmode/mm_arena.h"
+#include "muffmode/mm_ordnance_identity.h"
 
 namespace {
 
@@ -18,6 +19,44 @@ constexpr float TESLA_EXPLOSION_RADIUS = 200.0f;
 
 constexpr int TESLA_DANGEROUS_CONTENTS = CONTENTS_SLIME | CONTENTS_LAVA;
 constexpr int TESLA_CONDUCTIVE_CONTENTS = TESLA_DANGEROUS_CONTENTS | CONTENTS_WATER;
+
+bool TeslaGenerationMatches(const gentity_t *entity, int32_t generation) {
+	return entity && entity->inuse && entity->spawn_count == generation;
+}
+
+gentity_t *TeslaOwner(const gentity_t *tesla) {
+	return MM_ResolveOrdnanceOwner(tesla,
+		tesla ? tesla->teammaster : nullptr);
+}
+
+gentity_t *TeslaField(const gentity_t *tesla) {
+	if (!tesla || !tesla->teamchain)
+		return nullptr;
+
+	gentity_t *field = tesla->teamchain;
+	if (!MM_OrdnanceEntityIdentityMatches(field, tesla->style,
+		tesla->sounds) || MM_ResolveOrdnanceOwner(field) != tesla)
+		return nullptr;
+	return field;
+}
+
+void TeslaDiscard(gentity_t *tesla) {
+	if (!tesla)
+		return;
+
+	const int32_t tesla_generation = tesla->spawn_count;
+	if (gentity_t *field = TeslaField(tesla)) {
+		tesla->teamchain = nullptr;
+		G_FreeEntity(field);
+	}
+	if (TeslaGenerationMatches(tesla, tesla_generation))
+		G_FreeEntity(tesla);
+}
+
+struct tesla_box_context_t {
+	gentity_t *tesla;
+	gentity_t *owner;
+};
 
 bool IsTeslaTargetCandidate(gentity_t *candidate, gentity_t *self, gentity_t *team_damage_owner, bool reject_traps) {
 	if (!candidate->inuse)
@@ -59,19 +98,23 @@ bool IsSpawnProtectedEntity(const gentity_t *entity) {
 } // namespace
 
 static void tesla_remove(gentity_t *self) {
-	self->takedamage = false;
-
-	if (auto *field = self->teamchain) {
-		for (auto *cur = field; cur; ) {
-			auto *next = cur->teamchain;
-			G_FreeEntity(cur);
-			cur = next;
-		}
-	} else if (self->air_finished) {
-		gi.Com_Print("tesla_mine without a field!\n");
+	gentity_t *owner = TeslaOwner(self);
+	if (!owner) {
+		TeslaDiscard(self);
+		return;
 	}
 
-	self->owner = self->teammaster; // Going away, set the owner correctly.
+	self->takedamage = false;
+
+	if (gentity_t *field = TeslaField(self)) {
+		self->teamchain = nullptr;
+		G_FreeEntity(field);
+	} else if (self->air_finished) {
+		TeslaDiscard(self);
+		return;
+	}
+
+	self->owner = owner; // Going away, set the owner correctly.
 	// grenade explode does damage to self->enemy
 	self->enemy = nullptr;
 
@@ -87,20 +130,42 @@ static DIE(tesla_die) (gentity_t *self, gentity_t *inflictor, gentity_t *attacke
 }
 
 static void tesla_blow(gentity_t *self) {
+	if (!TeslaOwner(self)) {
+		TeslaDiscard(self);
+		return;
+	}
 	self->dmg *= TESLA_EXPLOSION_DAMAGE_MULT;
 	self->splash_radius = TESLA_EXPLOSION_RADIUS;
 	tesla_remove(self);
 }
 
-static TOUCH(tesla_zap) (gentity_t *self, gentity_t *other, const trace_t &tr, bool other_touching_self) -> void {}
+static TOUCH(tesla_zap) (gentity_t *self, gentity_t *other, const trace_t &tr, bool other_touching_self) -> void {
+	const int32_t field_generation = self->spawn_count;
+	gentity_t *tesla = MM_ResolveOrdnanceOwner(self);
+	if (tesla && TeslaOwner(tesla) && TeslaField(tesla) == self)
+		return;
+
+	if (tesla)
+		TeslaDiscard(tesla);
+	if (TeslaGenerationMatches(self, field_generation))
+		G_FreeEntity(self);
+}
 
 static BoxEntitiesResult_t tesla_think_active_BoxFilter(gentity_t *check, void *data) {
-	auto *self = static_cast<gentity_t *>(data);
-	return IsTeslaTargetCandidate(check, self, self->teammaster, true) ? BoxEntitiesResult_t::Keep : BoxEntitiesResult_t::Skip;
+	auto *context = static_cast<tesla_box_context_t *>(data);
+	return IsTeslaTargetCandidate(check, context->tesla, context->owner, true)
+		? BoxEntitiesResult_t::Keep : BoxEntitiesResult_t::Skip;
 }
 
 static THINK(tesla_think_active) (gentity_t *self) -> void {
 	static gentity_t *touch[MAX_ENTITIES];
+	static int32_t touch_generations[MAX_ENTITIES];
+	gentity_t *owner = TeslaOwner(self);
+	gentity_t *field = TeslaField(self);
+	if (!owner || !field) {
+		TeslaDiscard(self);
+		return;
+	}
 
 	if (level.time > self->air_finished) {
 		tesla_remove(self);
@@ -112,29 +177,36 @@ static THINK(tesla_think_active) (gentity_t *self) -> void {
 
 	vec3_t start = self->s.origin;
 	start[2] += 16;
+	tesla_box_context_t context { self, owner };
 
 	const size_t num = gi.BoxEntities(
-		self->teamchain->absmin,
-		self->teamchain->absmax,
+		field->absmin,
+		field->absmax,
 		touch,
 		MAX_ENTITIES,
 		AREA_SOLID,
 		tesla_think_active_BoxFilter,
-		self);
+		&context);
+	for (size_t i = 0; i < num; i++)
+		touch_generations[i] = touch[i]->spawn_count;
 
-	auto *team_damage_owner = self->teamchain ? self->teamchain->owner : self->teammaster;
 	for (size_t i = 0; i < num; i++) {
 		// if the tesla died while zapping things, stop zapping.
 		if (!self->inuse)
-			break;
+			return;
 
 		auto *hit = touch[i];
-		if (!IsTeslaTargetCandidate(hit, self, team_damage_owner, false))
+		if (!TeslaGenerationMatches(hit, touch_generations[i]))
+			continue;
+		if (!IsTeslaTargetCandidate(hit, self, owner, false))
 			continue;
 
 		const trace_t tr = gi.traceline(start, hit->s.origin, self, MASK_PROJECTILE);
 		if (tr.fraction == 1 || tr.ent == hit) {
 			const vec3_t dir = hit->s.origin - start;
+			const int32_t tesla_generation = self->spawn_count;
+			const int32_t target_generation = hit->spawn_count;
+			const int target_arena = MM_Arena_Id(hit);
 
 			// PMM - play quad sound if it's above the "normal" damage
 			if (self->dmg > TESLA_DAMAGE)
@@ -142,8 +214,20 @@ static THINK(tesla_think_active) (gentity_t *self) -> void {
 
 			// PGM - don't do knockback to walking monsters
 			const int knockback = ((hit->svflags & SVF_MONSTER) && !(hit->flags & (FL_FLY | FL_SWIM))) ? 0 : TESLA_KNOCKBACK;
-			T_Damage(hit, self, self->teammaster, dir, tr.endpos, tr.plane.normal,
+			T_Damage(hit, self, owner, dir, tr.endpos, tr.plane.normal,
 				self->dmg, knockback, DAMAGE_NONE | DAMAGE_STAT_ONCE, MOD_TESLA);
+			if (!TeslaGenerationMatches(self, tesla_generation))
+				return;
+
+			owner = TeslaOwner(self);
+			field = TeslaField(self);
+			if (!owner || !field) {
+				TeslaDiscard(self);
+				return;
+			}
+			if (!MM_OrdnanceEntityIdentityMatches(hit, target_generation,
+				target_arena))
+				continue;
 
 			gi.WriteByte(svc_temp_entity);
 			gi.WriteByte(TE_LIGHTNING);
@@ -155,13 +239,20 @@ static THINK(tesla_think_active) (gentity_t *self) -> void {
 		}
 	}
 
-	if (self->inuse) {
-		self->think = tesla_think_active;
-		self->nextthink = level.time + 10_hz;
+	if (!TeslaOwner(self) || !TeslaField(self)) {
+		TeslaDiscard(self);
+		return;
 	}
+	self->think = tesla_think_active;
+	self->nextthink = level.time + 10_hz;
 }
 
 static THINK(tesla_activate) (gentity_t *self) -> void {
+	if (!TeslaOwner(self)) {
+		TeslaDiscard(self);
+		return;
+	}
+
 	if (gi.pointcontents(self->s.origin) & TESLA_CONDUCTIVE_CONTENTS) {
 		tesla_blow(self);
 		return;
@@ -193,7 +284,8 @@ static THINK(tesla_activate) (gentity_t *self) -> void {
 	trigger->maxs = { TESLA_DAMAGE_RADIUS, TESLA_DAMAGE_RADIUS, TESLA_DAMAGE_RADIUS };
 	trigger->movetype = MOVETYPE_NONE;
 	trigger->solid = SOLID_TRIGGER;
-	trigger->owner = self;
+	MM_CaptureOrdnanceOwner(trigger, self);
+	self->style = trigger->spawn_count;
 	trigger->touch = tesla_zap;
 	trigger->classname = "tesla trigger";
 	// doesn't need to be marked as a teamslave since the move code for bounce looks for teamchains
@@ -210,6 +302,12 @@ static THINK(tesla_activate) (gentity_t *self) -> void {
 }
 
 static THINK(tesla_think) (gentity_t *ent) -> void {
+	gentity_t *owner = TeslaOwner(ent);
+	if (!owner) {
+		TeslaDiscard(ent);
+		return;
+	}
+
 	if (gi.pointcontents(ent->s.origin) & TESLA_DANGEROUS_CONTENTS) {
 		tesla_remove(ent);
 		return;
@@ -228,8 +326,8 @@ static THINK(tesla_think) (gentity_t *ent) -> void {
 	} else {
 		if (ent->s.frame > 9) {
 			if (ent->s.frame == 10) {
-				if (ent->owner && ent->owner->client) {
-					PlayerNoise(ent->owner, ent->s.origin, PNOISE_WEAPON);
+				if (owner->client) {
+					PlayerNoise(owner, ent->s.origin, PNOISE_WEAPON);
 				}
 				ent->s.skinnum = 1;
 			} else if (ent->s.frame == 12) {
@@ -244,6 +342,11 @@ static THINK(tesla_think) (gentity_t *ent) -> void {
 }
 
 static TOUCH(tesla_lava) (gentity_t *ent, gentity_t *other, const trace_t &tr, bool other_touching_self) -> void {
+	if (!TeslaOwner(ent)) {
+		TeslaDiscard(ent);
+		return;
+	}
+
 	if (tr.contents & TESLA_DANGEROUS_CONTENTS) {
 		tesla_blow(ent);
 		return;
@@ -280,7 +383,7 @@ void fire_tesla(gentity_t *self, const vec3_t &start, const vec3_t &aimdir, int 
 	tesla->maxs = { 12, 12, 20 };
 	tesla->s.modelindex = gi.modelindex("models/weapons/g_tesla/tris.md2");
 
-	tesla->owner = self; // PGM - we don't want it owned by self YET.
+	MM_CaptureOrdnanceOwner(tesla, self); // PGM - we don't want it owned by self YET.
 	tesla->teammaster = self;
 
 	tesla->wait = (level.time + TESLA_TIME_TO_LIVE).seconds();

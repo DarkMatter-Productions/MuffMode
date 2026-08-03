@@ -2,7 +2,11 @@
 // Licensed under the GNU General Public License 2.0.
 
 #include <limits>
+#include <optional>
 #include <sstream>
+#include <string>
+#include <string_view>
+#include <vector>
 
 #include "g_local.h"
 #include "muffmode/mm_parse.h"
@@ -17,6 +21,8 @@
 #pragma clang diagnostic pop
 #endif
 
+void target_poi_use(gentity_t *ent, gentity_t *other, gentity_t *activator);
+
 // new save format;
 // - simple JSON format
 // - work via 'type' definitions which declare the type
@@ -24,9 +30,12 @@
 // - backwards & forwards compatible with this same format
 // - I wrote this initially when the codebase was in C, so it
 //   does have some C-isms in here.
-constexpr uint32_t SAVE_FORMAT_VERSION = 1;
+constexpr uint32_t SAVE_FORMAT_VERSION = 2;
 constexpr uint32_t SAVE_FORMAT_MIN_READ_VERSION = 1;
 constexpr uint32_t SAVE_FORMAT_MAX_READ_VERSION = SAVE_FORMAT_VERSION;
+// Chosen reinforcement indices are uint8_t with 255 reserved as the sentinel.
+// Keep every saved list both allocation-bounded and representable by that ABI.
+constexpr size_t MAX_SAVED_REINFORCEMENT_SPECS = UINT8_MAX;
 
 #include <unordered_map>
 
@@ -154,6 +163,24 @@ void json_print_error(const char *field, const char *message, bool fatal) {
 		gi.Com_ErrorFmt("Error loading JSON\n{}.{}: {}", json_error_stack, field, message);
 
 	gi.Com_PrintFmt("Warning loading JSON\n{}.{}: {}\n", json_error_stack, field, message);
+}
+
+static std::optional<std::string_view> json_c_string_view(
+	const Json::Value &json) noexcept
+{
+	if (!json.isString())
+		return std::nullopt;
+
+	const char *begin = nullptr;
+	const char *end = nullptr;
+	if (!json.getString(&begin, &end) || !begin || !end || end < begin)
+		return std::nullopt;
+
+	const std::string_view text(
+		begin, static_cast<size_t>(end - begin));
+	if (text.find('\0') != std::string_view::npos)
+		return std::nullopt;
+	return text;
 }
 
 using save_void_t = save_data_t<void, UINT_MAX>;
@@ -472,16 +499,23 @@ struct save_type_deducer<std::bitset<N>> {
 
 					if (!json.isString())
 						json_print_error(field, "expected string", false);
-					else if (strlen(json.asCString()) > N)
-						json_print_error(field, "bitset length overflow", false);
 					else {
-						const char *str = json.asCString();
-						size_t len = strlen(str);
+						const std::optional<std::string_view> text =
+							json_c_string_view(json);
+						if (!text) {
+							json_print_error(
+								field, "string contains embedded null", false);
+							return;
+						}
+						if (text->size() > N) {
+							json_print_error(field, "bitset length overflow", false);
+							return;
+						}
 
-						for (size_t i = 0; i < len; i++) {
-							if (str[i] == '0')
+						for (size_t i = 0; i < text->size(); i++) {
+							if ((*text)[i] == '0')
 								continue;
-							else if (str[i] == '1')
+							else if ((*text)[i] == '1')
 								as_bitset[i] = true;
 							else
 								json_print_error(field, "bad bitset value", false);
@@ -932,6 +966,7 @@ FIELD_LEVEL_STRING(classname), // FIXME: should allow loading from constants
 FIELD_AUTO(spawnflags),
 
 FIELD_AUTO(timestamp),
+FIELD_AUTO(item_available_time),
 
 FIELD_AUTO(angle),
 FIELD_LEVEL_STRING(target),
@@ -1004,8 +1039,17 @@ FIELD_AUTO(oldenemy),
 FIELD_AUTO(activator),
 FIELD_AUTO(groundentity),
 FIELD_AUTO(groundentity_linkcount),
-FIELD_AUTO(teamchain),
-FIELD_AUTO(teammaster),
+	FIELD_AUTO(teamchain),
+	FIELD_AUTO(teammaster),
+	FIELD_AUTO(turret_breach_generation),
+	FIELD_AUTO(turret_master_generation),
+	FIELD_AUTO(turret_controller_generation),
+	FIELD_AUTO(turret_activator_generation),
+	FIELD_AUTO(turret_enemy_generation),
+	FIELD_AUTO(sphere_enemy_generation),
+	FIELD_AUTO(doppel_body_generation),
+	FIELD_AUTO(megahealth_owner_generation),
+	FIELD_AUTO(target_ent_generation),
 
 FIELD_AUTO(mynoise),
 FIELD_AUTO(mynoise2),
@@ -1463,13 +1507,17 @@ void read_save_type_json(const Json::Value &json, void *data, const save_type_t 
 		if (json.isNull())
 			*((char **)data) = nullptr;
 		else if (json.isString()) {
-			if (type->count && strlen(json.asCString()) >= type->count)
+			const std::optional<std::string_view> text =
+				json_c_string_view(json);
+			if (!text)
+				json_print_error(field, "string contains embedded null", false);
+			else if (type->count && text->size() >= type->count)
 				json_print_error(field, "static-length dynamic string overrun", false);
 			else {
-				size_t len = strlen(json.asCString());
-				size_t alloc_size = type->count ? type->count : (len + 1);
+				const size_t len = text->size();
+				const size_t alloc_size = type->count ? type->count : (len + 1);
 				char *str = *((char **)data) = (char *)gi.TagMalloc(alloc_size, type->tag);
-				Q_strlcpy(str, json.asCString(), alloc_size);
+				memcpy(str, text->data(), len);
 				str[len] = 0;
 			}
 		} else if (json.isArray()) {
@@ -1508,11 +1556,16 @@ void read_save_type_json(const Json::Value &json, void *data, const save_type_t 
 		return;
 	case ST_FIXED_STRING:
 		if (json.isString()) {
-			if (type->count && strlen(json.asCString()) >= type->count)
+			const std::optional<std::string_view> text =
+				json_c_string_view(json);
+			if (!text)
+				json_print_error(field, "string contains embedded null", false);
+			else if (type->count && text->size() >= type->count)
 				json_print_error(field, "fixed length string overrun", false);
 			else {
-				size_t dest_size = type->count ? type->count : (strlen(json.asCString()) + 1);
-				Q_strlcpy((char *)data, json.asCString(), dest_size);
+				const size_t len = text->size();
+				memcpy(data, text->data(), len);
+				static_cast<char *>(data)[len] = 0;
 			}
 		} else if (json.isArray()) {
 			if (type->count && json.size() >= type->count)
@@ -1628,11 +1681,19 @@ void read_save_type_json(const Json::Value &json, void *data, const save_type_t 
 		if (json.isNull())
 			item = nullptr;
 		else if (json.isString()) {
-			const char *classname = json.asCString();
-			item = FindItemByClassname(classname);
+			const std::optional<std::string_view> classname_view =
+				json_c_string_view(json);
+			if (!classname_view) {
+				json_print_error(
+					field, "item classname contains embedded null", false);
+				return;
+			}
+			const std::string classname(*classname_view);
+			item = FindItemByClassname(classname.c_str());
 
 			if (item == nullptr) {
-				json_print_error(field, G_Fmt("item {} missing", classname).data(), false);
+				json_print_error(
+					field, G_Fmt("item {} missing", classname).data(), false);
 				return;
 			}
 		} else {
@@ -1658,8 +1719,15 @@ void read_save_type_json(const Json::Value &json, void *data, const save_type_t 
 		else if (!json.isString())
 			json_print_error(field, "expected null or string", false);
 		else {
-			const char *name = json.asCString();
-			auto link = list_str_hash.find(name);
+			const std::optional<std::string_view> name_view =
+				json_c_string_view(json);
+			if (!name_view) {
+				json_print_error(
+					field, "pointer name contains embedded null", false);
+				return;
+			}
+			const std::string name(*name_view);
+			auto link = list_str_hash.find(name.c_str());
 
 			if (link == list_str_hash.end())
 				json_print_error(
@@ -1677,21 +1745,30 @@ void read_save_type_json(const Json::Value &json, void *data, const save_type_t 
 			//for (auto key : json.getMemberNames())
 			for (auto it = json.begin(); it != json.end(); it++) {
 				//const char		   *classname = key.c_str();
-				const char *dummy;
-				const char *classname = it.memberName(&dummy);
+				const char *classname_end = nullptr;
+				const char *classname_begin = it.memberName(&classname_end);
+				const std::string_view classname_view(
+					classname_begin,
+					static_cast<size_t>(classname_end - classname_begin));
 				const Json::Value &value = *it;
+				if (classname_view.find('\0') != std::string_view::npos) {
+					json_print_error(
+						field, "inventory classname contains embedded null", false);
+					continue;
+				}
+				const std::string classname(classname_view);
 
 				if (!value.isInt()) {
-					json_push_stack(classname);
+					json_push_stack(classname.c_str());
 					json_print_error(field, "expected integer", false);
 					json_pop_stack();
 					continue;
 				}
 
-				gitem_t *item = FindItemByClassname(classname);
+				gitem_t *item = FindItemByClassname(classname.c_str());
 
 				if (!item) {
-					json_push_stack(classname);
+					json_push_stack(classname.c_str());
 					json_print_error(field, G_Fmt("can't find item {}", classname).data(), false);
 					json_pop_stack();
 					continue;
@@ -1707,13 +1784,23 @@ void read_save_type_json(const Json::Value &json, void *data, const save_type_t 
 			json_print_error(field, "expected array", false);
 		else {
 			reinforcement_list_t *list_ptr = (reinforcement_list_t *)data;
+			list_ptr->num_reinforcements = 0;
+			list_ptr->reinforcements = nullptr;
+			if (json.size() > MAX_SAVED_REINFORCEMENT_SPECS) {
+				json_print_error(field, "too many reinforcement entries", false);
+				return;
+			}
 
-			list_ptr->num_reinforcements = json.size();
-			list_ptr->reinforcements = (reinforcement_t *)gi.TagMalloc(sizeof(reinforcement_t) * list_ptr->num_reinforcements, TAG_LEVEL);
+			struct parsed_reinforcement_t {
+				std::string classname;
+				int32_t strength = 0;
+				vec3_t mins{};
+				vec3_t maxs{};
+			};
+			std::vector<parsed_reinforcement_t> parsed;
+			parsed.reserve(json.size());
 
-			reinforcement_t *p = list_ptr->reinforcements;
-
-			for (Json::Value::ArrayIndex i = 0; i < json.size(); i++, p++) {
+			for (Json::Value::ArrayIndex i = 0; i < json.size(); i++) {
 				const Json::Value &value = json[i];
 
 				if (!value.isObject()) {
@@ -1731,6 +1818,15 @@ void read_save_type_json(const Json::Value &json, void *data, const save_type_t 
 					json_pop_stack();
 					continue;
 				}
+				const std::optional<std::string_view> classname =
+					json_c_string_view(value["classname"]);
+				if (!classname) {
+					json_push_stack(fmt::format("{}.classname", i));
+					json_print_error(
+						field, "string contains embedded null", false);
+					json_pop_stack();
+					continue;
+				}
 
 				if (!value["mins"].isArray() || value["mins"].size() != 3) {
 					json_push_stack(fmt::format("{}.mins", i));
@@ -1745,6 +1841,17 @@ void read_save_type_json(const Json::Value &json, void *data, const save_type_t 
 					json_pop_stack();
 					continue;
 				}
+				bool bounds_are_integral = true;
+				for (Json::Value::ArrayIndex x = 0; x < 3; x++) {
+					bounds_are_integral = bounds_are_integral &&
+						value["mins"][x].isInt() && value["maxs"][x].isInt();
+				}
+				if (!bounds_are_integral) {
+					json_push_stack(fmt::format("{}.bounds", i));
+					json_print_error(field, "expected integer bounds", false);
+					json_pop_stack();
+					continue;
+				}
 
 				if (!value["strength"].isInt()) {
 					json_push_stack(fmt::format("{}.strength", i));
@@ -1753,13 +1860,30 @@ void read_save_type_json(const Json::Value &json, void *data, const save_type_t 
 					continue;
 				}
 
-				p->classname = G_CopyString(value["classname"].asCString(), TAG_LEVEL);
-				p->strength = value["strength"].asInt();
-
+				parsed_reinforcement_t entry;
+				entry.classname.assign(classname->data(), classname->size());
+				entry.strength = value["strength"].asInt();
 				for (int32_t x = 0; x < 3; x++) {
-					p->mins[x] = value["mins"][x].asInt();
-					p->maxs[x] = value["maxs"][x].asInt();
+					entry.mins[x] = value["mins"][x].asInt();
+					entry.maxs[x] = value["maxs"][x].asInt();
 				}
+				parsed.push_back(std::move(entry));
+			}
+
+			if (parsed.empty())
+				return;
+
+			list_ptr->num_reinforcements =
+				static_cast<uint32_t>(parsed.size());
+			list_ptr->reinforcements = (reinforcement_t *)gi.TagMalloc(
+				sizeof(reinforcement_t) * parsed.size(), TAG_LEVEL);
+			for (size_t i = 0; i < parsed.size(); i++) {
+				reinforcement_t &destination = list_ptr->reinforcements[i];
+				destination.classname =
+					G_CopyString(parsed[i].classname.c_str(), TAG_LEVEL);
+				destination.strength = parsed[i].strength;
+				destination.mins = parsed[i].mins;
+				destination.maxs = parsed[i].maxs;
 			}
 		}
 		return;
@@ -2186,54 +2310,74 @@ void read_save_struct_json(const Json::Value &json, void *data, const save_struc
 		return;
 	}
 
-	//for (auto key : json.getMemberNames())
 	for (auto it = json.begin(); it != json.end(); it++) {
-		//const char		   *classname = key.c_str();
-		const char *dummy;
-		const char *key = it.memberName(&dummy);
-		const Json::Value &value = *it;//json[key];
-		const save_field_t *field;
+		// [MuffMode] JsonCpp member names may contain embedded NUL bytes.
+		const char *key_end = nullptr;
+		const char *key_begin = it.memberName(&key_end);
+		const std::string_view key(
+			key_begin, static_cast<size_t>(key_end - key_begin));
+		const Json::Value &value = *it;
+		const save_field_t *matched_field = nullptr;
 
-		for (field = structure->fields.begin(); field != structure->fields.end(); field++) {
-			if (strcmp(key, field->name) == 0) {
-				void *p = ((uint8_t *)data) + field->offset;
-				read_save_type_json(value, p, &field->type, field->name);
+		for (const save_field_t &field : structure->fields) {
+			if (key == std::string_view(field.name)) {
+				matched_field = &field;
+				void *p = ((uint8_t *)data) + field.offset;
+				read_save_type_json(value, p, &field.type, field.name);
 				break;
 			}
 		}
 
-		if (!field->name)
-			json_print_error(key, "unknown field", false);
+		if (!matched_field) {
+			std::string printable_key(key);
+			std::replace(
+				printable_key.begin(), printable_key.end(), '\0', '?');
+			json_print_error(printable_key.c_str(), "unknown field", false);
+		}
 	}
 }
 
 #include <fstream>
 #include <memory>
 
-static Json::Value parseJson(const char *jsonString) {
+static std::optional<Json::Value> parseJson(const char *jsonString) {
+	if (!jsonString) {
+		gi.Com_Error("Couldn't decode null JSON input");
+		return std::nullopt;
+	}
+
 	Json::CharReaderBuilder reader;
 	reader["allowSpecialFloats"] = true;
 	Json::Value		  json;
 	JSONCPP_STRING	  errs;
 	std::stringstream ss(jsonString, std::ios_base::in | std::ios_base::binary);
 
-	if (!Json::parseFromStream(reader, ss, &json, &errs))
+	if (!Json::parseFromStream(reader, ss, &json, &errs)) {
 		gi.Com_ErrorFmt("Couldn't decode JSON: {}", errs.c_str());
+		return std::nullopt;
+	}
 
-	if (!json.isObject())
+	if (!json.isObject()) {
 		gi.Com_Error("expected object at root");
+		return std::nullopt;
+	}
 
 	return json;
 }
 
-static uint32_t ValidateSaveFormatVersion(const Json::Value &json, const char *scope) {
+static std::optional<uint32_t> ValidateSaveFormatVersion(
+	const Json::Value &json, const char *scope) {
 	const Json::Value &version = json["save_version"];
 
-	if (version.isNull())
+	if (version.isNull()) {
 		gi.Com_ErrorFmt("{} JSON is missing required save_version", scope);
+		return std::nullopt;
+	}
 
-	if (!version.isUInt())
+	if (!version.isUInt()) {
 		gi.Com_ErrorFmt("{} JSON save_version must be an unsigned integer", scope);
+		return std::nullopt;
+	}
 
 	const uint32_t save_version = version.asUInt();
 
@@ -2243,19 +2387,22 @@ static uint32_t ValidateSaveFormatVersion(const Json::Value &json, const char *s
 			save_version,
 			SAVE_FORMAT_MIN_READ_VERSION,
 			SAVE_FORMAT_MAX_READ_VERSION);
+		return std::nullopt;
 	}
 
 	return save_version;
 }
 
-static uint32_t ParseSavedEntityNumber(const char *id) {
-	const auto value = MM_ParseUInt32Arg(id);
+static std::optional<uint32_t> ParseSavedEntityNumber(std::string_view id) {
+	const auto value = MM_ParseCanonicalUInt32Text(id);
 	if (!value) {
-		gi.Com_ErrorFmt("invalid entity id in level JSON: {}", id ? id : "");
+		gi.Com_ErrorFmt("invalid entity id in level JSON: {}", id);
+		return std::nullopt;
 	}
 
 	if (*value >= static_cast<uint32_t>(game.maxentities)) {
 		gi.Com_ErrorFmt("entity id {} exceeds maxentities {}", *value, game.maxentities);
+		return std::nullopt;
 	}
 
 	return *value;
@@ -2323,8 +2470,48 @@ void PrecacheInventoryItems();
 // takes in pointer to JSON data. does
 // not store or modify it.
 void ReadGameJson(const char *jsonString) {
-	Json::Value json = parseJson(jsonString);
-	ValidateSaveFormatVersion(json, "game");
+	std::optional<Json::Value> parsed_json = parseJson(jsonString);
+	if (!parsed_json || !ValidateSaveFormatVersion(*parsed_json, "game"))
+		return;
+	Json::Value json = std::move(*parsed_json);
+
+	const Json::Value &saved_game = json["game"];
+	if (!saved_game.isObject()) {
+		gi.Com_Error("expected \"game\" to be object");
+		return;
+	}
+	const Json::Value &saved_maxentities = saved_game["maxentities"];
+	if (!saved_maxentities.isUInt() ||
+		saved_maxentities.asUInt() != game.maxentities) {
+		gi.Com_ErrorFmt(
+			"saved game maxentities must equal current maxentities {}",
+			game.maxentities);
+		return;
+	}
+	const Json::Value &saved_maxclients = saved_game["maxclients"];
+	if (!saved_maxclients.isUInt() ||
+		saved_maxclients.asUInt() != game.maxclients) {
+		gi.Com_ErrorFmt(
+			"saved game maxclients must equal current maxclients {}",
+			game.maxclients);
+		return;
+	}
+
+	const Json::Value &clients = json["clients"];
+	if (!clients.isArray()) {
+		gi.Com_Error("expected \"clients\" to be array");
+		return;
+	}
+	if (clients.size() != game.maxclients) {
+		gi.Com_Error("mismatched client size");
+		return;
+	}
+	for (Json::Value::ArrayIndex i = 0; i < clients.size(); i++) {
+		if (!clients[i].isObject()) {
+			gi.Com_ErrorFmt("expected clients[{}] to be object", i);
+			return;
+		}
+	}
 
 	gi.FreeTags(TAG_GAME);
 
@@ -2338,26 +2525,21 @@ void ReadGameJson(const char *jsonString) {
 
 	// read game
 	json_push_stack("game");
-	read_save_struct_json(json["game"], &game, &game_locals_t_savestruct);
+	read_save_struct_json(saved_game, &game, &game_locals_t_savestruct);
 	json_pop_stack();
 
 	if (game.maxentities != max_entities) {
 		gi.Com_ErrorFmt("saved game maxentities {} does not match current maxentities {}", game.maxentities, max_entities);
+		return;
 	}
 	if (game.maxclients != max_clients) {
 		gi.Com_ErrorFmt("saved game maxclients {} does not match current maxclients {}", game.maxclients, max_clients);
+		return;
 	}
 
 	globals.max_entities = game.maxentities;
 
 	// read clients
-	const Json::Value &clients = json["clients"];
-
-	if (!clients.isArray())
-		gi.Com_Error("expected \"clients\" to be array");
-	else if (clients.size() != game.maxclients)
-		gi.Com_Error("mismatched client size");
-
 	size_t i = 0;
 
 	for (auto &v : clients) {
@@ -2416,34 +2598,116 @@ char *WriteLevelJson(bool transition, size_t *out_size) {
 // takes in pointer to JSON data. does
 // not store or modify it.
 void ReadLevelJson(const char *jsonString) {
-	Json::Value json = parseJson(jsonString);
-	ValidateSaveFormatVersion(json, "level");
+	std::optional<Json::Value> parsed_json = parseJson(jsonString);
+	if (!parsed_json)
+		return;
+	const std::optional<uint32_t> loaded_save_version =
+		ValidateSaveFormatVersion(*parsed_json, "level");
+	if (!loaded_save_version)
+		return;
+	Json::Value json = std::move(*parsed_json);
+
+	// Validate every object key before releasing the live level.  If an engine
+	// test double unexpectedly returns from Com_ErrorFmt, malformed input must
+	// not leave a destroyed world or alias two spellings onto the same slot.
+	const Json::Value &saved_level = json["level"];
+	if (!saved_level.isObject()) {
+		gi.Com_Error("expected \"level\" to be object");
+		return;
+	}
+	const Json::Value &entities = json["entities"];
+	if (!entities.isObject()) {
+		gi.Com_Error("expected \"entities\" to be object");
+		return;
+	}
+	if (entities.size() > game.maxentities) {
+		gi.Com_ErrorFmt(
+			"saved level contains {} entities, exceeding maxentities {}",
+			entities.size(), game.maxentities);
+		return;
+	}
+	const Json::Value &saved_body_queue = saved_level["body_que"];
+	if (!saved_body_queue.isNull() &&
+		(!saved_body_queue.isInt() || saved_body_queue.asInt() < 0 ||
+			saved_body_queue.asInt() >= BODY_QUEUE_SIZE)) {
+		gi.Com_ErrorFmt("saved level body_que must be in [0, {})",
+			BODY_QUEUE_SIZE);
+		return;
+	}
+	const Json::Value &saved_total_monsters = saved_level["total_monsters"];
+	if (!saved_total_monsters.isNull() &&
+		(!saved_total_monsters.isInt() || saved_total_monsters.asInt() < 0)) {
+		gi.Com_Error("saved level total_monsters must be a non-negative integer");
+		return;
+	}
+	std::vector<uint32_t> entity_numbers;
+	entity_numbers.reserve(entities.size());
+	bool has_world_entity = false;
+	for (auto it = entities.begin(); it != entities.end(); it++) {
+		const char *id_end = nullptr;
+		const char *id = it.memberName(&id_end);
+		const std::optional<uint32_t> number = ParseSavedEntityNumber(
+			std::string_view(id, static_cast<size_t>(id_end - id)));
+		if (!number)
+			return;
+		if (!it->isObject()) {
+			gi.Com_ErrorFmt(
+				"expected saved entity {} to be object", *number);
+			return;
+		}
+		const std::optional<std::string_view> classname =
+			json_c_string_view((*it)["classname"]);
+		if (!classname || classname->empty()) {
+			gi.Com_ErrorFmt(
+				"saved entity {} requires a non-empty classname", *number);
+			return;
+		}
+		if (*number == 0) {
+			if (*classname != "worldspawn") {
+				gi.Com_Error("saved entity 0 must be worldspawn");
+				return;
+			}
+			has_world_entity = true;
+		}
+		entity_numbers.push_back(*number);
+	}
+	if (!has_world_entity) {
+		gi.Com_Error("saved level is missing required world entity 0");
+		return;
+	}
 
 	// free any dynamic memory allocated by loading the level
 	// base state
 	gi.FreeTags(TAG_LEVEL);
+	// The level structure is deliberately overlaid on the freshly spawned base
+	// map. Clear TAG_LEVEL allocations and sparse pointer containers before the
+	// JSON reader applies fields, so an omitted field cannot retain freed data.
+	level.changemap = nullptr;
+	level.achievement = nullptr;
+	level.goals = nullptr;
+	level.start_items = nullptr;
+	for (vec3_t *&points : level.poi_points)
+		points = nullptr;
+	level.monsters_registered.fill(nullptr);
+	level.health_bar_entities.fill(nullptr);
+	level.disguise_violator = nullptr;
+	level.current_dynamic_poi = nullptr;
+	level.body_que = 0;
 
 	// wipe all the entities
-	memset(g_entities, 0, game.maxentities * sizeof(g_entities[0]));
+	memset(g_entities, 0, game.maxentities * sizeof(g_entities[0])); // NOLINT(bugprone-undefined-memory-manipulation): engine-owned gentity_t slots are intentionally raw C ABI storage.
 	globals.num_entities = static_cast<uint32_t>(min(static_cast<size_t>(game.maxclients) + 1, static_cast<size_t>(game.maxentities)));
 
 	// read level
 	json_push_stack("level");
-	read_save_struct_json(json["level"], &level, &level_locals_t_savestruct);
+	read_save_struct_json(saved_level, &level, &level_locals_t_savestruct);
 	json_pop_stack();
 
-	// read entities
-	const Json::Value &entities = json["entities"];
-
-	if (!entities.isObject())
-		gi.Com_Error("expected \"entities\" to be object");
-
 	//for (auto key : json.getMemberNames())
+	size_t entity_number_index = 0;
 	for (auto it = entities.begin(); it != entities.end(); it++) {
-		const char *dummy;
-		const char *id = it.memberName(&dummy);
 		const Json::Value &value = *it;//json[key];
-		uint32_t		   number = ParseSavedEntityNumber(id);
+		const uint32_t number = entity_numbers[entity_number_index++];
 
 		if (number >= globals.num_entities)
 			globals.num_entities = number + 1;
@@ -2453,6 +2717,11 @@ void ReadLevelJson(const char *jsonString) {
 		json_push_stack(fmt::format("entities[{}]", number));
 		read_save_struct_json(value, ent, &gentity_t_savestruct);
 		json_pop_stack();
+		const uint32_t reinforcement_count =
+			ent->monsterinfo.reinforcements.num_reinforcements;
+		for (uint8_t &chosen : ent->monsterinfo.chosen_reinforcements)
+			if (chosen != UINT8_MAX && chosen >= reinforcement_count)
+				chosen = UINT8_MAX;
 		gi.linkentity(ent);
 	}
 
@@ -2464,6 +2733,31 @@ void ReadLevelJson(const char *jsonString) {
 		ent->client->pers.connected = false;
 		ent->client->pers.spawned = false;
 	}
+	// [MuffMode] Bound restored team graphs before pusher physics can walk them.
+	// V1 saves then need structural migration of the new turret stamps; V2 saves
+	// retain and validate the identities captured when they were written.
+	if (*loaded_save_version < 2) {
+		G_MigrateLegacyEntityReferenceStamps();
+		G_MigrateLegacyOrdnanceIdentities();
+		G_MigrateLegacyVehicleOrdnanceIdentities();
+	}
+	G_SanitizeRestoredEntityTeams();
+	G_TurretRestoreEntityReferences(*loaded_save_version < 2);
+
+	for (gentity_t *&bar : level.health_bar_entities) {
+		const bool expected_class = bar && bar->classname &&
+			(strcmp(bar->classname, "target_healthbar") == 0 ||
+				strcmp(bar->classname, "horde_boss_healthbar") == 0);
+		if (!bar || !bar->inuse || !expected_class ||
+			(!bar->timestamp && (!bar->enemy || !bar->enemy->inuse)))
+			bar = nullptr;
+	}
+	if (level.current_dynamic_poi &&
+		(!level.current_dynamic_poi->inuse ||
+			!level.current_dynamic_poi->classname ||
+			strcmp(level.current_dynamic_poi->classname, "target_poi") != 0 ||
+			level.current_dynamic_poi->use != target_poi_use))
+		level.current_dynamic_poi = nullptr;
 
 	// do any load time things at this point
 	const size_t entity_count = SaveEntityCount();

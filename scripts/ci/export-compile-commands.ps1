@@ -7,7 +7,9 @@ param(
 
     [string]$Project = "projects\msvc\game.vcxproj",
     [string]$Output = "build\compile_commands.json",
-    [string]$Compiler = "clang-cl.exe"
+    [string]$Compiler = "clang-cl.exe",
+
+    [switch]$GhostRuntimeTesting
 )
 
 $ErrorActionPreference = "Stop"
@@ -25,8 +27,34 @@ function Split-MSBuildList {
     })
 }
 
+function Expand-CompileSetting {
+    param(
+        [string]$Value,
+        [hashtable]$Properties
+    )
+
+    $expanded = $Value
+    foreach ($property in $Properties.GetEnumerator()) {
+        $expanded = $expanded.Replace("`$($($property.Key))", [string]$property.Value)
+    }
+
+    # Item metadata expressions are removed by Split-MSBuildList after list
+    # expansion. Property expressions must be resolved here because they may
+    # prefix a real definition, as MMGhostRuntimeTestingDefine does.
+    if ($expanded -match '\$\([^)]+\)') {
+        throw "Compile setting contains an unresolved MSBuild expression: $expanded"
+    }
+
+    return $expanded
+}
+
 $repoRoot = Get-RepoRoot
-$projectPath = Join-Path $repoRoot $Project
+$projectPath = if ([System.IO.Path]::IsPathRooted($Project)) {
+    [System.IO.Path]::GetFullPath($Project)
+}
+else {
+    [System.IO.Path]::GetFullPath((Join-Path $repoRoot $Project))
+}
 $projectDir = Split-Path -Parent $projectPath
 
 [xml]$projectXml = Get-Content -Raw -Path $projectPath
@@ -38,10 +66,21 @@ if (-not $itemDefinition) {
     throw "Could not find ClCompile settings for $Configuration|$Platform in $Project."
 }
 
-$defines = @(Split-MSBuildList $itemDefinition.PreprocessorDefinitions)
-$disabledWarnings = @(Split-MSBuildList $itemDefinition.DisableSpecificWarnings)
-$includeDirs = @(Split-MSBuildList $itemDefinition.AdditionalIncludeDirectories | ForEach-Object {
-    $_.Replace('$(ProjectDir)', "$projectDir\")
+$compileProperties = @{
+    ProjectDir = "$projectDir\"
+    MMGhostRuntimeTestingDefine = if ($GhostRuntimeTesting) { "MM_GHOST_RUNTIME_TESTING;" } else { "" }
+}
+
+$defines = @(Split-MSBuildList (Expand-CompileSetting `
+    -Value ([string]$itemDefinition.PreprocessorDefinitions) `
+    -Properties $compileProperties))
+$disabledWarnings = @(Split-MSBuildList (Expand-CompileSetting `
+    -Value ([string]$itemDefinition.DisableSpecificWarnings) `
+    -Properties $compileProperties))
+$includeDirs = @(Split-MSBuildList (Expand-CompileSetting `
+    -Value ([string]$itemDefinition.AdditionalIncludeDirectories) `
+    -Properties $compileProperties) | ForEach-Object {
+    [System.IO.Path]::GetFullPath($_)
 })
 
 $vcpkgInclude = Join-Path $repoRoot "vcpkg_installed\x64-windows-static\x64-windows-static\include"
@@ -50,10 +89,10 @@ if (Test-Path -LiteralPath $vcpkgInclude) {
 }
 
 $compileItems = $projectXml.SelectNodes("//msb:ClCompile[@Include]", $namespace)
-$commands = foreach ($item in $compileItems) {
-    $sourcePath = Join-Path $projectDir $item.Include
-    if (-not (Test-Path -LiteralPath $sourcePath)) {
-        continue
+$commands = @(foreach ($item in $compileItems) {
+    $sourcePath = [System.IO.Path]::GetFullPath((Join-Path $projectDir $item.Include))
+    if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
+        throw "Project compile source does not exist: $($item.Include) ($sourcePath)"
     }
 
     $args = @(
@@ -83,9 +122,36 @@ $commands = foreach ($item in $compileItems) {
         file = $sourcePath
         arguments = $args
     }
+})
+
+if ($commands.Count -eq 0) {
+    throw "No existing C++ source files were exported from $Project."
 }
 
-$outputPath = Join-Path $repoRoot $Output
+foreach ($command in $commands) {
+    $unresolved = @($command.arguments | Where-Object {
+        $_ -match '\$\([^)]+\)' -or $_ -match '%\([^)]+\)'
+    })
+    if ($unresolved.Count -ne 0) {
+        throw "Compile command for '$($command.file)' contains unresolved MSBuild expressions: $($unresolved -join ', ')"
+    }
+
+    if ($command.arguments -notcontains "/DKEX_Q2_GAME") {
+        throw "Compile command for '$($command.file)' is missing the required KEX_Q2_GAME definition."
+    }
+
+    $hasRuntimeTesting = $command.arguments -contains "/DMM_GHOST_RUNTIME_TESTING"
+    if ($hasRuntimeTesting -ne [bool]$GhostRuntimeTesting) {
+        throw "Compile command for '$($command.file)' has the wrong MM_GHOST_RUNTIME_TESTING state."
+    }
+}
+
+$outputPath = if ([System.IO.Path]::IsPathRooted($Output)) {
+    [System.IO.Path]::GetFullPath($Output)
+}
+else {
+    [System.IO.Path]::GetFullPath((Join-Path $repoRoot $Output))
+}
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $outputPath) | Out-Null
 $commands | ConvertTo-Json -Depth 8 | Set-Content -Path $outputPath -Encoding utf8
 

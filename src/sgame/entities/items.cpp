@@ -6,9 +6,12 @@
 #include "muffmode/mm_announcer.h"
 #include "muffmode/mm_arena.h"
 #include "muffmode/mm_captain.h"
+#include "muffmode/mm_client_profile.h"
 #include "muffmode/mm_freezetag.h"
 #include "muffmode/mm_horde.h"
 #include "muffmode/mm_items_rules.h"
+#include "muffmode/mm_match_stats.h"
+#include "muffmode/mm_ordnance_identity.h"
 #include "muffmode/mm_ruleset.h"
 #include "muffmode/mm_ruleset_weapons.h"
 #include "muffmode/mm_skin.h"
@@ -39,37 +42,66 @@ static void UsedMessage(gentity_t *ent, gitem_t *item) {
 gentity_t *Sphere_Spawn(gentity_t *owner, spawnflags_t spawnflags);
 
 static DIE(doppelganger_die) (gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int damage, const vec3_t &point, const mod_t &mod) -> void {
-	gentity_t *sphere;
+	if (!self || !self->inuse)
+		return;
+	gentity_t *sphere = nullptr;
 	float	 dist;
 	vec3_t	 dir;
+	const int32_t self_generation = self->spawn_count;
+	gentity_t *owner = self->teammaster;
+	const bool owner_connected = owner &&
+		(!owner->client || owner->client->pers.connected);
+	if (!owner || !MM_OrdnanceIdentityMatches(self->count, self->sounds,
+		owner->inuse, owner_connected, owner->spawn_count, MM_Arena_Active(),
+		MM_Arena_Id(owner)))
+		owner = world;
+	gentity_t *enemy = self->enemy;
+	const bool enemy_connected = enemy &&
+		(!enemy->client || enemy->client->pers.connected);
+	if (!enemy || !MM_OrdnanceIdentityMatches(
+		self->sphere_enemy_generation, self->sounds, enemy->inuse,
+		enemy_connected, enemy->spawn_count, MM_Arena_Active(),
+		MM_Arena_Id(enemy)))
+		enemy = nullptr;
 
-	if ((self->enemy) && (self->enemy != self->teammaster)) {
-		dir = self->enemy->s.origin - self->s.origin;
+	if (enemy && enemy != owner) {
+		dir = enemy->s.origin - self->s.origin;
 		dist = dir.length();
 
 		if (dist > 80.f) {
 			if (dist > 768) {
 				sphere = Sphere_Spawn(self, SF_SPHERE_HUNTER | SF_DOPPELGANGER);
-				sphere->pain(sphere, attacker, 0, 0, mod);
 			} else {
 				sphere = Sphere_Spawn(self, SF_SPHERE_VENGEANCE | SF_DOPPELGANGER);
-				sphere->pain(sphere, attacker, 0, 0, mod);
 			}
+			if (sphere && sphere->pain)
+				sphere->pain(sphere, attacker, 0, 0, mod);
 		}
 	}
 
+	if (!self->inuse || self->spawn_count != self_generation)
+		return;
 	self->takedamage = DAMAGE_NONE;
 
 	// [Paril-KEX]
-	T_RadiusDamage(self, self->teammaster, 160.f, self, 140.f, DAMAGE_NONE, MOD_DOPPEL_EXPLODE);
+	gentity_t *const teamchain = self->teamchain;
+	T_RadiusDamage(self, owner, 160.f, self, 140.f,
+		DAMAGE_NONE, MOD_DOPPEL_EXPLODE);
+	if (!self->inuse || self->spawn_count != self_generation)
+		return;
 
-	if (self->teamchain)
-		BecomeExplosion1(self->teamchain);
+	if (teamchain && teamchain->inuse &&
+		teamchain->spawn_count == self->doppel_body_generation &&
+		teamchain->teammaster == self &&
+		teamchain->doppel_body_generation == self->spawn_count)
+		BecomeExplosion1(teamchain);
 	BecomeExplosion1(self);
 }
 
 static PAIN(doppelganger_pain) (gentity_t *self, gentity_t *other, float kick, int damage, const mod_t &mod) -> void {
-	self->enemy = other;
+	self->enemy = other && other->inuse ? other : nullptr;
+	self->sphere_enemy_generation = self->enemy
+		? self->enemy->spawn_count : 0;
 }
 
 static THINK(doppelganger_timeout) (gentity_t *self) -> void {
@@ -123,6 +155,9 @@ void fire_doppelganger(gentity_t *ent, const vec3_t &start, const vec3_t &aimdir
 	base->s.modelindex = gi.modelindex("models/objects/dopplebase/tris.md2");
 	base->s.alpha = 0.1f;
 	base->teammaster = ent;
+	base->count = ent->spawn_count;
+	base->sounds = MM_Arena_Id(ent);
+	base->arena = base->sounds;
 	base->flags |= (FL_DAMAGEABLE | FL_TRAP);
 	base->takedamage = true;
 	base->health = 30;
@@ -146,6 +181,7 @@ void fire_doppelganger(gentity_t *ent, const vec3_t &start, const vec3_t &aimdir
 	body->ideal_yaw = 0;
 	body->s.origin = start;
 	body->s.origin[2] += 8;
+	body->arena = base->arena;
 	body->teleport_time = level.time + 10_hz;
 	body->think = body_think;
 	body->nextthink = level.time + FRAME_TIME_MS;
@@ -153,6 +189,8 @@ void fire_doppelganger(gentity_t *ent, const vec3_t &start, const vec3_t &aimdir
 
 	base->teamchain = body;
 	body->teammaster = base;
+	base->doppel_body_generation = body->spawn_count;
+	body->doppel_body_generation = base->spawn_count;
 
 	// [Paril-KEX]
 	body->owner = ent;
@@ -175,14 +213,143 @@ void hunter_touch(gentity_t *self, gentity_t *other, const trace_t &tr, bool oth
 // General Sphere Code
 // *************************
 
+static bool sphere_owner_lifetime_matches(
+	const gentity_t *self, const gentity_t *owner) noexcept
+{
+	if (!owner)
+		return false;
+	const bool connected = !owner->client || owner->client->pers.connected;
+	return MM_OrdnanceIdentityMatches(self->count, self->sounds,
+		owner->inuse, connected, owner->spawn_count, MM_Arena_Active(),
+		MM_Arena_Id(owner));
+}
+
+static gentity_t *sphere_resolve_owner(gentity_t *self) noexcept
+{
+	if (!sphere_owner_lifetime_matches(self, self->owner))
+		self->owner = nullptr;
+	return self->owner;
+}
+
+static bool sphere_reference_is_active(const gentity_t *entity) noexcept
+{
+	return entity && (!entity->client || entity->client->pers.connected);
+}
+
+static gentity_t *sphere_resolve_enemy(gentity_t *self) noexcept
+{
+	if (self->enemy) {
+		const bool connected = !self->enemy->client ||
+			self->enemy->client->pers.connected;
+		if (!MM_OrdnanceIdentityMatches(self->sphere_enemy_generation,
+			self->sounds, self->enemy->inuse, connected,
+			self->enemy->spawn_count, MM_Arena_Active(),
+			MM_Arena_Id(self->enemy))) {
+			self->enemy = nullptr;
+			self->sphere_enemy_generation = 0;
+		}
+	}
+	return self->enemy;
+}
+
+static bool sphere_is_owned_by_client(const gentity_t *sphere,
+	const gclient_t *client) noexcept
+{
+	return sphere && sphere->inuse && client && sphere->owner &&
+		sphere->owner->client == client &&
+		sphere_owner_lifetime_matches(sphere, sphere->owner);
+}
+
+gentity_t *G_ResolveOwnedSphere(gclient_t *client) noexcept
+{
+	if (!client || !client->owned_sphere)
+		return nullptr;
+	gentity_t *const sphere = client->owned_sphere;
+	if (sphere->inuse &&
+		sphere->spawn_count == client->owned_sphere_generation &&
+		sphere_is_owned_by_client(sphere, client))
+		return sphere;
+	client->owned_sphere = nullptr;
+	client->owned_sphere_generation = 0;
+	return nullptr;
+}
+
+void G_AssignOwnedSphere(gclient_t *client, gentity_t *sphere) noexcept
+{
+	if (!client)
+		return;
+	client->owned_sphere = nullptr;
+	client->owned_sphere_generation = 0;
+	if (!sphere_is_owned_by_client(sphere, client))
+		return;
+	client->owned_sphere = sphere;
+	client->owned_sphere_generation = sphere->spawn_count;
+}
+
+void G_ClearOwnedSphere(gclient_t *client) noexcept
+{
+	if (!client)
+		return;
+	client->owned_sphere = nullptr;
+	client->owned_sphere_generation = 0;
+}
+
+void G_PrepareSphereEntityFree(gentity_t *sphere) noexcept
+{
+	if (!sphere || !sphere->owner || !sphere->owner->inuse ||
+		sphere->owner->spawn_count != sphere->count ||
+		!sphere->owner->client)
+		return;
+	gclient_t *const client = sphere->owner->client;
+	if (client->owned_sphere == sphere &&
+		client->owned_sphere_generation == sphere->spawn_count)
+		G_ClearOwnedSphere(client);
+}
+
+void G_PrepareDoppelEntityFree(gentity_t *entity) noexcept
+{
+	if (!entity)
+		return;
+	const bool is_base = entity->classname &&
+		strcmp(entity->classname, "doppelganger") == 0;
+	if (is_base) {
+		gentity_t *const body = entity->teamchain;
+		const bool live_body = body && body->inuse &&
+			body->spawn_count == entity->doppel_body_generation &&
+			body->teammaster == entity &&
+			body->doppel_body_generation == entity->spawn_count;
+		entity->teamchain = nullptr;
+		entity->doppel_body_generation = 0;
+		if (live_body) {
+			body->teammaster = nullptr;
+			body->doppel_body_generation = 0;
+			G_FreeEntity(body);
+		}
+		return;
+	}
+
+	gentity_t *const base = entity->teammaster;
+	if (!base || !base->inuse || !base->classname ||
+		strcmp(base->classname, "doppelganger") != 0 ||
+		base->spawn_count != entity->doppel_body_generation ||
+		base->teamchain != entity ||
+		base->doppel_body_generation != entity->spawn_count)
+		return;
+	base->teamchain = nullptr;
+	base->doppel_body_generation = 0;
+	entity->teammaster = nullptr;
+	entity->doppel_body_generation = 0;
+}
+
 // =================
 // =================
 static void sphere_clear_owner(gentity_t *self) {
 	if (!self || self->spawnflags.has(SF_DOPPELGANGER))
 		return;
 
-	if (self->owner && self->owner->client && self->owner->client->owned_sphere == self)
-		self->owner->client->owned_sphere = nullptr;
+	gentity_t *const owner = sphere_resolve_owner(self);
+	if (owner && owner->client && G_ResolveOwnedSphere(owner->client) == self)
+		G_ClearOwnedSphere(owner->client);
 }
 
 static THINK(sphere_think_explode) (gentity_t *self) -> void {
@@ -201,7 +368,7 @@ static DIE(sphere_explode) (gentity_t *self, gentity_t *inflictor, gentity_t *at
 // sphere_if_idle_die - if the sphere is not currently attacking, blow up.
 // =================
 static DIE(sphere_if_idle_die) (gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int damage, const vec3_t &point, const mod_t &mod) -> void {
-	if (!self->enemy)
+	if (!sphere_resolve_enemy(self))
 		sphere_think_explode(self);
 }
 
@@ -220,16 +387,21 @@ static void sphere_fly(gentity_t *self) {
 	// Doppelganger-fired spheres intentionally have no owner. If their target
 	// disappears, the think functions fall back here; retire the sphere instead
 	// of dereferencing a null owner while trying to resume orbiting.
-	if (!self->owner) {
+	gentity_t *const owner = sphere_resolve_owner(self);
+	if (!owner) {
 		sphere_think_explode(self);
 		return;
 	}
+	if (!sphere_reference_is_active(owner)) {
+		self->velocity = {};
+		return;
+	}
 
-	dest = self->owner->s.origin;
-	dest[2] = self->owner->absmax[2] + 4;
+	dest = owner->s.origin;
+	dest[2] = owner->absmax[2] + 4;
 
 	if (level.time.seconds() == level.time.seconds<int>()) {
-		if (!visible(self, self->owner)) {
+		if (!visible(self, owner)) {
 			self->s.origin = dest;
 			gi.linkentity(self);
 			return;
@@ -245,16 +417,22 @@ static void sphere_chase(gentity_t *self, int stupidChase) {
 	vec3_t dir;
 	float  dist;
 
-	if (!self->enemy || level.time >= gtime_t::from_sec(self->wait) || self->enemy->health < 1) {
+	gentity_t *const enemy = sphere_resolve_enemy(self);
+	if (!enemy || level.time >= gtime_t::from_sec(self->wait) ||
+		enemy->health < 1) {
 		sphere_think_explode(self);
 		return;
 	}
+	if (!sphere_reference_is_active(enemy)) {
+		self->velocity = {};
+		return;
+	}
 
-	dest = self->enemy->s.origin;
-	if (self->enemy->client)
-		dest[2] += self->enemy->viewheight;
+	dest = enemy->s.origin;
+	if (enemy->client)
+		dest[2] += enemy->viewheight;
 
-	if (visible(self, self->enemy) || stupidChase) {
+	if (visible(self, enemy) || stupidChase) {
 		// if moving, hunter sphere uses active sound
 		if (!stupidChase)
 			self->s.sound = gi.soundindex("spheres/h_active.wav");
@@ -265,7 +443,7 @@ static void sphere_chase(gentity_t *self, int stupidChase) {
 		self->velocity = dir * 300;	// 500;
 		self->monsterinfo.saved_goal = dest;
 	} else if (!self->monsterinfo.saved_goal) {
-		dir = self->enemy->s.origin - self->s.origin;
+		dir = enemy->s.origin - self->s.origin;
 		dir.normalize();
 		self->s.angles = vectoangles(dir);
 
@@ -290,7 +468,7 @@ static void sphere_chase(gentity_t *self, int stupidChase) {
 			if (!stupidChase)
 				self->s.sound = gi.soundindex("spheres/h_active.wav");
 		} else {
-			dir = self->enemy->s.origin - self->s.origin;
+			dir = enemy->s.origin - self->s.origin;
 			dir.normalize();
 			self->s.angles = vectoangles(dir);
 
@@ -330,15 +508,20 @@ static void sphere_fire(gentity_t *self, gentity_t *enemy) {
 }
 
 static void sphere_touch(gentity_t *self, gentity_t *other, const trace_t &tr, mod_t mod) {
+	const int32_t self_generation = self->spawn_count;
 	if (self->spawnflags.has(SF_DOPPELGANGER)) {
-		if (other == self->teammaster)
+		gentity_t *const doppel_owner = self->teammaster;
+		const bool owner_is_current =
+			sphere_owner_lifetime_matches(self, doppel_owner);
+		if (owner_is_current && other == doppel_owner)
 			return;
 
 		self->takedamage = false;
-		self->owner = self->teammaster;
+		self->owner = owner_is_current ? doppel_owner : nullptr;
 		self->teammaster = nullptr;
 	} else {
-		if (other == self->owner)
+		gentity_t *const owner = sphere_resolve_owner(self);
+		if (owner && other == owner)
 			return;
 		// PMM - don't blow up on bodies
 		if (!strcmp(other->classname, "bodyque"))
@@ -352,13 +535,18 @@ static void sphere_touch(gentity_t *self, gentity_t *other, const trace_t &tr, m
 		return;
 	}
 
-	if (self->owner) {
+	gentity_t *const owner = sphere_resolve_owner(self);
+	gentity_t *const attacker = owner && sphere_reference_is_active(owner)
+		? owner : world;
+	if (attacker) {
 		if (other->takedamage) {
-			T_Damage(other, self, self->owner, self->velocity, self->s.origin, tr.plane.normal,
+			T_Damage(other, self, attacker, self->velocity, self->s.origin, tr.plane.normal,
 				10000, 1, DAMAGE_DESTROY_ARMOR, mod);
 		} else {
-			T_RadiusDamage(self, self->owner, 512, self->owner, 256, DAMAGE_NONE, mod);
+			T_RadiusDamage(self, attacker, 512, attacker, 256, DAMAGE_NONE, mod);
 		}
+		if (!self->inuse || self->spawn_count != self_generation)
+			return;
 	}
 
 	sphere_think_explode(self);
@@ -372,14 +560,13 @@ TOUCH(vengeance_touch) (gentity_t *self, gentity_t *other, const trace_t &tr, bo
 }
 
 TOUCH(hunter_touch) (gentity_t *self, gentity_t *other, const trace_t &tr, bool other_touching_self) -> void {
-	gentity_t *owner;
 	// don't blow up if you hit the world.... sheesh.
 	if (other == world)
 		return;
 
-	if (self->owner) {
+	if (gentity_t *const owner = sphere_resolve_owner(self);
+		owner && sphere_reference_is_active(owner)) {
 		// if owner is flying with us, make sure they stop too.
-		owner = self->owner;
 		if (owner->flags & FL_SAM_RAIMI) {
 			owner->velocity = {};
 			owner->movetype = MOVETYPE_NONE;
@@ -396,14 +583,16 @@ TOUCH(hunter_touch) (gentity_t *self, gentity_t *other, const trace_t &tr, bool 
 static void defender_shoot(gentity_t *self, gentity_t *enemy) {
 	vec3_t dir;
 	vec3_t start;
+	gentity_t *const owner = sphere_resolve_owner(self);
 
-	if (!(enemy->inuse) || enemy->health <= 0)
+	if (!owner || !sphere_reference_is_active(owner) || !(enemy->inuse) ||
+		enemy->health <= 0)
 		return;
 
 	if (enemy->client && enemy->client->eliminated)
 		return;
 
-	if (enemy == self->owner)
+	if (enemy == owner)
 		return;
 
 	dir = enemy->s.origin - self->s.origin;
@@ -417,7 +606,7 @@ static void defender_shoot(gentity_t *self, gentity_t *enemy) {
 
 	start = self->s.origin;
 	start[2] += 2;
-	fire_greenblaster(self->owner, start, dir, 10, 1000, EF_BLASTER, 0);
+	fire_greenblaster(owner, start, dir, 10, 1000, EF_BLASTER, 0);
 
 	self->monsterinfo.attack_finished = level.time + 400_ms;
 }
@@ -439,10 +628,10 @@ static PAIN(hunter_pain) (gentity_t *self, gentity_t *other, float kick, int dam
 	float	 dist;
 	vec3_t	 dir;
 
-	if (self->enemy)
+	if (sphere_resolve_enemy(self))
 		return;
 
-	owner = self->owner;
+	owner = sphere_resolve_owner(self);
 
 	if (!(self->spawnflags & SF_DOPPELGANGER)) {
 		if (owner && (owner->health > 0))
@@ -460,6 +649,7 @@ static PAIN(hunter_pain) (gentity_t *self, gentity_t *other, float kick, int dam
 	self->s.effects |= EF_BLASTER | EF_TRACKER;
 	self->touch = hunter_touch;
 	self->enemy = other;
+	self->sphere_enemy_generation = other ? other->spawn_count : 0;
 
 	// if we're not owned by a player, no sam raimi
 	// if we're spawned by a doppelganger, no sam raimi
@@ -468,7 +658,7 @@ static PAIN(hunter_pain) (gentity_t *self, gentity_t *other, float kick, int dam
 
 	// sam raimi cam is disabled if FORCE_RESPAWN is set.
 	// sam raimi cam is also disabled if g_huntercam->value is 0.
-	if (!g_dm_force_respawn->integer && g_huntercam->integer) {
+	if (other && !g_dm_force_respawn->integer && g_huntercam->integer) {
 		dir = other->s.origin - self->s.origin;
 		dist = dir.length();
 
@@ -505,21 +695,23 @@ static PAIN(hunter_pain) (gentity_t *self, gentity_t *other, float kick, int dam
 }
 
 static PAIN(defender_pain) (gentity_t *self, gentity_t *other, float kick, int damage, const mod_t &mod) -> void {
-	if (other == self->owner)
+	if (other == sphere_resolve_owner(self))
 		return;
 
 	self->enemy = other;
+	self->sphere_enemy_generation = other ? other->spawn_count : 0;
 }
 
 static PAIN(vengeance_pain) (gentity_t *self, gentity_t *other, float kick, int damage, const mod_t &mod) -> void {
-	if (self->enemy)
+	if (sphere_resolve_enemy(self))
 		return;
 
 	if (!(self->spawnflags & SF_DOPPELGANGER)) {
-		if (self->owner && self->owner->health >= 25)
+		gentity_t *const owner = sphere_resolve_owner(self);
+		if (owner && owner->health >= 25)
 			return;
 
-		if (other == self->owner)
+		if (other == owner)
 			return;
 	} else {
 		self->wait = (level.time + MINIMUM_FLY_TIME).seconds();
@@ -530,6 +722,7 @@ static PAIN(vengeance_pain) (gentity_t *self, gentity_t *other, float kick, int 
 	self->s.effects |= EF_ROCKET;
 	self->touch = vengeance_touch;
 	self->enemy = other;
+	self->sphere_enemy_generation = other ? other->spawn_count : 0;
 }
 
 // *************************
@@ -537,8 +730,14 @@ static PAIN(vengeance_pain) (gentity_t *self, gentity_t *other, float kick, int 
 // *************************
 
 static THINK(defender_think) (gentity_t *self) -> void {
-	if (!self->owner) {
+	gentity_t *const owner = sphere_resolve_owner(self);
+	if (!owner) {
 		G_FreeEntity(self);
+		return;
+	}
+	if (!sphere_reference_is_active(owner)) {
+		self->velocity = {};
+		self->nextthink = level.time + 10_hz;
 		return;
 	}
 
@@ -548,7 +747,7 @@ static THINK(defender_think) (gentity_t *self) -> void {
 		return;
 	}
 
-	if (self->owner->health <= 0 || self->owner->client->eliminated) {
+	if (owner->health <= 0 || (owner->client && owner->client->eliminated)) {
 		sphere_think_explode(self);
 		return;
 	}
@@ -557,11 +756,15 @@ static THINK(defender_think) (gentity_t *self) -> void {
 	if (self->s.frame > 19)
 		self->s.frame = 0;
 
-	if (self->enemy) {
-		if (self->enemy->health > 0)
-			defender_shoot(self, self->enemy);
-		else
+	if (gentity_t *const enemy = sphere_resolve_enemy(self)) {
+		if (!sphere_reference_is_active(enemy)) {
+			self->velocity = {};
+		} else if (enemy->health > 0) {
+			defender_shoot(self, enemy);
+		} else {
 			self->enemy = nullptr;
+			self->sphere_enemy_generation = 0;
+		}
 	}
 
 	sphere_fly(self);
@@ -577,31 +780,37 @@ static THINK(hunter_think) (gentity_t *self) -> void {
 		return;
 	}
 
-	gentity_t *owner = self->owner;
+	gentity_t *owner = sphere_resolve_owner(self);
 
 	if (!owner && !(self->spawnflags & SF_DOPPELGANGER)) {
 		G_FreeEntity(self);
 		return;
 	}
+	if (owner && !sphere_reference_is_active(owner)) {
+		self->velocity = {};
+		self->nextthink = level.time + 10_hz;
+		return;
+	}
+	gentity_t *const enemy = sphere_resolve_enemy(self);
 
 	if (owner)
 		self->ideal_yaw = owner->s.angles[YAW];
-	else if (self->enemy) // fired by doppelganger
+	else if (enemy && sphere_reference_is_active(enemy)) // fired by doppelganger
 	{
-		vec3_t dir = self->enemy->s.origin - self->s.origin;
+		vec3_t dir = enemy->s.origin - self->s.origin;
 		self->ideal_yaw = vectoyaw(dir);
 	}
 
 	M_ChangeYaw(self);
 
-	if (self->enemy) {
+	if (enemy) {
 		sphere_chase(self, 0);
 
 		// deal with sam raimi cam
 		if (owner && (owner->flags & FL_SAM_RAIMI)) {
 			if (self->inuse) {
 				owner->movetype = MOVETYPE_FLYMISSILE;
-				LookAtKiller(owner, self, self->enemy);
+				LookAtKiller(owner, self, enemy);
 				// owner is flying with us, move him too
 				owner->movetype = MOVETYPE_FLYMISSILE;
 				owner->viewheight = (int)(self->s.origin[2] - owner->s.origin[2]);
@@ -631,12 +840,13 @@ static THINK(vengeance_think) (gentity_t *self) -> void {
 		return;
 	}
 
-	if (!(self->owner) && !(self->spawnflags & SF_DOPPELGANGER)) {
+	if (!self->spawnflags.has(SF_DOPPELGANGER) &&
+		!sphere_resolve_owner(self)) {
 		G_FreeEntity(self);
 		return;
 	}
 
-	if (self->enemy)
+	if (sphere_resolve_enemy(self))
 		sphere_chase(self, 1);
 	else
 		sphere_fly(self);
@@ -648,6 +858,8 @@ static THINK(vengeance_think) (gentity_t *self) -> void {
 // =================
 gentity_t *Sphere_Spawn(gentity_t *owner, spawnflags_t spawnflags) {
 	gentity_t *sphere;
+	if (!owner || !owner->inuse)
+		return nullptr;
 
 	sphere = G_Spawn();
 	sphere->s.origin = owner->s.origin;
@@ -658,10 +870,17 @@ gentity_t *Sphere_Spawn(gentity_t *owner, spawnflags_t spawnflags) {
 	sphere->s.renderfx = RF_FULLBRIGHT | RF_IR_VISIBLE;
 	sphere->movetype = MOVETYPE_FLYMISSILE;
 
-	if (spawnflags.has(SF_DOPPELGANGER))
-		sphere->teammaster = owner->teammaster;
-	else
-		sphere->owner = owner;
+	if (spawnflags.has(SF_DOPPELGANGER)) {
+		gentity_t *doppel_owner = owner->teammaster;
+		if (!sphere_owner_lifetime_matches(owner, doppel_owner))
+			doppel_owner = world;
+		sphere->teammaster = doppel_owner;
+		sphere->count = doppel_owner ? doppel_owner->spawn_count : 0;
+		sphere->sounds = owner->arena ? owner->arena : MM_Arena_Id(owner);
+		sphere->arena = sphere->sounds;
+	} else {
+		MM_CaptureOrdnanceOwner(sphere, owner);
+	}
 
 	sphere->classname = "sphere";
 	sphere->yaw_speed = 40;
@@ -715,25 +934,12 @@ gentity_t *Sphere_Spawn(gentity_t *owner, spawnflags_t spawnflags) {
 //		directly access it later
 // =================
 static void Own_Sphere(gentity_t *self, gentity_t *sphere) {
-	if (!sphere)
+	if (!sphere || !self || !self->client)
 		return;
 
-	// ownership only for players
-	if (self->client) {
-		// if they don't have one
-		if (!(self->client->owned_sphere)) {
-			self->client->owned_sphere = sphere;
-		}
-		// they already have one, take care of the old one
-		else {
-			if (self->client->owned_sphere->inuse) {
-				G_FreeEntity(self->client->owned_sphere);
-				self->client->owned_sphere = sphere;
-			} else {
-				self->client->owned_sphere = sphere;
-			}
-		}
-	}
+	if (gentity_t *old_sphere = G_ResolveOwnedSphere(self->client))
+		G_FreeEntity(old_sphere);
+	G_AssignOwnedSphere(self->client, sphere);
 }
 
 void Defender_Launch(gentity_t *self) {
@@ -1010,6 +1216,7 @@ THINK(RespawnItem) (gentity_t *ent) -> void {
 
 	ent->svflags &= ~(SVF_NOCLIENT | SVF_RESPAWNING);
 	ent->solid = SOLID_TRIGGER;
+	ent->item_available_time = level.time;
 	gi.linkentity(ent);
 
 	// send an effect
@@ -1266,7 +1473,7 @@ void Use_Defender(gentity_t *ent, gitem_t *item) {
 	if (!ent || !ent->client || !item)
 		return;
 
-	if (ent->client->owned_sphere) {
+	if (G_ResolveOwnedSphere(ent->client)) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "$g_only_one_sphere_time");
 		return;
 	}
@@ -1280,7 +1487,7 @@ void Use_Hunter(gentity_t *ent, gitem_t *item) {
 	if (!ent || !ent->client || !item)
 		return;
 
-	if (ent->client->owned_sphere) {
+	if (G_ResolveOwnedSphere(ent->client)) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "$g_only_one_sphere_time");
 		return;
 	}
@@ -1294,7 +1501,7 @@ void Use_Vengeance(gentity_t *ent, gitem_t *item) {
 	if (!ent || !ent->client || !item)
 		return;
 
-	if (ent->client->owned_sphere) {
+	if (G_ResolveOwnedSphere(ent->client)) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "$g_only_one_sphere_time");
 		return;
 	}
@@ -1310,7 +1517,7 @@ bool Pickup_Sphere(gentity_t *ent, gentity_t *other) {
 
 	int quantity;
 
-	if (other->client->owned_sphere) {
+	if (G_ResolveOwnedSphere(other->client)) {
 		//		gi.LocClient_Print(other, PRINT_HIGH, "$g_only_one_sphere_customer");
 		return false;
 	}
@@ -1930,6 +2137,11 @@ void G_CheckAutoSwitch(gentity_t *ent, gitem_t *item, bool is_new) {
 			return;
 	}
 
+	if (ent->client->pers.weapon &&
+		!MM_ClientProfilePrefersWeapon(ent->client, item->id,
+			ent->client->pers.weapon->id))
+		return;
+
 	// switch!
 	ent->client->newweapon = item;
 }
@@ -1998,14 +2210,31 @@ void Drop_Ammo(gentity_t *ent, gitem_t *item) {
 //======================================================================
 
 static THINK(MegaHealth_think) (gentity_t *self) -> void {
-	int32_t health = self->max_health;
-	if (health < self->owner->max_health)
-		health = self->owner->max_health;
+	gentity_t *const owner = self->owner;
+	if (!owner || !owner->inuse ||
+		(self->megahealth_owner_generation &&
+			owner->spawn_count != self->megahealth_owner_generation) ||
+		!owner->client || !owner->client->pers.connected) {
+		self->owner = nullptr;
+		self->megahealth_owner_generation = 0;
+		SetRespawn(self, 20_sec);
+		if (self->spawnflags.has(SPAWNFLAG_ITEM_DROPPED))
+			G_FreeEntity(self);
+		return;
+	}
+	// V1 saves did not carry the stamp. Disconnect cleanup retires their raw
+	// owner alias, so a surviving live client is safe to adopt once here.
+	if (!self->megahealth_owner_generation)
+		self->megahealth_owner_generation = owner->spawn_count;
 
-	if (self->owner->health > health && !Tech_HasRegeneration(self->owner)) {
+	int32_t health = self->max_health;
+	if (health < owner->max_health)
+		health = owner->max_health;
+
+	if (owner->health > health && !Tech_HasRegeneration(owner)) {
 
 		self->nextthink = level.time + 1_sec;
-		self->owner->health -= 1;
+		owner->health -= 1;
 		return;
 	}
 
@@ -2054,6 +2283,7 @@ bool Pickup_Health(gentity_t *ent, gentity_t *other) {
 			ent->think = MegaHealth_think;
 			ent->nextthink = level.time + 5_sec;
 			ent->owner = other;
+			ent->megahealth_owner_generation = other->spawn_count;
 			ent->flags |= FL_RESPAWN;
 			ent->svflags |= SVF_NOCLIENT;
 			ent->solid = SOLID_NOT;
@@ -2195,7 +2425,18 @@ TOUCH(Touch_Item) (gentity_t *ent, gentity_t *other, const trace_t &tr, bool oth
 		return; // not a grabbable item?
 
 	gitem_t *it = ent->item;
+	const gtime_t item_available_time = ent->item_available_time;
 	const int32_t item_spawn_count = ent->spawn_count;
+	// High-value pickup statistics describe control of map-spawned items. A
+	// powerup recovered from a death drop and the continuously circulating
+	// QuadHog quad are deliberately excluded, matching the source system.
+	const bool death_dropped_powerup =
+		ent->spawnflags.has(SPAWNFLAG_ITEM_DROPPED_PLAYER) &&
+		!ent->spawnflags.has(SPAWNFLAG_ITEM_DROPPED);
+	const bool quadhog_powerup = g_quadhog && g_quadhog->integer &&
+		it->id == IT_POWERUP_QUAD;
+	const bool record_high_value_pickup =
+		!death_dropped_powerup && !quadhog_powerup;
 	const bool use_coop_instanced_items = coop->integer && P_UseCoopInstancedItems();
 	size_t player_index = 0;
 
@@ -2223,6 +2464,14 @@ TOUCH(Touch_Item) (gentity_t *ent, gentity_t *other, const trace_t &tr, bool oth
 		return;
 
 	if (taken) {
+		const gtime_t pickup_delay = level.time > item_available_time
+			? level.time - item_available_time
+			: 0_ms;
+		if (record_high_value_pickup) {
+			MM_MatchStats_RecordPickup(other->client, it->id,
+				static_cast<uint64_t>(pickup_delay.milliseconds()));
+		}
+
 		// flash the screen
 		other->client->bonus_alpha = 0.25;
 
@@ -2313,9 +2562,8 @@ TOUCH(Touch_Item) (gentity_t *ent, gentity_t *other, const trace_t &tr, bool oth
 		if (suppress_message)
 			std::swap(message_backup, ent->message);
 
-		G_UseTargets(ent, other);
-
-		if (!ent->inuse || ent->spawn_count != item_spawn_count)
+		if (!G_UseTargets(ent, other) || !ent->inuse ||
+			ent->spawn_count != item_spawn_count)
 			return;
 
 		if (suppress_message)
@@ -2338,7 +2586,8 @@ TOUCH(Touch_Item) (gentity_t *ent, gentity_t *other, const trace_t &tr, bool oth
 				should_remove = ent->spawnflags.has(SPAWNFLAG_ITEM_DROPPED | SPAWNFLAG_ITEM_DROPPED_PLAYER) || !(it->flags & IF_STAY_COOP);
 		} else {
 			const bool quad_hog_consumed =
-				deathmatch->integer && g_quadhog->integer && it->id == IT_POWERUP_QUAD;
+				deathmatch->integer && g_quadhog && g_quadhog->integer &&
+				it->id == IT_POWERUP_QUAD;
 			should_remove = !deathmatch->integer || quad_hog_consumed ||
 				ent->spawnflags.has(SPAWNFLAG_ITEM_DROPPED | SPAWNFLAG_ITEM_DROPPED_PLAYER);
 		}
@@ -2377,6 +2626,7 @@ gentity_t *Drop_Item(gentity_t *ent, gitem_t *item) {
 	dropped = G_Spawn();
 
 	dropped->item = item;
+	dropped->item_available_time = level.time;
 	dropped->spawnflags = SPAWNFLAG_ITEM_DROPPED;
 	dropped->classname = item->classname;
 	dropped->s.effects = item->world_model_flags;
@@ -2388,6 +2638,9 @@ gentity_t *Drop_Item(gentity_t *ent, gitem_t *item) {
 	dropped->movetype = MOVETYPE_TOSS;
 	dropped->touch = drop_temp_touch;
 	dropped->owner = ent;
+	// Dropped items retain their origin room independently of the player's
+	// later arena changes; item fields cannot share ordnance count/sounds.
+	dropped->arena = MM_Arena_Id(ent);
 
 	if (ent->client) {
 		trace_t trace;
@@ -2419,6 +2672,7 @@ gentity_t *Drop_Item(gentity_t *ent, gitem_t *item) {
 
 static USE(Use_Item) (gentity_t *ent, gentity_t *other, gentity_t *activator) -> void {
 	ent->svflags &= ~SVF_NOCLIENT;
+	ent->item_available_time = level.time;
 	ent->use = nullptr;
 
 	if (ent->spawnflags.has(SPAWNFLAG_ITEM_NO_TOUCH)) {
@@ -2455,6 +2709,7 @@ static THINK(FinishSpawningItem) (gentity_t *ent) -> void {
 
 	ent->solid = SOLID_TRIGGER;
 	ent->touch = Touch_Item;
+	ent->item_available_time = level.time;
 
 	if (ent->spawnflags.has(SPAWNFLAG_ITEM_SUSPENDED)) {
 		ent->movetype = MOVETYPE_NONE;
@@ -2929,8 +3184,11 @@ void Use_Compass(gentity_t *ent, gitem_t *inv) {
 		return;
 	}
 
-	if (level.current_dynamic_poi)
+	if (level.current_dynamic_poi && level.current_dynamic_poi->inuse &&
+		level.current_dynamic_poi->use)
 		level.current_dynamic_poi->use(level.current_dynamic_poi, ent, ent);
+	else if (level.current_dynamic_poi)
+		level.current_dynamic_poi = nullptr;
 
 	ent->client->help_poi_location = level.current_poi;
 	ent->client->help_poi_image = level.current_poi_image;

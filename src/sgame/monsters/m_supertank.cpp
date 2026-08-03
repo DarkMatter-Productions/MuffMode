@@ -235,8 +235,8 @@ static void supertankGrenade(gentity_t *self) {
 	vec3_t aim_point;
 	PredictAim(self, self->enemy, start, 0, false, crandom_open() * 0.1f, &forward, &aim_point);
 
-	for (float speed = 500.f; speed < 1000.f; speed += 100.f) {
-		if (!M_CalculatePitchToFire(self, aim_point, start, forward, speed, 2.5f, true))
+	for (int32_t speed = 500; speed < 1000; speed += 100) {
+		if (!M_CalculatePitchToFire(self, aim_point, start, forward, static_cast<float>(speed), 2.5f, true))
 			continue;
 
 		monster_fire_grenade(self, start, forward, 50, speed, flash_number, 0.f, 0.f);

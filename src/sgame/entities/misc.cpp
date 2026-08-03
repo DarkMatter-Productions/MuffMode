@@ -48,10 +48,14 @@ static TOUCH(path_corner_touch) (gentity_t *self, gentity_t *other, const trace_
 
 	if (self->pathtarget) {
 		const char *savetarget;
+		const int32_t other_generation = other->spawn_count;
 
 		savetarget = self->target;
 		self->target = self->pathtarget;
-		G_UseTargets(self, other);
+		if (!G_UseTargets(self, other))
+			return;
+		if (!other->inuse || other->spawn_count != other_generation)
+			return;
 		self->target = savetarget;
 	}
 
@@ -167,7 +171,8 @@ TOUCH(point_combat_touch) (gentity_t *self, gentity_t *other, const trace_t &tr,
 			activator = other->activator;
 		else
 			activator = other;
-		G_UseTargets(self, activator);
+		if (!G_UseTargets(self, activator))
+			return;
 		self->target = savetarget;
 	}
 }
@@ -221,8 +226,16 @@ static TOUCH(barrel_touch) (gentity_t *self, gentity_t *other, const trace_t &tr
 
 static THINK(barrel_explode) (gentity_t *self) -> void {
 	self->takedamage = false;
+	gentity_t *attacker = self->activator;
+	if (!attacker || !attacker->inuse || attacker->spawn_count != self->count ||
+		(attacker->client && !attacker->client->pers.connected))
+		attacker = world;
 
-	T_RadiusDamage(self, self->activator, (float)self->dmg, nullptr, (float)(self->dmg + 40), DAMAGE_NONE, MOD_BARREL);
+	const int32_t self_generation = self->spawn_count;
+	T_RadiusDamage(self, attacker, (float)self->dmg, nullptr,
+		(float)(self->dmg + 40), DAMAGE_NONE, MOD_BARREL);
+	if (!self->inuse || self->spawn_count != self_generation)
+		return;
 
 	ThrowGibs(self, (1.5f * self->dmg / 200.f), {
 		{ 2, "models/objects/debris1/tris.md2", GIB_METALLIC | GIB_DEBRIS },
@@ -254,10 +267,12 @@ DIE(barrel_delay) (gentity_t *self, gentity_t *inflictor, gentity_t *attacker, i
 	if (damage >= 90) {
 		self->think = barrel_explode;
 		self->activator = attacker;
+		self->count = attacker ? attacker->spawn_count : 0;
 	} else {
 		self->timestamp = level.time + 750_ms;
 		self->think = barrel_burn;
 		self->activator = attacker;
+		self->count = attacker ? attacker->spawn_count : 0;
 	}
 
 }

@@ -21,7 +21,7 @@ This guide is for anyone joining a MuffMode game. You do not need to learn every
 
 If you are joining someone else's server, they control most match settings. Your client-side commands still let you adjust your display preferences, ready state, team, votes, and spectator behavior.
 
-Display, audio, skin override, follow view, and spectator auto-follow preferences are saved per server by your social ID. Open **Player Config** from the game menu for everyday changes, or use the commands below when you want binds, explicit values, or a custom skin path.
+Display, audio, skin override, follow view, and spectator auto-follow preferences are saved per server by your social ID. Open **Player Config** from the game menu for everyday changes, or use the commands below when you want binds, explicit values, or a custom skin path. Rapid changes are combined automatically, and each changed setting is merged independently so saving one preference does not revert another.
 
 ## First Match
 
@@ -31,7 +31,7 @@ Display, audio, skin override, follow view, and spectator auto-follow preference
 - Use `ready`, `notready`, or `readyup` when the server uses competitive-style warmups.
 - Use `motd` to read server rules, notes, or event information.
 - Use `maplist` to see maps available in the server rotation.
-- If you disconnect during an active match and return quickly with the same account, Muff Mode usually restores you automatically. If the server gives you a fallback ghost code, rejoin as spectator and use `ghost <code>`.
+- If you disconnect during an active match and return quickly with the same account, Muff Mode usually restores you automatically. The saved match snapshot finishes that match, while your current profile and any reconnect-time preference changes carry forward into the next one. If the server gives you a fallback ghost code, rejoin as spectator and use `ghost <code>`.
 
 ## Team Commands
 
@@ -60,6 +60,7 @@ The **Player Config** menu separates **Display & Audio**, **Spectator & Follow**
 | `id [on|off]` | Toggle crosshair player identification. |
 | `infohud [on|off]` | Toggle the top-right match-info HUD and save the preference. |
 | `kb [0-4]` | Cycle kill beeps, or set one directly. `0`/`off` disables it. Named values are `clang`, `beep-boop`, `insane`, and `tang-tang`. |
+| `setweaponpref [weapon ...]` | Replace your saved preferred weapon order. Use compact names such as `RL`, `RG`, and `SSG` or friendly full names; run it with no weapons to clear the custom order. The order guides no-ammo fallback and automatic switching to a newly picked-up weapon, with unlisted weapons retaining the default order. |
 | `timer [on|off]` | Toggle the match timer. |
 | `tskin <model/skin>` or `tskin off` | In team games and Arena Rooms, re-skin teammates on your screen only (not available in duel). No argument shows the current setting. |
 
@@ -134,12 +135,13 @@ In Freeze Tag, dying during a live round freezes you in place instead of sending
 | `ready [0\|1]`, `notready`, `readyup` | Set or toggle ready status; room readiness is competition-only. |
 | `callvote <command> <arg>` or `cv <command> <arg>` | Start a vote. |
 | `vote yes` or `vote no` | Vote on an active proposal. |
-| `mymap <map>` | Add a valid map to the MyMap queue. |
+| `mymap <map> [modifier ...]` | Add a valid map to the MyMap queue, optionally with one-shot item rules for that entry. |
 | `maplist` | Summarize the active structured pool/cycle and any legacy map-list fallback. |
 | `mappool [filter]` | List the first 32 matching maps in the structured voting/MyMap catalog, optionally filtered by name, title, episode, mode, `popular`, or `custom`. |
 | `mapcycle [filter]` | List the first 32 matches in the active structured automatic-rotation cycle with the same optional filters. |
 | `motd` | Print the message of the day. |
 | `forfeit` | Forfeit a duel when `g_allow_forfeit` is enabled. |
+| `sr` | Show your current singleton gametype's skill rating, its latest change, and the average rating of profile-ready active human players. Arena Rooms, non-Duel matches with a departure, matches containing a player whose profile could not be loaded, and matches whose complete rating result cannot be admitted to the bounded persistence queue are unranked. |
 | `ghost <code>` | Restore a saved in-progress match slot when automatic reconnect recovery is not available. |
 | `time-out` | Call a timeout when the server allows timeouts. |
 | `time-in` | End an active timeout early. |
@@ -150,6 +152,20 @@ In Freeze Tag, dying during a live round freezes you in place instead of sending
 | `followkiller [on|off]` | Toggle auto-following killers while spectating. |
 | `followleader [on|off]` | Toggle auto-following the leading player while spectating. |
 | `followpowerup [on|off]` | Toggle auto-following players who pick up powerups. |
+
+MyMap modifiers are `pu` (powerups), `pa` (power armor), `ht` (health),
+`ar` (armor), `am` (ammo), and `wp` (weapons). Prefix a code with `+` to
+force that category on for the queued map or `-` to remove it, for example
+`mymap q2dm1 +pu -wp`. Each queued map retains its own modifiers; a later
+entry cannot change the item rules attached to an earlier one.
+
+`motd` and `mymap` use the server's shared flood controls. Queue listings are
+split into bounded messages, and the full 32-entry queue fits the capped
+four-message response to an explicit request. A successful addition broadcasts
+only that new bounded entry. An unusually large MOTD is shown as a bounded prefix:
+the explicit command uses at most eight chunks (about 7 KiB total), while the
+automatic join-time preview is limited to one chunk. Both add a truncation
+notice without splitting a UTF-8 character.
 
 ## Voting
 
@@ -182,6 +198,7 @@ Use `hook` and `unhook` directly if you prefer separate commands.
 - Some gametypes are works in progress. The [Gameplay Reference](gameplay-reference.md) calls these out.
 - Rulesets change starts, weapons, ammo, armor, health, powerups, and movement feel. The [Rulesets](rulesets.md) guide has the player-facing differences.
 - Custom skins, voting, team picking, timeouts, MyMap, and ready-up behavior are server controlled.
-- During active matches, servers can restore your match state automatically if you reconnect quickly with the same social ID. The older `ghost <code>` path remains as a fallback.
+- Completed matches update your saved per-gametype rating and aggregate record when the server can identify your account and can guarantee admission of every required result. Match-end summaries show the result and rating change; matches containing bots or profile-unready players, non-Duel matches with a departure, and result sets the bounded persistence queue cannot accept remain unranked and do not apply Elo. A valid two-player Duel departure instead settles both players atomically as a forfeit and closes the match.
+- During active matches, servers can restore your match state automatically if you reconnect quickly with the same social ID. That reserved state remains the authority for finishing the interrupted match, then the admitted result is reconciled with your current profile before the next match; reconnect-time preferences are preserved. The older `ghost <code>` path remains as a fallback.
 - If something feels misconfigured, ask the host to run `doctor`; it reports risky cvar combinations and suggested fixes.
 - The `hand` cvar sets weapon handedness: `0` right, `1` left, `2` center (fires from screen center, weapon model hidden). Muff Mode adds `hand 3` — centered fire like `hand 2` but with the weapon model still visible. Set it from the console (`hand 3`); the in-game menu only exposes 0–2.

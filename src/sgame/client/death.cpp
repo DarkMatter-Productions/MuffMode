@@ -10,6 +10,7 @@
 #include "muffmode/mm_freezetag_rules.h"
 #include "muffmode/mm_horde.h"
 #include "muffmode/mm_lms.h"
+#include "muffmode/mm_match_stats.h"
 #include "muffmode/mm_spawn_loadout.h"
 
 static bool ShouldShowRampageMessages();
@@ -25,7 +26,7 @@ static void ClientObituaryBroadcast(gentity_t *scope, print_type_t level,
 
 	for (auto recipient : active_clients()) {
 		if (MM_Arena_ChatRecipient(scope, recipient, mm_arena_chat_scope_t::Arena))
-			gi.LocClient_Print(recipient, level, base, std::forward<Args>(args)...);
+			gi.LocClient_Print(recipient, level, base, args...);
 	}
 }
 
@@ -104,6 +105,96 @@ static bool IsVowel(const char c) {
 		c == 'U' || c == 'u')
 		return true;
 	return false;
+}
+
+static std::string ObituaryColorResetAfter(const char *text) {
+	if (!text || !*text)
+		return {};
+
+	std::string result(text);
+	if (result.size() < 2 || result[result.size() - 2] != '^' || result.back() != '7')
+		result.append("^7");
+	return result;
+}
+
+static const char *PlayerObituaryLogFormat(mod_id_t mod) {
+	switch (mod) {
+	case MOD_BLASTER:
+		return "{} was blasted by {}.\n";
+	case MOD_SHOTGUN:
+		return "{} was gunned down by {}.\n";
+	case MOD_SSHOTGUN:
+		return "{} was blown away by {}'s Super Shotgun.\n";
+	case MOD_MACHINEGUN:
+		return "{} was machinegunned by {}.\n";
+	case MOD_CHAINGUN:
+		return "{} was cut in half by {}'s Chaingun.\n";
+	case MOD_GRENADE:
+		return "{} was popped by {}'s grenade.\n";
+	case MOD_G_SPLASH:
+		return "{} was shredded by {}'s shrapnel.\n";
+	case MOD_ROCKET:
+		return "{} ate {}'s rocket.\n";
+	case MOD_R_SPLASH:
+		return "{} almost dodged {}'s rocket.\n";
+	case MOD_HYPERBLASTER:
+		return "{} was melted by {}'s HyperBlaster.\n";
+	case MOD_RAILGUN:
+		return "{} was railed by {}.\n";
+	case MOD_BFG_LASER:
+		return "{} saw the pretty lights from {}'s BFG.\n";
+	case MOD_BFG_BLAST:
+		return "{} was disintegrated by {}'s BFG blast.\n";
+	case MOD_BFG_EFFECT:
+		return "{} couldn't hide from {}'s BFG.\n";
+	case MOD_HANDGRENADE:
+		return "{} caught {}'s handgrenade.\n";
+	case MOD_HG_SPLASH:
+		return "{} didn't see {}'s handgrenade.\n";
+	case MOD_HELD_GRENADE:
+		return "{} feels {}'s pain.\n";
+	case MOD_TELEFRAG:
+	case MOD_TELEFRAG_SPAWN:
+		return "{} tried to invade {}'s personal space.\n";
+	case MOD_RIPPER:
+		return "{} ripped to shreds by {}'s ripper gun.\n";
+	case MOD_PHALANX:
+		return "{} was evaporated by {}.\n";
+	case MOD_TRAP:
+		return "{} was caught in {}'s trap.\n";
+	case MOD_CHAINFIST:
+		return "{} was shredded by {}'s ripsaw.\n";
+	case MOD_DISINTEGRATOR:
+		return "{} lost his grip courtesy of {}'s Disintegrator.\n";
+	case MOD_ETF_RIFLE:
+		return "{} was perforated by {}.\n";
+	case MOD_PLASMABEAM:
+		return "{} was scorched by {}'s Plasma Beam.\n";
+	case MOD_TESLA:
+		return "{} was enlightened by {}'s tesla mine.\n";
+	case MOD_PROX:
+		return "{} got too close to {}'s proximity mine.\n";
+	case MOD_NUKE:
+		return "{} was nuked by {}'s antimatter bomb.\n";
+	case MOD_VENGEANCE_SPHERE:
+		return "{} was purged by {}'s Vengeance Sphere.\n";
+	case MOD_DEFENDER_SPHERE:
+		return "{} had a blast with {}'s Defender Sphere.\n";
+	case MOD_HUNTER_SPHERE:
+		return "{} was hunted down by {}'s Hunter Sphere.\n";
+	case MOD_TRACKER:
+		return "{} was annihilated by {}'s Disruptor.\n";
+	case MOD_DOPPEL_EXPLODE:
+		return "{} was tricked by {}'s Doppelganger.\n";
+	case MOD_DOPPEL_VENGEANCE:
+		return "{} was purged by {}'s Doppelganger.\n";
+	case MOD_DOPPEL_HUNTER:
+		return "{} was hunted down by {}'s Doppelganger.\n";
+	case MOD_GRAPPLE:
+		return "{} was caught by {}'s grapple.\n";
+	default:
+		return "{} was killed by {}.\n";
+	}
 }
 
 static void ClientObituary(gentity_t *self, gentity_t *inflictor, gentity_t *attacker, mod_t mod) {
@@ -202,6 +293,10 @@ static void ClientObituary(gentity_t *self, gentity_t *inflictor, gentity_t *att
 	// send generic/self
 	if (base) {
 		ClientObituaryBroadcast(self, PRINT_MEDIUM, base, self->client->resp.netname);
+		MM_MatchStats_LogEvent(fmt::format("{} died by {}{}.",
+			ObituaryColorResetAfter(self->client->resp.netname),
+			MM_MatchStats_ModName(static_cast<uint8_t>(mod.id)),
+			attacker == self ? " (self)" : ""));
 		self->enemy = nullptr;
 		return;
 	}
@@ -215,9 +310,12 @@ static void ClientObituary(gentity_t *self, gentity_t *inflictor, gentity_t *att
 	if (attacker->svflags & SVF_MONSTER) {
 		const char *monname = MonsterName(attacker->classname);
 
-		if (monname)
+		if (monname) {
 			ClientObituaryBroadcast(self, PRINT_MEDIUM, "{} was killed by a{} {}\n",
 				self->client->resp.netname, IsVowel(monname[0]) ? "n" : "", monname);
+			MM_MatchStats_LogEvent(fmt::format("{} was killed by a {}.\n",
+				ObituaryColorResetAfter(self->client->resp.netname), monname));
+		}
 		return;
 	}
 
@@ -341,6 +439,8 @@ static void ClientObituary(gentity_t *self, gentity_t *inflictor, gentity_t *att
 
 	ClientObituaryBroadcast(self, PRINT_MEDIUM, base,
 		self->client->resp.netname, attacker->client->resp.netname);
+	MM_MatchStats_LogEvent(fmt::format(PlayerObituaryLogFormat(mod.id),
+		self->client->resp.netname, attacker->client->resp.netname));
 
 	if (Teams()) {
 		// if at start and same team, clear.
@@ -388,8 +488,11 @@ static void ClientObituary(gentity_t *self, gentity_t *inflictor, gentity_t *att
 						MM_Announce(mm_announce_event_t::Rampage1, attacker);
 						attacker->client->pers.medal_time = level.time;
 						attacker->client->pers.medal_type = MEDAL_RAMPAGE;
-						attacker->client->pers.medal_count[MEDAL_RAMPAGE]++;
 					}
+					// Message and announcer preferences are presentation-only. The
+					// earned award must remain present in native and exported stats.
+					attacker->client->pers.medal_count[MEDAL_RAMPAGE]++;
+					MM_MatchStats_RecordMedal(attacker->client, MEDAL_RAMPAGE);
 				} else if (kill_count >= 10) {
 					if (ShouldShowRampageMessages()) {
 						ClientObituaryBroadcast(self, PRINT_CENTER, "{} put an end to {}'s\nrampage!",
@@ -697,6 +800,7 @@ DIE(player_die) (gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 				attacker->client->pers.medal_time = level.time;
 				attacker->client->pers.medal_type = MEDAL_EXCELLENT;
 				attacker->client->pers.medal_count[MEDAL_EXCELLENT]++;
+				MM_MatchStats_RecordMedal(attacker->client, MEDAL_EXCELLENT);
 
 				if (attacker->client->pers.medal_count[MEDAL_EXCELLENT] == 1)
 					MM_Announce(mm_announce_event_t::FirstExcellent, attacker);
@@ -709,6 +813,7 @@ DIE(player_die) (gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 				attacker->client->pers.medal_time = level.time;
 				attacker->client->pers.medal_type = MEDAL_HUMILIATION;
 				attacker->client->pers.medal_count[MEDAL_HUMILIATION]++;
+				MM_MatchStats_RecordMedal(attacker->client, MEDAL_HUMILIATION);
 
 				MM_Announce(mm_announce_event_t::Humiliation1, attacker);
 			}
@@ -733,6 +838,12 @@ DIE(player_die) (gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 		MS_Adjust(self->client, MSTAT_DEATHS_ENVIRO, 1);
 	else if (1_sec > (level.time - self->client->respawn_time))
 		MS_Adjust(self->client, MSTAT_DEATHS_SPAWN, 1);
+
+	const bool spawn_death = self != attacker &&
+		1_sec > (level.time - self->client->respawn_time);
+	const bool team_kill = attacker && attacker != self && attacker->client &&
+		OnSameTeam(self, attacker);
+	MM_MatchStats_RecordDeath(self, attacker, mod, spawn_death, team_kill);
 
 	if (MM_FreezeTag_ShouldFreezeDeath(self, attacker, mod)) {
 		LookAtKiller(self, inflictor, attacker);
@@ -817,11 +928,11 @@ DIE(player_die) (gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 	// if there's a sphere around, let it know the player died.
 	// vengeance and hunter will die if they're not attacking,
 	// defender should always die
-	if (self->client->owned_sphere) {
-		gentity_t *sphere;
-
-		sphere = self->client->owned_sphere;
-		sphere->die(sphere, self, self, 0, vec3_origin, mod);
+	if (gentity_t *sphere = G_ResolveOwnedSphere(self->client)) {
+		if (sphere->die)
+			sphere->die(sphere, self, self, 0, vec3_origin, mod);
+		else
+			G_FreeEntity(sphere);
 	}
 
 	// if we've been killed by the tracker, GIB!

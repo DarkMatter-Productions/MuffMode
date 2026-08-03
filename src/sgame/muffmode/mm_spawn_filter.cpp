@@ -121,7 +121,7 @@ int CurrentSpawnGametypeFlags()
 
 const char *CurrentSpawnRulesetToken()
 {
-	const int ruleset = clamp((int)game.ruleset, (int)RS_NONE + 1, (int)RS_NUM_RULESETS - 1);
+	const int ruleset = ClampPlayableRulesetIndex(static_cast<int>(game.ruleset));
 	return rs_short_name[ruleset];
 }
 

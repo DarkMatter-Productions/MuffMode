@@ -102,6 +102,29 @@ inline std::optional<std::string> EncodeSocialIdConfigStem(std::string_view soci
 	return out;
 }
 
+// WORR historically formed profile filenames by deleting every character
+// outside this ASCII allow-list. Keep that mapping only for one-way migration;
+// new writes use EncodeSocialIdConfigStem so distinct identities cannot collide.
+inline std::optional<std::string> LegacyWorrSocialIdConfigStem(
+	std::string_view social_id, size_t max_social_id_length, size_t max_stem_length)
+{
+	if (social_id.empty() || social_id.size() > max_social_id_length)
+		return std::nullopt;
+
+	std::string out;
+	out.reserve(std::min(social_id.size(), max_stem_length));
+	for (const char ch : social_id) {
+		if (IsAsciiAlphaNumeric(ch) || ch == '-' || ch == '_') {
+			if (out.size() >= max_stem_length)
+				return std::nullopt;
+			out.push_back(ch);
+		}
+	}
+
+	return out.empty() ? std::nullopt
+		: std::optional<std::string>(std::move(out));
+}
+
 inline bool IsDisableToken(std::string_view value) noexcept
 {
 	return EqualsI(value, "off") ||

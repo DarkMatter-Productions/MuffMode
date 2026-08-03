@@ -52,15 +52,15 @@ Use `ifstat` + configstrings instead (same pattern as `STAT_WARMUP_NOTICE` / `ST
 |------|--------|-----------------|-------|
 | `STAT_MATCH_STATE` | `hud.cpp` / match | `xv 0 yb -78 stat_string` | Match phase label (`WARMUP`, timer, etc.) |
 | `STAT_WARMUP_NOTICE` | unused | `xv 0 yb -90` | Reserved; warmup/ready guidance is centerprint (menu-bind band) |
-| `STAT_GAMETYPE_HUD` | `hud.cpp` | top-right `loc_stat_rstring` | Gametype / limit / round label |
-| `STAT_RULESET_HUD` | `hud.cpp` | top-right | Ruleset or capturelimit |
-| `STAT_ROUND_NUMBER` | `hud.cpp` | top-right / arena progress slot | Round progress via `CONFIG_ROUND_PROGRESS`; round-based modes may reuse it for compact series context |
+| `STAT_GAMETYPE_HUD` | `hud.cpp` | top-right `loc_stat_rstring` | Gametype label; 5 s notice armed by team join and gametype/ruleset change (`MM_MatchInfoHud_Show`) |
+| `STAT_RULESET_HUD` | `hud.cpp` | top-right | Ruleset label; same 5 s notice window as `STAT_GAMETYPE_HUD` |
+| `STAT_ROUND_NUMBER` | `hud.cpp` | unused in the DM layout | Cleared every frame; the match limit rides on `STAT_SCORELIMIT` |
 | `STAT_CENTER_LINE` | `hud.cpp` | `xv 0 yt 26` | Duel pic; LMS primary-lane POV text |
 | `STAT_COUNTDOWN` | match | `yb -256 num` | Layout position (same on all clients) |
 | `STAT_HORDE_REMAINING` | `hud.cpp` | Horde right stack `num` | Horde only |
-| `STAT_SCORELIMIT` | `hud.cpp` | Horde: Wave between Lives and Monsters; coop: score limit | Horde reuses this slot (stats enum at `MAX_STATS`); DM match limit stays on `STAT_ROUND_NUMBER` |
+| `STAT_SCORELIMIT` | `view.cpp` | match limit under the miniscore rows (`xr -28 yb -57 stat_string`) | Holds the `CONFIG_STORY_SCORELIMIT` index, so the limit draws as small white text rather than big HUD digits |
 | `STAT_ARENA_ROLE` | `hud.cpp` / `MM_Arena_SetHudStats` | Strike/MuffMode Arena top-right or CA/Freeze centre yt 48 | Per-client room number/name, role, elimination, team, or queue status via the primary POV configstring lane |
-| `STAT_MINISCORE_*` | `hud.cpp` | bottom corners | Team / FFA miniscore; MuffMode Arena publishes the selected room's red/blue series scores |
+| `STAT_MINISCORE_*` | `hud.cpp` | bottom corners | Team / FFA miniscore, shown only while the match is live (hidden through warmup, countdown, and intermission); MuffMode Arena publishes the selected room's red/blue series scores while that room's series is active |
 
 Full contract comments: `src/sgame/muffmode/mm_hud_stat_contracts.h`.
 

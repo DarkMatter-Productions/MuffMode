@@ -167,9 +167,22 @@ constexpr gtime_t SPAWNGROW_LIFESPAN = 1000_ms;
 
 static THINK(spawngrow_think) (gentity_t *self) -> void
 {
+	gentity_t *const beam = self->target_ent;
+	const bool live_beam = beam && beam->inuse && beam->classname &&
+		strcmp(beam->classname, "spawngro_beam") == 0 &&
+		(!self->target_ent_generation ||
+			beam->spawn_count == self->target_ent_generation) &&
+		beam->owner == self;
+	if (live_beam && !self->target_ent_generation)
+		self->target_ent_generation = beam->spawn_count;
+	else if (!live_beam) {
+		self->target_ent = nullptr;
+		self->target_ent_generation = 0;
+	}
 	if (level.time >= self->timestamp)
 	{
-		G_FreeEntity(self->target_ent);
+		if (live_beam)
+			G_FreeEntity(beam);
 		G_FreeEntity(self);
 		return;
 	}
@@ -245,6 +258,7 @@ void SpawnGrow_Spawn(const vec3_t &startpos, float start_size, float end_size)
 
 	// [Paril-KEX]
 	gentity_t *beam = ent->target_ent = G_Spawn();
+	ent->target_ent_generation = beam->spawn_count;
 	beam->s.modelindex = MODELINDEX_WORLD;
 	beam->s.renderfx = RF_BEAM_LIGHTNING | RF_NO_ORIGIN_LERP;
 	beam->s.frame = 1;

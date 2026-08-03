@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "mm_client_profile.h"
+
 struct gentity_t;
 struct client_config_t;
 
@@ -21,8 +23,12 @@ enum class mm_pconfig_bool_setting_t {
 // [MuffMode] Per-player config persistence and preference commands.
 client_config_t MM_DefaultClientConfig();
 void MM_ClientInitPConfig(gentity_t *ent);
-bool MM_ClientSavePConfig(gentity_t *ent);
-void MM_ClientSavePConfigOrWarn(gentity_t *ent);
+bool MM_ClientSavePConfig(gentity_t *ent,
+	mm_client_profile_preference_mask_t dirty_mask =
+		MM_CLIENT_PROFILE_PREFERENCE_ALL);
+void MM_ClientSavePConfigOrWarn(gentity_t *ent,
+	mm_client_profile_preference_mask_t dirty_mask =
+		MM_CLIENT_PROFILE_PREFERENCE_ALL);
 bool MM_PConfigGetBool(const gentity_t *ent, mm_pconfig_bool_setting_t setting);
 bool MM_PConfigSetBool(gentity_t *ent, mm_pconfig_bool_setting_t setting, bool value);
 bool MM_PConfigToggleBool(gentity_t *ent, mm_pconfig_bool_setting_t setting);

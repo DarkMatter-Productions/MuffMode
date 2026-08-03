@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_on": "2026-06-15",
+  "generated_on": "2026-08-03",
   "project": {
     "name": "MuffMode",
     "license_spdx": "GPL-2.0-only",
@@ -16,9 +16,10 @@
     "manifest": "vcpkg.json",
     "vcpkg_baseline": "000d1bda1ffa95a73e0b40334fa4103d6f4d3d48",
     "vcpkg_triplet": "x64-windows-static",
+    "nuget_dependencies": [],
     "notice_file": "THIRD_PARTY_NOTICES.md",
     "policy_doc": "docs/dependencies.md",
-    "model": "vcpkg manifest is authoritative for restore/baseline; vendored compatibility mirrors live under third_party and must stay version-aligned."
+    "model": "vcpkg manifest is authoritative for restore/baseline; vendored compatibility mirrors live under third_party and must stay version-aligned; overrides, alternate registries, and overlay configuration require explicit inventory support before use."
   },
   "packages": [
     {

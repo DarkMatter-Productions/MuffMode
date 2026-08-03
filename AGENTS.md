@@ -35,6 +35,7 @@ When docs still mention older paths such as `src/muffmode/` or `src/g_local.h`, 
 
 ## Architecture
 
+- Always maintain compatibility with the retail engine, retail lobbies, and retail servers; treat regressions in any of these environments as release-blocking.
 - Preserve the thin-vanilla principle from `docs/THIN_VANILLA_PRINCIPLES.md`: keep upstream-style Quake II files as small hooks and put MuffMode behavior in dedicated modules.
 - Put new server-side feature bodies in `src/sgame/muffmode/mm_<feature>.{h,cpp}` when practical, expose the API through the header, include it from `src/sgame/muffmode/muffmode.h`, and wire `projects/msvc/game.vcxproj` plus `.filters`.
 - Keep `src/sgame/core/commands.cpp` command handlers as thin `Cmd_*_f` wrappers that delegate to `MM_Cmd*` functions in MuffMode modules.

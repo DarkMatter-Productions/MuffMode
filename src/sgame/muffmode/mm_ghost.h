@@ -3,17 +3,20 @@
 
 #pragma once
 
+#include "shared/game.h"
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
 
 struct gentity_t;
+struct gclient_t;
 struct usercmd_t;
 enum team_t;
 
 constexpr size_t MM_GHOST_POST_RESTORE_SKIN_MESSAGES_PER_FRAME = 2;
-constexpr size_t MM_GHOST_MAX_CLIENT_CAPACITY = 32;
+constexpr size_t MM_GHOST_MAX_CLIENT_CAPACITY = MAX_LOBBY_PLAYERS;
 constexpr size_t MM_GHOST_PLAYER_SKIN_CONFIGSTRING_VALUE_BYTES = 96;
 constexpr size_t MM_GHOST_CONFIGSTRING_MESSAGE_HEADER_BYTES = 1 + 2;
 constexpr size_t MM_GHOST_MAX_SKIN_CONFIGSTRING_MESSAGE_BYTES =
@@ -22,8 +25,14 @@ constexpr size_t MM_GHOST_MAX_SKIN_CONFIGSTRING_MESSAGE_BYTES =
 constexpr size_t MM_GHOST_NO_CLIENT_INDEX = std::numeric_limits<size_t>::max();
 constexpr size_t MM_GHOST_MAX_SKIN_SYNC_ACTIONS_PER_QUEUE =
 	1 + 2 * (MM_GHOST_MAX_CLIENT_CAPACITY - 1); // canonical + both directions per peer
-constexpr size_t MM_GHOST_MAX_SKIN_SYNC_ACTIONS_PER_DRAIN =
+constexpr size_t MM_GHOST_MAX_SKIN_SYNC_ACTIONS_TOTAL =
 	MM_GHOST_MAX_CLIENT_CAPACITY * MM_GHOST_MAX_SKIN_SYNC_ACTIONS_PER_QUEUE;
+// Bound no-op or failed presentation work independently of the message budget;
+// a 128-client all-queue wave must not scan its full quadratic matrix in one frame.
+constexpr size_t MM_GHOST_MAX_SKIN_SYNC_ACTIONS_PER_DRAIN =
+	MM_GHOST_MAX_CLIENT_CAPACITY * 2;
+static_assert(MM_GHOST_MAX_SKIN_SYNC_ACTIONS_PER_DRAIN <=
+	MM_GHOST_MAX_SKIN_SYNC_ACTIONS_TOTAL);
 
 enum class mm_ghost_restore_placement_t {
 	SavedPosition,
@@ -59,12 +68,29 @@ constexpr bool MM_GhostMayRunDeferredPresentation(
 	return !intermission_active && !intermission_queued;
 }
 
+constexpr bool MM_GhostShouldDeferSnapshotCleanup(
+	bool intermission_queued, bool match_stats_collecting) noexcept
+{
+	// QueueIntermission freezes gameplay before Match_End snapshots the result.
+	// Keep reservations authoritative throughout that short handoff window.
+	return intermission_queued && match_stats_collecting;
+}
+
 // A snapshot never grants authority to a new network connection. The current
 // connection may keep rights it authenticated during the reinstatement delay;
 // the listen-server host is always authoritative.
 constexpr bool MM_GhostRestoreAdminState(bool current_connection_admin, bool is_host)
 {
 	return current_connection_admin || is_host;
+}
+
+// A failed reconnect profile load has no preference authority. The installed
+// reservation snapshot remains the trusted base until a later successful load;
+// edits made after restore are layered on top separately.
+constexpr bool MM_GhostReconnectPreferencesUseInstalledProfile(
+	bool reconnect_profile_ready) noexcept
+{
+	return !reconnect_profile_ready;
 }
 
 struct mm_ghost_skin_sync_pair_t {
@@ -470,6 +496,11 @@ bool MM_Ghost_CaptureDisconnect(gentity_t *ent);
 void MM_Ghost_MakeDisconnectPlaceholder(gentity_t *ent);
 gentity_t *MM_Ghost_ChooseReconnectSlot(const char *social_id, gentity_t **ignore, size_t num_ignore);
 bool MM_Ghost_IsReservedSlot(gentity_t *slot);
+gclient_t *MM_Ghost_ReservedClientState(gentity_t *slot);
+const gclient_t *MM_Ghost_ReservedClientState(const gentity_t *slot);
+size_t MM_Ghost_ActivePlayingReservationCount();
+size_t MM_Ghost_ActiveHumanPlayingReservationCount();
+size_t MM_Ghost_ActivePlayingReservationCountForTeam(team_t team);
 bool MM_Ghost_ReservedClientCountsForRound(const gentity_t *slot, team_t team);
 bool MM_Ghost_IsPendingRestore(gentity_t *ent);
 bool MM_Ghost_IsAbortSpawnPending(gentity_t *ent);

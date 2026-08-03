@@ -7,6 +7,7 @@
 #include "muffmode/mm_announcer.h"
 #include "muffmode/mm_arena.h"
 #include "muffmode/mm_captain.h"
+#include "muffmode/mm_client_profile.h"
 #include "muffmode/mm_combat_heatmap.h"
 #include "muffmode/mm_command_contracts.h"
 #include "muffmode/mm_duel.h"
@@ -17,7 +18,9 @@
 #include "muffmode/mm_map_pool.h"
 #include "muffmode/mm_maps.h"
 #include "muffmode/mm_match.h"
+#include "muffmode/mm_match_stats.h"
 #include "muffmode/mm_motd.h"
+#include "muffmode/mm_player_stats.h"
 #include "muffmode/mm_profile.h"
 #include "muffmode/mm_red_rover_rules.h"
 #include "muffmode/mm_team.h"
@@ -506,9 +509,6 @@ static void InitGametype() {
 	constexpr const char *COOP = "coop";
 	bool force_dm = false;
 
-	if (g_gametype->integer < 0 || g_gametype->integer >= GT_NUM_GAMETYPES)
-		gi.cvar_forceset("g_gametype", G_Fmt("{}", clamp(g_gametype->integer, (int)GT_FIRST, (int)GT_LAST)).data());
-
 	MM_SanitizeCurrentGametype();
 
 	if (ctf->integer) {
@@ -536,8 +536,8 @@ static void InitGametype() {
 	if (Teams()) {
 		int pmax = maxplayers->integer;
 
-		if (pmax != floor(pmax / 2))
-			gi.cvar_set("maxplayers", G_Fmt("{}", floor(pmax / 2) * 2).data());
+		if (pmax > 0 && (pmax % 2) != 0)
+			gi.cvar_set("maxplayers", G_Fmt("{}", pmax - 1).data());
 	}
 }
 
@@ -560,6 +560,15 @@ is loaded.
 */
 static void PreInitGame() {
 	maxclients = gi.cvar("maxclients", G_Fmt("{}", MAX_SPLIT_PLAYERS).data(), CVAR_SERVERINFO | CVAR_LATCH);
+	const uint32_t supported_maxclients = MM_ClampLobbyPlayerCount(maxclients->integer);
+	if (static_cast<int64_t>(maxclients->integer) != supported_maxclients) {
+		gi.Com_PrintFmt("{}: clamped maxclients from {} to {}\n",
+			__FUNCTION__, maxclients->integer, supported_maxclients);
+		// The engine performs its final client-slab sizing after PreInit returns.
+		// Force the latched cvar now so engine and game allocations cannot diverge.
+		maxclients = gi.cvar_forceset(
+			"maxclients", G_Fmt("{}", supported_maxclients).data());
+	}
 	minplayers = gi.cvar("minplayers", "2", CVAR_NOFLAGS);
 	maxplayers = gi.cvar("maxplayers", "16", CVAR_NOFLAGS);
 
@@ -925,6 +934,7 @@ static void InitGame() {
 	g_votable_rulesets = gi.cvar("g_votable_rulesets", "", CVAR_NOFLAGS);
 	g_match_lock = gi.cvar("g_match_lock", "0", CVAR_SERVERINFO);
 	g_matchstats = gi.cvar("g_matchstats", "0", CVAR_NOFLAGS);
+	MM_MatchStats_RegisterCvars();
 	g_loc = gi.cvar("g_loc", "1", CVAR_NOFLAGS);
 	g_loc_items = gi.cvar("g_loc_items", "1", CVAR_NOFLAGS);
 	g_motd_filename = gi.cvar("g_motd_filename", "motd.txt", CVAR_NOFLAGS);
@@ -1004,8 +1014,11 @@ static void InitGame() {
 	InitItems();
 
 	game = {};
+	// Static MyMap transition state must not survive a game-module lifecycle.
+	MM_MQ_CancelPendingMapLoad();
 
-	const uint32_t clamped_max_clients = G_ClampGameLimit("maxclients", maxclients->integer, 1, MAX_CLIENTS_KEX);
+	const uint32_t clamped_max_clients = G_ClampGameLimit(
+		"maxclients", maxclients->integer, 1, static_cast<uint32_t>(MAX_LOBBY_PLAYERS));
 	const uint32_t minimum_entities = clamped_max_clients + static_cast<uint32_t>(BODY_QUEUE_SIZE) + 1;
 	const uint32_t clamped_max_entities = G_ClampGameLimit("maxentities", maxentities->integer, minimum_entities, MAX_ENTITIES);
 
@@ -1325,16 +1338,64 @@ static gclient_t *ClientFromSortedSlot(size_t slot) {
 	return &game.clients[client_index];
 }
 
-static bool ScoreIsTied(void) {
-	if (level.num_playing_clients < 2)
-		return false;
+struct logical_individual_score_view_t {
+	const gclient_t *leader = nullptr;
+	const gclient_t *runner_up = nullptr;
+	int leader_client_num = -1;
+	int runner_up_client_num = -1;
+	size_t participant_count = 0;
+};
 
+static bool LogicalScoreRanksBefore(
+	const gclient_t *candidate, int candidate_num,
+	const gclient_t *current, int current_num) {
+	return !current || candidate->resp.score > current->resp.score ||
+		(candidate->resp.score == current->resp.score &&
+			candidate_num < current_num);
+}
+
+static logical_individual_score_view_t LogicalIndividualScoreView() {
+	logical_individual_score_view_t view;
+	for (size_t i = 0; i < game.maxclients; ++i) {
+		gentity_t *ent = &g_entities[i + 1];
+		if (!ent->client)
+			continue;
+
+		const gclient_t *state = MM_Ghost_ReservedClientState(ent);
+		if (!state) {
+			if (!ent->inuse || !ent->client->pers.connected ||
+				!ClientIsPlaying(ent->client))
+				continue;
+			state = ent->client;
+		} else if (state->sess.team == TEAM_NONE ||
+			state->sess.team == TEAM_SPECTATOR) {
+			continue;
+		}
+
+		const int client_num = static_cast<int>(i);
+		if (LogicalScoreRanksBefore(state, client_num,
+				view.leader, view.leader_client_num)) {
+			view.runner_up = view.leader;
+			view.runner_up_client_num = view.leader_client_num;
+			view.leader = state;
+			view.leader_client_num = client_num;
+		} else if (LogicalScoreRanksBefore(state, client_num,
+				view.runner_up, view.runner_up_client_num)) {
+			view.runner_up = state;
+			view.runner_up_client_num = client_num;
+		}
+		++view.participant_count;
+	}
+	return view;
+}
+
+static bool ScoreIsTied(void) {
 	if (Teams() && notGT(GT_RR))
 		return level.team_scores[TEAM_RED] == level.team_scores[TEAM_BLUE];
 
-	gclient_t *first = ClientFromSortedSlot(0);
-	gclient_t *second = ClientFromSortedSlot(1);
-	return first && second && first->resp.score == second->resp.score;
+	const logical_individual_score_view_t scores = LogicalIndividualScoreView();
+	return scores.participant_count >= 2 && scores.leader && scores.runner_up &&
+		scores.leader->resp.score == scores.runner_up->resp.score;
 }
 
 /*
@@ -1436,6 +1497,8 @@ void CalculateRanks() {
 	level.num_living_free = 0;
 	level.num_playing_red = 0;
 	level.num_playing_blue = 0;
+	level.follow1 = UINT8_MAX;
+	level.follow2 = UINT8_MAX;
 
 	//memset(level.sorted_clients, -1, sizeof(level.sorted_clients));
 	for (size_t i = 0; i < MAX_CLIENTS; i++)
@@ -1458,10 +1521,10 @@ void CalculateRanks() {
 		if (!cl->sess.is_a_bot) {
 			level.num_playing_human_clients++;
 		}
-		if (level.follow1 == -1)
-			level.follow1 = ec->client - game.clients;
-		else if (level.follow2 == -1)
-			level.follow2 = ec->client - game.clients;
+		if (level.follow1 == UINT8_MAX)
+			level.follow1 = static_cast<uint8_t>(ec->client - game.clients);
+		else if (level.follow2 == UINT8_MAX)
+			level.follow2 = static_cast<uint8_t>(ec->client - game.clients);
 
 		if (teams) {
 			if (cl->sess.team == TEAM_RED) {
@@ -1687,12 +1750,22 @@ void CalculateRanks() {
 static void ShutdownGame() {
 	gi.Com_Print("==== ShutdownGame ====\n");
 
+	// [MuffMode] Give any exact, already-computed profile settlements one final
+	// persistence attempt while the game imports are still available.
+	MM_PlayerStats_Shutdown();
+	MM_ClientProfile_Shutdown();
+	// [MuffMode] Drain and join the asynchronous stats writer while game state
+	// and import callbacks are still valid.
+	MM_MatchStats_Shutdown();
 	MM_ShutdownMapPoolSystem();
 	gi.FreeTags(TAG_LEVEL);
 	gi.FreeTags(TAG_GAME);
 }
 
 static void *G_GetExtension(const char *name) {
+	if (void *extension = MM_MatchStats_GetExtension(name))
+		return extension;
+
 	return nullptr;
 }
 
@@ -1802,9 +1875,16 @@ void Match_End() {
 	level.match_state = matchst_t::MATCH_ENDED;
 	level.match_state_timer = 0_sec;
 
+	// [MuffMode] Freeze every result consumer before settlement so direct admin
+	// and vote endings share the same reservation-aware path as QueueIntermission.
+	MM_Duel_MatchEnd_AdjustScores();
+	MM_MatchStats_FreezeResultTime();
+	MM_PlayerStats_OnMatchEnd();
+	MM_MatchStats_End();
+
 	// see if there is a queued map to go to
-	if (MM_MQ_Count()) {
-		BeginIntermission(CreateTargetChangeLevel(MM_MQ_Go_Next()));
+	if (const char *queued_map = MM_MQ_Go_Next(); queued_map && *queued_map) {
+		BeginIntermission(CreateTargetChangeLevel(queued_map));
 		return;
 	}
 	
@@ -1885,6 +1965,13 @@ void QueueIntermission(const char *msg, bool boo, bool reset) {
 	if (reset) {
 		Match_Reset();
 	} else {
+		// Freeze every result consumer while reconnect reservations still expose
+		// their authoritative saved score. Match_End later performs export and
+		// enters the intermission, but these calls are exact-once.
+		MM_Duel_MatchEnd_AdjustScores();
+		MM_MatchStats_FreezeResultTime();
+		MM_PlayerStats_OnMatchEnd();
+
 		level.match_state = matchst_t::MATCH_ENDED;
 		level.match_state_timer = 0_sec;
 		level.match_time = level.time;
@@ -1970,12 +2057,22 @@ void CheckDMExitRules() {
 	if (MM_Horde_CheckMatchEnd())
 		return;
 
-	if (!g_dm_allow_no_humans->integer && !level.num_playing_human_clients) {
+	const size_t logical_human_players =
+		(level.num_playing_human_clients > 0
+			? static_cast<size_t>(level.num_playing_human_clients) : 0) +
+		MM_Ghost_ActiveHumanPlayingReservationCount();
+	const size_t logical_players =
+		(level.num_playing_clients > 0
+			? static_cast<size_t>(level.num_playing_clients) : 0) +
+		MM_Ghost_ActivePlayingReservationCount();
+
+	if (!g_dm_allow_no_humans->integer && logical_human_players == 0) {
 		QueueIntermission("No human players remaining.", true, false);
 		return;
 	}
 	
-	if (minplayers->integer > 0 && level.num_playing_clients < minplayers->integer) {
+	if (minplayers->integer > 0 &&
+		logical_players < static_cast<size_t>(minplayers->integer)) {
 		QueueIntermission("Not enough players remaining.", true, false);
 		return;
 	}
@@ -1983,9 +2080,21 @@ void CheckDMExitRules() {
 	bool teams = MM_UseTeamScoreLimit(Teams(), GT(GT_RR));
 	
 	if (teams && g_teamplay_force_balance->integer) {
-		if (abs(level.num_playing_red - level.num_playing_blue) > 1) {
+		const int logical_red = level.num_playing_red + static_cast<int>(
+			MM_Ghost_ActivePlayingReservationCountForTeam(TEAM_RED));
+		const int logical_blue = level.num_playing_blue + static_cast<int>(
+			MM_Ghost_ActivePlayingReservationCountForTeam(TEAM_BLUE));
+		if (abs(logical_red - logical_blue) > 1) {
 			if (g_teamplay_auto_balance->integer) {
 				TeamBalance(true);
+				const int balanced_red = level.num_playing_red +
+					static_cast<int>(
+						MM_Ghost_ActivePlayingReservationCountForTeam(TEAM_RED));
+				const int balanced_blue = level.num_playing_blue +
+					static_cast<int>(
+						MM_Ghost_ActivePlayingReservationCountForTeam(TEAM_BLUE));
+				if (abs(balanced_red - balanced_blue) > 1)
+					QueueIntermission("Teams are imbalanced.", true, true);
 			} else {
 				QueueIntermission("Teams are imbalanced.", true, true);
 			}
@@ -2033,7 +2142,7 @@ void CheckDMExitRules() {
 						return;
 					}
 				} else {
-					gclient_t *leader = ClientFromSortedSlot(0);
+					const gclient_t *leader = LogicalIndividualScoreView().leader;
 					if (leader)
 						QueueIntermission(G_Fmt("{} WINS with a final score of {}.", leader->resp.netname, leader->resp.score).data(), false, false);
 					else
@@ -2058,10 +2167,10 @@ void CheckDMExitRules() {
 				return;
 			}
 		} else if (!MM_Horde_SkipMercyLimit() && notGT(GT_RR)) {
-			gclient_t *cl1, *cl2;
-
-			cl1 = ClientFromSortedSlot(0);
-			cl2 = ClientFromSortedSlot(1);
+			const logical_individual_score_view_t scores =
+				LogicalIndividualScoreView();
+			const gclient_t *cl1 = scores.leader;
+			const gclient_t *cl2 = scores.runner_up;
 			if (cl1 && cl2) {
 				if (cl1->resp.score >= cl2->resp.score + mercylimit->integer) {
 					QueueIntermission(G_Fmt("{} hit the mercylimit ({}).", cl1->resp.netname, mercylimit->integer).data(), true, false);
@@ -2092,7 +2201,7 @@ void CheckDMExitRules() {
 	// is the round just finished (we only reach this at ROUND_ENDED).
 	if (GT(GT_RR)) {
 		if (level.round_number >= scorelimit) {
-			gclient_t *leader = ClientFromSortedSlot(0);
+			const gclient_t *leader = LogicalIndividualScoreView().leader;
 			QueueIntermission(leader
 				? G_Fmt("{} WINS! (most frags after {} rounds)", leader->resp.netname, scorelimit).data()
 				: "Round limit hit.", false, false);
@@ -2110,17 +2219,13 @@ void CheckDMExitRules() {
 			return;
 		}
 	} else {
-		for (auto ec : active_clients()) {
-			// FFA players are TEAM_FREE; Red Rover scores individually but its players
-			// are on TEAM_RED/TEAM_BLUE, so gate on "is playing" rather than TEAM_FREE
-			// or the score/frag limit would never end an RR match.
-			if (!ClientIsPlaying(ec->client))
-				continue;
-
-			if (ec->client->resp.score >= scorelimit) {
-				QueueIntermission(G_Fmt("{} WINS! (hit the {} limit)", ec->client->resp.netname, GT_ScoreLimitString()).data(), false, false);
-				return;
-			}
+		const logical_individual_score_view_t scores =
+			LogicalIndividualScoreView();
+		if (scores.leader && scores.leader->resp.score >= scorelimit) {
+			QueueIntermission(G_Fmt("{} WINS! (hit the {} limit)",
+				scores.leader->resp.netname, GT_ScoreLimitString()).data(),
+				false, false);
+			return;
 		}
 	}
 }
@@ -2169,8 +2274,14 @@ void BeginIntermission(gentity_t *targ) {
 	if (level.intermission_time)
 		return; // already activated
 
-	// if in a duel, change the wins / losses
+	// [MuffMode] Every path into intermission, including a map's direct
+	// target_changelevel exit, must settle and export the live result. Each hook
+	// is internally exact-once, so the normal Match_End path safely reaches this
+	// same boundary after already freezing the result.
 	MM_Duel_MatchEnd_AdjustScores();
+	MM_MatchStats_FreezeResultTime();
+	MM_PlayerStats_OnMatchEnd();
+	MM_MatchStats_End();
 
 	game.autosaved = false;
 
@@ -2256,6 +2367,14 @@ void BeginIntermission(gentity_t *targ) {
 	G_ReportMatchDetails(true);
 
 	level.intermission_exit = false;
+	const logical_individual_score_view_t individual_scores =
+		!Teams() && notGT(GT_ARENA)
+			? LogicalIndividualScoreView()
+			: logical_individual_score_view_t{};
+	const bool individual_draw = individual_scores.participant_count >= 2 &&
+		individual_scores.leader && individual_scores.runner_up &&
+		individual_scores.leader->resp.score ==
+			individual_scores.runner_up->resp.score;
 
 	//SetIntermissionPoint();
 
@@ -2264,10 +2383,32 @@ void BeginIntermission(gentity_t *targ) {
 		MoveClientToIntermission(ec);
 		if (GT(GT_ARENA))
 			continue;
-		if (Teams())
-			MM_Announce(level.team_scores[TEAM_RED] > level.team_scores[TEAM_BLUE] ? mm_announce_event_t::RedWins : mm_announce_event_t::BlueWins, ec);
-		else
-			MM_Announce(ec->client->resp.rank == 0 ? mm_announce_event_t::YouWin : mm_announce_event_t::YouLose, ec);
+		if (Teams()) {
+			if (level.team_scores[TEAM_RED] > level.team_scores[TEAM_BLUE])
+				MM_Announce(mm_announce_event_t::RedWins, ec);
+			else if (level.team_scores[TEAM_BLUE] > level.team_scores[TEAM_RED])
+				MM_Announce(mm_announce_event_t::BlueWins, ec);
+			continue;
+		}
+		if (GT(GT_DUEL)) {
+			switch (MM_Duel_FinalOutcomeForClient(ec)) {
+			case mm_duel_final_outcome_t::win:
+				MM_Announce(mm_announce_event_t::YouWin, ec);
+				break;
+			case mm_duel_final_outcome_t::loss:
+				MM_Announce(mm_announce_event_t::YouLose, ec);
+				break;
+			default:
+				break;
+			}
+			continue;
+		}
+		if (individual_draw)
+			continue;
+		const int client_num = static_cast<int>(ec - g_entities - 1);
+		MM_Announce(client_num == individual_scores.leader_client_num
+			? mm_announce_event_t::YouWin
+			: mm_announce_event_t::YouLose, ec);
 	}
 
 }
@@ -2365,7 +2506,8 @@ void ExitLevel() {
 			}
 			std::string name = sanitize_name(raw_name);
 
-			std::string filename = std::string(G_Fmt("{}-{}-{}-{}", gt_short_name_upper[g_gametype->integer],
+			const int gametype_index = static_cast<int>(MM_CurrentGametype());
+			std::string filename = std::string(G_Fmt("{}-{}-{}-{}", gt_short_name_upper[gametype_index],
 				name.c_str(), safe_mapname.c_str(), timestamp.c_str()));
 			if (filename.length() > MAX_SCREENSHOT_FILENAME)
 				filename.resize(MAX_SCREENSHOT_FILENAME);
@@ -2541,14 +2683,20 @@ static void CheckMinMaxPlayers() {
 			maxplayers_mod_count == maxplayers->modified_count)
 		return;
 
-	// set min/maxplayer limits
+	const int client_capacity = static_cast<int>(game.maxclients);
+
+	// Set active-player limits from the client array actually allocated by the
+	// game, not from a stale or externally clamped cvar string.
 	if (minplayers->integer < 1) {
 		gi.Com_PrintFmt("minplayers must be at least 1; clamped to 1.\n");
 		gi.cvar_set("minplayers", "1");
 	}
-	else if (minplayers->integer > maxclients->integer) gi.cvar_set("minplayers", maxclients->string);
-	if (maxplayers->integer < 0) gi.cvar_set("maxplayers", maxclients->string);
-	if (maxplayers->integer > maxclients->integer) gi.cvar_set("maxplayers", maxclients->string);
+	else if (minplayers->integer > client_capacity)
+		gi.cvar_set("minplayers", G_Fmt("{}", client_capacity).data());
+	if (maxplayers->integer < 0)
+		gi.cvar_set("maxplayers", G_Fmt("{}", client_capacity).data());
+	if (maxplayers->integer > client_capacity)
+		gi.cvar_set("maxplayers", G_Fmt("{}", client_capacity).data());
 	else if (maxplayers->integer < minplayers->integer) gi.cvar_set("maxplayers", minplayers->string);
 
 	minplayers_mod_count = minplayers->modified_count;
@@ -2615,6 +2763,9 @@ static inline void G_RunFrame_(bool main_loop) {
 
 	muffmode::combat_heatmap::RunFrame();
 	MM_Ghost_RunFrame();
+	MM_PlayerStats_RunFrame();
+	MM_ClientProfile_RunFrame();
+	MM_MatchStats_RunFrame();
 	// [MuffMode] Keep structured map sources current even while timeout logic
 	// skips GT_Changes and the rest of the normal cvar polling path.
 	MM_HandleMapPoolCvarChanges();

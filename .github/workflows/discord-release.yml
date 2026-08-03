@@ -13,7 +13,7 @@ jobs:
 
     steps:
       - name: Send release embed
-        uses: actions/github-script@v9
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}
           DISCORD_RELEASE_EMOJI: ${{ vars.DISCORD_RELEASE_EMOJI || '<:quake2:1174744083403657316>' }}

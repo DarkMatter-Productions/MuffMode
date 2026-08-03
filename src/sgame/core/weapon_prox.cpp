@@ -3,6 +3,7 @@
 // Proximity mine projectile behavior.
 #include "g_local.h"
 #include "muffmode/mm_arena.h"
+#include "muffmode/mm_ordnance_identity.h"
 
 namespace {
 
@@ -13,6 +14,39 @@ constexpr float PROX_DAMAGE_RADIUS = 192.0f;
 constexpr int32_t PROX_HEALTH = 20;
 constexpr int32_t PROX_DAMAGE = 90;
 constexpr float PROX_STOP_EPSILON = 0.1f;
+
+bool ProxGenerationMatches(const gentity_t *entity, int32_t generation) {
+	return entity && entity->inuse && entity->spawn_count == generation;
+}
+
+gentity_t *ProxOwner(const gentity_t *prox) {
+	return MM_ResolveOrdnanceOwner(prox,
+		prox ? prox->teammaster : nullptr);
+}
+
+gentity_t *ProxField(const gentity_t *prox) {
+	if (!prox || !prox->teamchain)
+		return nullptr;
+
+	gentity_t *field = prox->teamchain;
+	if (!MM_OrdnanceEntityIdentityMatches(field, prox->style,
+		prox->sounds) || MM_ResolveOrdnanceOwner(field) != prox)
+		return nullptr;
+	return field;
+}
+
+void ProxDiscard(gentity_t *prox) {
+	if (!prox)
+		return;
+
+	const int32_t prox_generation = prox->spawn_count;
+	if (gentity_t *field = ProxField(prox)) {
+		prox->teamchain = nullptr;
+		G_FreeEntity(field);
+	}
+	if (ProxGenerationMatches(prox, prox_generation))
+		G_FreeEntity(prox);
+}
 
 gtime_t ProxLifetimeForMultiplier(int32_t multiplier) {
 	switch (multiplier) {
@@ -30,23 +64,39 @@ gtime_t ProxLifetimeForMultiplier(int32_t multiplier) {
 } // namespace
 
 static THINK(Prox_Explode) (gentity_t *ent) -> void {
-	// PMM - changed teammaster to "mover" .. owner of the field is the prox
-	if (ent->teamchain && ent->teamchain->owner == ent)
-		G_FreeEntity(ent->teamchain);
-
-	gentity_t *owner = ent;
-
-	if (ent->teammaster) {
-		owner = ent->teammaster;
-		PlayerNoise(owner, ent->s.origin, PNOISE_IMPACT);
+	gentity_t *owner = ProxOwner(ent);
+	if (!owner) {
+		ProxDiscard(ent);
+		return;
 	}
+
+	// PMM - changed teammaster to "mover" .. owner of the field is the prox
+	gentity_t *field = ProxField(ent);
+	if (ent->teamchain && !field) {
+		ProxDiscard(ent);
+		return;
+	}
+	if (field) {
+		ent->teamchain = nullptr;
+		G_FreeEntity(field);
+	}
+
+	if (owner->client)
+		PlayerNoise(owner, ent->s.origin, PNOISE_IMPACT);
 
 	// play quad sound if appropriate
 	if (ent->dmg > PROX_DAMAGE)
 		gi.sound(ent, CHAN_ITEM, gi.soundindex("items/damage3.wav"), 1, ATTN_NORM, 0);
 
 	ent->takedamage = false;
+	const int32_t prox_generation = ent->spawn_count;
 	T_RadiusDamage(ent, owner, static_cast<float>(ent->dmg), ent, PROX_DAMAGE_RADIUS, DAMAGE_NONE, MOD_PROX);
+	if (!ProxGenerationMatches(ent, prox_generation))
+		return;
+	if (!ProxOwner(ent)) {
+		G_FreeEntity(ent);
+		return;
+	}
 
 	const vec3_t origin = ent->s.origin + (ent->velocity * -0.02f);
 	gi.WriteByte(svc_temp_entity);
@@ -58,6 +108,10 @@ static THINK(Prox_Explode) (gentity_t *ent) -> void {
 }
 
 static DIE(prox_die) (gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int damage, const vec3_t &point, const mod_t &mod) -> void {
+	if (!ProxOwner(self)) {
+		ProxDiscard(self);
+		return;
+	}
 	self->takedamage = false;
 
 	// if set off by another prox, delay a little (chained explosions)
@@ -70,20 +124,29 @@ static DIE(prox_die) (gentity_t *self, gentity_t *inflictor, gentity_t *attacker
 }
 
 static TOUCH(Prox_Field_Touch) (gentity_t *ent, gentity_t *other, const trace_t &tr, bool other_touching_self) -> void {
+	// trigger the prox mine if it's still there, and still mine.
+	const int32_t field_generation = ent->spawn_count;
+	gentity_t *prox = MM_ResolveOrdnanceOwner(ent);
+	gentity_t *owner = ProxOwner(prox);
+	if (!prox || !owner || ProxField(prox) != ent) {
+		if (prox)
+			ProxDiscard(prox);
+		if (ProxGenerationMatches(ent, field_generation))
+			G_FreeEntity(ent);
+		return;
+	}
+
 	if (deathmatch->integer && notGT(GT_ARENA) && IsCombatDisabled())
 		return;
 
 	if (!(other->svflags & SVF_MONSTER) && !other->client)
 		return;
 
-	// trigger the prox mine if it's still there, and still mine.
-	gentity_t *prox = ent->owner;
-
 	if (GT(GT_ARENA) && !MM_Arena_CanInteract(prox, other))
 		return;
 
 	// teammate avoidance
-	if (CheckTeamDamage(prox->teammaster, other))
+	if (CheckTeamDamage(owner, other))
 		return;
 
 	if (!deathmatch->integer && other->client)
@@ -107,6 +170,11 @@ static TOUCH(Prox_Field_Touch) (gentity_t *ent, gentity_t *other, const trace_t 
 }
 
 static THINK(prox_seek) (gentity_t *ent) -> void {
+	if (!ProxOwner(ent) || !ProxField(ent)) {
+		ProxDiscard(ent);
+		return;
+	}
+
 	if (level.time > gtime_t::from_sec(ent->wait)) {
 		Prox_Explode(ent);
 	} else {
@@ -121,6 +189,13 @@ static THINK(prox_seek) (gentity_t *ent) -> void {
 }
 
 static THINK(prox_open) (gentity_t *ent) -> void {
+	gentity_t *owner = ProxOwner(ent);
+	gentity_t *field = ProxField(ent);
+	if (!owner || !field) {
+		ProxDiscard(ent);
+		return;
+	}
+
 	if (ent->s.frame == 9) {
 		// set the owner to nullptr so the owner can walk through it.
 		ent->s.sound = 0;
@@ -128,8 +203,7 @@ static THINK(prox_open) (gentity_t *ent) -> void {
 		if (deathmatch->integer)
 			ent->owner = nullptr;
 
-		if (ent->teamchain)
-			ent->teamchain->touch = Prox_Field_Touch;
+		field->touch = Prox_Field_Touch;
 
 		gentity_t *search = nullptr;
 		while ((search = findradius(search, ent->s.origin, PROX_DAMAGE_RADIUS + 10.0f)) != nullptr) {
@@ -140,7 +214,7 @@ static THINK(prox_open) (gentity_t *ent) -> void {
 				continue;
 
 			// teammate avoidance
-			if (CheckTeamDamage(search, ent->teammaster))
+			if (CheckTeamDamage(search, owner))
 				continue;
 
 			// if it's a monster or player with health > 0,
@@ -150,9 +224,10 @@ static THINK(prox_open) (gentity_t *ent) -> void {
 					(deathmatch->integer && (search->client || (search->classname && !strcmp(search->classname, "prox_mine"))))) &&
 					(search->health > 0)) ||
 					(deathmatch->integer &&
-						((!strncmp(search->classname, "info_player_", 12)) ||
+						(search->classname &&
+						 ((!strncmp(search->classname, "info_player_", 12)) ||
 							(!strcmp(search->classname, "misc_teleporter_dest")) ||
-							(!strncmp(search->classname, "item_flag_", 10))))) &&
+							(!strncmp(search->classname, "item_flag_", 10)))))) &&
 				visible(search, ent)) {
 				gi.sound(ent, CHAN_VOICE, gi.soundindex("weapons/proxwarn.wav"), 1, ATTN_NORM, 0);
 				Prox_Explode(ent);
@@ -175,6 +250,12 @@ static THINK(prox_open) (gentity_t *ent) -> void {
 }
 
 static TOUCH(prox_land) (gentity_t *ent, gentity_t *other, const trace_t &tr, bool other_touching_self) -> void {
+	gentity_t *owner = ProxOwner(ent);
+	if (!owner) {
+		ProxDiscard(ent);
+		return;
+	}
+
 	if (tr.surface && (tr.surface->flags & SURF_SKY)) {
 		G_FreeEntity(ent);
 		return;
@@ -191,7 +272,7 @@ static TOUCH(prox_land) (gentity_t *ent, gentity_t *other, const trace_t &tr, bo
 	movetype_t movetype = MOVETYPE_NONE;
 
 	if (!tr.plane.normal || (other->svflags & SVF_MONSTER) || other->client || (other->flags & FL_DAMAGEABLE)) {
-		if (other != ent->teammaster)
+		if (other != owner)
 			Prox_Explode(ent);
 
 		return;
@@ -247,9 +328,10 @@ static TOUCH(prox_land) (gentity_t *ent, gentity_t *other, const trace_t &tr, bo
 	field->maxs = { PROX_BOUND_SIZE, PROX_BOUND_SIZE, PROX_BOUND_SIZE };
 	field->movetype = MOVETYPE_NONE;
 	field->solid = SOLID_TRIGGER;
-	field->owner = ent;
+	MM_CaptureOrdnanceOwner(field, ent);
 	field->classname = "prox_field";
-	field->teammaster = ent;
+	ent->style = field->spawn_count;
+	ent->teamchain = field;
 	gi.linkentity(field);
 
 	ent->velocity = {};
@@ -261,7 +343,6 @@ static TOUCH(prox_land) (gentity_t *ent, gentity_t *other, const trace_t &tr, bo
 	ent->takedamage = true;
 	ent->movetype = movetype;
 	ent->die = prox_die;
-	ent->teamchain = field;
 	ent->health = PROX_HEALTH;
 	ent->nextthink = level.time;
 	ent->think = prox_open;
@@ -272,6 +353,11 @@ static TOUCH(prox_land) (gentity_t *ent, gentity_t *other, const trace_t &tr, bo
 }
 
 static THINK(Prox_Think) (gentity_t *self) -> void {
+	if (!ProxOwner(self)) {
+		ProxDiscard(self);
+		return;
+	}
+
 	if (self->timestamp <= level.time) {
 		Prox_Explode(self);
 		return;
@@ -312,7 +398,7 @@ void fire_prox(gentity_t *self, const vec3_t &start, const vec3_t &aimdir, int p
 	prox->mins = { -6, -6, -6 };
 	prox->maxs = { 6, 6, 6 };
 	prox->s.modelindex = gi.modelindex("models/weapons/g_prox/tris.md2");
-	prox->owner = self;
+	MM_CaptureOrdnanceOwner(prox, self);
 	prox->teammaster = self;
 	prox->touch = prox_land;
 	prox->think = Prox_Think;

@@ -12,6 +12,7 @@
 #include "muffmode/mm_parse.h"
 #include "muffmode/mm_red_rover_rules.h"
 #include "muffmode/mm_scoring.h"
+#include "muffmode/mm_spawn_rules.h"
 #include "muffmode/mm_team.h"
 #include "muffmode/mm_time_format.h"
 #include "muffmode/mm_util.h"
@@ -2821,7 +2822,7 @@ bool TransferCaptain(gentity_t *ent, LogicalTeam &team, gentity_t *target)
 			"You must be captain to transfer it to another player.\n");
 		return false;
 	}
-	if (!IsConnected(target)) {
+	if (!target || !target->client || !IsConnected(target)) {
 		gi.Client_Print(ent, PRINT_HIGH, "Invalid player.\n");
 		return false;
 	}
@@ -3120,7 +3121,8 @@ void TeamInviteCommand(gentity_t *ent, TeamInviteAction action,
 	}
 	gentity_t *target = target_name && *target_name
 		? ClientEntFromString(target_name) : nullptr;
-	if (!IsConnected(target)) {
+	gclient_t *const target_client = target ? target->client : nullptr;
+	if (!target || !target_client || !IsConnected(target)) {
 		gi.Client_Print(ent, PRINT_HIGH, "Invalid player.\n");
 		return;
 	}
@@ -3128,7 +3130,7 @@ void TeamInviteCommand(gentity_t *ent, TeamInviteAction action,
 		gi.Client_Print(ent, PRINT_HIGH, "You cannot invite or revoke yourself.\n");
 		return;
 	}
-	if (spectator_action && target->client->resp.arena_id != a->id) {
+	if (spectator_action && target_client->resp.arena_id != a->id) {
 		gi.Client_Print(ent, PRINT_HIGH,
 			"Spectator invitations only apply to players in this arena.\n");
 		return;
@@ -3141,7 +3143,7 @@ void TeamInviteCommand(gentity_t *ent, TeamInviteAction action,
 	}
 	switch (action) {
 	case TeamInviteAction::InviteMember:
-		if (IsTeamMember(target->client, team->id)) {
+		if (IsTeamMember(target_client, team->id)) {
 			gi.Client_Print(ent, PRINT_HIGH,
 				"That player is already on your Arena team.\n");
 			return;
@@ -3460,7 +3462,7 @@ void BeginTimeout(gentity_t *ent)
 		(team->id == arena->active_red || team->id == arena->active_blue);
 	const bool team_member = team &&
 		Role(ent->client) != mm_arena_role_t::Coach;
-	if (!arena || !MM_ArenaCanCallTimeout(arena->state, active_side,
+	if (!arena || !team || !MM_ArenaCanCallTimeout(arena->state, active_side,
 		team_member)) {
 		gi.Client_Print(ent, PRINT_HIGH,
 			"Only a member of an active team can call timeout.\n");
@@ -4015,6 +4017,10 @@ void MM_Arena_PreflightMap(const char *mapname, const char *entity_lump)
 
 	if (!g_gametype || !GT_RAW(GT_ARENA))
 		return;
+	// Demo playback and cinematics carry no entities. Reset the room state for
+	// them, but never report a worldless state as a failed Arena map.
+	if (!MM_MapStateHasWorld(mapname))
+		return;
 
 	arena::s_map_contract = arena::ParseMapContract(entity_lump);
 	const bool allow_untagged_idmap = g_arena_legacy_idmap &&
@@ -4053,13 +4059,13 @@ void MM_Arena_PreflightMap(const char *mapname, const char *entity_lump)
 
 bool MM_Arena_Active()
 {
-	return g_gametype && GT_RAW(GT_ARENA) && arena::s_map_active;
+	return GT_RAW(GT_ARENA) && arena::s_map_active;
 }
 
 void MM_Arena_Init()
 {
-	arena::s_arenas = {};
-	arena::s_teams = {};
+	arena::s_arenas.fill({});
+	arena::s_teams.fill({});
 	arena::s_rover_pending_side.fill(TEAM_NONE);
 	arena::s_rover_pending_arena.fill(0);
 	arena::s_rover_respawn_pending.fill(false);
@@ -5461,7 +5467,7 @@ void MM_Arena_Cmd(gentity_t *ent)
 	if (!arena::IsConnected(ent))
 		return;
 	if (!arena::IsArenaGametype()) {
-		if (g_gametype && GT_RAW(GT_ARENA))
+		if (GT_RAW(GT_ARENA))
 			gi.Client_Print(ent, PRINT_HIGH,
 				"MuffMode Arena is inactive: this map is not "
 				"RA2-compatible. Load a map with a valid RA2 arena contract.\n");
@@ -5949,7 +5955,8 @@ void MM_Arena_ScoreboardMessage(gentity_t *viewer, gentity_t *)
 
 void MM_Arena_SetHudStats(gentity_t *ent)
 {
-	if (!arena::IsArenaGametype() || !arena::IsConnected(ent))
+	if (!ent || !ent->client || !arena::IsArenaGametype() ||
+		!arena::IsConnected(ent))
 		return;
 	const arena::Arena *a = arena::ArenaForConst(ent->client);
 	std::string text;
@@ -6006,6 +6013,18 @@ void MM_Arena_SetHudStats(gentity_t *ent)
 				ent->client->resp.arena_side == TEAM_BLUE ? ii_highlight : 0;
 		}
 	}
+
+	// Miniscore rows only track a live series, matching the single-arena HUD rule: nothing while a
+	// room is warming up or once its match is over.
+	if (a && !arena::IsActiveSeriesState(a->state)) {
+		ent->client->ps.stats[STAT_MINISCORE_FIRST_SCORE] = -999;
+		ent->client->ps.stats[STAT_MINISCORE_SECOND_SCORE] = -999;
+		ent->client->ps.stats[STAT_MINISCORE_FIRST_PIC] = 0;
+		ent->client->ps.stats[STAT_MINISCORE_SECOND_PIC] = 0;
+		ent->client->ps.stats[STAT_MINISCORE_FIRST_POS] = 0;
+		ent->client->ps.stats[STAT_MINISCORE_SECOND_POS] = 0;
+	}
+
 	const int client_num = arena::ClientNumber(ent);
 	const int cs = client_num >= 0 ? MM_PovConfigStringForClient(
 		static_cast<size_t>(client_num), game.maxclients,

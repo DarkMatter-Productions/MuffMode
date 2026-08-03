@@ -3,7 +3,9 @@
 
 #include "g_local.h"
 #include "muffmode/mm_command_contracts.h"
+#include "muffmode/mm_message_budget.h"
 #include "muffmode/mm_motd.h"
+#include "muffmode/mm_reliable_text.h"
 #include "muffmode/mm_util.h"
 
 #include <cstdio>
@@ -71,6 +73,34 @@ std::optional<std::string> ReadTextFile(FILE *file, const char *name)
 
 } // namespace muffmode::motd
 
+namespace {
+
+void PrintBoundedMOTDResponse(gentity_t *ent, std::string_view text)
+{
+	using namespace muffmode::reliable_text;
+	constexpr size_t max_total_bytes =
+		kMaxMotdCommandMessages * kGuaranteedPrintContentBytes;
+	const std::string bounded = MakeBoundedPreview(text, max_total_bytes);
+	const chunk_plan_t plan = PlanChunks(
+		bounded, kMaxPrintPayloadBytes, kMaxMotdCommandMessages);
+
+	mm_reliable_fanout_scope_t budget(
+		kMaxMotdCommandMessages,
+		kMaxMotdCommandMessages *
+			(kMaxPrintPayloadBytes + kReliablePrintAccountingOverheadBytes),
+		"MOTD client response");
+	for (std::string_view chunk : plan.chunks) {
+		if (!MM_ReserveReliableFanoutMessage(
+			chunk.size() + kReliablePrintAccountingOverheadBytes)) {
+			break;
+		}
+		const std::string terminated(chunk);
+		gi.LocClient_Print(ent, PRINT_HIGH, "{}", terminated.c_str());
+	}
+}
+
+} // namespace
+
 void MM_LoadMOTD()
 {
 	const char *configured_filename = (g_motd_filename && g_motd_filename->string) ? g_motd_filename->string : "";
@@ -104,6 +134,26 @@ void MM_LoadMOTD()
 	}
 }
 
+void MM_ShowAutomaticMOTD(gentity_t *ent)
+{
+	if (!ent || !ent->client || game.motd.empty())
+		return;
+
+	using namespace muffmode::reliable_text;
+	const std::string preview = MakeBoundedPreview(
+		game.motd, kMaxPrintPayloadBytes);
+	mm_reliable_fanout_scope_t budget(
+		1,
+		kMaxPrintPayloadBytes + kReliablePrintAccountingOverheadBytes,
+		"automatic MOTD preview");
+	if (!MM_ReserveReliableFanoutMessage(
+		preview.size() + kReliablePrintAccountingOverheadBytes)) {
+		return;
+	}
+
+	gi.LocCenter_Print(ent, "{}", preview.c_str());
+}
+
 void MM_CmdLoadMotd(gentity_t *ent)
 {
 	if (!ent || !ent->client)
@@ -121,23 +171,22 @@ void MM_CmdMotd(gentity_t *ent)
 {
 	if (!ent || !ent->client)
 		return;
+	if (CheckFlood(ent))
+		return;
 
 	if (!MM_IsExactArgcValid(gi.argc(), 1)) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "Usage: {}\n", gi.argv(0));
 		return;
 	}
 
-	std::string motd_message;
-	const char *s = nullptr;
-
-	if (game.motd.size()) {
-		motd_message = "Message of the Day:\n";
-		motd_message += game.motd;
-		motd_message += "\n";
-		s = motd_message.c_str();
-	} else {
-		s = "No Message of the Day set.\n";
+	if (game.motd.empty()) {
+		gi.LocClient_Print(ent, PRINT_HIGH,
+			"No Message of the Day set.\n");
+		return;
 	}
 
-	gi.LocClient_Print(ent, PRINT_HIGH, "{}", s);
+	std::string motd_message = "Message of the Day:\n";
+	motd_message += game.motd;
+	motd_message += "\n";
+	PrintBoundedMOTDResponse(ent, motd_message);
 }

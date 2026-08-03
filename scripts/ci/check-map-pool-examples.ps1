@@ -62,7 +62,16 @@ $maxCycleBytes = 256 * 1024
 $maxMapIdBytes = 64
 $maxTitleBytes = 160
 $maxEpisodeBytes = 64
-$maxPlayers = 32
+$gameHeaderPath = Join-Path $repoRoot "src\shared\game.h"
+$gameHeader = Get-Content -LiteralPath $gameHeaderPath -Raw
+$lobbyLimitMatches = [regex]::Matches(
+    $gameHeader,
+    '(?m)^\s*constexpr size_t MAX_LOBBY_PLAYERS = ([0-9]+);\s*$'
+)
+if ($lobbyLimitMatches.Count -ne 1) {
+    throw "Expected exactly one MAX_LOBBY_PLAYERS definition in $gameHeaderPath."
+}
+$maxPlayers = [int] $lobbyLimitMatches[0].Groups[1].Value
 $script:strictUtf8 = [System.Text.UTF8Encoding]::new($false, $true)
 
 $bspLumpNames = @(

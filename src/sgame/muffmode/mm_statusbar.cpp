@@ -54,6 +54,7 @@ using muffmode::hud::kBottomMiniscoreRow2Yb;
 using muffmode::hud::kBottomMiniscoreMetaRow1Yb;
 using muffmode::hud::kMiniscoreHighlightXr;
 using muffmode::hud::kMiniscoreHighlightYInset;
+using muffmode::hud::kMiniscoreLimitTextXr;
 using muffmode::hud::kMiniscoreNumFieldWidth;
 using muffmode::hud::kMiniscoreNumXr;
 using muffmode::hud::kMiniscorePicXr;
@@ -131,8 +132,6 @@ void EmitCoopStackAdvancePastNum(int32_t *coop_y)
 	*coop_y += kCoopStackNumFieldHeight;
 }
 
-const char *ScoreLimitLabel();
-
 void EmitCoopStackLabeledNum(statusbar_t &sb, int32_t *coop_y, player_stat_t stat, const char *label, int field_width)
 {
 	sb.ifstat(stat).xr(RightStackLabelXr(label)).yt(*coop_y += kCoopStackItemGap).loc_rstring(label).xr(RightHudNumXr(field_width)).yt(*coop_y += kCoopStackLabelToNumGap).num(field_width, stat).endifstat();
@@ -162,11 +161,6 @@ void EmitRightLivesStack(statusbar_t &sb, int32_t yt)
 		.xr(MiniscoreAlignedNumXr(1)).yt(yt).num(1, STAT_LIVES)
 		.xr(kRightHudTextXr).yt(yt + kLabelBelowNum).loc_rstring("$g_lives")
 		.endifstat();
-}
-
-void EmitCoopStackScoreLimit(statusbar_t &sb, int32_t *coop_y)
-{
-	EmitCoopStackLabeledNum(sb, coop_y, STAT_SCORELIMIT, ScoreLimitLabel(), kRightHudNumFieldWidth);
 }
 
 void EmitRoundCounter(statusbar_t &sb, round_counter_profile_t profile, const char *label, int32_t *coop_y = nullptr)
@@ -205,7 +199,7 @@ void EmitHordeWaveAndRemainingStack(statusbar_t &sb)
 
 	sb.ifstat(STAT_HORDE_REMAINING)
 		.xr(MiniscoreAlignedNumXr(kMiniscoreNumFieldWidth)).yt(y += 10).num(kMiniscoreNumFieldWidth, STAT_HORDE_REMAINING)
-		.xr(kRightHudTextXr).yt(y += kLabelBelowNum).loc_rstring("Monsters")
+		.xr(kRightHudTextXr).yt(y + kLabelBelowNum).loc_rstring("Monsters")
 		.endifstat();
 }
 
@@ -277,29 +271,19 @@ void EmitTeamHeader(statusbar_t &sb)
 	sb.ifstat(STAT_TEAMPLAY_INFO).xl(0).yb(-88).stat_string(STAT_TEAMPLAY_INFO).endifstat();
 }
 
-const char *ScoreLimitLabel()
-{
-	if (GT(GT_STRIKE) || GT(GT_CTF))
-		return "Captures";
-	if (MM_GametypeHasFlag(GTF_ROUNDS))
-		return "Rounds";
-	return "Frags";
-}
-
 void EmitBottomTeamMiniscoreRows(statusbar_t &sb)
 {
 	EmitTeamMiniscoreRow(sb, hud_vanchor_t::Bottom, kBottomMiniscoreRow1Yb, STAT_MINISCORE_FIRST_PIC, STAT_MINISCORE_FIRST_SCORE, STAT_MINISCORE_FIRST_POS);
 	EmitTeamMiniscoreRow(sb, hud_vanchor_t::Bottom, kBottomMiniscoreRow2Yb, STAT_MINISCORE_SECOND_PIC, STAT_MINISCORE_SECOND_SCORE, STAT_MINISCORE_SECOND_POS);
 }
 
+// Match limit under the miniscore rows: small white stat_string, not big HUD digits.
 void EmitMiniscoreMetaRows(statusbar_t &sb)
 {
 	sb.ifstat(STAT_MINISCORE_FIRST_PIC)
-		.ifstat(STAT_ROUND_NUMBER)
-			.xr(MiniscoreAlignedNumXr(kMiniscoreNumFieldWidth))
-			.yb(kBottomMiniscoreMetaRow1Yb)
-			.num(kMiniscoreNumFieldWidth, STAT_ROUND_NUMBER)
-		.endifstat()
+		.xr(kMiniscoreLimitTextXr)
+		.yb(kBottomMiniscoreMetaRow1Yb)
+		.stat_string(STAT_SCORELIMIT)
 		.endifstat();
 }
 
@@ -309,7 +293,33 @@ void EmitStandardTeamMiniscore(statusbar_t &sb)
 	EmitMiniscoreMetaRows(sb);
 }
 
+// Top-right gametype/ruleset notice window. Long enough to read, short enough to stay out of
+// the way for the rest of warmup.
+constexpr gtime_t kMatchInfoHudTime = 5_sec;
+
 } // namespace muffmode::statusbar
+
+void MM_MatchInfoHud_Show(gentity_t *ent)
+{
+	if (!ent || !ent->client)
+		return;
+
+	ent->client->match_info_hud_time = level.time + muffmode::statusbar::kMatchInfoHudTime;
+}
+
+void MM_MatchInfoHud_ShowAll()
+{
+	for (auto ec : active_clients())
+		MM_MatchInfoHud_Show(ec);
+}
+
+bool MM_MatchInfoHud_Visible(const gentity_t *ent)
+{
+	if (!ent || !ent->client)
+		return false;
+
+	return ent->client->match_info_hud_time > level.time;
+}
 
 void MM_InitStatusbar()
 {

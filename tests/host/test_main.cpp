@@ -2,10 +2,18 @@
 // Licensed under the GNU General Public License 2.0.
 
 #include "fake_game_import.h"
+#include "hud_text.h"
+#include "shared/q_std.h"
+#include "muffmode/mm_admin.h"
 #include "muffmode/mm_announcer_rules.h"
 #include "muffmode/mm_arena_rules.h"
+#include "muffmode/mm_client_profile.h"
+#include "muffmode/mm_client_refs.h"
 #include "muffmode/mm_command_contracts.h"
+#include "muffmode/mm_duel.h"
 #include "muffmode/mm_freezetag_rules.h"
+#include "muffmode/mm_gametype.h"
+#include "muffmode/mm_gametype_cfg_rules.h"
 #include "muffmode/mm_ghost.h"
 #include "muffmode/mm_hud_stat_contracts.h"
 #include "muffmode/mm_horde_ai_rules.h"
@@ -14,15 +22,21 @@
 #include "muffmode/mm_loc_parse.h"
 #include "muffmode/mm_map_pool.h"
 #include "muffmode/mm_maps.h"
+#include "muffmode/mm_match_stats.h"
+#include "muffmode/mm_menu.h"
 #include "muffmode/mm_message_budget.h"
 #include "muffmode/mm_motd.h"
+#include "muffmode/mm_ordnance_identity.h"
 #include "muffmode/mm_parse.h"
 #include "muffmode/mm_pconfig_rules.h"
+#include "muffmode/mm_reliable_text.h"
+#include "muffmode/mm_player_stats.h"
 #include "muffmode/mm_red_rover_rules.h"
 #include "muffmode/mm_spawn_rules.h"
 #include "muffmode/mm_time_format.h"
 #include "muffmode/mm_util.h"
 #include "muffmode/mm_vote_menu.h"
+#include "shared/gameplay.h"
 
 #include <algorithm>
 #include <array>
@@ -88,6 +102,696 @@ MM_TEST(parse_helpers_trim_ascii_whitespace_without_touching_inner_text) {
 	MM_CHECK(MM_TrimAsciiWhitespace(std::string_view(" \t\r\n")).empty());
 }
 
+MM_TEST(player_stats_elo_is_symmetric_and_applies_signed_changes) {
+	MM_CHECK_EQ(MM_PlayerStats_EloExpected(1500.0f, 1500.0f), 0.5f);
+	const float favorite = MM_PlayerStats_EloExpected(1700.0f, 1300.0f);
+	const float underdog = MM_PlayerStats_EloExpected(1300.0f, 1700.0f);
+	MM_CHECK(std::fabs((favorite + underdog) - 1.0f) < 0.00001f);
+
+	const auto winner = MM_PlayerStats_ApplyRating(1500.0f, 1.0f, 0.5f);
+	const auto loser = MM_PlayerStats_ApplyRating(1500.0f, 0.0f, 0.5f);
+	MM_CHECK_EQ(winner.rating, 1516.0f);
+	MM_CHECK_EQ(winner.change, 16);
+	MM_CHECK_EQ(loser.rating, 1484.0f);
+	MM_CHECK_EQ(loser.change, -16);
+}
+
+MM_TEST(player_stats_retains_fractional_elo_and_truncates_only_the_delta) {
+	const float expected = MM_PlayerStats_EloExpected(1600.0f, 1500.0f);
+	const auto winner = MM_PlayerStats_ApplyRating(1600.0f, 1.0f, expected);
+	MM_CHECK(std::fabs(winner.rating - 1611.5186f) < 0.001f);
+	MM_CHECK_EQ(winner.change, 11);
+
+	const auto loser = MM_PlayerStats_ApplyRating(
+		1500.0f, 0.0f, 1.0f - expected);
+	MM_CHECK(std::fabs(loser.rating - 1488.4814f) < 0.001f);
+	MM_CHECK_EQ(loser.change, -11);
+}
+
+MM_TEST(player_stats_rating_bounds_and_invalid_values_are_safe) {
+	MM_CHECK_EQ(MM_PlayerStats_NormalizeRating(
+		std::numeric_limits<float>::quiet_NaN()),
+		MM_PLAYER_STATS_DEFAULT_RATING);
+	const auto floor = MM_PlayerStats_ApplyRating(0.0f, 0.0f, 1.0f);
+	const auto ceiling = MM_PlayerStats_ApplyRating(
+		MM_PLAYER_STATS_MAX_RATING, 1.0f, 0.0f);
+	MM_CHECK_EQ(floor.rating, MM_PLAYER_STATS_MIN_RATING);
+	MM_CHECK_EQ(floor.change, 0);
+	MM_CHECK_EQ(ceiling.rating, MM_PLAYER_STATS_MAX_RATING);
+	MM_CHECK_EQ(ceiling.change, 0);
+	MM_CHECK_EQ(MM_PlayerStats_DisplayRating(1511.99f), 1511);
+	MM_CHECK_EQ(MM_PlayerStats_DisplayRating(-12.0f), 0);
+	MM_CHECK_EQ(MM_PlayerStats_DisplayRating(
+		std::numeric_limits<float>::infinity()),
+		static_cast<int32_t>(MM_PLAYER_STATS_DEFAULT_RATING));
+}
+
+MM_TEST(player_stats_ffa_scores_ties_pairwise) {
+	const int32_t scores[] = { 10, 10, 0 };
+	MM_CHECK_EQ(MM_PlayerStats_FfaActualScore(scores, 3, 0), 0.75f);
+	MM_CHECK_EQ(MM_PlayerStats_FfaActualScore(scores, 3, 1), 0.75f);
+	MM_CHECK_EQ(MM_PlayerStats_FfaActualScore(scores, 3, 2), 0.0f);
+
+	const float ratings[] = { 1500.0f, 1500.0f, 1500.0f };
+	MM_CHECK_EQ(MM_PlayerStats_FfaExpectedScore(ratings, 3, 0), 0.5f);
+	MM_CHECK_EQ(MM_PlayerStats_FfaExpectedScore(nullptr, 3, 0), 0.5f);
+}
+
+MM_TEST(player_stats_runtime_identity_uses_generation_only_without_social_id) {
+	MM_CHECK_FALSE(MM_PlayerStats_RuntimeOwnerMatches(
+		false, {}, 7, {}, 7));
+	MM_CHECK(MM_PlayerStats_RuntimeOwnerMatches(
+		true, "account", 7, "account", 8));
+	MM_CHECK_FALSE(MM_PlayerStats_RuntimeOwnerMatches(
+		true, "account-a", 7, "account-b", 7));
+	MM_CHECK(MM_PlayerStats_RuntimeOwnerMatches(
+		true, {}, 7, {}, 7));
+	MM_CHECK_FALSE(MM_PlayerStats_RuntimeOwnerMatches(
+		true, {}, 7, {}, 8));
+}
+
+MM_TEST(duel_reconnect_reservations_continue_to_occupy_player_slots) {
+	MM_CHECK_EQ(MM_DuelLogicalParticipantCount(1, 1), size_t{2});
+	MM_CHECK_EQ(MM_DuelLogicalParticipantCount(0, 2), size_t{2});
+	MM_CHECK_EQ(MM_DuelLogicalParticipantCount(2, 1), size_t{3});
+	MM_CHECK_EQ(MM_DuelLogicalParticipantCount(
+		std::numeric_limits<size_t>::max(), 1),
+		std::numeric_limits<size_t>::max());
+}
+
+MM_TEST(duel_forfeit_policy_uses_the_logical_two_player_result) {
+	MM_CHECK(MM_DuelForfeitAllowed(2, false, 1));
+	MM_CHECK_FALSE(MM_DuelForfeitAllowed(2, false, 0));
+	MM_CHECK(MM_DuelForfeitAllowed(2, true, 0));
+	MM_CHECK(MM_DuelForfeitAllowed(2, true, 1));
+	MM_CHECK_FALSE(MM_DuelForfeitAllowed(1, true, 0));
+	MM_CHECK_FALSE(MM_DuelForfeitAllowed(2, true, 2));
+}
+
+MM_TEST(duel_departure_forfeits_regardless_of_the_quitters_score_rank) {
+	MM_CHECK(MM_DuelDepartureForfeitAllowed(2, 0));
+	MM_CHECK(MM_DuelDepartureForfeitAllowed(2, 1));
+	MM_CHECK_FALSE(MM_DuelDepartureForfeitAllowed(1, 0));
+	MM_CHECK_FALSE(MM_DuelDepartureForfeitAllowed(2, 2));
+}
+
+MM_TEST(match_stats_result_events_stop_at_the_frozen_end_time) {
+	MM_CHECK(MM_MatchStatsAcceptsResultEvents(true, false, 0));
+	MM_CHECK_FALSE(MM_MatchStatsAcceptsResultEvents(true, false, 1));
+	MM_CHECK_FALSE(MM_MatchStatsAcceptsResultEvents(false, false, 0));
+	MM_CHECK_FALSE(MM_MatchStatsAcceptsResultEvents(true, true, 0));
+}
+
+MM_TEST(match_stats_exports_only_clients_who_entered_play) {
+	MM_CHECK_FALSE(MM_MatchStatsHasRecordedParticipation(0, 0));
+	MM_CHECK(MM_MatchStatsHasRecordedParticipation(1, 0));
+	MM_CHECK(MM_MatchStatsHasRecordedParticipation(0, 1));
+	MM_CHECK_FALSE(MM_MatchStatsCanRefreshArchivedParticipant(0, 0, 0));
+	MM_CHECK(MM_MatchStatsCanRefreshArchivedParticipant(1, 0, 0));
+	MM_CHECK(MM_MatchStatsCanRefreshArchivedParticipant(0, 0, 1));
+}
+
+MM_TEST(match_stats_frozen_results_require_the_original_live_connection) {
+	MM_CHECK(MM_MatchStatsCanDeliverFrozenResult(true, true, 17, 17));
+	MM_CHECK_FALSE(MM_MatchStatsCanDeliverFrozenResult(false, true, 17, 17));
+	MM_CHECK_FALSE(MM_MatchStatsCanDeliverFrozenResult(true, false, 17, 17));
+	MM_CHECK_FALSE(MM_MatchStatsCanDeliverFrozenResult(true, true, 17, 18));
+}
+
+MM_TEST(match_stats_uses_reserved_profile_readiness_when_authoritative) {
+	MM_CHECK_FALSE(MM_MatchStatsEffectiveProfileReadiness(false, false, false));
+	MM_CHECK(MM_MatchStatsEffectiveProfileReadiness(true, false, false));
+	MM_CHECK(MM_MatchStatsEffectiveProfileReadiness(false, true, true));
+	MM_CHECK_FALSE(MM_MatchStatsEffectiveProfileReadiness(true, true, false));
+}
+
+MM_TEST(match_stats_time_limit_conversion_is_overflow_safe) {
+	MM_CHECK_EQ(MM_MatchStatsTimeLimitSeconds(
+		-std::numeric_limits<float>::infinity()), 0);
+	MM_CHECK_EQ(MM_MatchStatsTimeLimitSeconds(-1.0f), 0);
+	MM_CHECK_EQ(MM_MatchStatsTimeLimitSeconds(0.0f), 0);
+	MM_CHECK_EQ(MM_MatchStatsTimeLimitSeconds(0.5f), 30);
+	MM_CHECK_EQ(MM_MatchStatsTimeLimitSeconds(1.5f), 90);
+	MM_CHECK_EQ(MM_MatchStatsTimeLimitSeconds(1.0f / 60.0f), 1);
+	MM_CHECK_EQ(MM_MatchStatsTimeLimitSeconds(
+		std::numeric_limits<float>::quiet_NaN()), 0);
+	MM_CHECK_EQ(MM_MatchStatsTimeLimitSeconds(
+		std::numeric_limits<float>::infinity()), 0);
+	MM_CHECK_EQ(MM_MatchStatsTimeLimitSeconds(
+		std::numeric_limits<float>::max()), std::numeric_limits<int>::max());
+}
+
+MM_TEST(match_stats_catalog_artifact_types_have_a_hard_limit) {
+	MM_CHECK(MM_MatchStatsCatalogTypeCountValid(0));
+	MM_CHECK(MM_MatchStatsCatalogTypeCountValid(
+		MM_MATCH_CATALOG_ARTIFACT_TYPE_LIMIT));
+	MM_CHECK_FALSE(MM_MatchStatsCatalogTypeCountValid(
+		MM_MATCH_CATALOG_ARTIFACT_TYPE_LIMIT + 1));
+	MM_CHECK_FALSE(MM_MatchStatsCatalogTypeCountValid(
+		std::numeric_limits<size_t>::max()));
+}
+
+MM_TEST(match_stats_ctf_aggregate_serialization_does_not_wrap) {
+	MM_CHECK_EQ(MM_MatchStatsWideCounterSum(
+		std::numeric_limits<uint32_t>::max(), 1),
+		static_cast<uint64_t>(std::numeric_limits<uint32_t>::max()) + 1);
+	MM_CHECK_EQ(MM_MatchStatsWideCounterSum(
+		std::numeric_limits<uint32_t>::max(),
+		std::numeric_limits<uint32_t>::max()),
+		static_cast<uint64_t>(std::numeric_limits<uint32_t>::max()) * 2);
+	MM_CHECK_EQ(MM_MatchStatsSaturatingDurationSum(40, 2), uint64_t { 42 });
+	MM_CHECK_EQ(MM_MatchStatsSaturatingDurationSum(
+		std::numeric_limits<uint64_t>::max(), 1),
+		std::numeric_limits<uint64_t>::max());
+}
+
+MM_TEST(match_stats_export_logs_enforce_their_hard_capacity) {
+	MM_CHECK(MM_MatchStatsLogHasCapacity(0, MM_MATCH_EVENT_LIMIT));
+	MM_CHECK(MM_MatchStatsLogHasCapacity(
+		MM_MATCH_EVENT_LIMIT - 1, MM_MATCH_EVENT_LIMIT));
+	MM_CHECK_FALSE(MM_MatchStatsLogHasCapacity(
+		MM_MATCH_EVENT_LIMIT, MM_MATCH_EVENT_LIMIT));
+	MM_CHECK_FALSE(MM_MatchStatsLogHasCapacity(
+		MM_MATCH_DEATH_EVENT_LIMIT + 1, MM_MATCH_DEATH_EVENT_LIMIT));
+	MM_CHECK_FALSE(MM_MatchStatsLogHasCapacity(
+		MM_MATCH_DEPARTED_PLAYER_LIMIT, MM_MATCH_DEPARTED_PLAYER_LIMIT));
+}
+
+MM_TEST(player_stats_pending_settlement_queue_has_a_hard_capacity) {
+	MM_CHECK(MM_PlayerStatsPendingQueueHasCapacity(0));
+	MM_CHECK(MM_PlayerStatsPendingQueueHasCapacity(
+		MM_PLAYER_STATS_PENDING_SETTLEMENT_LIMIT - 1));
+	MM_CHECK_FALSE(MM_PlayerStatsPendingQueueHasCapacity(
+		MM_PLAYER_STATS_PENDING_SETTLEMENT_LIMIT));
+	MM_CHECK(MM_PlayerStatsPendingQueueCanAdmit(0,
+		MM_PLAYER_STATS_PENDING_SETTLEMENT_LIMIT));
+	MM_CHECK(MM_PlayerStatsPendingQueueCanAdmit(
+		MM_PLAYER_STATS_PENDING_SETTLEMENT_LIMIT - 2, 2));
+	MM_CHECK_FALSE(MM_PlayerStatsPendingQueueCanAdmit(
+		MM_PLAYER_STATS_PENDING_SETTLEMENT_LIMIT - 1, 2));
+	MM_CHECK_FALSE(MM_PlayerStatsPendingQueueCanAdmit(
+		std::numeric_limits<size_t>::max(), 0));
+}
+
+MM_TEST(player_stats_ranking_requires_ready_humans_and_atomic_departures) {
+	MM_CHECK(MM_PlayerStatsMatchCanBeRanked(false, false));
+	MM_CHECK_FALSE(MM_PlayerStatsMatchCanBeRanked(true, false));
+	MM_CHECK_FALSE(MM_PlayerStatsMatchCanBeRanked(false, true));
+	MM_CHECK_FALSE(MM_PlayerStatsMatchCanBeRanked(true, true));
+	MM_CHECK_FALSE(MM_PlayerStatsMatchCanBeRanked(false, false, true));
+}
+
+MM_TEST(player_stats_replays_only_current_or_pending_settlements) {
+	MM_CHECK(MM_PlayerStatsShouldApplyRecordedSettlement(true, false));
+	MM_CHECK(MM_PlayerStatsShouldApplyRecordedSettlement(false, true));
+	MM_CHECK(MM_PlayerStatsShouldApplyRecordedSettlement(true, true));
+	MM_CHECK_FALSE(MM_PlayerStatsShouldApplyRecordedSettlement(false, false));
+}
+
+MM_TEST(client_lifetime_reference_matching_rejects_unrelated_slots) {
+	const int departing = 1;
+	const int noise = 2;
+	const int unrelated = 3;
+	MM_CHECK(MM_ClientLifetimeReferenceMatches(
+		&departing, &departing, &noise));
+	MM_CHECK(MM_ClientLifetimeReferenceMatches(
+		&noise, &departing, &noise));
+	MM_CHECK_FALSE(MM_ClientLifetimeReferenceMatches(
+		&unrelated, &departing, &noise));
+}
+
+MM_TEST(match_stats_hits_require_a_live_target_and_safe_once_policy) {
+	MM_CHECK_FALSE(MM_MatchStatsShouldCountHit(
+		false, false, false, true, false));
+	MM_CHECK_FALSE(MM_MatchStatsShouldCountHit(
+		true, true, false, true, false));
+	MM_CHECK(MM_MatchStatsShouldCountHit(true, false, false, true, true));
+	MM_CHECK(MM_MatchStatsShouldCountHit(true, false, true, false, false));
+	MM_CHECK(MM_MatchStatsShouldCountHit(true, false, true, true, false));
+	MM_CHECK_FALSE(MM_MatchStatsShouldCountHit(
+		true, false, true, true, true));
+}
+
+MM_TEST(lobby_player_limit_clamps_to_muffmode_supported_capacity) {
+	MM_CHECK_EQ(MAX_CLIENTS, size_t { 256 });
+	MM_CHECK_EQ(MAX_LOBBY_PLAYERS, size_t { 128 });
+	MM_CHECK_EQ(MM_ClampLobbyPlayerCount(std::numeric_limits<int64_t>::min()), 1u);
+	MM_CHECK_EQ(MM_ClampLobbyPlayerCount(0), 1u);
+	MM_CHECK_EQ(MM_ClampLobbyPlayerCount(1), 1u);
+	MM_CHECK_EQ(MM_ClampLobbyPlayerCount(127), 127u);
+	MM_CHECK_EQ(MM_ClampLobbyPlayerCount(128), 128u);
+	MM_CHECK_EQ(MM_ClampLobbyPlayerCount(129), 128u);
+	MM_CHECK_EQ(MM_ClampLobbyPlayerCount(std::numeric_limits<int64_t>::max()), 128u);
+	MM_CHECK_EQ(MM_GHOST_MAX_CLIENT_CAPACITY, MAX_LOBBY_PLAYERS);
+}
+
+MM_TEST(multiplayer_menus_capture_usercmds_for_players_and_spectators) {
+	MM_CHECK(MM_MenuCapturesUsercmd(true, mm_menu_client_state_t::Playing));
+	MM_CHECK(MM_MenuCapturesUsercmd(true, mm_menu_client_state_t::Spectator));
+	MM_CHECK_FALSE(MM_MenuCapturesUsercmd(false, mm_menu_client_state_t::Playing));
+	MM_CHECK_FALSE(MM_MenuCapturesUsercmd(false, mm_menu_client_state_t::Spectator));
+}
+
+MM_TEST(shared_tokenizer_stops_at_unterminated_quoted_eof) {
+	const char unterminated[] = { '"', 'x', '\0', 'Y', '\0' };
+	const char *cursor = unterminated;
+	MM_CHECK_EQ(std::string(COM_Parse(&cursor)), std::string("x"));
+	MM_CHECK(cursor == nullptr);
+
+	const char closed[] = "\"first\" second";
+	cursor = closed;
+	MM_CHECK_EQ(std::string(COM_Parse(&cursor)), std::string("first"));
+	MM_CHECK(cursor != nullptr);
+	MM_CHECK_EQ(std::string(COM_Parse(&cursor)), std::string("second"));
+}
+
+MM_TEST(shared_tokenizer_treats_a_zero_capacity_buffer_as_the_shared_buffer) {
+	// COM_Parse's own defaults are (nullptr, 0), so a caller buffer with no
+	// capacity has to take the shared-buffer path too. Taking the caller-buffer
+	// path wrote the terminator one byte outside the caller's storage.
+	char guarded[2] = { '\x7f', '\x7f' };
+	const char source[] = "\"alpha\" beta";
+	const char *cursor = source;
+
+	const char *token = COM_Parse(&cursor, guarded, 0);
+	MM_CHECK_EQ(std::string(token), std::string("alpha"));
+	MM_CHECK(token != guarded);
+	MM_CHECK_EQ(guarded[0], '\x7f');
+	MM_CHECK_EQ(guarded[1], '\x7f');
+}
+
+MM_TEST(shared_tokenizer_component_parse_leaves_the_shared_token_intact) {
+	// ED_ParseEntity hands field loaders the value token, which lives in the
+	// shared buffer. Vector and colour loaders re-tokenise that value, so they
+	// must supply their own buffers -- an unbuffered COM_Parse rewrites the very
+	// string it is reading.
+	const char source[] = "\"-11.5 0 24\"";
+	const char *cursor = source;
+	const char *value = COM_Parse(&cursor);
+	const char *component_cursor = value;
+
+	char component[MAX_TOKEN_CHARS];
+	MM_CHECK_EQ(std::string(COM_Parse(&component_cursor, component, sizeof(component))),
+		std::string("-11.5"));
+	MM_CHECK_EQ(std::string(COM_Parse(&component_cursor, component, sizeof(component))),
+		std::string("0"));
+	MM_CHECK_EQ(std::string(COM_Parse(&component_cursor, component, sizeof(component))),
+		std::string("24"));
+	MM_CHECK_EQ(std::string(value), std::string("-11.5 0 24"));
+}
+
+MM_TEST(hud_line_copy_truncates_without_losing_the_next_line) {
+	std::string input(32, 'x');
+	input += "\nnext";
+	char line[8];
+
+	const cg_hud_line_t first = CG_CopyHUDLine(input.c_str(), line);
+	MM_CHECK_EQ(first.length, size_t { 7 });
+	MM_CHECK_EQ(std::string(line), std::string(7, 'x'));
+	MM_CHECK(first.next != nullptr);
+	MM_CHECK_EQ(*first.next, '\n');
+
+	const cg_hud_line_t second = CG_CopyHUDLine(first.next + 1, line);
+	MM_CHECK_EQ(second.length, size_t { 4 });
+	MM_CHECK_EQ(std::string(line), std::string("next"));
+	MM_CHECK_EQ(*second.next, '\0');
+}
+
+MM_TEST(client_packed_stat_ids_reject_signed_and_narrowing_overflow) {
+	uint8_t packed_id = 0x5a;
+	MM_CHECK(CG_TryPackedStatId(0, AMMO_MAX, packed_id));
+	MM_CHECK_EQ(packed_id, uint8_t { 0 });
+	MM_CHECK(CG_TryPackedStatId(AMMO_MAX - 1, AMMO_MAX, packed_id));
+	MM_CHECK_EQ(packed_id, static_cast<uint8_t>(AMMO_MAX - 1));
+
+	for (const int32_t invalid : {
+		std::numeric_limits<int32_t>::min(), -1, static_cast<int32_t>(AMMO_MAX),
+		256, std::numeric_limits<int32_t>::max() }) {
+		packed_id = 0x5a;
+		MM_CHECK_FALSE(CG_TryPackedStatId(invalid, AMMO_MAX, packed_id));
+		MM_CHECK_EQ(packed_id, uint8_t { 0x5a });
+	}
+
+	MM_CHECK(CG_TryPackedStatId(255, 256, packed_id));
+	MM_CHECK_EQ(packed_id, uint8_t { 255 });
+	packed_id = 0x5a;
+	MM_CHECK_FALSE(CG_TryPackedStatId(256, 300, packed_id));
+	MM_CHECK_EQ(packed_id, uint8_t { 0x5a });
+}
+
+MM_TEST(client_hud_coordinates_scale_with_checked_integer_arithmetic) {
+	int32_t pixel = 0;
+	MM_CHECK(CG_TryScaleHUDCoordinate(10, 2, 3, pixel));
+	MM_CHECK_EQ(pixel, 23);
+	// Pixel-space adjustments are deliberately not multiplied by the HUD scale.
+	// Client blocks mix a fixed 32-pixel inset with scaled logical spacing.
+	MM_CHECK(CG_TryScaleHUDCoordinate(96, 2, 32, pixel));
+	MM_CHECK_EQ(pixel, 224);
+	MM_CHECK(CG_TryScaleHUDCoordinate(0, 3, 100 - 8, pixel));
+	MM_CHECK_EQ(pixel, 92);
+	MM_CHECK(CG_TryScaleHUDCoordinate(std::numeric_limits<int32_t>::max(), 1, 0, pixel));
+	MM_CHECK_EQ(pixel, std::numeric_limits<int32_t>::max());
+	MM_CHECK(CG_TryScaleHUDCoordinate(std::numeric_limits<int32_t>::min(), 1, 0, pixel));
+	MM_CHECK_EQ(pixel, std::numeric_limits<int32_t>::min());
+	MM_CHECK(CG_TryScaleHUDCoordinate(std::numeric_limits<int32_t>::max(), -1, 0, pixel));
+	MM_CHECK_EQ(pixel, -std::numeric_limits<int32_t>::max());
+	MM_CHECK(CG_TryAddHUDPixels(std::numeric_limits<int32_t>::max() - 8, 8, pixel));
+	MM_CHECK_EQ(pixel, std::numeric_limits<int32_t>::max());
+	MM_CHECK(CG_TryAddHUDPixels(std::numeric_limits<int32_t>::min() + 8, -8, pixel));
+	MM_CHECK_EQ(pixel, std::numeric_limits<int32_t>::min());
+
+	const auto check_rejected = [&](int64_t logical, int32_t scale, int64_t adjustment) {
+		pixel = 0x5a5a;
+		MM_CHECK_FALSE(CG_TryScaleHUDCoordinate(logical, scale, adjustment, pixel));
+		MM_CHECK_EQ(pixel, 0x5a5a);
+	};
+	check_rejected(static_cast<int64_t>(std::numeric_limits<int32_t>::max()) + 1, 1, 0);
+	check_rejected(static_cast<int64_t>(std::numeric_limits<int32_t>::min()) - 1, 1, 0);
+	check_rejected(std::numeric_limits<int32_t>::max(), 2, 0);
+	check_rejected(std::numeric_limits<int32_t>::min(), -1, 0);
+	check_rejected(std::numeric_limits<int32_t>::max(), std::numeric_limits<int32_t>::max(),
+		std::numeric_limits<int64_t>::max());
+	check_rejected(std::numeric_limits<int32_t>::min(), std::numeric_limits<int32_t>::max(),
+		std::numeric_limits<int64_t>::min());
+	pixel = 0x5a5a;
+	MM_CHECK_FALSE(CG_TryAddHUDPixels(std::numeric_limits<int32_t>::max(), 1, pixel));
+	MM_CHECK_EQ(pixel, 0x5a5a);
+	MM_CHECK_FALSE(CG_TryAddHUDPixels(std::numeric_limits<int32_t>::min(), -1, pixel));
+	MM_CHECK_EQ(pixel, 0x5a5a);
+	MM_CHECK(CG_TryHUDTextExtent(1023, 8, 4, pixel));
+	MM_CHECK_EQ(pixel, 32736);
+	MM_CHECK_FALSE(CG_TryHUDTextExtent(
+		std::numeric_limits<size_t>::max(), 8, 4, pixel));
+	MM_CHECK_FALSE(CG_TryHUDTextExtent(1, 8, 0, pixel));
+	MM_CHECK_FALSE(CG_TryHUDTextExtent(
+		static_cast<size_t>(std::numeric_limits<int32_t>::max()), 8, 2, pixel));
+
+	MM_CHECK_EQ(CG_HUDViewportCenter(100, 320), int64_t { 260 });
+	MM_CHECK_EQ(CG_HUDViewportCenter(-100, 320), int64_t { 60 });
+}
+
+MM_TEST(client_hud_blink_and_layout_limits_have_stable_boundaries) {
+	MM_CHECK_FALSE(CG_HUDBlinkVisible(0));
+	MM_CHECK_FALSE(CG_HUDBlinkVisible(255));
+	MM_CHECK(CG_HUDBlinkVisible(256));
+	MM_CHECK(CG_HUDBlinkVisible(511));
+	MM_CHECK_FALSE(CG_HUDBlinkVisible(512));
+	MM_CHECK_FALSE(CG_HUDBlinkVisible(1000, 0));
+
+	MM_CHECK(CG_IsValidHUDLocalizationArgCount(0, MAX_LOCALIZATION_ARGS));
+	MM_CHECK(CG_IsValidHUDLocalizationArgCount(
+		static_cast<int32_t>(MAX_LOCALIZATION_ARGS), MAX_LOCALIZATION_ARGS));
+	MM_CHECK_FALSE(CG_IsValidHUDLocalizationArgCount(-1, MAX_LOCALIZATION_ARGS));
+	MM_CHECK_FALSE(CG_IsValidHUDLocalizationArgCount(
+		static_cast<int32_t>(MAX_LOCALIZATION_ARGS + 1), MAX_LOCALIZATION_ARGS));
+	MM_CHECK(CG_IsValidHUDNumericWidth(0));
+	MM_CHECK(CG_IsValidHUDNumericWidth(15));
+	MM_CHECK_FALSE(CG_IsValidHUDNumericWidth(-1));
+	MM_CHECK_FALSE(CG_IsValidHUDNumericWidth(16));
+	MM_CHECK_FALSE(CG_IsValidHUDNumericWidth(std::numeric_limits<int32_t>::max()));
+
+	MM_CHECK(CG_HUDLayoutConditionsBalanced(0, false));
+	MM_CHECK_FALSE(CG_HUDLayoutConditionsBalanced(1, false));
+	MM_CHECK_FALSE(CG_HUDLayoutConditionsBalanced(1, true));
+	MM_CHECK_FALSE(CG_HUDLayoutConditionsBalanced(0, true));
+}
+
+MM_TEST(client_typewriter_prefixes_preserve_long_lines_and_utf8_boundaries) {
+	const std::string utf8 = "A\xC2\xA3" "B";
+	MM_CHECK_EQ(CG_FindEndOfUTF8Codepoint(utf8, 1), size_t { 1 });
+	MM_CHECK_EQ(CG_FindEndOfUTF8Codepoint(utf8, 2), size_t { 3 });
+	MM_CHECK_EQ(CG_FindEndOfUTF8Codepoint(utf8, 4), std::string_view::npos);
+	MM_CHECK_EQ(CG_CenterPrintVisiblePrefix(utf8, 1, false), std::string_view("A"));
+	MM_CHECK_EQ(CG_CenterPrintVisiblePrefix(utf8, 3, false),
+		std::string_view(utf8.data(), 3));
+	MM_CHECK_EQ(CG_CenterPrintVisiblePrefix(utf8, 0, true), std::string_view(utf8));
+	MM_CHECK_EQ(CG_CompleteUTF8PrefixLength(utf8), utf8.size());
+	MM_CHECK_EQ(CG_CompleteUTF8PrefixLength(
+		std::string_view("A\xC2", 2)), size_t { 1 });
+	MM_CHECK_EQ(CG_CompleteUTF8PrefixLength(
+		std::string_view("A\xE2\x82", 3)), size_t { 1 });
+	MM_CHECK_EQ(CG_CompleteUTF8PrefixLength(
+		std::string_view("A\xF0\x9F\x92", 4)), size_t { 1 });
+
+	const std::string long_line(400, 'x');
+	MM_CHECK_EQ(CG_CenterPrintVisiblePrefix(long_line, 350, false).size(), size_t { 350 });
+	MM_CHECK_EQ(CG_CenterPrintVisiblePrefix(long_line, 999, false).size(), size_t { 400 });
+	MM_CHECK_EQ(CG_CenterPrintVisiblePrefix(long_line, 0, true).size(), size_t { 400 });
+}
+
+MM_TEST(admin_authentication_policy_is_exact_non_empty_and_throttled) {
+	using muffmode::admin::MM_EvaluateAdminAttempt;
+	using muffmode::admin::MM_AdminPasswordMatches;
+	using muffmode::admin::mm_admin_attempt_result_t;
+
+	MM_CHECK(MM_AdminPasswordMatches("AbC-123", "AbC-123"));
+	MM_CHECK_FALSE(MM_AdminPasswordMatches("AbC-123", "abc-123"));
+	MM_CHECK_FALSE(MM_AdminPasswordMatches("AbC-123", "AbC-12"));
+	MM_CHECK_FALSE(MM_AdminPasswordMatches("AbC-123", "AbC-1234"));
+	MM_CHECK_FALSE(MM_AdminPasswordMatches("", ""));
+	MM_CHECK_FALSE(MM_AdminPasswordMatches(nullptr, "AbC-123"));
+	MM_CHECK_FALSE(MM_AdminPasswordMatches("AbC-123", nullptr));
+
+	MM_CHECK(MM_EvaluateAdminAttempt(false, "AbC-123", "AbC-123") ==
+		mm_admin_attempt_result_t::Accepted);
+	MM_CHECK(MM_EvaluateAdminAttempt(false, "AbC-123", "abc-123") ==
+		mm_admin_attempt_result_t::InvalidCredentials);
+	MM_CHECK(MM_EvaluateAdminAttempt(true, "AbC-123", "AbC-123") ==
+		mm_admin_attempt_result_t::Throttled);
+}
+
+MM_TEST(packed_powerup_stats_use_ammo_padding_without_moving_key_stat) {
+	MM_CHECK_EQ(NUM_AMMO_STATS, size_t { 7 });
+	MM_CHECK_EQ(NUM_POWERUP_STATS, size_t { 3 });
+	MM_CHECK_EQ(STAT_POWERUP_INFO_START, 41);
+	MM_CHECK_EQ(STAT_POWERUP_INFO_END, 43);
+	MM_CHECK_EQ(STAT_KEY_A, 44);
+
+	std::array<uint16_t, NUM_AMMO_STATS + NUM_POWERUP_STATS + 1> words {};
+	uint16_t *const ammo = words.data();
+	uint16_t *const powerups = ammo + NUM_AMMO_STATS;
+	words.back() = 0x5a5a;
+	for (uint8_t id = 0; id < AMMO_MAX; id++) {
+		const uint16_t value = static_cast<uint16_t>((id * 37) & AMMO_VALUE_INFINITE);
+		G_SetAmmoStat(ammo, id, value);
+		MM_CHECK_EQ(G_GetAmmoStat(ammo, id), value);
+		MM_CHECK_EQ(words.back(), uint16_t { 0x5a5a });
+	}
+	G_SetAmmoStat(ammo, AMMO_PROX, AMMO_VALUE_INFINITE);
+
+	for (uint8_t id = 0; id < POWERUP_MAX; id++) {
+		const uint16_t value = id % 4;
+		G_SetPowerupStat(ammo, powerups, id, value);
+		MM_CHECK_EQ(G_GetPowerupStat(ammo, powerups, id), value);
+		MM_CHECK_EQ(G_GetAmmoStat(ammo, AMMO_PROX), AMMO_VALUE_INFINITE);
+		MM_CHECK_EQ(words.back(), uint16_t { 0x5a5a });
+	}
+
+	for (uint16_t value = 0; value < 4; value++) {
+		G_SetPowerupStat(ammo, powerups, 24, value);
+		MM_CHECK_EQ(G_GetPowerupStat(ammo, powerups, 24), value);
+		MM_CHECK_EQ(G_GetAmmoStat(ammo, AMMO_PROX), AMMO_VALUE_INFINITE);
+		MM_CHECK_EQ(words.back(), uint16_t { 0x5a5a });
+	}
+
+	const auto snapshot = words;
+	G_SetAmmoStat(ammo, static_cast<uint8_t>(AMMO_MAX), AMMO_VALUE_INFINITE);
+	G_SetAmmoStat(ammo, uint8_t { 255 }, AMMO_VALUE_INFINITE);
+	MM_CHECK_EQ(G_GetAmmoStat(ammo, static_cast<uint8_t>(AMMO_MAX)), uint16_t { 0 });
+	MM_CHECK_EQ(G_GetAmmoStat(ammo, uint8_t { 255 }), uint16_t { 0 });
+	G_SetPowerupStat(ammo, powerups, static_cast<uint8_t>(POWERUP_MAX), 3);
+	MM_CHECK_EQ(G_GetPowerupStat(
+		ammo, powerups, static_cast<uint8_t>(POWERUP_MAX)), uint16_t { 0 });
+	MM_CHECK(words == snapshot);
+}
+
+MM_TEST(capped_gametype_cfg_filters_every_maxclients_assignment) {
+	using muffmode::gametype::MM_GtCfgLineViolatesSlotCap;
+	using muffmode::gametype::MM_IsSlotCappedCapacity;
+
+	MM_CHECK(MM_IsSlotCappedCapacity(4, 64, 4));
+	MM_CHECK_FALSE(MM_IsSlotCappedCapacity(16, 4, 4));
+	MM_CHECK(MM_IsSlotCappedCapacity(0, 4, 4));
+	MM_CHECK_FALSE(MM_IsSlotCappedCapacity(0, 16, 4));
+	MM_CHECK_FALSE(MM_IsSlotCappedCapacity(0, 0, 4));
+
+	constexpr std::array<std::string_view, 17> allowed = {
+		"maxclients",
+		"maxclients 4",
+		"set maxclients 4",
+		"seta \"maxclients\" \"4\"",
+		"setu maxclients 4",
+		"set foo \"quoted; maxclients 64\"",
+		"echo \"maxclients 64; still quoted\"",
+		"echo \"alias grow 'set maxclients 64'\"",
+		"echo safe",
+		"wait; set maxclients 4",
+		"fraglimit 20",
+		"set fraglimit 20",
+		"toggle g_friendly_fire",
+		"inc timelimit 5",
+		"reset fraglimit",
+		"// maxclients 64",
+		"set maxclients"
+	};
+	for (const std::string_view line : allowed)
+		MM_CHECK_FALSE(MM_GtCfgLineViolatesSlotCap(line, 4));
+
+	constexpr std::array<std::string_view, 37> rejected = {
+		"maxclients 16",
+		"set maxclients 16",
+		"seta maxclients 16",
+		"setu maxclients 16",
+		"sets maxclients 16",
+		"cvar_set maxclients 16",
+		"cvar_forceset maxclients 16",
+		"set maxclients nope",
+		"set \"maxclients\" \"$dynamic\"",
+		"echo safe; maxclients 16",
+		"set foo bar; cvar_forceset \"maxclients\" \"64\"",
+		"echo safe // comment; seta maxclients 16",
+		"echo ok; kexmultiplayer 1",
+		"MAXCLIENTS 5",
+		"SeTa MAXCLIENTS 5",
+		"maxclients 0",
+		"maxclients -1",
+		"toggle maxclients",
+		"inc maxclients 1",
+		"add maxclients 1",
+		"reset maxclients",
+		"cvar_toggle maxclients",
+		"cvar_inc maxclients 1",
+		"cvar_add maxclients 1",
+		"cvar_reset maxclients",
+		"exec gt-FFA.cfg",
+		"EXECQ gt-FFA.cfg",
+		"alias grow \"set maxclients 16\"",
+		"vstr next_gametype",
+		"if 1 \"set maxclients 16\"",
+		"ifnot 0 \"set maxclients 16\"",
+		"delay 1 \"set maxclients 16\"",
+		"defer \"set maxclients 16\"",
+		"cvar_restart",
+		"echo safe; exec gt-FFA.cfg",
+		"echo safe; vstr next_gametype",
+		"\"exec"
+	};
+	for (const std::string_view line : rejected)
+		MM_CHECK(MM_GtCfgLineViolatesSlotCap(line, 4));
+}
+
+MM_TEST(mymap_queue_entries_keep_their_own_modifiers) {
+	using namespace muffmode::maps;
+
+	mymap_modifier_modes_t first {};
+	mymap_modifier_modes_t second {};
+	MM_CHECK(ApplyMyMapModifierToken(first, "+pu"));
+	MM_CHECK(ApplyMyMapModifierToken(first, "-wp"));
+	MM_CHECK(ApplyMyMapModifierToken(second, "-am"));
+	MM_CHECK(ApplyMyMapModifierToken(second, "+ht"));
+
+	const mymap_modifier_modes_t first_snapshot = first;
+	MM_CHECK(ApplyMyMapModifierToken(second, "-PU"));
+	MM_CHECK(first == first_snapshot);
+	MM_CHECK_EQ(second[MyMapModifierIndex(mymap_modifier_id_t::Powerups)], int8_t { -1 });
+
+	const mymap_modifier_modes_t invalid_snapshot = second;
+	for (const std::string_view token : { "pu", "+p", "+unknown", "*pu" })
+		MM_CHECK_FALSE(ApplyMyMapModifierToken(second, token));
+	MM_CHECK(second == invalid_snapshot);
+
+	std::vector<mymap_queue_entry_t> queue {
+		{ "q2dm1", first },
+		{ "q2dm2", second }
+	};
+	mymap_queue_entry_t popped;
+	MM_CHECK(PopMyMapQueueFront(queue, popped));
+	MM_CHECK_EQ(popped.map_name, std::string("q2dm1"));
+	MM_CHECK_EQ(popped.modifier_modes[MyMapModifierIndex(mymap_modifier_id_t::Powerups)], int8_t { 1 });
+	MM_CHECK_EQ(popped.modifier_modes[MyMapModifierIndex(mymap_modifier_id_t::Weapons)], int8_t { -1 });
+	MM_CHECK_EQ(popped.modifier_modes[MyMapModifierIndex(mymap_modifier_id_t::Ammo)], int8_t { 0 });
+
+	MM_CHECK(PopMyMapQueueFront(queue, popped));
+	MM_CHECK_EQ(popped.map_name, std::string("q2dm2"));
+	MM_CHECK_EQ(popped.modifier_modes[MyMapModifierIndex(mymap_modifier_id_t::Ammo)], int8_t { -1 });
+	MM_CHECK_EQ(popped.modifier_modes[MyMapModifierIndex(mymap_modifier_id_t::Health)], int8_t { 1 });
+	MM_CHECK_EQ(popped.modifier_modes[MyMapModifierIndex(mymap_modifier_id_t::Powerups)], int8_t { -1 });
+	MM_CHECK_FALSE(PopMyMapQueueFront(queue, popped));
+}
+
+MM_TEST(mymap_pending_selection_matches_canonical_target_once) {
+	using namespace muffmode::maps;
+
+	mymap_modifier_modes_t selected_modes {};
+	MM_CHECK(ApplyMyMapModifierToken(selected_modes, "+pu"));
+	MM_CHECK(ApplyMyMapModifierToken(selected_modes, "-wp"));
+
+	mymap_pending_selection_t pending;
+	MM_CHECK(pending.Arm({ "Q2DM\\Power", selected_modes }));
+	MM_CHECK(pending.active());
+	MM_CHECK_EQ(pending.map_name(), std::string("Q2DM\\Power"));
+
+	mymap_modifier_modes_t applied_modes {};
+	MM_CHECK_EQ(
+		pending.TakeForMap("q2dm/power", applied_modes),
+		mymap_pending_load_result_t::matched);
+	MM_CHECK(applied_modes == selected_modes);
+	MM_CHECK_FALSE(pending.active());
+
+	applied_modes.fill(-1);
+	MM_CHECK_EQ(
+		pending.TakeForMap("q2dm/power", applied_modes),
+		mymap_pending_load_result_t::none);
+	mymap_modifier_modes_t unchanged_after_consume {};
+	unchanged_after_consume.fill(-1);
+	MM_CHECK(applied_modes == unchanged_after_consume);
+}
+
+MM_TEST(mymap_pending_selection_cancels_on_first_different_load) {
+	using namespace muffmode::maps;
+
+	mymap_modifier_modes_t selected_modes {};
+	MM_CHECK(ApplyMyMapModifierToken(selected_modes, "-am"));
+
+	mymap_pending_selection_t pending;
+	MM_CHECK(pending.Arm({ "q2dm1", selected_modes }));
+	mymap_modifier_modes_t output {};
+	output.fill(1);
+	const mymap_modifier_modes_t unchanged_output = output;
+	MM_CHECK_EQ(
+		pending.TakeForMap("q2dm2", output),
+		mymap_pending_load_result_t::cancelled);
+	MM_CHECK_FALSE(pending.active());
+	MM_CHECK(output == unchanged_output);
+
+	// A failed or overridden transition is deliberately not retried: even a
+	// later load of the original target cannot inherit the cancelled modes.
+	MM_CHECK_EQ(
+		pending.TakeForMap("q2dm1", output),
+		mymap_pending_load_result_t::none);
+	MM_CHECK(output == unchanged_output);
+}
+
+MM_TEST(mymap_pending_selection_preserves_first_intermission_transition) {
+	using namespace muffmode::maps;
+
+	mymap_modifier_modes_t first_modes {};
+	mymap_modifier_modes_t second_modes {};
+	MM_CHECK(ApplyMyMapModifierToken(first_modes, "+pu"));
+	MM_CHECK(ApplyMyMapModifierToken(second_modes, "-wp"));
+
+	mymap_pending_selection_t pending;
+	MM_CHECK(pending.Arm({ "q2dm1", first_modes }));
+	MM_CHECK_FALSE(pending.Arm({ "q2dm2", second_modes }));
+	MM_CHECK_EQ(pending.map_name(), std::string("q2dm1"));
+
+	mymap_modifier_modes_t applied_modes {};
+	MM_CHECK_EQ(
+		pending.TakeForMap("q2dm1", applied_modes),
+		mymap_pending_load_result_t::matched);
+	MM_CHECK(applied_modes == first_modes);
+}
+
 MM_TEST(parse_int_rejects_malformed_values) {
 	MM_CHECK_EQ(*MM_ParseIntArg("42"), 42);
 	MM_CHECK_EQ(*MM_ParseIntArg("-7"), -7);
@@ -133,9 +837,17 @@ MM_TEST(parse_uint32_rejects_signed_malformed_and_overflow_values) {
 	MM_CHECK_FALSE(MM_ParseUInt32Arg(" 1"));
 	MM_CHECK_FALSE(MM_ParseUInt32Arg("1x"));
 	MM_CHECK_FALSE(MM_ParseUInt32Arg("4294967296"));
+	MM_CHECK_EQ(*MM_ParseCanonicalUInt32Arg("0"), 0u);
+	MM_CHECK_EQ(*MM_ParseCanonicalUInt32Arg("4294967295"),
+		std::numeric_limits<uint32_t>::max());
+	MM_CHECK_FALSE(MM_ParseCanonicalUInt32Arg("00"));
+	MM_CHECK_FALSE(MM_ParseCanonicalUInt32Arg("01"));
+	MM_CHECK_FALSE(MM_ParseCanonicalUInt32Arg("+1"));
 
 	const char embedded_null[] = { '1', '\0', '2' };
 	MM_CHECK_FALSE(MM_ParseUInt32Text(std::string_view(embedded_null, sizeof(embedded_null))));
+	MM_CHECK_FALSE(MM_ParseCanonicalUInt32Text(
+		std::string_view(embedded_null, sizeof(embedded_null))));
 }
 
 MM_TEST(parse_bool_accepts_common_tokens_without_guessing) {
@@ -530,6 +1242,127 @@ MM_TEST(motd_filenames_reject_paths_devices_and_shell_metacharacters) {
 	MM_CHECK_FALSE(IsSafeFilenameText(std::string(64, 'a'), 64));
 }
 
+MM_TEST(reliable_motd_output_is_utf8_safe_and_bounded_for_256_kib_files) {
+	using namespace muffmode::reliable_text;
+	using muffmode::map_pool::IsWellFormedUtf8;
+
+	constexpr size_t motd_file_bytes = 256 * 1024;
+	std::string motd;
+	motd.reserve(motd_file_bytes);
+	while (motd.size() < motd_file_bytes)
+		motd += "\xf0\x9f\x98\x80";
+	MM_CHECK_EQ(motd.size(), motd_file_bytes);
+
+	std::string response = "Message of the Day:\n";
+	response += motd;
+	response += "\n";
+	const auto raw_plan = PlanChunks(
+		response, kMaxPrintPayloadBytes, kMaxMotdCommandMessages);
+	MM_CHECK(raw_plan.truncated);
+	MM_CHECK(raw_plan.chunks.size() <= kMaxMotdCommandMessages);
+	for (const std::string_view chunk : raw_plan.chunks) {
+		MM_CHECK(chunk.size() <= kMaxPrintPayloadBytes);
+		MM_CHECK(IsWellFormedUtf8(chunk));
+	}
+
+	constexpr size_t response_budget =
+		kMaxMotdCommandMessages * kGuaranteedPrintContentBytes;
+	const std::string bounded = MakeBoundedPreview(response, response_budget);
+	MM_CHECK(bounded.size() <= response_budget);
+	MM_CHECK(IsWellFormedUtf8(bounded));
+	MM_CHECK_EQ(
+		bounded.substr(bounded.size() - kTruncatedNotice.size()),
+		std::string(kTruncatedNotice));
+
+	const auto bounded_plan = PlanChunks(
+		bounded, kMaxPrintPayloadBytes, kMaxMotdCommandMessages);
+	MM_CHECK_FALSE(bounded_plan.truncated);
+	MM_CHECK(bounded_plan.chunks.size() <= kMaxMotdCommandMessages);
+	std::string reconstructed;
+	for (const std::string_view chunk : bounded_plan.chunks) {
+		MM_CHECK(chunk.size() <= kMaxPrintPayloadBytes);
+		MM_CHECK(IsWellFormedUtf8(chunk));
+		reconstructed.append(chunk);
+	}
+	MM_CHECK_EQ(reconstructed, bounded);
+
+	const std::string automatic = MakeBoundedPreview(
+		motd, kMaxPrintPayloadBytes);
+	MM_CHECK(automatic.size() <= kMaxPrintPayloadBytes);
+	MM_CHECK(IsWellFormedUtf8(automatic));
+	MM_CHECK_EQ(
+		automatic.substr(automatic.size() - kTruncatedNotice.size()),
+		std::string(kTruncatedNotice));
+}
+
+MM_TEST(reliable_preview_does_not_split_utf8_at_byte_budget) {
+	using namespace muffmode::reliable_text;
+	using muffmode::map_pool::IsWellFormedUtf8;
+
+	std::string text(510, 'a');
+	text += "\xf0\x9f\x98\x80";
+	const std::string preview = MakeBoundedPreview(text, 512, "...");
+
+	MM_CHECK_EQ(preview.size(), size_t { 512 });
+	MM_CHECK(IsWellFormedUtf8(preview));
+	MM_CHECK_EQ(preview.substr(509), std::string("..."));
+}
+
+MM_TEST(maximal_mymap_queue_fits_the_capped_four_message_fanout) {
+	using namespace muffmode::maps;
+	using namespace muffmode::reliable_text;
+
+	std::vector<mymap_queue_entry_t> queue;
+	queue.reserve(kMaxMyMapQueueEntries + 1);
+	for (size_t i = 0; i < kMaxMyMapQueueEntries; i++) {
+		mymap_queue_entry_t entry;
+		entry.map_name.assign(63, 'a');
+		entry.map_name[0] = static_cast<char>('a' + (i % 26));
+		entry.map_name[1] = static_cast<char>('a' + ((i / 26) % 26));
+		entry.modifier_modes.fill(1);
+		queue.push_back(std::move(entry));
+	}
+	queue.push_back({ "ignored", {} });
+
+	std::string display = "MyMap Queue => ";
+	display += FormatMyMapQueueEntries(queue);
+	display += "\n";
+	MM_CHECK_EQ(display.find("ignored"), std::string::npos);
+	MM_CHECK(display.size() <=
+		kMaxMyMapQueueMessages * kGuaranteedPrintContentBytes);
+
+	const auto plan = PlanChunks(
+		display, kMaxPrintPayloadBytes, kMaxMyMapQueueMessages);
+	MM_CHECK_FALSE(plan.truncated);
+	MM_CHECK_EQ(plan.chunks.size(), kMaxMyMapQueueMessages);
+	std::string reconstructed;
+	for (const std::string_view chunk : plan.chunks) {
+		MM_CHECK(chunk.size() <= kMaxPrintPayloadBytes);
+		reconstructed.append(chunk);
+	}
+	MM_CHECK_EQ(reconstructed, display);
+
+	const std::string delta = "MyMap queued => " +
+		FormatMyMapQueueEntry(queue.front()) + "\n";
+	const auto delta_plan = PlanChunks(
+		delta, kMaxPrintPayloadBytes, size_t { 1 });
+	MM_CHECK_FALSE(delta_plan.truncated);
+	MM_CHECK_EQ(delta_plan.chunks.size(), size_t { 1 });
+	MM_CHECK(delta.size() <= kGuaranteedPrintContentBytes);
+
+	const std::string oversized(16 * 1024, 'x');
+	const std::string capped = MakeBoundedPreview(
+		oversized,
+		kMaxMyMapQueueMessages * kGuaranteedPrintContentBytes);
+	const auto capped_plan = PlanChunks(
+		capped, kMaxPrintPayloadBytes, kMaxMyMapQueueMessages);
+	MM_CHECK_FALSE(capped_plan.truncated);
+	MM_CHECK(capped_plan.chunks.size() <= kMaxMyMapQueueMessages);
+	MM_CHECK_EQ(
+		capped.substr(capped.size() - kTruncatedNotice.size()),
+		std::string(kTruncatedNotice));
+}
+
 MM_TEST(player_config_social_ids_encode_to_safe_unique_path_stems) {
 	using namespace muffmode::pconfig;
 
@@ -550,6 +1383,18 @@ MM_TEST(player_config_social_ids_encode_to_safe_unique_path_stems) {
 	MM_CHECK_FALSE(EncodeSocialIdConfigStem(std::string(124, 'a'), 124, 251));
 	MM_CHECK_FALSE(EncodeSocialIdConfigStem("ab", 63, 7));
 	MM_CHECK(*EncodeSocialIdConfigStem("ab", 63, 251) != *EncodeSocialIdConfigStem("a/b", 63, 251));
+}
+
+MM_TEST(player_config_legacy_worr_profile_stems_match_original_sanitizer) {
+	using namespace muffmode::pconfig;
+
+	MM_CHECK_EQ(*LegacyWorrSocialIdConfigStem("a.b-c_123", 63, 251),
+		std::string("ab-c_123"));
+	MM_CHECK_EQ(*LegacyWorrSocialIdConfigStem("../abc\\def", 63, 251),
+		std::string("abcdef"));
+	MM_CHECK_FALSE(LegacyWorrSocialIdConfigStem("...", 63, 251));
+	MM_CHECK_FALSE(LegacyWorrSocialIdConfigStem("abc", 2, 251));
+	MM_CHECK_FALSE(LegacyWorrSocialIdConfigStem("abc", 63, 2));
 }
 
 MM_TEST(player_config_tokens_parse_deterministically) {
@@ -678,6 +1523,18 @@ MM_TEST(command_contract_helpers_enforce_exact_arity_and_timeout_bounds) {
 	MM_CHECK_EQ(MM_ClampTimeoutSeconds(3601), 3600);
 }
 
+MM_TEST(player_profile_recreation_restores_the_full_preference_snapshot) {
+	MM_CHECK_EQ(MM_ClientProfilePreferenceMergeMask(
+		false, MM_CLIENT_PROFILE_PREFERENCE_SHOW_TIMER),
+		MM_CLIENT_PROFILE_PREFERENCE_SHOW_TIMER);
+	MM_CHECK_EQ(MM_ClientProfilePreferenceMergeMask(
+		true, MM_CLIENT_PROFILE_PREFERENCE_SHOW_TIMER),
+		MM_CLIENT_PROFILE_PREFERENCE_ALL);
+	MM_CHECK_EQ(MM_ClientProfilePreferenceMergeMask(
+		false, std::numeric_limits<mm_client_profile_preference_mask_t>::max()),
+		MM_CLIENT_PROFILE_PREFERENCE_ALL);
+}
+
 MM_TEST(item_override_commands_require_exact_known_names_and_admin_authority) {
 	MM_CHECK(MM_IsItemOverrideCvarFor("disable_weapon_bfg", "q2dm1", "weapon_bfg"));
 	MM_CHECK(MM_IsItemOverrideCvarFor("replace_item_quad", "q2dm1", "item_quad"));
@@ -746,6 +1603,8 @@ MM_TEST(arena_players_per_team_is_bounded_by_half_the_server_capacity) {
 	MM_CHECK_EQ(MM_ArenaNormalizePlayersPerTeam(2, 4), 2);
 	MM_CHECK_EQ(MM_ArenaNormalizePlayersPerTeam(3, 4), 2);
 	MM_CHECK_EQ(MM_ArenaNormalizePlayersPerTeam(99, 16), 8);
+	MM_CHECK_EQ(MM_ArenaNormalizePlayersPerTeam(
+		std::numeric_limits<int>::max(), static_cast<int>(MAX_LOBBY_PLAYERS)), 64);
 	MM_CHECK_EQ(
 		MM_ArenaNormalizePlayersPerTeam(std::numeric_limits<int>::max(), std::numeric_limits<int>::max()),
 		std::numeric_limits<int>::max() / 2);
@@ -1000,9 +1859,9 @@ MM_TEST(arena_fixed_clan_and_rover_teams_have_unlimited_size) {
 	MM_CHECK_FALSE(MM_ArenaTeamSizeIsUnlimited(mm_arena_type_t::Practice));
 
 	MM_CHECK(MM_ArenaTeamEligibleForType(
-		mm_arena_type_t::ClanArena, 32, 1));
+		mm_arena_type_t::ClanArena, static_cast<int>(MAX_LOBBY_PLAYERS), 1));
 	MM_CHECK(MM_ArenaTeamEligibleForType(
-		mm_arena_type_t::RedRover, 32, 1));
+		mm_arena_type_t::RedRover, static_cast<int>(MAX_LOBBY_PLAYERS), 1));
 	MM_CHECK_FALSE(MM_ArenaTeamEligibleForType(
 		mm_arena_type_t::ClanArena, 0, 1));
 	MM_CHECK_FALSE(MM_ArenaTeamEligibleForType(
@@ -1988,19 +2847,94 @@ MM_TEST(hud_stat_count_within_max_stats) {
 }
 
 MM_TEST(hud_pov_configstring_lanes_do_not_overlap_global_countdown_or_each_other) {
-	constexpr size_t kTypicalMaxClients = 32;
 	MM_CHECK(CONFIG_COUNTDOWN_HEADER < CONFIG_POV_CENTER_POOL);
+	MM_CHECK_EQ(CONFIG_FOLLOW_PLAYER_NAME_END - CONFIG_FOLLOW_PLAYER_NAME,
+		static_cast<int>(MAX_CLIENTS));
+	MM_CHECK_EQ(CONFIG_POV_CENTER_SECONDARY_POOL,
+		CONFIG_FOLLOW_PLAYER_NAME + static_cast<int>(MAX_LOBBY_PLAYERS));
 
-	const int primary = MM_PovConfigStringForClient(1, kTypicalMaxClients, mm_pov_configstring_lane_t::Primary);
-	const int secondary = MM_PovConfigStringForClient(1, kTypicalMaxClients, mm_pov_configstring_lane_t::Secondary);
+	const int primary_first = MM_PovConfigStringForClient(
+		0, MAX_LOBBY_PLAYERS, mm_pov_configstring_lane_t::Primary);
+	const int primary_last = MM_PovConfigStringForClient(
+		MAX_LOBBY_PLAYERS - 1, MAX_LOBBY_PLAYERS,
+		mm_pov_configstring_lane_t::Primary);
+	const int secondary_first = MM_PovConfigStringForClient(
+		0, MAX_LOBBY_PLAYERS, mm_pov_configstring_lane_t::Secondary);
+	const int secondary_last = MM_PovConfigStringForClient(
+		MAX_LOBBY_PLAYERS - 1, MAX_LOBBY_PLAYERS,
+		mm_pov_configstring_lane_t::Secondary);
 
-	MM_CHECK(primary != 0);
-	MM_CHECK(secondary != 0);
-	MM_CHECK(primary != secondary);
-	MM_CHECK(primary != CONFIG_COUNTDOWN_HEADER);
-	MM_CHECK(secondary != CONFIG_COUNTDOWN_HEADER);
-	MM_CHECK_EQ(MM_PovConfigStringForClient(CONFIG_POV_CENTER_POOL_SLOTS, kTypicalMaxClients, mm_pov_configstring_lane_t::Primary), 0);
-	MM_CHECK_EQ(MM_PovConfigStringForClient(0, CONFIG_POV_CENTER_POOL_SLOTS, mm_pov_configstring_lane_t::Secondary), 0);
+	for (const int configstring : {
+			primary_first, primary_last, secondary_first, secondary_last }) {
+		MM_CHECK(configstring >= CS_GENERAL);
+		MM_CHECK(configstring < CS_GENERAL + MAX_GENERAL);
+		MM_CHECK(configstring != CONFIG_COUNTDOWN_HEADER);
+	}
+	MM_CHECK(primary_last < secondary_first || secondary_last < primary_first);
+	MM_CHECK_EQ(primary_first, CONFIG_POV_CENTER_POOL);
+	MM_CHECK_EQ(secondary_first, CONFIG_POV_CENTER_SECONDARY_POOL);
+	MM_CHECK_EQ(MM_PovConfigStringForClient(
+		MAX_LOBBY_PLAYERS, MAX_LOBBY_PLAYERS,
+		mm_pov_configstring_lane_t::Primary), 0);
+	MM_CHECK_EQ(MM_PovConfigStringForClient(
+		MAX_LOBBY_PLAYERS, MAX_LOBBY_PLAYERS,
+		mm_pov_configstring_lane_t::Secondary), 0);
+	MM_CHECK_EQ(MM_PovConfigStringForClient(
+		0, MAX_CLIENTS, static_cast<mm_pov_configstring_lane_t>(2)), 0);
+}
+
+MM_TEST(gametype_boundary_bounds_integer_extremes_before_effective_lookup) {
+	constexpr int ffa = 1;
+	constexpr int duel = 2;
+	constexpr int arena = 14;
+
+	const auto int_min = MM_ResolveGametypeBoundary(
+		std::numeric_limits<int>::min(), ffa, arena, arena, ffa, false);
+	MM_CHECK_EQ(int_min.configured_index, ffa);
+	MM_CHECK_EQ(int_min.effective_index, ffa);
+	MM_CHECK_FALSE(int_min.requested_in_range);
+
+	const auto minus_one = MM_ResolveGametypeBoundary(
+		-1, ffa, arena, arena, ffa, true);
+	MM_CHECK_EQ(minus_one.configured_index, ffa);
+	MM_CHECK_EQ(minus_one.effective_index, ffa);
+	MM_CHECK_FALSE(minus_one.requested_in_range);
+
+	const auto first = MM_ResolveGametypeBoundary(
+		ffa, ffa, arena, arena, ffa, false);
+	MM_CHECK_EQ(first.configured_index, ffa);
+	MM_CHECK_EQ(first.effective_index, ffa);
+	MM_CHECK(first.requested_in_range);
+
+	const auto middle = MM_ResolveGametypeBoundary(
+		duel, ffa, arena, arena, ffa, false);
+	MM_CHECK_EQ(middle.configured_index, duel);
+	MM_CHECK_EQ(middle.effective_index, duel);
+	MM_CHECK(middle.requested_in_range);
+
+	const auto last_inactive = MM_ResolveGametypeBoundary(
+		arena, ffa, arena, arena, ffa, false);
+	MM_CHECK_EQ(last_inactive.configured_index, arena);
+	MM_CHECK_EQ(last_inactive.effective_index, ffa);
+	MM_CHECK(last_inactive.requested_in_range);
+
+	const auto last_active = MM_ResolveGametypeBoundary(
+		arena, ffa, arena, arena, ffa, true);
+	MM_CHECK_EQ(last_active.configured_index, arena);
+	MM_CHECK_EQ(last_active.effective_index, arena);
+	MM_CHECK(last_active.requested_in_range);
+
+	const auto int_max_inactive = MM_ResolveGametypeBoundary(
+		std::numeric_limits<int>::max(), ffa, arena, arena, ffa, false);
+	MM_CHECK_EQ(int_max_inactive.configured_index, arena);
+	MM_CHECK_EQ(int_max_inactive.effective_index, ffa);
+	MM_CHECK_FALSE(int_max_inactive.requested_in_range);
+
+	const auto int_max_active = MM_ResolveGametypeBoundary(
+		std::numeric_limits<int>::max(), ffa, arena, arena, ffa, true);
+	MM_CHECK_EQ(int_max_active.configured_index, arena);
+	MM_CHECK_EQ(int_max_active.effective_index, arena);
+	MM_CHECK_FALSE(int_max_active.requested_in_range);
 }
 
 MM_TEST(hud_stat_contract_miniscore_val_visibility) {
@@ -2096,6 +3030,47 @@ MM_TEST(spawn_rules_entity_generation_advances_without_signed_overflow) {
 		std::numeric_limits<int32_t>::min());
 }
 
+MM_TEST(ordnance_owner_identity_rejects_disconnect_and_client_slot_reuse) {
+	constexpr int32_t captured_generation = 41;
+	constexpr int captured_arena = 3;
+
+	MM_CHECK(MM_OrdnanceGenerationMatches(
+		captured_generation, true, captured_generation));
+	MM_CHECK_FALSE(MM_OrdnanceGenerationMatches(
+		captured_generation, false, captured_generation));
+	MM_CHECK_FALSE(MM_OrdnanceGenerationMatches(
+		captured_generation, true, captured_generation + 1));
+
+	MM_CHECK(MM_OrdnanceIdentityMatches(captured_generation,
+		captured_arena, true, true, captured_generation, true,
+		captured_arena));
+	MM_CHECK_FALSE(MM_OrdnanceIdentityMatches(captured_generation,
+		captured_arena, false, false, captured_generation, true,
+		captured_arena));
+	MM_CHECK_FALSE(MM_OrdnanceIdentityMatches(captured_generation,
+		captured_arena, true, false, captured_generation, true,
+		captured_arena));
+	MM_CHECK_FALSE(MM_OrdnanceIdentityMatches(captured_generation,
+		captured_arena, true, true, captured_generation + 1, true,
+		captured_arena));
+	MM_CHECK_FALSE(MM_OrdnanceIdentityMatches(
+		std::numeric_limits<int32_t>::max(), captured_arena, true, true,
+		std::numeric_limits<int32_t>::min(), true, captured_arena));
+}
+
+MM_TEST(ordnance_owner_identity_keeps_origin_arena_authoritative) {
+	constexpr int32_t generation = 7;
+
+	MM_CHECK(MM_OrdnanceIdentityMatches(generation, 5, true, true,
+		generation, true, 5));
+	MM_CHECK_FALSE(MM_OrdnanceIdentityMatches(generation, 5, true, true,
+		generation, true, 6));
+	MM_CHECK_FALSE(MM_OrdnanceIdentityMatches(generation, 0, true, true,
+		generation, true, 1));
+	MM_CHECK(MM_OrdnanceIdentityMatches(generation, 5, true, true,
+		generation, false, 6));
+}
+
 MM_TEST(spawn_rules_entity_lump_preflight_accepts_valid_world) {
 	const std::string lump =
 		"// cached effective map entities\n"
@@ -2137,6 +3112,28 @@ MM_TEST(spawn_rules_entity_lump_preflight_rejects_malformed_or_unsafe_input) {
 	MM_CHECK_FALSE(MM_ValidateEntityLump(embedded_nul, 8).valid);
 }
 
+MM_TEST(spawn_rules_worldless_map_states_skip_the_entity_contract) {
+	// The startup demo loop ("map demo1.dm2") and cinematics reach SpawnEntities
+	// with an empty entity lump, which is only fatal for a real map.
+	MM_CHECK_FALSE(MM_MapStateHasWorld("demo1.dm2"));
+	MM_CHECK_FALSE(MM_MapStateHasWorld("DEMO2.DM2"));
+	MM_CHECK_FALSE(MM_MapStateHasWorld("idlog.cin"));
+	MM_CHECK_FALSE(MM_MapStateHasWorld("conback.pcx"));
+	MM_CHECK_FALSE(MM_MapStateHasWorld("credits.png"));
+	MM_CHECK_FALSE(MM_MapStateHasWorld("demo1.dm2$start"));
+
+	MM_CHECK(MM_MapStateHasWorld("q2dm1"));
+	MM_CHECK(MM_MapStateHasWorld("maps/q2dm1.bsp"));
+	MM_CHECK(MM_MapStateHasWorld("q64/outpost"));
+	MM_CHECK(MM_MapStateHasWorld("base1$start"));
+	// The engine only treats these as media when a stem precedes the extension.
+	MM_CHECK(MM_MapStateHasWorld(".dm2"));
+	MM_CHECK(MM_MapStateHasWorld("dm2"));
+	MM_CHECK(MM_MapStateHasWorld("dm2demo"));
+	MM_CHECK(MM_MapStateHasWorld(""));
+	MM_CHECK(MM_MapStateHasWorld(static_cast<const char *>(nullptr)));
+}
+
 MM_TEST(spawn_rules_replace_path_filename_preserves_directory) {
 	char path[64] = "C:\\Games\\Quake2\\game_x64.dll";
 	MM_CHECK(MM_ReplacePathFilename(path, sizeof(path), "muffmode_alloc.log"));
@@ -2166,11 +3163,90 @@ MM_TEST(spawn_rules_join_directory_file_adds_separator_when_needed) {
 	MM_CHECK_FALSE(MM_JoinDirectoryFile(tiny, sizeof(tiny), "C:\\Temp", "muffmode_alloc.log"));
 }
 
+MM_TEST(spawn_rules_entity_value_unescape_matches_the_legacy_grammar) {
+	char out[32];
+
+	MM_CHECK_EQ(MM_UnescapeEntityValue("plain", out, sizeof(out)), size_t{ 5 });
+	MM_CHECK_EQ(std::string(out), std::string("plain"));
+
+	MM_CHECK_EQ(MM_UnescapeEntityValue("a\\nb", out, sizeof(out)), size_t{ 3 });
+	MM_CHECK_EQ(std::string(out), std::string("a\nb"));
+
+	// Every other escape collapses to a lone backslash and drops the escaped byte.
+	MM_CHECK_EQ(MM_UnescapeEntityValue("a\\tb", out, sizeof(out)), size_t{ 3 });
+	MM_CHECK_EQ(std::string(out), std::string("a\\b"));
+
+	MM_CHECK_EQ(MM_UnescapeEntityValue("a\\\\b", out, sizeof(out)), size_t{ 3 });
+	MM_CHECK_EQ(std::string(out), std::string("a\\b"));
+
+	MM_CHECK_EQ(MM_UnescapeEntityValue("", out, sizeof(out)), size_t{ 0 });
+	MM_CHECK_EQ(std::string(out), std::string());
+}
+
+MM_TEST(spawn_rules_entity_value_unescape_terminates_a_trailing_backslash) {
+	// The escaped byte a trailing backslash consumes is the terminator itself.
+	// Expanding in place left the allocation unterminated, so every later reader
+	// of that field walked off the end of it.
+	char out[8];
+	std::fill(std::begin(out), std::end(out), '#');
+
+	MM_CHECK_EQ(MM_UnescapeEntityValue("a\\", out, sizeof(out)), size_t{ 2 });
+	MM_CHECK_EQ(std::string(out), std::string("a\\"));
+
+	MM_CHECK_EQ(MM_UnescapeEntityValue("\\", out, sizeof(out)), size_t{ 1 });
+	MM_CHECK_EQ(std::string(out), std::string("\\"));
+
+	// ED_NewString sizes its allocation strlen + 1; expansion must never grow.
+	for (const std::string_view sample :
+		{ "", "\\", "\\n", "\\\\", "a\\nb\\", "plain" }) {
+		MM_CHECK(MM_UnescapedEntityValueLength(sample) <= sample.size());
+		MM_CHECK_EQ(MM_UnescapedEntityValueLength(sample),
+			MM_UnescapeEntityValue(sample, out, sizeof(out)));
+	}
+}
+
+MM_TEST(spawn_rules_entity_value_unescape_never_writes_past_capacity) {
+	char scratch[8];
+	std::fill(std::begin(scratch), std::end(scratch), '#');
+
+	MM_CHECK_EQ(MM_UnescapeEntityValue("abcdefgh", scratch, 4), size_t{ 3 });
+	MM_CHECK_EQ(std::string(scratch), std::string("abc"));
+	MM_CHECK_EQ(scratch[4], '#');
+
+	std::fill(std::begin(scratch), std::end(scratch), '#');
+	MM_CHECK_EQ(MM_UnescapeEntityValue("abc", scratch, 0), size_t{ 0 });
+	MM_CHECK_EQ(scratch[0], '#');
+	MM_CHECK_EQ(MM_UnescapeEntityValue("abc", nullptr, sizeof(scratch)), size_t{ 0 });
+}
+
+MM_TEST(spawn_rules_entity_color_packs_channels_without_overflow_or_bleed) {
+	// 0..1 components scale to bytes; red lands in the sign bit of the field.
+	MM_CHECK_EQ(MM_PackEntityColorRgba(std::array<float, 4>{ 1.0f, 1.0f, 1.0f, 1.0f }),
+		static_cast<int32_t>(0xffffffffu));
+	MM_CHECK_EQ(MM_PackEntityColorRgba(std::array<float, 4>{ 1.0f, 0.0f, 0.0f, 1.0f }),
+		static_cast<int32_t>(0xff0000ffu));
+	MM_CHECK_EQ(MM_PackEntityColorRgba(std::array<float, 4>{ 0.5f, 0.0f, 0.0f, 1.0f }),
+		static_cast<int32_t>(0x7f0000ffu));
+
+	// Any component above 1 means the tuple is already authored in byte range.
+	MM_CHECK_EQ(MM_PackEntityColorRgba(std::array<float, 4>{ 255.0f, 128.0f, 0.0f, 255.0f }),
+		static_cast<int32_t>(0xff8000ffu));
+
+	// Out-of-range map data clamps instead of bleeding into the neighbouring
+	// channel, and never converts a float outside int32_t's range.
+	MM_CHECK_EQ(MM_PackEntityColorRgba(std::array<float, 4>{ 300.0f, 2.0f, 0.0f, 0.0f }),
+		static_cast<int32_t>(0xff020000u));
+	MM_CHECK_EQ(MM_PackEntityColorRgba(std::array<float, 4>{ -1.0e30f, 1.0e30f, 0.0f, 0.0f }),
+		static_cast<int32_t>(0x00ff0000u));
+}
+
 MM_TEST(ghost_restore_authority_comes_only_from_the_current_connection) {
 	MM_CHECK_FALSE(MM_GhostRestoreAdminState(false, false));
 	MM_CHECK(MM_GhostRestoreAdminState(true, false));
 	MM_CHECK(MM_GhostRestoreAdminState(false, true));
 	MM_CHECK(MM_GhostRestoreAdminState(true, true));
+	MM_CHECK(MM_GhostReconnectPreferencesUseInstalledProfile(false));
+	MM_CHECK_FALSE(MM_GhostReconnectPreferencesUseInstalledProfile(true));
 }
 
 MM_TEST(ghost_restore_epoch_rejects_state_from_another_round) {
@@ -2306,7 +3382,7 @@ MM_TEST(ghost_restore_placement_never_telefrags_a_crowded_position) {
 	MM_CHECK_EQ(MM_GhostRestorePlacementStrategy(true, true, true),
 		mm_ghost_restore_placement_t::Wait);
 
-	// At the engine's 32-client ceiling, every saved hull may be occupied at
+	// At MuffMode's 128-client ceiling, every saved hull may be occupied at
 	// once. None becomes eligible until a genuinely clear fallback exists.
 	for (size_t client = 0; client < MM_GHOST_MAX_CLIENT_CAPACITY; client++)
 		MM_CHECK_EQ(MM_GhostRestorePlacementStrategy(true, true, true),
@@ -2322,6 +3398,9 @@ MM_TEST(ghost_deferred_presentation_is_connection_and_transition_owned) {
 	MM_CHECK_FALSE(MM_GhostMayRunDeferredPresentation(true, false));
 	MM_CHECK_FALSE(MM_GhostMayRunDeferredPresentation(false, true));
 	MM_CHECK_FALSE(MM_GhostMayRunDeferredPresentation(true, true));
+	MM_CHECK(MM_GhostShouldDeferSnapshotCleanup(true, true));
+	MM_CHECK_FALSE(MM_GhostShouldDeferSnapshotCleanup(false, true));
+	MM_CHECK_FALSE(MM_GhostShouldDeferSnapshotCleanup(true, false));
 
 	MM_CHECK(MM_GhostRestoreEpochMatches(41, 41));
 	MM_CHECK_FALSE(MM_GhostRestoreEpochMatches(41, 42));
@@ -2497,6 +3576,33 @@ MM_TEST(ghost_skin_sync_false_sends_still_make_bounded_progress) {
 	MM_CHECK_EQ(attempts, MM_GHOST_MAX_SKIN_SYNC_ACTIONS_PER_QUEUE);
 	MM_CHECK_EQ(MM_GhostStepSkinSync(scheduler, slots, context).action,
 		mm_ghost_skin_sync_action_t::None);
+}
+
+MM_TEST(ghost_skin_sync_max_client_noop_wave_is_attempt_bounded_per_frame) {
+	constexpr size_t capacity = MM_GHOST_MAX_CLIENT_CAPACITY;
+	const auto slots = ReadyGhostSkinSyncSlots();
+	const mm_ghost_skin_sync_context_t context{ capacity, 9, 4, true };
+	mm_ghost_skin_sync_scheduler_t<capacity> scheduler{};
+
+	for (size_t restored = 0; restored < capacity; restored++)
+		MM_CHECK(MM_GhostQueueSkinSync(scheduler, restored,
+			slots[restored].spawn_count, context.round_epoch, context.world_epoch));
+
+	const size_t pending_before = MM_GhostPendingSkinSyncActionUpperBound(
+		scheduler, context);
+	size_t attempts = 0;
+	for (; attempts < MM_GHOST_MAX_SKIN_SYNC_ACTIONS_PER_DRAIN; attempts++) {
+		const auto step = MM_GhostStepSkinSync(scheduler, slots, context);
+		if (step.action == mm_ghost_skin_sync_action_t::None)
+			break;
+	}
+	const size_t pending_after = MM_GhostPendingSkinSyncActionUpperBound(
+		scheduler, context);
+
+	MM_CHECK_EQ(attempts, MM_GHOST_MAX_SKIN_SYNC_ACTIONS_PER_DRAIN);
+	MM_CHECK(pending_after < pending_before);
+	MM_CHECK(pending_after > 0);
+	MM_CHECK(MM_GhostActiveSkinSyncQueueCount(scheduler) > 0);
 }
 
 MM_TEST(ghost_skin_sync_queue_diagnostics_bound_remaining_work) {

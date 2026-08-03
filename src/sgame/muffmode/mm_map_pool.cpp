@@ -553,10 +553,10 @@ pool_load_result_t LoadPoolCandidate()
 			!ReadOptionalBool(object, "custom_textures", entry.custom_textures, error) ||
 			!ReadOptionalBool(object, "custom_sounds", entry.custom_sounds, error) ||
 			!ReadOptionalInt(
-				object, "min", 0, MAX_CLIENTS_KEX,
+				object, "min", 0, static_cast<int>(MAX_LOBBY_PLAYERS),
 				entry.min_players, error) ||
 			!ReadOptionalInt(
-				object, "max", 0, MAX_CLIENTS_KEX,
+				object, "max", 0, static_cast<int>(MAX_LOBBY_PLAYERS),
 				entry.max_players, error) ||
 			!ReadOptionalDisplayString(
 				object, "title", MAX_TITLE_BYTES,
@@ -1115,7 +1115,7 @@ void PrintEntries(
 			line += fmt::format(
 				" (players {}..{})",
 				entry.min_players > 0 ? entry.min_players : 0,
-				entry.max_players > 0 ? entry.max_players : MAX_CLIENTS_KEX);
+				entry.max_players > 0 ? entry.max_players : static_cast<int>(MAX_LOBBY_PLAYERS));
 		}
 		if (entry.popular)
 			line += " popular";

@@ -1,0 +1,33 @@
+# MSVC /analyze still reports every enabled warning. These clean,
+# high-confidence correctness and safety diagnostics fail the job immediately.
+C6001
+C6011
+C6031
+C6200
+C6201
+C6270
+C6271
+C6272
+C6273
+C6274
+C6275
+C6276
+C6277
+C6278
+C6279
+C6280
+C6281
+C6282
+C6283
+C6284
+C6290
+C6295
+C6308
+C6319
+C6330
+C6386
+C6387
+C26815
+C26865
+C28020
+C28182

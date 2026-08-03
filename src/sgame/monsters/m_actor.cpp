@@ -495,10 +495,14 @@ static TOUCH(target_actor_touch) (gentity_t *self, gentity_t *other, const trace
 
 	if (!self->spawnflags.has((SPAWNFLAG_TARGET_ACTOR_ATTACK | SPAWNFLAG_TARGET_ACTOR_SHOOT)) && (self->pathtarget)) {
 		const char *savetarget;
+		const int32_t other_generation = other->spawn_count;
 
 		savetarget = self->target;
 		self->target = self->pathtarget;
-		G_UseTargets(self, other);
+		if (!G_UseTargets(self, other))
+			return;
+		if (!other->inuse || other->spawn_count != other_generation)
+			return;
 		self->target = savetarget;
 	}
 
@@ -510,7 +514,7 @@ static TOUCH(target_actor_touch) (gentity_t *self, gentity_t *other, const trace
 	if (!other->movetarget && !other->enemy) {
 		other->monsterinfo.pausetime = HOLD_FOREVER;
 		other->monsterinfo.stand(other);
-	} else if (other->movetarget == other->goalentity) {
+	} else if (other->movetarget && other->movetarget == other->goalentity) {
 		v = other->movetarget->s.origin - other->s.origin;
 		other->ideal_yaw = vectoyaw(v);
 	}

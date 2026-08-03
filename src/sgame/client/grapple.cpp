@@ -4,6 +4,7 @@
 #include "g_local.h"
 #include "muffmode/mm_arena.h"
 #include "muffmode/mm_freezetag.h"
+#include "muffmode/mm_ordnance_identity.h"
 
 namespace {
 constexpr float GRAPPLE_NORMAL_VOLUME = 1.0f;
@@ -253,8 +254,7 @@ static bool Weapon_Grapple_FireHook(gentity_t *self, const vec3_t &start, const 
 	grapple->solid = SOLID_BBOX;
 	grapple->s.effects |= effect;
 	grapple->s.modelindex = gi.modelindex("models/weapons/grapple/hook/tris.md2");
-	grapple->owner = self;
-	grapple->count = self->spawn_count;
+	MM_CaptureOrdnanceOwner(grapple, self);
 	grapple->touch = Weapon_Grapple_Touch;
 	grapple->dmg = damage;
 	grapple->flags |= FL_NO_KNOCKBACK | FL_NO_DAMAGE_EFFECTS;

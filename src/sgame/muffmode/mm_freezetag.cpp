@@ -9,6 +9,7 @@
 #include "muffmode/mm_ghost.h"
 #include "muffmode/mm_loc.h"
 #include "muffmode/mm_match.h"
+#include "muffmode/mm_match_stats.h"
 #include "muffmode/mm_spawn_loadout.h"
 #include "monsters/m_player.h"
 
@@ -714,13 +715,13 @@ void StripFrozenInventory(gentity_t *ent, const mod_t &mod)
 	if (client->tracker_pain_time)
 		RemoveAttackingPainDaemons(ent);
 
-	if (client->owned_sphere) {
-		gentity_t *sphere = client->owned_sphere;
+	if (gentity_t *sphere = G_ResolveOwnedSphere(client)) {
+		const int32_t sphere_generation = sphere->spawn_count;
 		if (sphere->die)
 			sphere->die(sphere, ent, ent, 0, vec3_origin, mod);
-		else
+		else if (sphere->inuse && sphere->spawn_count == sphere_generation)
 			G_FreeEntity(sphere);
-		client->owned_sphere = nullptr;
+		G_ClearOwnedSphere(client);
 	}
 
 	client->pers.inventory.fill(0);
@@ -1202,6 +1203,7 @@ void RestoreFrozenPlayerAt(gentity_t *ent, const freeze_state_t &state, gentity_
 	G_ClearLagCompensationHistory(ent);
 	gi.linkentity(ent);
 	G_PostRespawn(ent);
+	MM_MatchStats_RecordSpawn(ent->client);
 
 	AwardThawCredit(ent, credit);
 	gi.LocClient_Print(ent, PRINT_CENTER, "THAWED!");

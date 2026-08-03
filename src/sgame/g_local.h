@@ -6,13 +6,16 @@
 
 #include "shared/gameplay.h"
 #include "muffmode/mm_arena_rules.h"
+#include "muffmode/mm_gametype.h"
+#include "muffmode/mm_match_stats_types.h"
+#include "muffmode/mm_maps.h"
 #include "muffmode/mm_vote_types.h"
 
 // the "gameversion" client command will print this plus compile date
 constexpr const char *GAMEVERSION = "baseq2";
 
 constexpr const char *GAMEMOD_TITLE = "Muff Mode";
-constexpr const char *GAMEMOD_VERSION = "0.70.5";
+constexpr const char *GAMEMOD_VERSION = "0.70.7";
 
 //==================================================================
 
@@ -21,8 +24,6 @@ constexpr const char *GAMEMOD_VERSION = "0.70.5";
 constexpr const int32_t GIB_HEALTH = -40;
 
 constexpr const int32_t AMMO_INFINITE = 1000;
-
-constexpr size_t MAX_CLIENTS_KEX = 32; // absolute limit
 
 enum mstats_t : uint32_t {
 	MSTAT_NONE,
@@ -169,6 +170,13 @@ enum ruleset_t : uint8_t {
 	RS_QC,
 	RS_NUM_RULESETS
 };
+
+constexpr int ClampPlayableRulesetIndex(int value) noexcept
+{
+	const int minimum = static_cast<int>(RS_NONE) + 1;
+	const int maximum = static_cast<int>(RS_NUM_RULESETS) - 1;
+	return value < minimum ? minimum : (value > maximum ? maximum : value);
+}
 #define RS( x ) (game.ruleset == (x))
 
 constexpr const char *rs_short_name[RS_NUM_RULESETS] = {
@@ -199,7 +207,7 @@ enum team_t {
 	TEAM_NUM_TEAMS
 };
 
-enum gametype_t {
+enum gametype_t : int {
 	GT_NONE,
 	GT_FFA,
 	GT_DUEL,
@@ -239,10 +247,14 @@ extern int _gt[GT_NUM_GAMETYPES];
 // gameplay queries see FFA while registration/configuration code can use
 // GT_RAW to inspect the requested cvar value.
 bool MM_Arena_Active();
-#define GT_RAW( x ) (g_gametype->integer == (int)(x))
+#define GT_RAW( x ) (g_gametype && g_gametype->integer == (int)(x))
+#define MM_GAMETYPE_BOUNDARY() \
+	MM_ResolveGametypeBoundary( \
+		g_gametype ? g_gametype->integer : (int)GT_FFA, \
+		(int)GT_FIRST, (int)GT_LAST, (int)GT_ARENA, (int)GT_FFA, \
+		MM_Arena_Active())
 #define MM_EFFECTIVE_GT \
-	MM_ArenaEffectiveGametype(g_gametype->integer, (int)GT_ARENA, \
-		(int)GT_FFA, MM_Arena_Active())
+	(MM_GAMETYPE_BOUNDARY().effective_index)
 #define GTF( x ) (_gt[MM_EFFECTIVE_GT] & (x))
 #define GT( x ) (MM_EFFECTIVE_GT == (int)(x))
 #define notGT( x ) (!GT(x))
@@ -1481,7 +1493,7 @@ struct game_locals_t {
 	int32_t max_lag_origins;
 	lag_compensation_sample_t *lag_samples; // maxclients * max_lag_origins
 
-	std::vector<std::string> mapqueue;
+	std::vector<muffmode::maps::mymap_queue_entry_t> mapqueue;
 
 	gametype_t	gametype;
 	std::string motd;
@@ -1664,7 +1676,7 @@ struct level_locals_t {
 	uint8_t		num_playing_clients;		// connected, non-spectators
 	uint8_t		num_playing_human_clients;	// players, bots excluded
 	int			sorted_clients[MAX_CLIENTS];// sorted by score
-	uint8_t		follow1, follow2;			// clientNums for auto-follow spectators
+	uint8_t		follow1, follow2;			// clientNums for auto-follow spectators; UINT8_MAX = none
 
 	int			num_living_red;
 	int			num_eliminated_red;
@@ -1676,6 +1688,10 @@ struct level_locals_t {
 
 	int			team_scores[TEAM_NUM_TEAMS];
 	int			team_old_scores[TEAM_NUM_TEAMS];
+
+	// [MuffMode] Durable match collection/export state. This is independent of
+	// g_matchstats, which only controls the live player-stats menu.
+	mm_match_overall_stats_t match;
 
 	matchst_t	match_state;
 	warmupreq_t	warmup_requisite;
@@ -1879,7 +1895,7 @@ struct savable_allocated_memory_t {
 		ptr(ptr),
 		count(count) {}
 
-	inline ~savable_allocated_memory_t() {
+	inline ~savable_allocated_memory_t() noexcept {
 		release();
 	}
 
@@ -1888,15 +1904,17 @@ struct savable_allocated_memory_t {
 	constexpr savable_allocated_memory_t &operator=(const savable_allocated_memory_t &) = delete;
 
 	// free move
-	constexpr savable_allocated_memory_t(savable_allocated_memory_t &&move) {
-		ptr = move.ptr;
-		count = move.count;
-
+	savable_allocated_memory_t(savable_allocated_memory_t &&move) noexcept :
+		ptr(move.ptr), count(move.count) {
 		move.ptr = nullptr;
 		move.count = 0;
 	}
 
-	constexpr savable_allocated_memory_t &operator=(savable_allocated_memory_t &&move) {
+	savable_allocated_memory_t &operator=(savable_allocated_memory_t &&move) noexcept {
+		if (this == &move)
+			return *this;
+
+		release();
 		ptr = move.ptr;
 		count = move.count;
 
@@ -1906,12 +1924,11 @@ struct savable_allocated_memory_t {
 		return *this;
 	}
 
-	inline void release() {
-		if (ptr) {
+	inline void release() noexcept {
+		if (ptr)
 			gi.TagFree(ptr);
-			count = 0;
-			ptr = nullptr;
-		}
+		count = 0;
+		ptr = nullptr;
 	}
 
 	constexpr explicit operator T *() { return ptr; }
@@ -2759,6 +2776,11 @@ item_id_t	DoRandomRespawn(gentity_t *ent);
 void		RespawnItem(gentity_t *ent);
 void		fire_doppelganger(gentity_t *ent, const vec3_t &start, const vec3_t &aimdir);
 
+gentity_t *G_ResolveOwnedSphere(gclient_t *client) noexcept;
+void G_AssignOwnedSphere(gclient_t *client, gentity_t *sphere) noexcept;
+void G_ClearOwnedSphere(gclient_t *client) noexcept;
+void G_PrepareSphereEntityFree(gentity_t *sphere) noexcept;
+
 //
 // sgame/core/game_utils.cpp
 //
@@ -2800,16 +2822,24 @@ gentity_t *G_FindByString(gentity_t *from, const std::string_view &value) {
 
 gentity_t *findradius(gentity_t *from, const vec3_t &org, float rad);
 gentity_t *G_PickTarget(const char *targetname);
-void	 G_UseTargets(gentity_t *ent, gentity_t *activator);
+[[nodiscard]] bool G_UseTargets(gentity_t *ent, gentity_t *activator);
 void	 G_PrintActivationMessage(gentity_t *ent, gentity_t *activator, bool coop_global);
 void	 G_SetMovedir(vec3_t &angles, vec3_t &movedir);
 
 void	 G_InitGentity(gentity_t *e);
 gentity_t *G_Spawn();
 void	 G_FreeEntity(gentity_t *e);
+void	 G_PrepareDoppelEntityFree(gentity_t *e) noexcept;
+void	 G_TurretPrepareEntityFree(gentity_t *e);
+void	 G_TurretRestoreEntityReferences(bool migrate_legacy_stamps);
+void	 G_SanitizeRestoredEntityTeams();
+void	 G_MigrateLegacyEntityReferenceStamps();
+void	 G_MigrateLegacyOrdnanceIdentities();
+void	 G_MigrateLegacyVehicleOrdnanceIdentities();
 
 void G_TouchTriggers(gentity_t *ent);
-void G_TouchProjectiles(gentity_t *ent, vec3_t previous_origin);
+[[nodiscard]] bool G_TouchProjectiles(
+	gentity_t *ent, vec3_t previous_origin);
 
 char *G_CopyString(const char *in, int32_t tag);
 
@@ -2854,7 +2884,7 @@ void G_StuffCmd(gentity_t *e, const char *fmt, ...);
 // sgame/entities/spawn.cpp
 //
 void  ED_CallSpawn(gentity_t *ent);
-char *ED_NewString(char *string);
+char *ED_NewString(const char *string);
 void GT_SetLongName(void);
 void GT_PrecacheAssets();
 
@@ -3131,6 +3161,7 @@ struct pierce_args_t {
 	// stuff we pierced
 	std::array<gentity_t *, MAX_PIERCE> pierced;
 	std::array<solid_t, MAX_PIERCE> pierce_solidities;
+	std::array<int32_t, MAX_PIERCE> pierce_generations;
 	size_t num_pierced = 0;
 	// the last trace that was done, when piercing stopped
 	trace_t tr;
@@ -3301,9 +3332,10 @@ bool		G_RunThink(gentity_t *ent);
 void		G_AddRotationalFriction(gentity_t *ent);
 void		G_AddGravity(gentity_t *ent);
 void		G_CheckVelocity(gentity_t *ent);
-void		G_FlyMove(gentity_t *ent, float time, contents_t mask);
+[[nodiscard]] bool G_FlyMove(
+	gentity_t *ent, float time, contents_t mask);
 contents_t	G_GetClipMask(gentity_t *ent);
-void		G_Impact(gentity_t *e1, const trace_t &trace);
+[[nodiscard]] bool G_Impact(gentity_t *e1, const trace_t &trace);
 
 //
 // sgame/core/runtime.cpp
@@ -3433,7 +3465,7 @@ constexpr spawnflags_t SPAWNFLAG_LANDMARK_KEEP_Z = 1_spawnflag;
 	return G_PowerUpExpiringRelative(time - level.time);
 }
 
-bool ClientIsPlaying(gclient_t *cl);
+bool ClientIsPlaying(const gclient_t *cl);
 bool ClientCanVote(gclient_t *cl);
 
 #include "client/menu.h"
@@ -3595,6 +3627,9 @@ struct client_persistant_t {
 	gtime_t			kill_time;
 
 	gtime_t			last_spawn_time;
+
+	// [MuffMode] Detailed per-match counters survive respawns and world rebuilds.
+	mm_match_player_stats_t match;
 };
 
 // player config vars:
@@ -3644,6 +3679,18 @@ struct client_session_t {
 
 	// real time of team joining
 	gtime_t			team_join_time;
+
+	// [MuffMode] Durable player profile/rating state. Keep this POD because
+	// gclient_t is allocated and reset through the engine's C-style paths.
+	bool			profile_persistence_ready;
+	float			skill_rating;
+	int32_t			skill_rating_change;
+	int64_t			stats_play_start_ms;
+	uint32_t		stats_saved_match_serial;
+	uint8_t			stats_saved_match_outcome;
+	bool			stats_reconnect_suspended;
+	std::array<item_id_t, IT_TOTAL> weapon_prefs;
+	uint8_t			weapon_pref_count;
 };
 
 // client data that stays across deathmatch respawns
@@ -3732,6 +3779,7 @@ struct gclient_t {
 	button_t buttons;
 	button_t oldbuttons;
 	button_t latched_buttons;
+	button_t menu_captured_buttons; // menu selection presses suppressed until released
 	usercmd_t cmd; // last CMD send
 
 	// weapon cannot fire until this time is up
@@ -3833,6 +3881,7 @@ struct gclient_t {
 	gtime_t tracker_pain_time;
 
 	gentity_t *owned_sphere; // this points to the player's sphere
+	int32_t owned_sphere_generation;
 
 	gtime_t empty_click_sound;
 
@@ -3925,6 +3974,10 @@ struct gclient_t {
 	bool		initial_menu_shown;
 	bool		initial_menu_closure;
 
+	// [MuffMode] Top-right gametype/ruleset info stays up until this time; refreshed by
+	// joining a team and by gametype/ruleset changes (see MM_MatchInfoHud_Show).
+	gtime_t		match_info_hud_time;
+
 	gtime_t		pu_last_message_time;
 
 	gtime_t		last_banned_message_time;
@@ -3993,6 +4046,9 @@ struct gentity_t {
 	spawnflags_t	spawnflags;
 
 	gtime_t timestamp;
+	// [MuffMode] Kept separate from timestamp, which tech entities use as an
+	// absolute lifetime deadline.
+	gtime_t item_available_time;
 
 	float		angle; // set in qe3, -1 = up, -2 = down
 	const char *target;
@@ -4067,6 +4123,25 @@ struct gentity_t {
 	int32_t	 groundentity_linkcount;
 	gentity_t *teamchain;
 	gentity_t *teammaster;
+	// [MuffMode] Generation stamps for the persistent turret reference graph.
+	// These are restored structurally when loading legacy v1 JSON saves.
+	int32_t turret_breach_generation;
+	int32_t turret_master_generation;
+	int32_t turret_controller_generation;
+	int32_t turret_activator_generation;
+	int32_t turret_enemy_generation;
+	// [MuffMode] Spheres retain an independently stamped target alongside
+	// their owner generation (stored in count for this spawned entity family).
+	int32_t sphere_enemy_generation;
+	// [MuffMode] The doppelganger base owns a cosmetic body through teamchain;
+	// keep its lifetime separate from the ordinary mover-team graph.
+	int32_t doppel_body_generation;
+	// [MuffMode] MegaHealth decay persists after pickup and must not transfer to
+	// a replacement occupant of the original client slot.
+	int32_t megahealth_owner_generation;
+	// [MuffMode] Persistent helper/destination target_ent links retain identity
+	// across delayed mover, teleporter, effect, and turret callbacks.
+	int32_t target_ent_generation;
 
 	gentity_t *mynoise; // can go in client only
 	gentity_t *mynoise2;
@@ -4492,6 +4567,7 @@ inline bool pierce_args_t::mark(gentity_t *ent) {
 
 	pierced[num_pierced] = ent;
 	pierce_solidities[num_pierced] = ent->solid;
+	pierce_generations[num_pierced] = ent->spawn_count;
 	num_pierced++;
 
 	ent->solid = SOLID_NOT;
@@ -4504,6 +4580,8 @@ inline bool pierce_args_t::mark(gentity_t *ent) {
 inline void pierce_args_t::restore() {
 	for (size_t i = 0; i < num_pierced; i++) {
 		auto &ent = pierced[i];
+		if (!ent->inuse || ent->spawn_count != pierce_generations[i])
+			continue;
 		ent->solid = pierce_solidities[i];
 		gi.linkentity(ent);
 	}

@@ -15,9 +15,20 @@ concurrency:
 jobs:
   build-windows:
     runs-on: windows-2025-vs2026
+    timeout-minutes: 90
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+
+      - name: Check release workflow provenance contract
+        shell: pwsh
+        run: ./scripts/ci/check-release-workflow.ps1
+
+      - name: Check analysis and fuzz tooling contracts
+        shell: pwsh
+        run: ./scripts/ci/check-tooling-contracts.ps1
 
       - name: Check generated artifacts
         shell: pwsh
@@ -29,7 +40,29 @@ jobs:
 
       - name: Check changelog ledger
         shell: pwsh
-        run: ./scripts/ci/check-changelog.ps1
+        run: |
+          $changedSince = "${{ github.event.pull_request.base.sha || github.event.before }}"
+          if ($changedSince -match "^0+$") {
+            $defaultBranch = "${{ github.event.repository.default_branch }}"
+            if ([string]::IsNullOrWhiteSpace($defaultBranch)) {
+              throw "GitHub did not provide a default branch for the new-branch comparison."
+            }
+            $defaultRef = "refs/remotes/origin/$defaultBranch"
+            git fetch --no-tags origin "+refs/heads/${defaultBranch}:$defaultRef"
+            if ($LASTEXITCODE -ne 0) {
+              throw "Could not fetch $defaultRef for the new-branch comparison."
+            }
+            $changedSince = (git merge-base HEAD $defaultRef).Trim()
+            if ($LASTEXITCODE -ne 0 -or $changedSince -notmatch "^[0-9a-fA-F]{40}$") {
+              throw "Could not resolve a new-branch merge base against $defaultRef."
+            }
+          }
+          if ([string]::IsNullOrWhiteSpace($changedSince)) {
+            ./scripts/ci/check-changelog.ps1
+          }
+          else {
+            ./scripts/ci/check-changelog.ps1 -ChangedSince $changedSince
+          }
 
       - name: Check phase-zero asset seeds
         shell: pwsh
@@ -40,7 +73,7 @@ jobs:
         run: ./scripts/ci/check-regression-corpus.ps1
 
       - name: Setup MSBuild
-        uses: microsoft/setup-msbuild@v3
+        uses: microsoft/setup-msbuild@30375c66a4eea26614e0d39710365f22f8b0af57 # v3
 
       - name: Run host smoke tests
         shell: pwsh
@@ -51,7 +84,7 @@ jobs:
         run: ./scripts/ci/run-updater-tests.ps1 -Configuration Release
 
       - name: Cache vcpkg
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: |
             vcpkg/downloads
@@ -77,14 +110,14 @@ jobs:
           VCPKG_ROOT: ${{ github.workspace }}/vcpkg
 
       - name: Upload MSBuild log
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: always()
         with:
           name: build-msbuild-log
           path: build/logs/*.binlog
 
       - name: Upload game_x64.dll
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: game_x64
           path: build/msbuild/x64/Release/game_x64.dll
