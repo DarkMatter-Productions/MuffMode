@@ -680,8 +680,13 @@ static bool InitPlayerTeam(gentity_t *ent) {
 		return true;
 	}
 
-	// already initialised
-	if (ent->client->sess.team != TEAM_NONE)
+	// already initialised. ClientConnect pre-sets fresh deathmatch clients to
+	// TEAM_SPECTATOR before first spawn, which made this early-return swallow
+	// every human before the g_dm_force_join / g_dm_auto_join block below could
+	// run (the cvars were dead for humans). An uninitialised spectator is really
+	// a brand-new client awaiting first join, so let them fall through. [MuffMode]
+	if (ent->client->sess.team != TEAM_NONE &&
+		(ent->client->sess.initialised || ent->client->sess.team != TEAM_SPECTATOR))
 		return true;
 
 	ent->client->sess.team = TEAM_SPECTATOR;
