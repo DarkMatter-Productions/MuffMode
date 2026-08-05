@@ -19,7 +19,7 @@ void MultiplayerScoreboard(gentity_t *ent);
 // Round counter in HUD: during countdown show the upcoming round (matches centerprint).
 int HudRoundDisplayNumber()
 {
-	if (level.round_state != roundst_t::ROUND_COUNTDOWN)
+	if (level.round_state != round_state_t::ROUND_COUNTDOWN)
 		return level.round_number;
 
 	if (GT(GT_HORDE))
@@ -645,7 +645,7 @@ void DeathmatchScoreboardMessage(gentity_t *ent, gentity_t *killer) {
 			fmt::format_to(std::back_inserter(entry), FMT_STRING("xv {} yv {} picn {} "), x, y, s);
 
 		// player ready marker
-		if (level.match_state == matchst_t::MATCH_WARMUP_READYUP && (cl->sess.is_a_bot || cl->resp.ready)) {
+		if (level.match_state == match_state_t::MATCH_WARMUP_READYUP && (cl->sess.is_a_bot || cl->resp.ready)) {
 			fmt::format_to(std::back_inserter(entry), FMT_STRING("xv {} yv {} picn {} "), x + 16, y + 16, "wheel/p_compass_selected");
 		}
 
@@ -925,7 +925,7 @@ static void G_SetGametypeStats(gentity_t *ent) {
 				ent->client->ps.stats[STAT_ARENA_ROLE] = cs;
 			}
 		} else if (GTF(GTF_ELIMINATION) && GTF(GTF_TEAMS) && GTF(GTF_CTF) && GT(GT_STRIKE)
-			&& level.round_state != roundst_t::ROUND_COUNTDOWN
+			&& level.round_state != round_state_t::ROUND_COUNTDOWN
 			&& ClientIsPlaying(ent->client) && !ent->client->eliminated) {
 			const int cs = PovHudConfigString(ent, mm_pov_configstring_lane_t::Primary);
 			if (cs != 0) {
@@ -960,7 +960,7 @@ static void G_SetGametypeStats(gentity_t *ent) {
 		ent->client->ps.stats[STAT_COOP_RESPAWN] = 0;
 
 	if (GT(GT_LMS) && deathmatch->integer && level.match_state == MATCH_IN_PROGRESS
-		&& level.round_state == roundst_t::ROUND_IN_PROGRESS) {
+		&& level.round_state == round_state_t::ROUND_IN_PROGRESS) {
 		gentity_t *pov = ent;
 		if (ent->client->follow_target && ent->client->follow_target->client)
 			pov = ent->client->follow_target;
@@ -1787,7 +1787,7 @@ void G_SetStats(gentity_t *ent) {
 	}
 
 	if (GT(GT_CTF)) {
-		//ent->client->ps.stats[STAT_MATCH_STATE] = level.match_state > matchst_t::MATCH_NONE ? CONFIG_MATCH_STATE : 0;
+		//ent->client->ps.stats[STAT_MATCH_STATE] = level.match_state > match_state_t::MATCH_NONE ? CONFIG_MATCH_STATE : 0;
 		//ent->client->ps.stats[STAT_TEAMPLAY_INFO] = level.warnactive ? CONFIG_TEAMINFO : 0;
 	}
 
@@ -1816,17 +1816,17 @@ void G_SetStats(gentity_t *ent) {
 			ent->client->last_match_timer_update = ft;
 
 			switch (level.match_state) {
-			case matchst_t::MATCH_WARMUP_DELAYED:
+			case match_state_t::MATCH_WARMUP_DELAYED:
 				s1 = "";
 				break;
-			case matchst_t::MATCH_NONE:
+			case match_state_t::MATCH_NONE:
 				s1 = "";
 				break;
-			case matchst_t::MATCH_WARMUP_DEFAULT:
-			case matchst_t::MATCH_WARMUP_READYUP:
+			case match_state_t::MATCH_WARMUP_DEFAULT:
+			case match_state_t::MATCH_WARMUP_READYUP:
 				s1 = "WARMUP";
 				break;
-			case matchst_t::MATCH_COUNTDOWN:
+			case match_state_t::MATCH_COUNTDOWN:
 				s1 = "COUNTDOWN";
 				break;
 			default: {
@@ -1836,9 +1836,9 @@ void G_SetStats(gentity_t *ent) {
 				} else if (t < 0 && t >= -4) {
 					s1 = "OVERTIME!";
 				} else if (GTF(GTF_ROUNDS)) {
-					if (level.round_state == roundst_t::ROUND_COUNTDOWN) {
+					if (level.round_state == round_state_t::ROUND_COUNTDOWN) {
 						s1 = "COUNTDOWN";
-					} else if (level.round_state == roundst_t::ROUND_IN_PROGRESS) {
+					} else if (level.round_state == round_state_t::ROUND_IN_PROGRESS) {
 						if (roundtimelimit->value > 0 && notGT(GT_HORDE)) {
 							int t2 = (level.round_state_timer - level.time).milliseconds();
 							std::string match_time_str = G_TimeString(t, false);

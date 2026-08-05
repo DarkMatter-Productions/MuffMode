@@ -6,9 +6,11 @@
 #include "bots/bot_includes.h"
 // [MuffMode] AutoDoc regen lives in muffmode/mm_items_rules
 #include "muffmode/mm_arena.h"
+#include "muffmode/mm_awards.h"
 #include "muffmode/mm_freezetag.h"
 #include "muffmode/mm_ghost.h"
 #include "muffmode/mm_items_rules.h"
+#include "muffmode/mm_map_pick.h"
 #include "muffmode/mm_parse.h"
 
 static gentity_t *current_player;
@@ -1600,7 +1602,7 @@ void ClientEndServerFrame(gentity_t *ent) {
 	// still live: if the round has since ended, a round-result centerprint is showing and
 	// an instant empty centerprint would wipe it.
 	if (ent->client->last_standing_clear_time && level.time >= ent->client->last_standing_clear_time) {
-		if (level.round_state == roundst_t::ROUND_IN_PROGRESS)
+		if (level.round_state == round_state_t::ROUND_IN_PROGRESS)
 			gi.LocClient_Print(ent, PRINT_CENTER, "");
 		ent->client->last_standing_clear_time = 0_ms;
 	}
@@ -1679,13 +1681,19 @@ void ClientEndServerFrame(gentity_t *ent) {
 		G_SetStats(ent);
 		G_SetCoopStats(ent);
 
-		// if the scoreboard is up, update it if a client leaves
-		if (deathmatch->integer && ent->client->showscores && ent->client->menutime) {
-			// [MuffMode] Arena boards are scoped to the viewer's selected
-			// arena, even while that viewer is using a follow camera.
-			DeathmatchScoreboardMessage(GT(GT_ARENA) ? ent : e, e->enemy);
-			gi.unicast(ent, false);
-			ent->client->menutime = 0_ms;
+		// [MuffMode] The post-scoreboard next-map pick and then the post-match
+		// awards reel keep the intermission camera but draw where the scoreboard
+		// was. Only one of the three can own the layout in a given frame.
+		if (!MM_MapPick_DrawIntermissionMenu(ent) &&
+			!MM_Awards_DrawIntermissionLayout(ent)) {
+			// if the scoreboard is up, update it if a client leaves
+			if (deathmatch->integer && ent->client->showscores && ent->client->menutime) {
+				// [MuffMode] Arena boards are scoped to the viewer's selected
+				// arena, even while that viewer is using a follow camera.
+				DeathmatchScoreboardMessage(GT(GT_ARENA) ? ent : e, e->enemy);
+				gi.unicast(ent, false);
+				ent->client->menutime = 0_ms;
+			}
 		}
 
 		return;

@@ -73,3 +73,5 @@ bool MM_Horde_SkipMercyLimit();
 // Least-burdened living fighter for horde monster targeting (Tier 0/1).
 gentity_t *MM_Horde_PickTarget(gentity_t *from);
 bool MM_Horde_MaybeRetarget(gentity_t *monster);
+// Keeps an assigned threat closing on its fighter instead of idling at a cold trail.
+void MM_Horde_DrivePursuit(gentity_t *monster);

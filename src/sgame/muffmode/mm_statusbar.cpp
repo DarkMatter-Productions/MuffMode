@@ -277,13 +277,18 @@ void EmitBottomTeamMiniscoreRows(statusbar_t &sb)
 	EmitTeamMiniscoreRow(sb, hud_vanchor_t::Bottom, kBottomMiniscoreRow2Yb, STAT_MINISCORE_SECOND_PIC, STAT_MINISCORE_SECOND_SCORE, STAT_MINISCORE_SECOND_POS);
 }
 
-// Match limit under the miniscore rows: small white stat_string, not big HUD digits.
+// Match limit under the miniscore rows: small white text, right-aligned to the same edge as the
+// score digits above it (num(3) at kMiniscoreNumXr ends at kMiniscoreLimitTextXr).
+// The inner ifstat is required, not cosmetic: stat_string/loc_stat_rstring take the stat's value
+// as a configstring index, so an unset STAT_SCORELIMIT would print configstring 0 (the level name).
 void EmitMiniscoreMetaRows(statusbar_t &sb)
 {
 	sb.ifstat(STAT_MINISCORE_FIRST_PIC)
-		.xr(kMiniscoreLimitTextXr)
-		.yb(kBottomMiniscoreMetaRow1Yb)
-		.stat_string(STAT_SCORELIMIT)
+		.ifstat(STAT_SCORELIMIT)
+			.xr(kMiniscoreLimitTextXr)
+			.yb(kBottomMiniscoreMetaRow1Yb)
+			.loc_stat_rstring(STAT_SCORELIMIT)
+		.endifstat()
 		.endifstat();
 }
 
@@ -304,7 +309,7 @@ void MM_MatchInfoHud_Show(gentity_t *ent)
 	if (!ent || !ent->client)
 		return;
 
-	ent->client->match_info_hud_time = level.time + muffmode::statusbar::kMatchInfoHudTime;
+	ent->client->sess.match_info_hud_time = level.time + muffmode::statusbar::kMatchInfoHudTime;
 }
 
 void MM_MatchInfoHud_ShowAll()
@@ -318,7 +323,10 @@ bool MM_MatchInfoHud_Visible(const gentity_t *ent)
 	if (!ent || !ent->client)
 		return false;
 
-	return ent->client->match_info_hud_time > level.time;
+	// Bounded on both sides: sess survives map changes but level.time restarts, so a stamp carried
+	// in from a longer previous level (or a ghost restore) must not park the notice on screen.
+	const gtime_t expires = ent->client->sess.match_info_hud_time;
+	return expires > level.time && expires <= level.time + muffmode::statusbar::kMatchInfoHudTime;
 }
 
 void MM_InitStatusbar()

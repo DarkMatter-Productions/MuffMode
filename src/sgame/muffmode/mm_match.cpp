@@ -4,9 +4,11 @@
 #include "g_local.h"
 #include "muffmode/mm_announcer.h"
 #include "muffmode/mm_arena.h"
+#include "muffmode/mm_awards.h"
 #include "muffmode/mm_captain.h"
 #include "muffmode/mm_command_contracts.h"
 #include "muffmode/mm_duel.h"
+#include "muffmode/mm_ent_respawn.h"
 #include "muffmode/mm_freezetag.h"
 #include "muffmode/mm_gametype.h"
 #include "muffmode/mm_ghost.h"
@@ -191,6 +193,11 @@ static void ResetPlayers(bool reset_ghost, bool reset_score)
 
 static void LegacyResetWorldEntities()
 {
+	// This path patches the live world instead of rebuilding it from the entity
+	// lump, so props destroyed last round are still missing. Make their queued
+	// rebuilds eligible now; the placement rules still decide when each arrives.
+	MM_EntRespawn_ExpediteAll();
+
 	// reset the level items
 	Tech_Reset();
 	CTF_ResetFlags();
@@ -407,7 +414,7 @@ namespace muffmode::match {
 bool StartNewRound(bool reset_world = true)
 {
 	if (!MM_GametypeHasFlag(GTF_ROUNDS)) {
-		level.round_state = roundst_t::ROUND_NONE;
+		level.round_state = round_state_t::ROUND_NONE;
 		level.round_state_timer = 0_sec;
 		return false;
 	}
@@ -418,7 +425,7 @@ bool StartNewRound(bool reset_world = true)
 	if (++level.round_epoch == 0)
 		level.round_epoch = 1;
 
-	level.round_state = roundst_t::ROUND_COUNTDOWN;
+	level.round_state = round_state_t::ROUND_COUNTDOWN;
 	level.round_state_timer = level.time + gtime_t::from_sec(g_round_countdown->integer);
 	level.countdown_check = 0_sec;
 
@@ -507,7 +514,7 @@ Round_End
 void Round_End() {
 	// reset if not round based
 	if (!MM_GametypeHasFlag(GTF_ROUNDS)) {
-		level.round_state = roundst_t::ROUND_NONE;
+		level.round_state = round_state_t::ROUND_NONE;
 		level.round_state_timer = 0_sec;
 		return;
 	}
@@ -516,7 +523,7 @@ void Round_End() {
 	if (level.round_state != ROUND_IN_PROGRESS)
 		return;
 
-	level.round_state = roundst_t::ROUND_ENDED;
+	level.round_state = round_state_t::ROUND_ENDED;
 	level.round_state_timer = level.time + 3_sec;
 	MM_Horde_OnRoundEnd();
 }
@@ -600,9 +607,9 @@ void Match_Start() {
 	const char *s = G_TimeString(timelimit->value ? timelimit->value * 1000 : 0, true);
 	gi.configstring(CONFIG_MATCH_STATE, s);
 
-	level.match_state = matchst_t::MATCH_IN_PROGRESS;
+	level.match_state = match_state_t::MATCH_IN_PROGRESS;
 	level.match_state_timer = level.time;
-	level.warmup_requisite = warmupreq_t::WARMUP_REQ_NONE;
+	level.warmup_requisite = warmup_req_t::WARMUP_REQ_NONE;
 	level.warmup_notice_time = 0_sec;
 	level.warmup_gametype_hud_time = 0_sec;
 
@@ -687,6 +694,9 @@ void Match_Reset() {
 	MM_Ghost_ClearAll(true);
 	match::ResetEntities(true, false, true);
 	MM_MatchStats_Reset();
+	// [MuffMode] Retire the previous match's awards reel with its statistics, so
+	// a reset cannot leave it armed for the match that replaces it.
+	MM_Awards_Reset();
 	UnReadyAll();
 	ValidateCaptains();
 
@@ -694,8 +704,8 @@ void Match_Reset() {
 	level.locked[TEAM_SPECTATOR] = level.locked[TEAM_FREE] = level.locked[TEAM_RED] = level.locked[TEAM_BLUE] = false;
 
 	level.match_time = level.time;
-	level.match_state = matchst_t::MATCH_WARMUP_DEFAULT;
-	level.warmup_requisite = warmupreq_t::WARMUP_REQ_NONE;
+	level.match_state = match_state_t::MATCH_WARMUP_DEFAULT;
+	level.warmup_requisite = warmup_req_t::WARMUP_REQ_NONE;
 	level.warmup_notice_time = 0_sec;
 	level.warmup_gametype_hud_time = level.time;
 	level.match_state_timer = 0_sec;
@@ -741,10 +751,10 @@ void BroadcastWarmupWaitNotice()
 	const char *msg = nullptr;
 
 	switch (level.warmup_requisite) {
-	case warmupreq_t::WARMUP_REQ_MORE_PLAYERS:
+	case warmup_req_t::WARMUP_REQ_MORE_PLAYERS:
 		msg = G_Fmt("Waiting for players ({} minimum)", minplayers->integer).data();
 		break;
-	case warmupreq_t::WARMUP_REQ_BALANCE:
+	case warmup_req_t::WARMUP_REQ_BALANCE:
 		msg = "Teams are imbalanced.";
 		break;
 	default:
@@ -780,10 +790,10 @@ static void TickWarmupWaitNudges()
 {
 	if (!deathmatch->integer)
 		return;
-	if (level.match_state != matchst_t::MATCH_WARMUP_DEFAULT)
+	if (level.match_state != match_state_t::MATCH_WARMUP_DEFAULT)
 		return;
-	if (level.warmup_requisite != warmupreq_t::WARMUP_REQ_MORE_PLAYERS
-		&& level.warmup_requisite != warmupreq_t::WARMUP_REQ_BALANCE)
+	if (level.warmup_requisite != warmup_req_t::WARMUP_REQ_MORE_PLAYERS
+		&& level.warmup_requisite != warmup_req_t::WARMUP_REQ_BALANCE)
 		return;
 
 	if (level.warmup_notice_time != 0_sec
@@ -797,7 +807,7 @@ void TickWarmupReadyNudges()
 {
 	if (!deathmatch->integer || !muffmode::CvarEnabled(g_dm_do_readyup))
 		return;
-	if (level.match_state != matchst_t::MATCH_WARMUP_READYUP)
+	if (level.match_state != match_state_t::MATCH_WARMUP_READYUP)
 		return;
 
 	for (auto ec : active_players()) {
@@ -954,11 +964,11 @@ void TickRoundState() {
 	if (!MM_GametypeHasFlag(GTF_ROUNDS))
 		return;
 
-	if (level.match_state != matchst_t::MATCH_IN_PROGRESS)
+	if (level.match_state != match_state_t::MATCH_IN_PROGRESS)
 		return;
 
 	// initiate round
-	if (level.round_state == roundst_t::ROUND_NONE || level.round_state == roundst_t::ROUND_ENDED) {
+	if (level.round_state == round_state_t::ROUND_NONE || level.round_state == round_state_t::ROUND_ENDED) {
 		if (level.round_state_timer > level.time)
 			return;
 
@@ -967,12 +977,12 @@ void TickRoundState() {
 	}
 
 	// start round
-	if (level.round_state == roundst_t::ROUND_COUNTDOWN) {
+	if (level.round_state == round_state_t::ROUND_COUNTDOWN) {
 		if (level.time >= level.round_state_timer) {
 			for (auto ec : active_clients())
 				ec->client->latched_buttons = BUTTON_NONE;
 
-			level.round_state = roundst_t::ROUND_IN_PROGRESS;
+			level.round_state = round_state_t::ROUND_IN_PROGRESS;
 			level.round_state_timer = level.time + gtime_t::from_min(roundtimelimit->value);
 
 			for (int &c : level.last_standing_count)
@@ -1009,7 +1019,7 @@ void TickRoundState() {
 	}
 
 	// end round
-	if (level.round_state == roundst_t::ROUND_IN_PROGRESS) {
+	if (level.round_state == round_state_t::ROUND_IN_PROGRESS) {
 		CheckLastManStanding();
 
 		auto is_living_round_player = [](gentity_t *ent) {
@@ -1271,13 +1281,13 @@ TickCountdown
 namespace muffmode::match {
 
 void TickCountdown() {
-	if ((level.match_state != matchst_t::MATCH_COUNTDOWN && level.round_state != roundst_t::ROUND_COUNTDOWN) || level.intermission_time) {
+	if ((level.match_state != match_state_t::MATCH_COUNTDOWN && level.round_state != round_state_t::ROUND_COUNTDOWN) || level.intermission_time) {
 		if (level.countdown_check)
 			level.countdown_check = 0_sec;
 		return;
 	}
 
-	gtime_t base = (level.round_state == roundst_t::ROUND_COUNTDOWN) ? level.round_state_timer : level.match_state_timer;
+	gtime_t base = (level.round_state == round_state_t::ROUND_COUNTDOWN) ? level.round_state_timer : level.match_state_timer;
 	int t = (base + 1_sec - level.time).seconds<int>();
 	if (t <= 0) {
 		if (level.countdown_check)
@@ -1323,7 +1333,7 @@ void TickMatchEndWarning() {
 	if (MM_GametypeHasFlag(GTF_ROUNDS))
 		return;
 
-	if (level.match_state != matchst_t::MATCH_IN_PROGRESS || !timelimit->value) {
+	if (level.match_state != match_state_t::MATCH_IN_PROGRESS || !timelimit->value) {
 		if (level.matchendwarn_check)
 			level.matchendwarn_check = 0_sec;
 		return;
@@ -1378,21 +1388,21 @@ void TickWarmupState() {
 
 		// A reconnect reservation remains an active match participant even though
 		// it is deliberately excluded from the connected-player rank counts.
-		if (level.match_state == matchst_t::MATCH_IN_PROGRESS &&
+		if (level.match_state == match_state_t::MATCH_IN_PROGRESS &&
 			MM_Ghost_HasActiveReservations())
 			return;
 
-		if (level.match_state != matchst_t::MATCH_NONE) {
+		if (level.match_state != match_state_t::MATCH_NONE) {
 			// Do not silently discard a live match when its final player leaves.
 			// Departure settlement is exact-once; the frozen archive still contains
 			// disconnected players and can therefore produce the final artifact.
-			if (level.match_state == matchst_t::MATCH_IN_PROGRESS) {
+			if (level.match_state == match_state_t::MATCH_IN_PROGRESS) {
 				MM_PlayerStats_OnMatchEnd();
 				MM_MatchStats_End();
 			}
-			level.match_state = matchst_t::MATCH_NONE;
+			level.match_state = match_state_t::MATCH_NONE;
 			level.match_state_timer = 0_sec;
-			level.warmup_requisite = warmupreq_t::WARMUP_REQ_NONE;
+			level.warmup_requisite = warmup_req_t::WARMUP_REQ_NONE;
 			level.warmup_notice_time = 0_sec;
 			return;
 		}
@@ -1410,7 +1420,7 @@ void TickWarmupState() {
 	MM_Duel_QueueSpectatorBots();
 
 	min_players = GT(GT_DUEL) ? 2 : minplayers->integer;
-	if (level.match_state < matchst_t::MATCH_COUNTDOWN && !g_dm_do_warmup->integer && level.num_playing_clients >= min_players
+	if (level.match_state < match_state_t::MATCH_COUNTDOWN && !g_dm_do_warmup->integer && level.num_playing_clients >= min_players
 		&& (g_dm_allow_no_humans->integer || level.num_playing_human_clients > 0)) {
 		Match_Start();
 		return;
@@ -1418,19 +1428,19 @@ void TickWarmupState() {
 
 	// check because we run 3 game frames before calling Connect and/or ClientBegin
 	// for clients on a map_restart
-	if (level.match_state == matchst_t::MATCH_NONE) {
-		level.match_state = matchst_t::MATCH_WARMUP_DELAYED;
+	if (level.match_state == match_state_t::MATCH_NONE) {
+		level.match_state = match_state_t::MATCH_WARMUP_DELAYED;
 		level.match_state_timer = level.time + 5_sec;
-		level.warmup_requisite = warmupreq_t::WARMUP_REQ_NONE;
+		level.warmup_requisite = warmup_req_t::WARMUP_REQ_NONE;
 		level.warmup_notice_time = level.time;
 		level.warmup_gametype_hud_time = level.time;
 		return;
 	}
 
-	if (level.match_state == matchst_t::MATCH_WARMUP_DELAYED && level.match_state_timer > level.time)
+	if (level.match_state == match_state_t::MATCH_WARMUP_DELAYED && level.match_state_timer > level.time)
 		return;
 
-	if (level.match_state == matchst_t::MATCH_WARMUP_DEFAULT || level.match_state == matchst_t::MATCH_WARMUP_READYUP)
+	if (level.match_state == match_state_t::MATCH_WARMUP_DEFAULT || level.match_state == match_state_t::MATCH_WARMUP_READYUP)
 		MM_Horde_RunSpawning();
 
 	bool not_enough = false;
@@ -1440,7 +1450,7 @@ void TickWarmupState() {
 	// live match - that strands them off every team (grey tag, missing from the
 	// scoreboard) and skews the per-team counts the round logic relies on. Deliberate spectators
 	// (TEAM_SPECTATOR) are left alone; leaving the match is allowed.
-	if (GT(GT_RR) && level.match_state == matchst_t::MATCH_IN_PROGRESS) {
+	if (GT(GT_RR) && level.match_state == match_state_t::MATCH_IN_PROGRESS) {
 		for (auto ec : active_clients())
 			if (ec->client && ec->client->pers.connected && ec->client->sess.team == TEAM_NONE)
 				SetTeam(ec, PickTeam(-1), false, false, false);
@@ -1451,7 +1461,7 @@ void TickWarmupState() {
 	// next match can never reach the player/balance requirements and start. Reshuffle during
 	// warmup to restore balance. NOT during a live match: there an emptied team is the
 	// round-end trigger (TickRoundState), and the next round reshuffles in StartNewRound.
-	if (GT(GT_RR) && level.match_state < matchst_t::MATCH_IN_PROGRESS &&
+	if (GT(GT_RR) && level.match_state < match_state_t::MATCH_IN_PROGRESS &&
 		level.num_playing_clients > 1 && (!level.num_playing_red || !level.num_playing_blue)) {
 		TeamShuffle();
 		CalculateRanks();
@@ -1483,22 +1493,22 @@ void TickWarmupState() {
 	if (teams_imba) {
 		// Cancel immediately for team imbalance
 		level.match_cancel_delay_timer = 0_ms;
-		if (level.match_state <= matchst_t::MATCH_COUNTDOWN) {
-			if (level.match_state == matchst_t::MATCH_WARMUP_READYUP)
+		if (level.match_state <= match_state_t::MATCH_COUNTDOWN) {
+			if (level.match_state == match_state_t::MATCH_WARMUP_READYUP)
 				UnReadyAll();
-			else if (level.match_state == matchst_t::MATCH_COUNTDOWN) {
+			else if (level.match_state == match_state_t::MATCH_COUNTDOWN) {
 				gi.LocBroadcast_Print(PRINT_CENTER, "Countdown cancelled: teams are imbalanced\n");
 				// clear locks set by g_match_lock at countdown start
 				level.locked[TEAM_RED] = level.locked[TEAM_BLUE] = level.locked[TEAM_FREE] = false;
 			}
 
-			if (level.match_state != matchst_t::MATCH_WARMUP_DEFAULT) {
-				const matchst_t prev_state = level.match_state;
-				level.match_state = matchst_t::MATCH_WARMUP_DEFAULT;
+			if (level.match_state != match_state_t::MATCH_WARMUP_DEFAULT) {
+				const match_state_t prev_state = level.match_state;
+				level.match_state = match_state_t::MATCH_WARMUP_DEFAULT;
 				level.match_state_timer = 0_sec;
-				level.warmup_requisite = warmupreq_t::WARMUP_REQ_BALANCE;
+				level.warmup_requisite = warmup_req_t::WARMUP_REQ_BALANCE;
 				level.warmup_notice_time = level.time;
-				if (prev_state == matchst_t::MATCH_COUNTDOWN || prev_state == matchst_t::MATCH_WARMUP_READYUP)
+				if (prev_state == match_state_t::MATCH_COUNTDOWN || prev_state == match_state_t::MATCH_WARMUP_READYUP)
 					level.warmup_gametype_hud_time = level.time;
 				BroadcastWarmupWaitNotice();
 			}
@@ -1514,22 +1524,22 @@ void TickWarmupState() {
 
 		// Only cancel after delay has passed
 		if (level.time >= level.match_cancel_delay_timer) {
-			if (level.match_state <= matchst_t::MATCH_COUNTDOWN) {
-				if (level.match_state == matchst_t::MATCH_WARMUP_READYUP)
+			if (level.match_state <= match_state_t::MATCH_COUNTDOWN) {
+				if (level.match_state == match_state_t::MATCH_WARMUP_READYUP)
 					UnReadyAll();
-				else if (level.match_state == matchst_t::MATCH_COUNTDOWN) {
+				else if (level.match_state == match_state_t::MATCH_COUNTDOWN) {
 					gi.LocBroadcast_Print(PRINT_CENTER, "Countdown cancelled: not enough players\n");
 					// clear locks set by g_match_lock at countdown start
 					level.locked[TEAM_RED] = level.locked[TEAM_BLUE] = level.locked[TEAM_FREE] = false;
 				}
 
-				if (level.match_state != matchst_t::MATCH_WARMUP_DEFAULT) {
-					const matchst_t prev_state = level.match_state;
-					level.match_state = matchst_t::MATCH_WARMUP_DEFAULT;
+				if (level.match_state != match_state_t::MATCH_WARMUP_DEFAULT) {
+					const match_state_t prev_state = level.match_state;
+					level.match_state = match_state_t::MATCH_WARMUP_DEFAULT;
 					level.match_state_timer = 0_sec;
-					level.warmup_requisite = warmupreq_t::WARMUP_REQ_MORE_PLAYERS;
+					level.warmup_requisite = warmup_req_t::WARMUP_REQ_MORE_PLAYERS;
 					level.warmup_notice_time = level.time;
-					if (prev_state == matchst_t::MATCH_COUNTDOWN || prev_state == matchst_t::MATCH_WARMUP_READYUP)
+					if (prev_state == match_state_t::MATCH_COUNTDOWN || prev_state == match_state_t::MATCH_WARMUP_READYUP)
 						level.warmup_gametype_hud_time = level.time;
 					BroadcastWarmupWaitNotice();
 				}
@@ -1545,27 +1555,27 @@ void TickWarmupState() {
 	// We have enough players - clear the cancellation timer
 	level.match_cancel_delay_timer = 0_ms;
 
-	if (level.match_state == matchst_t::MATCH_WARMUP_DEFAULT) {
+	if (level.match_state == match_state_t::MATCH_WARMUP_DEFAULT) {
 		if (!g_dm_do_readyup->integer)
 			goto countdown;
-		level.match_state = matchst_t::MATCH_WARMUP_READYUP;
+		level.match_state = match_state_t::MATCH_WARMUP_READYUP;
 		level.match_state_timer = 0_sec;
-		level.warmup_requisite = warmupreq_t::WARMUP_REQ_READYUP;
+		level.warmup_requisite = warmup_req_t::WARMUP_REQ_READYUP;
 		level.warmup_notice_time = level.time;
 
 		BroadcastReadyReminderMessage();
 		return;
 	}
 
-	if (level.match_state > matchst_t::MATCH_COUNTDOWN)
+	if (level.match_state > match_state_t::MATCH_COUNTDOWN)
 		return;
 
 	// if the warmup is changed at the console, restart it
 	if (g_warmup_countdown->modified_count != level.warmup_modification_count) {
 		level.warmup_modification_count = g_warmup_countdown->modified_count;
 		level.match_state_timer = 0_sec;
-		level.match_state = matchst_t::MATCH_WARMUP_DEFAULT;
-		level.warmup_requisite = warmupreq_t::WARMUP_REQ_NONE;
+		level.match_state = match_state_t::MATCH_WARMUP_DEFAULT;
+		level.warmup_requisite = warmup_req_t::WARMUP_REQ_NONE;
 		level.warmup_notice_time = 0_sec;
 		level.warmup_gametype_hud_time = level.time;
 		level.prepare_to_fight = false;
@@ -1573,11 +1583,11 @@ void TickWarmupState() {
 	}
 
 	// if sufficient number of players are ready, start countdown
-	if (level.match_state == matchst_t::MATCH_WARMUP_READYUP) {
+	if (level.match_state == match_state_t::MATCH_WARMUP_READYUP) {
 		if (ReadyConditionsMet()) {
 countdown:
-			level.match_state = matchst_t::MATCH_COUNTDOWN;
-			level.warmup_requisite = warmupreq_t::WARMUP_REQ_NONE;
+			level.match_state = match_state_t::MATCH_COUNTDOWN;
+			level.warmup_requisite = warmup_req_t::WARMUP_REQ_NONE;
 			level.warmup_notice_time = 0_sec;
 			KillAllMonsters();
 
@@ -1622,7 +1632,7 @@ countdown:
 	}
 
 	// if the warmup time has counted down, start the match
-	if (level.match_state == matchst_t::MATCH_COUNTDOWN && level.time.seconds() >= level.match_state_timer.seconds()) {
+	if (level.match_state == match_state_t::MATCH_COUNTDOWN && level.time.seconds() >= level.match_state_timer.seconds()) {
 start:
 		Match_Start();
 		return;

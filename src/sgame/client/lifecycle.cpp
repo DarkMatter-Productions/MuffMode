@@ -5,6 +5,7 @@
 #include "monsters/m_player.h"
 #include "bots/bot_includes.h"
 #include "muffmode/mm_arena.h"
+#include "muffmode/mm_awards.h"
 #include "muffmode/mm_captain.h"
 #include "muffmode/mm_client_profile.h"
 #include "muffmode/mm_client_refs.h"
@@ -13,6 +14,7 @@
 #include "muffmode/mm_horde.h"
 #include "muffmode/mm_horde_ai_rules.h"
 #include "muffmode/mm_lms.h"
+#include "muffmode/mm_map_pick.h"
 #include "muffmode/mm_match_stats.h"
 #include "muffmode/mm_menu.h"
 #include "muffmode/mm_motd.h"
@@ -155,7 +157,7 @@ void InitClientPersistant(gentity_t *ent, gclient_t *client) {
 
 			if (false) // Race mode removed
 				client->pers.inventory[IT_COMPASS] = 1;
-			else if (!deathmatch->integer || level.match_state < matchst_t::MATCH_IN_PROGRESS)
+			else if (!deathmatch->integer || level.match_state < match_state_t::MATCH_IN_PROGRESS)
 				// compass also used for ready status toggling in deathmatch
 				client->pers.inventory[IT_COMPASS] = 1;
 
@@ -394,7 +396,7 @@ void G_PostRespawn(gentity_t *self) {
 	self->client->respawn_min_time = 0_ms;
 	self->client->respawn_time = level.time;
 	
-	if (deathmatch->integer && level.match_state == matchst_t::MATCH_WARMUP_READYUP)
+	if (deathmatch->integer && level.match_state == match_state_t::MATCH_WARMUP_READYUP)
 		BroadcastReadyReminderMessage();
 }
 
@@ -404,21 +406,21 @@ static bool ClientArenaEliminationRound(const gclient_t *client) {
 	if (GT(GT_ARENA))
 		return MM_Arena_IsEliminated(client);
 	return GTF(GTF_ARENA) && GTF(GTF_ELIMINATION) && GTF(GTF_ROUNDS) &&
-		level.match_state == matchst_t::MATCH_IN_PROGRESS &&
-		level.round_state == roundst_t::ROUND_IN_PROGRESS;
+		level.match_state == match_state_t::MATCH_IN_PROGRESS &&
+		level.round_state == round_state_t::ROUND_IN_PROGRESS;
 }
 
 static bool ClientHordeEliminatedRound(const gclient_t *client) {
 	return client && client->eliminated && GT(GT_HORDE) &&
-		level.match_state == matchst_t::MATCH_IN_PROGRESS &&
-		(level.round_state == roundst_t::ROUND_IN_PROGRESS || level.round_state == roundst_t::ROUND_ENDED) &&
+		level.match_state == match_state_t::MATCH_IN_PROGRESS &&
+		(level.round_state == round_state_t::ROUND_IN_PROGRESS || level.round_state == round_state_t::ROUND_ENDED) &&
 		client->sess.team != TEAM_SPECTATOR;
 }
 
 static bool ClientArenaBotMidRoundRespawnBlocked(const gclient_t *client) {
 	return client && GTF(GTF_ARENA) && GTF(GTF_ELIMINATION) && GTF(GTF_ROUNDS) &&
-		level.match_state == matchst_t::MATCH_IN_PROGRESS &&
-		level.round_state == roundst_t::ROUND_IN_PROGRESS &&
+		level.match_state == match_state_t::MATCH_IN_PROGRESS &&
+		level.round_state == round_state_t::ROUND_IN_PROGRESS &&
 		notGT(GT_HORDE) && notGT(GT_LMS);
 }
 
@@ -435,7 +437,7 @@ void ClientRespawn(gentity_t *ent) {
 		ent->svflags &= ~SVF_NOCLIENT;
 
 		bool rr_defected = false;
-		if (GT(GT_RR) && level.match_state == matchst_t::MATCH_IN_PROGRESS) {
+		if (GT(GT_RR) && level.match_state == match_state_t::MATCH_IN_PROGRESS) {
 			team_t cur = ent->client->sess.team;
 			team_t other = Teams_OtherTeam(cur);
 			int teammates_left = 0, opponents = 0;
@@ -814,9 +816,9 @@ void ClientSpawn(gentity_t *ent) {
 	const bool				defer_ghost_presentation =
 		GhostAbortSpawnUsesDeferredPresentation(ent);
 
-	if (GTF(GTF_ROUNDS) && level.match_state == matchst_t::MATCH_IN_PROGRESS && notGT(GT_HORDE)) {
-		const bool round_locked = level.round_state == roundst_t::ROUND_IN_PROGRESS ||
-			level.round_state == roundst_t::ROUND_ENDED;
+	if (GTF(GTF_ROUNDS) && level.match_state == match_state_t::MATCH_IN_PROGRESS && notGT(GT_HORDE)) {
+		const bool round_locked = level.round_state == round_state_t::ROUND_IN_PROGRESS ||
+			level.round_state == round_state_t::ROUND_ENDED;
 		if (round_locked) {
 			const bool freeze_thaw_respawn = MM_FreezeTag_IsFrozen(ent);
 
@@ -833,8 +835,8 @@ void ClientSpawn(gentity_t *ent) {
 	G_ClearLagCompensationHistory(ent);
 	MM_FreezeTag_ClearClient(ent);
 
-	if (GT(GT_HORDE) && level.match_state == matchst_t::MATCH_IN_PROGRESS &&
-		MM_Horde_ShouldEliminateMidWaveSpawn(level.round_state == roundst_t::ROUND_IN_PROGRESS,
+	if (GT(GT_HORDE) && level.match_state == match_state_t::MATCH_IN_PROGRESS &&
+		MM_Horde_ShouldEliminateMidWaveSpawn(level.round_state == round_state_t::ROUND_IN_PROGRESS,
 			ent->client->eliminated, ent->client->pers.lives))
 		ClientSetEliminated(ent);
 	bool eliminated = ent->client->eliminated;
@@ -971,7 +973,7 @@ void ClientSpawn(gentity_t *ent) {
 	// or new spawns in SP/coop)
 	const bool horde_elim_spectator = GT(GT_HORDE) && eliminated && ClientIsPlaying(client);
 	const bool horde_wave_rejoin = GT(GT_HORDE) && ClientIsPlaying(client) && !eliminated &&
-		level.round_state == roundst_t::ROUND_COUNTDOWN && level.round_number > 0 &&
+		level.round_state == round_state_t::ROUND_COUNTDOWN && level.round_number > 0 &&
 		client->pers.weapon != nullptr;
 	const bool ghost_abort_needs_persistent_initialization =
 		MM_GhostSpawnNeedsPersistentInitialization(defer_ghost_presentation,
@@ -1814,6 +1816,8 @@ void ClientDisconnect(gentity_t *ent) {
 
 	// Raw references to this reusable client slot must end with this lifetime.
 	MM_ClearDepartingClientReferences(ent);
+	// A departed player must not still be deciding the next map.
+	MM_MapPick_ClearClientVote(ent);
 	// A grapple entity is owned by this exact client generation and must not
 	// remain allocated after either a normal disconnect or snapshot capture.
 	Weapon_Grapple_DoReset(ent->client);
@@ -2186,7 +2190,7 @@ static bool ClientInactivityTimer(gentity_t *ent) {
 	// The moment they're active again, fold them back onto a team automatically so they
 	// aren't stranded off every team (grey tag, missing from the scoreboard) for the rest
 	// of the match. A deliberate spectator has sess.inactive == false and is left alone.
-	if (GT(GT_RR) && level.match_state == matchst_t::MATCH_IN_PROGRESS && deathmatch->integer &&
+	if (GT(GT_RR) && level.match_state == match_state_t::MATCH_IN_PROGRESS && deathmatch->integer &&
 		!ent->client->sess.is_a_bot && ent->client->sess.team == TEAM_SPECTATOR &&
 		ent->client->sess.inactive && client_has_input(ent)) {
 		SetTeam(ent, PickTeam(-1), false, false, false);
@@ -2250,7 +2254,7 @@ static void ClientTimerActions(gentity_t *ent) {
 	MM_ClampEntityHealthArmor(ent);
 
 	if (GT(GT_HORDE) && ent->client->eliminated && ent->client->sess.team != TEAM_SPECTATOR &&
-		level.round_state == roundst_t::ROUND_IN_PROGRESS)
+		level.round_state == round_state_t::ROUND_IN_PROGRESS)
 		MM_Horde_NotifyEliminatedSpectator(ent);
 
 	ent->client->time_residual = level.time + 1_sec;
@@ -2295,7 +2299,11 @@ void ClientThink(gentity_t *ent, usercmd_t *ucmd) {
 	client->cmd.buttons = client->buttons;
 
 	if (!client->initial_menu_shown && client->initial_menu_delay && level.time > client->initial_menu_delay) {
-		if (!ClientIsPlaying(client) && (!client->sess.initialised || client->sess.inactive)) {
+		// [MuffMode] Never open the join menu on a bot. Arena bots never route through SetTeam
+		// (the only sess.initialised setter), so without this guard the menu opens on them and is
+		// never closed, which suppresses Think_Weapon forever and unicasts a layout every 3s.
+		const bool is_a_bot = (ent->svflags & SVF_BOT) || client->sess.is_a_bot;
+		if (!is_a_bot && !ClientIsPlaying(client) && (!client->sess.initialised || client->sess.inactive)) {
 			if (ent->client->sess.admin && g_owner_push_scores->integer)
 				Cmd_Score_f(ent);
 			else
@@ -2389,10 +2397,25 @@ void ClientThink(gentity_t *ent, usercmd_t *ucmd) {
 		if (level.intermission_time) {
 			n64_sp = !deathmatch->integer && level.is_n64;
 
+			// [MuffMode] While the next-map pick is up it owns the intermission:
+			// its menu takes the buttons to move the cursor and cast the pick, and
+			// nobody -- menu open or not -- can press past it to the exit.
+			if (MM_MapPick_Active()) {
+				if (MM_MapPick_MenuOpen(ent))
+					HandleMenuMovement(ent, ucmd);
+			}
+			// [MuffMode] The awards reel sits between the scoreboard and the
+			// pick, and takes the skip on its own clock rather than the
+			// scoreboard's: its hold has to expire before a key means anything,
+			// or the press that dismissed the scoreboard would carry through it.
+			else if (MM_Awards_Active()) {
+				if (MM_Awards_AcceptsSkip() && (ucmd->buttons & BUTTON_ANY))
+					level.intermission_exit = true;
+			}
 			// can exit intermission after five seconds
 			// Paril: except in N64. the camera handles it.
 			// Paril again: except on unit exits, we can leave immediately after camera finishes
-			if (level.changemap && (!n64_sp || level.level_intermission_set) && level.time > level.intermission_time + 5_sec && (ucmd->buttons & BUTTON_ANY))
+			else if (level.changemap && (!n64_sp || level.level_intermission_set) && level.time > level.intermission_time + 5_sec && (ucmd->buttons & BUTTON_ANY))
 				level.intermission_exit = true;
 		}
 
@@ -3075,12 +3098,12 @@ void ClientBeginServerFrame(gentity_t *ent) {
 		}
 
 		if (deathmatch->integer && GT(GT_HORDE) && ClientIsPlaying(client) && client->eliminated &&
-				level.round_state == roundst_t::ROUND_IN_PROGRESS) {
+				level.round_state == round_state_t::ROUND_IN_PROGRESS) {
 			return;
 		}
 
 		if (deathmatch->integer && GT(GT_HORDE) && ClientIsPlaying(client) && !client->eliminated &&
-				level.round_state == roundst_t::ROUND_IN_PROGRESS &&
+				level.round_state == round_state_t::ROUND_IN_PROGRESS &&
 				level.time > client->respawn_time && !level.coop_level_restart_time) {
 			ClientRespawn(ent);
 			return;
@@ -3090,7 +3113,7 @@ void ClientBeginServerFrame(gentity_t *ent) {
 		// loadout (eliminated fighters are handled above by ClientArenaEliminationRound, which
 		// transitions them to a spectator until the next round).
 		if (deathmatch->integer && GT(GT_LMS) && ClientIsPlaying(client) && !client->eliminated &&
-				level.round_state == roundst_t::ROUND_IN_PROGRESS &&
+				level.round_state == round_state_t::ROUND_IN_PROGRESS &&
 				level.time > client->respawn_time && !level.coop_level_restart_time) {
 			ClientRespawn(ent);
 			return;

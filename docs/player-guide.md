@@ -54,6 +54,7 @@ The **Player Config** menu separates **Display & Audio**, **Spectator & Follow**
 | Command | What it does |
 | --- | --- |
 | `announcer [on|off]` | Toggle Quake Live style voice announcements. The voice pack is off by default; stock fallback cues still play where defined. |
+| `awards` | Reprint the last match's post-match awards reel to the console. The reel itself is gone once the level changes, so this is the only way to read it back. |
 | `eskin <model/skin>` or `eskin off` | In team games and Arena Rooms, re-skin enemies on your screen only; in duel, re-skin your opponent (e.g. `eskin male/grunt`). Other rooms and nonfighters are unaffected. No argument shows the current setting. |
 | `fm [on|off]` | Toggle frag messages. |
 | `help` | Toggle help text drawing. |
@@ -80,6 +81,19 @@ side; Practice keeps hits and knockback non-lethal. A room's teams, ready state,
 vote, timeout, score, and settings do not affect any other room.
 Practice is teamless, grants unlimited ammunition, scores damage dealt, and
 immediately respawns environmental deaths.
+
+Entering a room and creating or joining a team drops you into that room's own
+warmup, the same shape as MuffMode's warmup elsewhere: the room tells you what it
+is waiting on, `ready` marks you up, and once enough players are ready the room
+counts down with the announcer before FIGHT. Every room warms up independently,
+so one room counting down never disturbs another. The HUD shows `WARMUP - NEED
+PLAYERS`, `WARMUP - UNBALANCED`, or `WARMUP (n/m READY)`, and the scoreboard
+repeats the reason and marks who is ready. Servers that prefer the old behavior
+of starting the moment two sides pair up can turn ready-up off.
+
+Bots choose a room for themselves. They head for a room that already has players
+in it, prefer one where somebody is waiting for an opponent, and take an opposing
+team, founding one when a lone player has nobody to fight.
 The normal Multiplayer menu remains the hub. Use **Browse Rooms** or
 **Change Room** for the room browser, then **Teams & Queue** for the focused
 team and queue page. Both submenus paginate when needed and return directly to
@@ -120,7 +134,7 @@ In Freeze Tag, dying during a live round freezes you in place instead of sending
 | `arena create [name]` | Create a logical team. |
 | `arena join <team-id\|player\|red\|blue> [password]` | Join a logical or fixed team. |
 | `arena teamleave` | Leave your current team but remain in the room. |
-| `arena ready [0\|1]` | In competition mode, toggle ready state or set it explicitly. |
+| `arena ready [0\|1]` | Toggle ready state or set it explicitly during room warmup. Available whenever the server enables Arena ready-up or the room is in competition mode. |
 | `arena propose <key> <value>` / `arena vote <yes\|no>` | Start or answer a room-local settings vote. |
 | `arena timeout` / `arena timein` | Use a competition timeout or end the timeout called by your active side. |
 | `arena lock [password]` / `arena unlock` | In competition mode, let the captain control entry to the team. Passwords are a MuffMode extension. |
@@ -139,9 +153,10 @@ In Freeze Tag, dying during a live round freezes you in place instead of sending
 | `maplist` | Summarize the active structured pool/cycle and any legacy map-list fallback. |
 | `mappool [filter]` | List the first 32 matching maps in the structured voting/MyMap catalog, optionally filtered by name, title, episode, mode, `popular`, or `custom`. |
 | `mapcycle [filter]` | List the first 32 matches in the active structured automatic-rotation cycle with the same optional filters. |
+| `mappick [1-3]` | Choose the next map during the post-scoreboard pick, or list the current candidates and their tallies when given no number. |
 | `motd` | Print the message of the day. |
 | `forfeit` | Forfeit a duel when `g_allow_forfeit` is enabled. |
-| `sr` | Show your current singleton gametype's skill rating, its latest change, and the average rating of profile-ready active human players. Arena Rooms, non-Duel matches with a departure, matches containing a player whose profile could not be loaded, and matches whose complete rating result cannot be admitted to the bounded persistence queue are unranked. |
+| `sr` | Show your current singleton gametype's skill rating, its latest change, and the average rating of profile-ready active human players. Arena Rooms, non-Duel matches with a departure, matches containing a player whose profile could not be loaded, and matches whose complete rating result cannot be admitted to the bounded persistence queue are unranked. Your rating is also shown on the centerprint you receive when you join the match, whenever the session is ranked. |
 | `ghost <code>` | Restore a saved in-progress match slot when automatic reconnect recovery is not available. |
 | `time-out` | Call a timeout when the server allows timeouts. |
 | `time-in` | End an active timeout early. |
@@ -152,6 +167,25 @@ In Freeze Tag, dying during a live round freezes you in place instead of sending
 | `followkiller [on|off]` | Toggle auto-following killers while spectating. |
 | `followleader [on|off]` | Toggle auto-following the leading player while spectating. |
 | `followpowerup [on|off]` | Toggle auto-following players who pick up powerups. |
+
+When the server runs the next-map pick (`g_map_pick`), the end-of-match
+scoreboard is followed by a short menu offering up to three maps. Move the
+cursor with forward/back and choose with attack or jump, or type
+`mappick <number>`. Vote counts appear beside each map, your own choice is
+highlighted, and you can change it until the timer runs out. A map that holds
+more than half of the eligible voters wins immediately. Spectators take part
+whenever `g_allow_spec_vote` is enabled.
+
+A ranked match ends with three screens rather than one: the scoreboard, then the
+awards reel, then the next-map pick. Each moves on when somebody presses a key,
+or on its own after a few seconds if nobody does.
+
+The awards reel replaces the scoreboard with up to a dozen titles, each in green
+with the player who earned it underneath. It stays up for `g_match_awards`
+seconds unattended; any key moves it along, though not for the first three
+seconds, so the press that dismissed the scoreboard cannot skip it unseen.
+Anything you won is repeated in your end-of-match summary, and `awards` reprints
+the last reel at any time.
 
 MyMap modifiers are `pu` (powerups), `pa` (power armor), `ht` (health),
 `ar` (armor), `am` (ammo), and `wp` (weapons). Prefix a code with `+` to

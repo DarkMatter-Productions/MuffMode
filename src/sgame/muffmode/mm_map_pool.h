@@ -446,6 +446,13 @@ struct map_entry_t {
 	map_mode_flags_t modes = MAP_MODE_NONE;
 };
 
+// A rotation entry reduced to what a player-facing chooser needs: the map to
+// load and the name to show for it.
+struct map_choice_t {
+	std::string bsp;
+	std::string title;
+};
+
 } // namespace muffmode::map_pool
 
 // Structured map-pool lifecycle and queries.
@@ -467,6 +474,11 @@ std::vector<std::string> MM_CollectStructuredMapPool();
 std::vector<std::string> MM_CollectStructuredMapCycle();
 bool MM_SelectStructuredNextMap(std::string &mapname);
 bool MM_SelectStructuredCycleStartMap(std::string &mapname);
+// Several eligible successors to the current map, shuffled, for the end-of-match
+// pick. Uses the same eligibility and relaxation rules as the automatic
+// selection, so the offer never contains a map the rotation would refuse.
+std::vector<muffmode::map_pool::map_choice_t> MM_CollectStructuredMapChoices(
+	size_t max_choices);
 
 // Player/admin command bodies.
 void MM_CmdMapPool(gentity_t *ent);

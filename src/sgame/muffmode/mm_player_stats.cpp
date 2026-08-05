@@ -2,11 +2,13 @@
 // Licensed under the GNU General Public License 2.0.
 
 #include "g_local.h"
+#include "muffmode/mm_awards.h"
 #include "muffmode/mm_client_profile.h"
 #include "muffmode/mm_duel.h"
 #include "muffmode/mm_ghost.h"
 #include "muffmode/mm_match_stats.h"
 #include "muffmode/mm_player_stats.h"
+#include "muffmode/mm_util.h"
 
 #include <algorithm>
 #include <array>
@@ -82,6 +84,10 @@ struct pending_profile_settlement_t {
 	int64_t duration_ms = 0;
 	int64_t next_retry_ms = 0;
 	int64_t retry_delay_ms = 0;
+	// [MuffMode] Post-match award keys earned in this match. Owned here because
+	// a settlement can be retried across many frames, long after the reel that
+	// produced it has been torn down.
+	std::vector<std::string> match_awards;
 };
 
 std::vector<pending_profile_settlement_t> s_pending_profile_settlements;
@@ -320,6 +326,10 @@ player_stats_participant_t *FindParticipant(
 
 bool RatingsAllowed(const std::vector<player_stats_participant_t> &participants)
 {
+	// Host opted out of ranking entirely: play still records outcomes, ratings simply never move.
+	if (!muffmode::CvarEnabled(g_ranked))
+		return false;
+
 	return MM_PlayerStatsMatchCanBeRanked(
 			s_match_has_bot_participant,
 			s_match_has_unready_human_participant,
@@ -359,7 +369,8 @@ bool PersistPendingProfileSettlement(
 		pending.change,
 		pending.duration_ms,
 		pending.player_name,
-		pending.recovery_preferences_json
+		pending.recovery_preferences_json,
+		&pending.match_awards
 	};
 	return MM_ClientProfilePersistMatchResult(result);
 }
@@ -491,6 +502,32 @@ void PruneSettledPlayerHistory()
 	}
 }
 
+// Award keys this identity took off the post-match reel. Matched on social id
+// because that is the only stable handle a career profile is keyed by; a player
+// with no social id has no profile to credit in the first place.
+std::vector<std::string> CollectAwardKeys(std::string_view social_id)
+{
+	std::vector<std::string> keys;
+	if (social_id.empty())
+		return keys;
+
+	// The reel is deliberately sticky so `awards` still works after the map
+	// changes, and it carries no match identity of its own. Career tallies are
+	// permanent, so credit it only while it belongs to the match settling now.
+	if (!MM_Awards_BelongsToSettlingMatch())
+		return keys;
+
+	for (const mm_award_entry_t &entry : MM_Awards_Entries()) {
+		if (entry.social_id != social_id)
+			continue;
+		const char *key = MM_AwardKey(entry.award);
+		if (key && *key)
+			keys.emplace_back(key);
+	}
+
+	return keys;
+}
+
 bool EnqueueProfileSettlement(
 	const player_stats_participant_t &participant,
 	mm_player_stats_outcome_t outcome,
@@ -538,6 +575,11 @@ bool EnqueueProfileSettlement(
 		client->sess.skill_rating_change,
 		std::max<int64_t>(0, duration_ms)
 	});
+	// The awards reel is already decided by the time settlements are queued --
+	// MM_MatchStats_FreezeResultTime runs before MM_PlayerStats_OnMatchEnd --
+	// so the winner's titles can be attached to the career write here.
+	s_pending_profile_settlements.back().match_awards =
+		CollectAwardKeys(social_id);
 	RegisterProfileRetryIdentity(social_id);
 	return true;
 }
@@ -1257,6 +1299,20 @@ float MM_PlayerStats_Rating(const gentity_t *ent) noexcept
 		: MM_PlayerStats_NormalizeRating(rating);
 }
 
+bool MM_PlayerStats_SessionIsRanked(const gentity_t *ent) noexcept
+{
+	if (!ent || !ent->client)
+		return false;
+	if (!muffmode::CvarEnabled(g_ranked))
+		return false;
+	if (GT(GT_ARENA))
+		return false;
+	if (IsBot(ent) || ent->client->sess.is_a_bot)
+		return false;
+
+	return ent->client->sess.profile_persistence_ready;
+}
+
 int32_t MM_PlayerStats_RatingChange(const gentity_t *ent) noexcept
 {
 	return ent && ent->client ? ent->client->sess.skill_rating_change : 0;
@@ -1318,6 +1374,12 @@ void MM_CmdSkillRating(gentity_t *ent)
 		return;
 	if (CheckFlood(ent))
 		return;
+	if (!muffmode::CvarEnabled(g_ranked)) {
+		gi.LocClient_Print(ent, PRINT_HIGH,
+			"This server is unranked; skill ratings and match statistics are disabled.\n");
+		return;
+	}
+
 	if (GT(GT_ARENA)) {
 		gi.LocClient_Print(ent, PRINT_HIGH,
 			"Arena Rooms are unranked; live room statistics remain available in Player Stats.\n");

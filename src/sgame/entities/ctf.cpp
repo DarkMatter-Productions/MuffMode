@@ -283,7 +283,7 @@ bool CTF_PickupFlag(gentity_t *ent, gentity_t *other) {
 		return false;
 
 	// Capture Strike: no flag interaction once the turn is over (e.g. after a defender wipe).
-	if (GT(GT_STRIKE) && level.round_state != roundst_t::ROUND_IN_PROGRESS)
+	if (GT(GT_STRIKE) && level.round_state != round_state_t::ROUND_IN_PROGRESS)
 		return false;
 
 	team_t		team;

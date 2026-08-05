@@ -1,6 +1,11 @@
 // Copyright (c) ZeniMax Media Inc.
 // Licensed under the GNU General Public License 2.0.
 
+// [MuffMode] This header had no include guard, so any translation unit that reached it twice
+// (directly and again through g_local.h) failed to compile with redefinition errors. Every other
+// header in the tree already uses #pragma once.
+#pragma once
+
 #include <cstddef>
 #include <string_view>
 

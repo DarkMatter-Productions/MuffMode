@@ -172,6 +172,10 @@ void MM_MatchStats_RecordMedal(gclient_t *client, medal_t medal,
 	uint32_t count = 1);
 void MM_MatchStats_RecordPickup(gclient_t *client, item_id_t item,
 	uint64_t pickup_delay_msec);
+// Notes that a map-placed item has returned to the floor. Only the Quad is
+// counted today: the post-match Quad awards are a share of how many times it was
+// available, which a pickup total on its own cannot express.
+void MM_MatchStats_RecordItemAvailable(const gentity_t *ent);
 
 // CTF instrumentation. Flag-team counters describe the flag being carried;
 // scoring-team counters describe captures, defences, and assists.

@@ -31,11 +31,13 @@
 }
 {
 "classname" "trigger_multiple"
+"spawnflags" "2048"
 "target" "target_m2_1"
 "model" "*1"
 }
 {
 "classname" "target_changelevel"
+"spawnflags" "2048"
 "origin" "-1000 648 -88"
 "map" "mgu5m2$from1_1"
 "targetname" "target_m2_1"
@@ -684,6 +686,7 @@
 }
 {
 "classname" "func_door"
+"spawnflags" "2048"
 "angle" "-2"
 "wait" "-1"
 "targetname" "door_bunker"
@@ -695,6 +698,7 @@
 }
 {
 "classname" "func_door"
+"spawnflags" "2048"
 "angle" "-1"
 "wait" "-1"
 "targetname" "door_bunker"
@@ -808,6 +812,7 @@
 }
 {
 "classname" "func_door"
+"spawnflags" "2048"
 "_shadow" "0"
 "_shadowself" "0"
 "speed" "0"
@@ -1106,6 +1111,7 @@
 {
 "angle" "-1"
 "classname" "func_door"
+"spawnflags" "2048"
 "targetname" "door_closed"
 "wait" "-1"
 "_mirrorinside" "1"
@@ -1406,6 +1412,7 @@
 }
 {
 "classname" "func_door"
+"spawnflags" "2048"
 "angle" "-1"
 "targetname" "soldier_lasoff"
 "wait" "-1"
@@ -1456,7 +1463,7 @@
 "wait" "-1"
 "speed" "50"
 "targetname" "platform_sewer_entrance"
-"spawnflags" "32"
+"spawnflags" "2080"
 "model" "*18"
 }
 {
@@ -1626,7 +1633,7 @@
 "angle" "-1"
 "targetname" "enemies_door_button_hatch"
 "wait" "-1"
-"spawnflags" "0"
+"spawnflags" "2048"
 "model" "*19"
 }
 {
@@ -1757,7 +1764,7 @@
 "angle" "-1"
 "targetname" "enemies_below_overlook"
 "wait" "-1"
-"spawnflags" "32"
+"spawnflags" "2080"
 "model" "*21"
 }
 {
@@ -1802,7 +1809,7 @@
 "classname" "func_door"
 "targetname" "door_tower"
 "wait" "-1"
-"spawnflags" "32"
+"spawnflags" "2080"
 "model" "*22"
 }
 {
@@ -1810,7 +1817,7 @@
 "classname" "func_door"
 "targetname" "door_tower"
 "wait" "-1"
-"spawnflags" "32"
+"spawnflags" "2080"
 "model" "*23"
 }
 {
@@ -1852,7 +1859,7 @@
 "classname" "func_door"
 "targetname" "corner_lower_reinforcements"
 "wait" "-1"
-"spawnflags" "0"
+"spawnflags" "2048"
 "model" "*24"
 }
 {
@@ -1931,7 +1938,7 @@
 "classname" "func_door"
 "targetname" "corner_upper_reinforcements"
 "wait" "-1"
-"spawnflags" "32"
+"spawnflags" "2080"
 "model" "*25"
 }
 {
@@ -2155,6 +2162,7 @@
 }
 {
 "classname" "func_button"
+"spawnflags" "2048"
 "angle" "180"
 "wait" "240"
 "target" "relay_door_stroog"
@@ -2235,6 +2243,7 @@
 }
 {
 "classname" "item_breather"
+"spawnflags" "2048"
 "origin" "-1026.14 1094.14 56"
 "angle" "120"
 }
@@ -2408,7 +2417,7 @@
 }
 {
 "classname" "func_door_rotating"
-"spawnflags" "152"
+"spawnflags" "2200"
 "speed" "30"
 "targetname" "rot_hatch"
 "distance" "155"
@@ -2418,7 +2427,7 @@
 }
 {
 "classname" "func_door_rotating"
-"spawnflags" "152"
+"spawnflags" "2200"
 "speed" "30"
 "targetname" "rot_hatch"
 "distance" "-155"
@@ -2653,6 +2662,7 @@
 }
 {
 "classname" "func_button"
+"spawnflags" "2048"
 "angle" "180"
 "wait" "240"
 "target" "relay_activate_big_elevator"
@@ -2791,6 +2801,7 @@
 }
 {
 "classname" "target_changelevel"
+"spawnflags" "2048"
 "origin" "-240 -772 564"
 "targetname" "target_changelevel_m2_1"
 "map" "mgu5m2$from1_2"
@@ -2808,6 +2819,7 @@
 }
 {
 "classname" "func_button"
+"spawnflags" "2048"
 "angle" "180"
 "target" "door_rocket_fodder"
 "model" "*33"
@@ -2831,6 +2843,7 @@
 {
 "angle" "-1"
 "classname" "func_door"
+"spawnflags" "2048"
 "wait" "-1"
 "targetname" "door_rocket_fodder"
 "target" "enemies_rocket_fodder"
@@ -2900,6 +2913,7 @@
 }
 {
 "classname" "func_door"
+"spawnflags" "2048"
 "angle" "-2"
 "lip" "416"
 "targetname" "big_elevator"
@@ -3346,7 +3360,7 @@
 }
 {
 "classname" "trigger_hurt"
-"spawnflags" "128"
+"spawnflags" "2176"
 "targetname" "clip_laser2"
 "dmg" "1"
 "model" "*52"
@@ -3365,7 +3379,7 @@
 "classname" "target_speaker"
 "attenuation" "2"
 "volume" "1"
-"spawnflags" "1"
+"spawnflags" "2049"
 }
 {
 "classname" "trigger_relay"
@@ -3435,12 +3449,14 @@
 }
 {
 "classname" "func_door"
+"spawnflags" "2048"
 "alpha" "0.5"
 "targetname" "red_field"
 "model" "*55"
 }
 {
 "classname" "func_button"
+"spawnflags" "2048"
 "wait" "-1"
 "target" "relay_obj3"
 "message" "$map_red_lasers_deactivated"
@@ -3455,6 +3471,7 @@
 }
 {
 "classname" "func_door"
+"spawnflags" "2048"
 "angle" "-1"
 "lip" "8"
 "targetname" "door_stroog"
@@ -3464,6 +3481,7 @@
 }
 {
 "classname" "target_changelevel"
+"spawnflags" "2048"
 "origin" "-2656 788 -544"
 "targetname" "target_changelevel_m3_1"
 "map" "mgu5m3$from1_4"
@@ -3578,6 +3596,7 @@
 }
 {
 "classname" "target_changelevel"
+"spawnflags" "2048"
 "origin" "-1500 -1572 532"
 "targetname" "target_changelevel_m2_1"
 "map" "mgu5m2$from1_2"
@@ -3626,6 +3645,7 @@
 }
 {
 "classname" "target_changelevel"
+"spawnflags" "2048"
 "origin" "-268 -788 444"
 "targetname" "target_changelevel_m2_2"
 "map" "mgu5m2$from1_3"
@@ -3799,6 +3819,7 @@
 }
 {
 "classname" "func_door"
+"spawnflags" "2048"
 "angle" "-1"
 "targetname" "door_start"
 "message" "$map_access_denied"
@@ -4203,6 +4224,7 @@
 }
 {
 "classname" "func_explosive"
+"spawnflags" "2048"
 "health" "10"
 "_phong" "1"
 "_phong_angle" "89"
@@ -4232,7 +4254,7 @@
 "classname" "target_speaker"
 "attenuation" "2"
 "volume" "1"
-"spawnflags" "1"
+"spawnflags" "2049"
 }
 {
 "classname" "target_goal"
@@ -4270,16 +4292,19 @@
 }
 {
 "classname" "trigger_multiple"
+"spawnflags" "2048"
 "target" "target_changelevel_m2_2"
 "model" "*70"
 }
 {
 "classname" "trigger_multiple"
+"spawnflags" "2048"
 "target" "target_changelevel_m2_1"
 "model" "*71"
 }
 {
 "classname" "trigger_multiple"
+"spawnflags" "2048"
 "targetname" "trigger_door_bunker"
 "target" "activate_door_bunker"
 "wait" "6"
@@ -4288,6 +4313,7 @@
 }
 {
 "classname" "trigger_multiple"
+"spawnflags" "2048"
 "target" "target_changelevel_m2_3"
 "model" "*73"
 }
@@ -4308,6 +4334,7 @@
 }
 {
 "classname" "trigger_multiple"
+"spawnflags" "2048"
 "target" "target_m2_1"
 "model" "*77"
 }
@@ -4318,11 +4345,13 @@
 }
 {
 "classname" "trigger_multiple"
+"spawnflags" "2048"
 "target" "target_changelevel_m3_1"
 "model" "*79"
 }
 {
 "classname" "target_changelevel"
+"spawnflags" "2048"
 "origin" "1028 -332 428"
 "targetname" "target_changelevel_m2_3"
 "map" "mgu5m2$from1_4"
@@ -4337,12 +4366,14 @@
 }
 {
 "classname" "target_changelevel"
+"spawnflags" "2048"
 "origin" "-1000 664 -88"
 "map" "mgu5m2$from1_1"
 "targetname" "target_m2_1"
 }
 {
 "classname" "trigger_key"
+"spawnflags" "2048"
 "origin" "-1504 936 -40"
 "target" "door_bunker"
 "item" "key_red_key"
@@ -4549,6 +4580,7 @@
 }
 {
 "classname" "func_wall"
+"spawnflags" "2048"
 "targetname" "clip_laser1"
 "model" "*105"
 }
@@ -5156,6 +5188,7 @@
 }
 {
 "classname" "item_breather"
+"spawnflags" "2048"
 "origin" "-924 1232 112"
 "angle" "180"
 }
@@ -5165,6 +5198,7 @@
 }
 {
 "classname" "key_blue_key"
+"spawnflags" "2048"
 "origin" "-1680 -768 488"
 }
 {
@@ -6220,6 +6254,7 @@
 }
 {
 "classname" "func_wall"
+"spawnflags" "2048"
 "targetname" "clip_laser2"
 "model" "*107"
 }
@@ -6270,4 +6305,493 @@
 "origin" "-664 1280 420"
 "angle" "240"
 "targetname" "combat_flyer2"
+}
+// [MuffMode] deathmatch/horde additions. spawnflags 20480 keeps every one of
+// these out of single player and co-op, where the originals above still rule.
+// -- doors the campaign kept locked behind buttons and keys
+{
+"classname" "func_door"
+"angle" "-2"
+"wait" "-1"
+"speed" "12"
+"lip" "-8"
+"spawnflags" "20480"
+"model" "*3"
+}
+{
+"classname" "func_door"
+"angle" "-1"
+"wait" "-1"
+"speed" "12"
+"lip" "-5"
+"spawnflags" "20480"
+"model" "*4"
+}
+{
+"classname" "func_door"
+"wait" "-1"
+"_shadow" "0"
+"_shadowself" "0"
+"spawnflags" "20480"
+"model" "*6"
+}
+{
+"classname" "func_door"
+"angle" "-1"
+"wait" "-1"
+"_mirrorinside" "1"
+"spawnflags" "20480"
+"model" "*13"
+}
+{
+"classname" "func_door"
+"angle" "-1"
+"wait" "-1"
+"spawnflags" "20480"
+"model" "*17"
+}
+{
+"classname" "func_door"
+"angle" "90"
+"wait" "-1"
+"speed" "50"
+"spawnflags" "20480"
+"model" "*18"
+}
+{
+"classname" "func_door"
+"angle" "-1"
+"wait" "-1"
+"spawnflags" "20480"
+"model" "*19"
+}
+{
+"classname" "func_door"
+"angle" "-1"
+"wait" "-1"
+"spawnflags" "20480"
+"model" "*21"
+}
+{
+"classname" "func_door"
+"angle" "-1"
+"wait" "-1"
+"spawnflags" "20480"
+"model" "*22"
+}
+{
+"classname" "func_door"
+"angle" "-1"
+"wait" "-1"
+"spawnflags" "20480"
+"model" "*23"
+}
+{
+"classname" "func_door"
+"angle" "-1"
+"wait" "-1"
+"spawnflags" "20480"
+"model" "*24"
+}
+{
+"classname" "func_door"
+"angle" "-1"
+"wait" "-1"
+"spawnflags" "20480"
+"model" "*25"
+}
+{
+"classname" "func_door"
+"angle" "-1"
+"wait" "-1"
+"spawnflags" "20480"
+"model" "*34"
+}
+{
+"classname" "func_door"
+"angle" "-2"
+"wait" "5"
+"speed" "50"
+"lip" "416"
+"spawnflags" "20480"
+"model" "*37"
+}
+{
+"classname" "func_door"
+"angle" "-1"
+"wait" "-1"
+"lip" "8"
+"spawnflags" "20480"
+"model" "*57"
+}
+{
+"classname" "func_door"
+"angle" "-1"
+"wait" "3"
+"spawnflags" "20480"
+"model" "*58"
+}
+{
+"classname" "func_door_rotating"
+"spawnflags" "20632"
+"speed" "30"
+"distance" "155"
+"wait" "-1"
+"origin" "-920 672 40"
+"model" "*29"
+}
+{
+"classname" "func_door_rotating"
+"spawnflags" "20632"
+"speed" "30"
+"distance" "-155"
+"wait" "-1"
+"origin" "-1064 672 40"
+"model" "*30"
+}
+// -- rebreathers become double damage
+{
+"classname" "item_double"
+"origin" "-1026.14 1094.14 56"
+"angle" "120"
+"spawnflags" "20480"
+}
+{
+"classname" "item_double"
+"origin" "-924 1232 112"
+"angle" "180"
+"spawnflags" "20480"
+}
+// -- wider weapon and ammo spread
+// west sewer, lower walkway
+{
+"classname" "weapon_supershotgun"
+"origin" "-680 568 -104"
+"spawnflags" "20480"
+}
+// east complex, lower hall
+{
+"classname" "weapon_supershotgun"
+"origin" "776 1000 16"
+"spawnflags" "20480"
+}
+// lower mid tunnel
+{
+"classname" "weapon_grenadelauncher"
+"origin" "-200 1192 -104"
+"spawnflags" "20480"
+}
+// central tower
+{
+"classname" "weapon_chaingun"
+"origin" "448 336 152"
+"spawnflags" "20480"
+}
+// bunker roof
+{
+"classname" "weapon_rocketlauncher"
+"origin" "-1448 -400 448"
+"spawnflags" "20480"
+}
+// east complex, south corner
+{
+"classname" "weapon_hyperblaster"
+"origin" "704 -24 48"
+"spawnflags" "20480"
+}
+// west ledge
+{
+"classname" "weapon_machinegun"
+"origin" "-1928 696 176"
+"spawnflags" "20480"
+}
+// south-east upper
+{
+"classname" "weapon_railgun"
+"origin" "612 -188 208"
+"spawnflags" "20480"
+}
+// below overlook
+{
+"classname" "weapon_shotgun"
+"origin" "-1464 -288 48"
+"spawnflags" "20480"
+}
+// for the supershotgun in the west sewer, lower walkway
+{
+"classname" "ammo_shells"
+"origin" "-744 520 -104"
+"spawnflags" "20480"
+}
+// for the supershotgun in the east complex, lower hall
+{
+"classname" "ammo_shells"
+"origin" "712 952 16"
+"spawnflags" "20480"
+}
+// for the grenadelauncher in the lower mid tunnel
+{
+"classname" "ammo_grenades"
+"origin" "-264 1144 -104"
+"spawnflags" "20480"
+}
+// for the chaingun in the central tower
+{
+"classname" "ammo_bullets"
+"origin" "384 288 152"
+"spawnflags" "20480"
+}
+// for the rocketlauncher in the bunker roof
+{
+"classname" "ammo_rockets"
+"origin" "-1512 -448 448"
+"spawnflags" "20480"
+}
+// for the hyperblaster in the east complex, south corner
+{
+"classname" "ammo_cells"
+"origin" "640 -72 48"
+"spawnflags" "20480"
+}
+// for the machinegun in the west ledge
+{
+"classname" "ammo_bullets"
+"origin" "-1992 648 176"
+"spawnflags" "20480"
+}
+// for the railgun in the south-east upper
+{
+"classname" "ammo_slugs"
+"origin" "548 -236 208"
+"spawnflags" "20480"
+}
+// for the shotgun in the below overlook
+{
+"classname" "ammo_shells"
+"origin" "-1528 -336 48"
+"spawnflags" "20480"
+}
+// far south-west roof
+{
+"classname" "ammo_rockets"
+"origin" "-1507.86 -1088.55 448"
+"spawnflags" "20480"
+}
+// west sewer, upper walk
+{
+"classname" "ammo_cells"
+"origin" "-1330.93 565.07 -64"
+"spawnflags" "20480"
+}
+// central tower, upper
+{
+"classname" "ammo_slugs"
+"origin" "-56 400 224"
+"spawnflags" "20480"
+}
+// high south ledge
+{
+"classname" "ammo_grenades"
+"origin" "-224 -360 448"
+"spawnflags" "20480"
+}
+// far south-west roof
+{
+"classname" "ammo_shells"
+"origin" "-2123.31 -1235.6 448"
+"spawnflags" "20480"
+}
+// east complex, mainframe level
+{
+"classname" "ammo_cells"
+"origin" "1040 328 352"
+"spawnflags" "20480"
+}
+// bunker roof
+{
+"classname" "ammo_bullets"
+"origin" "-1480 -240 448"
+"spawnflags" "20480"
+}
+// -- deathmatch spawn points; the campaign lump ships none
+// west sewer, north hall
+{
+"classname" "info_player_deathmatch"
+"origin" "-923 707 70"
+"spawnflags" "20480"
+}
+// west sewer, shard row
+{
+"classname" "info_player_deathmatch"
+"origin" "-784 1520 -102"
+"spawnflags" "20480"
+}
+// west sewer, south walk
+{
+"classname" "info_player_deathmatch"
+"origin" "-1424 794 -54"
+"spawnflags" "20480"
+}
+// lower mid tunnel
+{
+"classname" "info_player_deathmatch"
+"origin" "-440 1504 -72"
+"spawnflags" "20480"
+}
+// east complex, lower hall
+{
+"classname" "info_player_deathmatch"
+"origin" "968 1160 26"
+"spawnflags" "20480"
+}
+// east complex, mainframe level
+{
+"classname" "info_player_deathmatch"
+"origin" "1188 1480 346"
+"spawnflags" "20480"
+}
+// east complex, south corner
+{
+"classname" "info_player_deathmatch"
+"origin" "928 8 58"
+"spawnflags" "20480"
+}
+// below overlook
+{
+"classname" "info_player_deathmatch"
+"origin" "-1488 -528 58"
+"spawnflags" "20480"
+}
+// bunker roof
+{
+"classname" "info_player_deathmatch"
+"origin" "-1336 -384 458"
+"spawnflags" "20480"
+}
+// north landing zone
+{
+"classname" "info_player_deathmatch"
+"origin" "472 2432 70"
+"spawnflags" "20480"
+}
+// north landing, upper
+{
+"classname" "info_player_deathmatch"
+"origin" "944 2192 226"
+"spawnflags" "20480"
+}
+// central tower
+{
+"classname" "info_player_deathmatch"
+"origin" "400 552 162"
+"spawnflags" "20480"
+}
+// high south ledge
+{
+"classname" "info_player_deathmatch"
+"origin" "-32 -328 474"
+"spawnflags" "20480"
+}
+// south-east upper
+{
+"classname" "info_player_deathmatch"
+"origin" "379 -378 218"
+"spawnflags" "20480"
+}
+// north drop zone
+{
+"classname" "info_player_deathmatch"
+"origin" "-872 2688 26"
+"spawnflags" "20480"
+}
+// far south-west roof
+{
+"classname" "info_player_deathmatch"
+"origin" "-1915 -1124 458"
+"spawnflags" "20480"
+}
+// west ledge
+{
+"classname" "info_player_deathmatch"
+"origin" "-2121 764 186"
+"spawnflags" "20480"
+}
+// north corridor
+{
+"classname" "info_player_deathmatch"
+"origin" "-752 2052 58"
+"spawnflags" "20480"
+}
+// -- level exits teleport to a random spawn point instead of changing map
+{
+"classname" "target_teleporter"
+"origin" "-1000 656 -88"
+"targetname" "dm_exit_teleport"
+"spawnflags" "20480"
+}
+{
+"classname" "trigger_multiple"
+"target" "dm_exit_teleport"
+"wait" "1"
+"spawnflags" "20480"
+"model" "*1"
+}
+{
+"classname" "trigger_multiple"
+"target" "dm_exit_teleport"
+"wait" "1"
+"spawnflags" "20480"
+"model" "*70"
+}
+{
+"classname" "trigger_multiple"
+"target" "dm_exit_teleport"
+"wait" "1"
+"spawnflags" "20480"
+"model" "*71"
+}
+{
+"classname" "trigger_multiple"
+"target" "dm_exit_teleport"
+"wait" "1"
+"spawnflags" "20480"
+"model" "*73"
+}
+{
+"classname" "trigger_multiple"
+"target" "dm_exit_teleport"
+"wait" "1"
+"spawnflags" "20480"
+"model" "*77"
+}
+{
+"classname" "trigger_multiple"
+"target" "dm_exit_teleport"
+"wait" "1"
+"spawnflags" "20480"
+"model" "*79"
+}
+// pad marking the sewer outfall pit exit (*1)
+{
+"classname" "misc_teleporter"
+"origin" "-992 672 -551"
+"spawnflags" "20480"
+}
+// pad marking the high south ledge exit (*70)
+{
+"classname" "misc_teleporter"
+"origin" "-240 -816 457"
+"spawnflags" "20480"
+}
+// pad marking the bunker roof exit (*71)
+{
+"classname" "misc_teleporter"
+"origin" "-1384 -1544 425"
+"spawnflags" "20480"
+}
+// pad marking the east complex exit (*73)
+{
+"classname" "misc_teleporter"
+"origin" "1056 -296 361"
+"spawnflags" "20480"
 }

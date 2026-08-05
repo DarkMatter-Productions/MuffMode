@@ -49,6 +49,9 @@ void MM_Arena_OnMatchReset();
 void MM_Arena_OnClientBegin(gentity_t *ent);
 void MM_Arena_OnClientDisconnect(gentity_t *ent);
 void MM_Arena_OnDeath(gentity_t *victim, gentity_t *attacker);
+// Per-frame bot placement. Arena rooms have no engine-side team concept, so a bot has to pick a
+// room and a logical team itself; this is a cheap no-op outside GT_ARENA and for non-bots.
+void MM_Arena_BotBeginFrame(gentity_t *bot);
 
 // Runs every discovered room. RunFrame reports whether any room has a runnable
 // pairing, while CheckExitRules fully consumes GT_ARENA exit handling.

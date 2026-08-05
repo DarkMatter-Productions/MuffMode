@@ -947,6 +947,11 @@ THINK(monster_think) (gentity_t *self) -> void {
 				FoundTarget(self);
 			}
 		}
+
+		// [MuffMode] horde: keep that assignment an active hunt rather than a cold trail walk
+		if (!self_is_current())
+			return;
+		MM_Horde_DrivePursuit(self);
 	} else if ((self->hackflags & HACKFLAG_ATTACK_PLAYER || GT(GT_HORDE)) && !self->enemy &&
 		g_entities[1].inuse && ClientIsPlaying(g_entities[1].client)) {
 		self->enemy = &g_entities[1];

@@ -16,8 +16,49 @@ enum class mm_horde_target_role_t {
 	Bulwark,
 };
 
+// Strategy-driven targeting: a monster picks a fighter by combining bounded utility terms
+// into a weighted mean, then multiplying by a reachability gate. Higher score wins.
+enum class mm_horde_strategy_t : uint8_t {
+	Balanced = 0,
+	Swarm,
+	Hunter,
+	Ambusher,
+	Skirmisher,
+	Artillery,
+	Bruiser,
+	Support,
+	Aquatic,
+	Count,
+};
+
+// Soft-term weights plus the three per-strategy shape parameters.
+struct mm_horde_strategy_weights_t {
+	float prox = 0.f;
+	float free = 0.f;
+	float threat = 0.f;
+	float vuln = 0.f;
+	float isolation = 0.f;
+	float prox_half = 768.f;   // world units at which the proximity term reads 0.5
+	float gate_bias = 0.f;     // added to the hull-derived reachability gate sharpening
+	float switch_scale = 1.f;  // multiplier on the base retarget switch margin
+};
+
+// The five bounded soft terms for one (monster, candidate) pair.
+struct mm_horde_target_terms_t {
+	float prox = 0.f;
+	float free = 0.f;
+	float threat = 0.f;
+	float vuln = 0.f;
+	float isolation = 0.f;
+};
+
 constexpr float MM_HORDE_MAX_BOSS_SCALE = 16.f;
 constexpr float MM_HORDE_MAX_COMBAT_MULTIPLIER = 1000.f;
+constexpr float MM_HORDE_MAX_TARGET_WEIGHT = 8.f;
+constexpr float MM_HORDE_MAX_WEIGHT_TUNING = 2.f;
+// A provably unreachable fighter still scores this fraction of its core, so a monster
+// hemmed in by unreachable fighters picks the least-bad one instead of stalling on a tie.
+constexpr float MM_HORDE_GATE_FLOOR = 0.05f;
 
 inline float MM_Horde_ClampFiniteFloat(float value, float fallback, float lower, float upper)
 {
@@ -145,6 +186,401 @@ inline float MM_Horde_ComputeRoleTargetScore(int monsters_targeting, float dista
 		score -= health_frac * std::max(health_weight, 0.f);
 
 	return score;
+}
+
+// ---------------------------------------------------------------------------------------
+// Strategy targeting: soft utility terms. Each returns a bounded [0,1] value where higher
+// means "more attractive target", so no term can dominate by unit magnitude alone.
+// ---------------------------------------------------------------------------------------
+
+// Replaces the legacy unbounded raw-distance term, which is why distance used to swamp
+// every other consideration at range. Strictly decreasing, never saturating, never zero.
+inline float MM_Horde_ProximityUtility(float distance_units, float half_units)
+{
+	const float half = MM_Horde_ClampFiniteFloat(half_units, 768.f, 1.f, 1.0e6f);
+	const float distance = MM_Horde_ClampFiniteFloat(distance_units, 0.f, 0.f, 1.0e9f);
+	return half / (half + distance);
+}
+
+// Target-load freedom: fewer monsters already committed to a fighter means more attractive.
+inline float MM_Horde_LoadUtility(int monsters_targeting, float load_span)
+{
+	const float span = MM_Horde_ClampFiniteFloat(load_span, 3.f, 1.f, 1024.f);
+	const float load = static_cast<float>(std::max(0, monsters_targeting));
+	return 1.f - std::clamp(load / span, 0.f, 1.f);
+}
+
+// The target-load histogram counts every live monster against its own current enemy, so a
+// retargeting monster is already inside its incumbent's tally but not inside any challenger's.
+// Scoring the raw counts would hand every challenger a free one-attacker advantage, which is
+// larger than the switch margin and would make a monster alternate targets forever. Score each
+// challenger as it would read after the switch instead.
+inline int MM_Horde_ComparableTargetLoad(int cached_load, bool is_incumbent, bool has_incumbent)
+{
+	if (!has_incumbent || is_incumbent)
+		return cached_load;
+
+	return MM_Horde_SaturatingIncrement(cached_load);
+}
+
+// Straggler detection. A fighter with no living allies at all is maximally isolated; the
+// legacy helper returned 0 (reading as "maximally grouped") in that case.
+inline float MM_Horde_IsolationUtility(float nearest_ally_units, int ally_count, float span_units)
+{
+	if (ally_count <= 0)
+		return 1.f;
+
+	const float span = MM_Horde_ClampFiniteFloat(span_units, 1024.f, 1.f, 1.0e6f);
+	const float nearest = MM_Horde_ClampFiniteFloat(nearest_ally_units, 0.f, 0.f, 1.0e9f);
+	return std::clamp(nearest / span, 0.f, 1.f);
+}
+
+// How dangerous a fighter is right now. Sub-weights sum to 1, so the result is bounded
+// without a divide. Every input is a per-moment signal, never a per-match total.
+inline float MM_Horde_ThreatUtility(float powerup01, float weapon01, float streak01,
+	float firing01, float amp01)
+{
+	return std::clamp(
+		0.32f * MM_Horde_Probability(powerup01) +
+		0.28f * MM_Horde_Probability(weapon01) +
+		0.20f * MM_Horde_Probability(streak01) +
+		0.12f * MM_Horde_Probability(firing01) +
+		0.08f * MM_Horde_Probability(amp01), 0.f, 1.f);
+}
+
+// How finishable a fighter is right now. Sub-weights sum to 1. A protected or invisible
+// fighter is a poor finisher pick rather than an invisible one.
+inline float MM_Horde_VulnerabilityUtility(float health_deficit01, float defense_deficit01,
+	float hurt01, float dry01, float helpless01, bool protected_now)
+{
+	float score =
+		0.34f * MM_Horde_Probability(health_deficit01) +
+		0.20f * MM_Horde_Probability(defense_deficit01) +
+		0.18f * MM_Horde_Probability(hurt01) +
+		0.16f * MM_Horde_Probability(dry01) +
+		0.12f * MM_Horde_Probability(helpless01);
+
+	if (protected_now)
+		score *= 0.30f;
+
+	return std::clamp(score, 0.f, 1.f);
+}
+
+// ---------------------------------------------------------------------------------------
+// Hull and traversal. Size never gets a soft term of its own: it modulates the reachability
+// gate and three weights, which keeps the per-term dominance bound a true bound.
+// ---------------------------------------------------------------------------------------
+
+// 0 for a nimble body, 1 for a genuinely large one. Derived from the live hull width, so it
+// automatically tracks s.scale, boss scaling, and Wildcard preset scaling.
+inline float MM_Horde_HullBulk(float hull_width_units, float nimble_units, float bulk_units)
+{
+	float nimble = MM_Horde_ClampFiniteFloat(nimble_units, 40.f, 0.f, 1.0e6f);
+	float bulk = MM_Horde_ClampFiniteFloat(bulk_units, 96.f, 0.f, 1.0e6f);
+	if (nimble > bulk)
+		std::swap(nimble, bulk);
+
+	const float span = std::max(1.f, bulk - nimble);
+	const float width = MM_Horde_ClampFiniteFloat(hull_width_units, nimble, 0.f, 1.0e6f);
+	return std::clamp((width - nimble) / span, 0.f, 1.f);
+}
+
+// Vertical reach in world units. The can_jump gate mirrors the engine: traversal heights are
+// only ever submitted to the pathfinder when the monster can jump or flies.
+inline float MM_Horde_ClimbBudget(bool flyer, bool swimmer, bool can_jump,
+	float jump_height, float drop_height, float step_budget)
+{
+	if (flyer)
+		return 1024.f;
+	if (swimmer)
+		return 320.f;
+
+	const float step = MM_Horde_ClampFiniteFloat(step_budget, 18.f, 0.f, 512.f);
+	if (!can_jump)
+		return step;
+
+	const float up = MM_Horde_ClampFiniteFloat(jump_height, 0.f, 0.f, 4096.f);
+	const float down = MM_Horde_ClampFiniteFloat(drop_height, 0.f, 0.f, 4096.f);
+	return step + std::max(up, down);
+}
+
+// A wider body needs a gentler ramp to gain the same height.
+inline float MM_Horde_ClimbSlope(float base_slope, float bulk01)
+{
+	const float base = MM_Horde_ClampFiniteFloat(base_slope, 1.f, 0.f, 8.f);
+	return base * (1.f - 0.5f * MM_Horde_Probability(bulk01));
+}
+
+// Large, ground-bound bodies weigh reachability far more heavily than small agile ones.
+inline float MM_Horde_GateSharpen(float gate_bias, float bulk01, float agility01)
+{
+	const float bias = MM_Horde_ClampFiniteFloat(gate_bias, 0.f, -1.f, 1.f);
+	const float bulk = MM_Horde_Probability(bulk01);
+	const float agility = MM_Horde_Probability(agility01);
+	return std::clamp(bias + bulk * (1.f - agility), 0.f, 1.f);
+}
+
+// ---------------------------------------------------------------------------------------
+// Reachability. A multiplicative gate rather than a soft term, so "cannot get there" is a
+// real veto instead of one more thing to outvote.
+// ---------------------------------------------------------------------------------------
+
+// A slope model, not a raw height delta: a walker climbs dz over a horizontal run when the
+// average grade is gentle enough. A raw delta would make a heavy refuse a fighter one storey
+// up a long ramp it can actually walk.
+inline float MM_Horde_VerticalAccess(float vertical_delta, float horizontal_units,
+	float climb_budget, float slope, float span_units)
+{
+	const float rise = std::fabs(MM_Horde_ClampFiniteFloat(vertical_delta, 0.f, -1.0e9f, 1.0e9f));
+	const float run = MM_Horde_ClampFiniteFloat(horizontal_units, 0.f, 0.f, 1.0e9f);
+	const float budget = MM_Horde_ClampFiniteFloat(climb_budget, 18.f, 0.f, 1.0e6f);
+	const float grade = MM_Horde_ClampFiniteFloat(slope, 1.f, 0.f, 8.f);
+	const float span = MM_Horde_ClampFiniteFloat(span_units, 512.f, 1.f, 1.0e6f);
+
+	const float climbable = budget + grade * run;
+	if (rise <= climbable)
+		return 1.f;
+
+	return std::clamp(1.f - (rise - climbable) / span, 0.f, 1.f);
+}
+
+// Product of the independent feasibility signals. An enemy we are currently in contact with
+// is reachable by definition, so contact floors the result.
+inline float MM_Horde_ComputeAccess(float area_factor, float vertical_factor,
+	float habitat_factor, float phs_factor, float evidence_factor,
+	bool in_contact, float contact_floor)
+{
+	float access = MM_Horde_Probability(area_factor, 1.f) *
+		MM_Horde_Probability(vertical_factor, 1.f) *
+		MM_Horde_Probability(habitat_factor, 1.f) *
+		MM_Horde_Probability(phs_factor, 1.f) *
+		MM_Horde_Probability(evidence_factor, 1.f);
+
+	if (in_contact)
+		access = std::max(access, MM_Horde_Probability(contact_floor, 0.9f));
+
+	return std::clamp(access, 0.f, 1.f);
+}
+
+// sharpen 0 leaves the gate linear in access; sharpen 1 squares it. One multiply-add, no powf.
+inline float MM_Horde_GateFromAccess(float access01, float sharpen, float gate_floor)
+{
+	const float access = MM_Horde_Probability(access01, 1.f);
+	const float sharp = MM_Horde_Probability(sharpen, 0.f);
+	const float floor_value = MM_Horde_Probability(gate_floor, MM_HORDE_GATE_FLOOR);
+	const float shaped = access * (1.f - sharp + sharp * access);
+	return std::clamp(floor_value + (1.f - floor_value) * shaped, 0.f, 1.f);
+}
+
+// ---------------------------------------------------------------------------------------
+// Unreachable memory. A per-fighter bit mask, not a single remembered slot: marking B must
+// never un-mark A, or a monster oscillates forever between two fighters it cannot reach.
+// ---------------------------------------------------------------------------------------
+
+inline bool MM_Horde_UnreachMaskTest(uint64_t lo, uint64_t hi, int slot)
+{
+	if (slot < 1 || slot > 128)
+		return false;
+
+	return slot <= 64
+		? ((lo >> (slot - 1)) & uint64_t{ 1 }) != 0
+		: ((hi >> (slot - 65)) & uint64_t{ 1 }) != 0;
+}
+
+inline void MM_Horde_UnreachMaskSet(uint64_t &lo, uint64_t &hi, int slot)
+{
+	if (slot < 1 || slot > 128)
+		return;
+
+	if (slot <= 64)
+		lo |= uint64_t{ 1 } << (slot - 1);
+	else
+		hi |= uint64_t{ 1 } << (slot - 65);
+}
+
+inline void MM_Horde_UnreachMaskClear(uint64_t &lo, uint64_t &hi, int slot)
+{
+	if (slot < 1 || slot > 128)
+		return;
+
+	if (slot <= 64)
+		lo &= ~(uint64_t{ 1 } << (slot - 1));
+	else
+		hi &= ~(uint64_t{ 1 } << (slot - 65));
+}
+
+// Fresh evidence of "no route to this fighter" is a near-veto that decays back to neutral,
+// so a monster retries once the world has had time to change (doors, lifts, the fighter moving).
+inline float MM_Horde_UnreachFactor(bool marked, int64_t age_ms, int64_t window_ms,
+	float floor_factor)
+{
+	if (!marked || window_ms <= 0 || age_ms < 0 || age_ms >= window_ms)
+		return 1.f;
+
+	const float floor_value = MM_Horde_Probability(floor_factor, 0.12f);
+	const float progress = static_cast<float>(age_ms) / static_cast<float>(window_ms);
+	return std::clamp(floor_value + (1.f - floor_value) * progress, 0.f, 1.f);
+}
+
+// ---------------------------------------------------------------------------------------
+// Weights and final score.
+// ---------------------------------------------------------------------------------------
+
+// Every strategy keeps max(weight)/total <= 0.35, which is what makes "no single factor
+// dominates" a mechanical property rather than a tuning claim.
+inline mm_horde_strategy_weights_t MM_Horde_StrategyWeights(mm_horde_strategy_t strategy)
+{
+	switch (strategy) {
+	case mm_horde_strategy_t::Swarm:
+		return { 1.8f, 1.8f, 0.5f, 0.8f, 0.3f, 640.f, -0.10f, 0.75f };
+	case mm_horde_strategy_t::Hunter:
+		return { 1.5f, 1.0f, 0.5f, 1.5f, 1.3f, 768.f, -0.10f, 0.85f };
+	case mm_horde_strategy_t::Ambusher:
+		return { 1.1f, 0.9f, 0.4f, 1.4f, 1.8f, 1024.f, -0.15f, 0.85f };
+	case mm_horde_strategy_t::Skirmisher:
+		return { 1.7f, 1.2f, 1.0f, 1.0f, 0.5f, 896.f, -0.35f, 0.90f };
+	case mm_horde_strategy_t::Artillery:
+		return { 1.0f, 1.3f, 1.7f, 0.7f, 0.4f, 1280.f, 0.10f, 1.30f };
+	case mm_horde_strategy_t::Bruiser:
+		return { 1.3f, 1.2f, 1.5f, 0.7f, 0.3f, 1152.f, 0.35f, 1.60f };
+	case mm_horde_strategy_t::Support:
+		return { 1.5f, 1.2f, 1.2f, 0.6f, 0.0f, 768.f, 0.05f, 1.20f };
+	case mm_horde_strategy_t::Aquatic:
+		return { 1.5f, 1.1f, 0.7f, 1.1f, 0.6f, 768.f, 0.20f, 1.10f };
+	case mm_horde_strategy_t::Balanced:
+	case mm_horde_strategy_t::Count:
+	default:
+		return { 1.6f, 1.4f, 0.9f, 0.9f, 0.5f, 768.f, 0.00f, 1.00f };
+	}
+}
+
+// g_horde_target_spread_weight keeps its name and its 512 default but now scales a bounded
+// weight: 512 maps to 1.0, and 0 still means "ignore target load entirely" as documented.
+inline float MM_Horde_NormalizedSpreadWeight(float spread_cvar, float reference, float max_weight)
+{
+	const float ref = MM_Horde_ClampFiniteFloat(reference, 512.f, 1.f, 1.0e6f);
+	const float max_w = MM_Horde_ClampFiniteFloat(max_weight, MM_HORDE_MAX_TARGET_WEIGHT,
+		0.f, MM_HORDE_MAX_TARGET_WEIGHT);
+	const float raw = MM_Horde_ClampFiniteFloat(spread_cvar, 512.f, 0.f, 1.0e6f);
+	return std::clamp(raw / ref, 0.f, max_w);
+}
+
+// A bulkier body stops chasing stragglers into tight geometry and grows less distance-sensitive,
+// because it would rather travel further to a fighter it can actually reach.
+inline mm_horde_strategy_weights_t MM_Horde_ApplySizeToWeights(
+	mm_horde_strategy_weights_t weights, float bulk01)
+{
+	const float bulk = MM_Horde_Probability(bulk01);
+	weights.isolation = std::max(0.f, weights.isolation) * (1.f - 0.50f * bulk);
+	weights.prox = std::max(0.f, weights.prox) * (1.f - 0.25f * bulk);
+	weights.prox_half = MM_Horde_ClampFiniteFloat(weights.prox_half, 768.f, 1.f, 8192.f) *
+		(1.f + 0.25f * bulk);
+	return weights;
+}
+
+inline mm_horde_strategy_weights_t MM_Horde_ApplyWeightTuning(mm_horde_strategy_weights_t weights,
+	float spread_normalized, float threat_mult, float vuln_mult)
+{
+	const float spread = MM_Horde_ClampFiniteFloat(spread_normalized, 1.f, 0.f,
+		MM_HORDE_MAX_TARGET_WEIGHT);
+	const float threat = MM_Horde_ClampFiniteFloat(threat_mult, 1.f, 0.f, MM_HORDE_MAX_WEIGHT_TUNING);
+	const float vuln = MM_Horde_ClampFiniteFloat(vuln_mult, 1.f, 0.f, MM_HORDE_MAX_WEIGHT_TUNING);
+
+	weights.free = std::clamp(std::max(0.f, weights.free) * spread, 0.f, MM_HORDE_MAX_TARGET_WEIGHT);
+	weights.threat = std::clamp(std::max(0.f, weights.threat) * threat, 0.f, MM_HORDE_MAX_TARGET_WEIGHT);
+	weights.vuln = std::clamp(std::max(0.f, weights.vuln) * vuln, 0.f, MM_HORDE_MAX_TARGET_WEIGHT);
+	weights.prox = std::clamp(std::max(0.f, weights.prox), 0.f, MM_HORDE_MAX_TARGET_WEIGHT);
+	weights.isolation = std::clamp(std::max(0.f, weights.isolation), 0.f, MM_HORDE_MAX_TARGET_WEIGHT);
+	return weights;
+}
+
+// Weighted mean of the bounded soft terms. The most any one term can move the result is
+// exactly its own weight share, which is the dominance bound the strategy table maintains.
+inline float MM_Horde_ComputeCoreUtility(const mm_horde_target_terms_t &terms,
+	const mm_horde_strategy_weights_t &weights)
+{
+	const float wp = std::max(0.f, weights.prox);
+	const float wf = std::max(0.f, weights.free);
+	const float wt = std::max(0.f, weights.threat);
+	const float wv = std::max(0.f, weights.vuln);
+	const float wi = std::max(0.f, weights.isolation);
+	const float total = wp + wf + wt + wv + wi;
+
+	if (!(total > 0.f))
+		return 0.f;
+
+	const float sum = wp * MM_Horde_Probability(terms.prox) +
+		wf * MM_Horde_Probability(terms.free) +
+		wt * MM_Horde_Probability(terms.threat) +
+		wv * MM_Horde_Probability(terms.vuln) +
+		wi * MM_Horde_Probability(terms.isolation);
+
+	return std::clamp(sum / total, 0.f, 1.f);
+}
+
+// Higher is better. Note this is the opposite sense from the legacy role scorer.
+inline float MM_Horde_ComputeGatedTargetScore(const mm_horde_target_terms_t &terms,
+	const mm_horde_strategy_weights_t &weights, float access01, float sharpen, float gate_floor)
+{
+	return MM_Horde_ComputeCoreUtility(terms, weights) *
+		MM_Horde_GateFromAccess(access01, sharpen, gate_floor);
+}
+
+inline float MM_Horde_TargetSwitchMargin(float base_margin, float switch_scale)
+{
+	const float base = MM_Horde_ClampFiniteFloat(base_margin, 0.05f, 0.f, 1.f);
+	const float scale = MM_Horde_ClampFiniteFloat(switch_scale, 1.f, 0.f, 8.f);
+	return std::clamp(base * scale, 0.f, 1.f);
+}
+
+// Hysteresis, with one escape: staying latched onto a fighter the body provably cannot reach
+// is the exact failure this model exists to fix, so a collapsed incumbent waives the margin.
+inline bool MM_Horde_ShouldSwitchTarget(float best_score, float current_score, float margin,
+	float current_access, float best_access, float abandon_threshold, float rescue_threshold)
+{
+	if (!std::isfinite(best_score) || !std::isfinite(current_score))
+		return false;
+
+	const float current = MM_Horde_Probability(current_access, 1.f);
+	const float best = MM_Horde_Probability(best_access, 1.f);
+	const float abandon = MM_Horde_Probability(abandon_threshold, 0.25f);
+	const float rescue = MM_Horde_Probability(rescue_threshold, 0.55f);
+	const float effective = (current < abandon && best >= rescue)
+		? 0.f
+		: MM_Horde_ClampFiniteFloat(margin, 0.05f, 0.f, 1.f);
+
+	return best_score > current_score + effective;
+}
+
+// Relentless pursuit: vanilla parks a monster for 5-10 seconds after a nav failure, which
+// reads as the threat losing interest. Horde caps that lockout so a transient path failure
+// becomes a short retry instead. Returns the clamped absolute lockout time in milliseconds.
+inline int64_t MM_Horde_ClampPursuitLockoutMs(int64_t lockout_ms, int64_t now_ms, float max_seconds)
+{
+	const float seconds = MM_Horde_ClampFiniteFloat(max_seconds, 2.f, 0.f, 60.f);
+	const int64_t limit = now_ms + static_cast<int64_t>(std::ceil(static_cast<double>(seconds) * 1000.0));
+	return std::min(lockout_ms, limit);
+}
+
+// True when a blind pursuer covered less ground than the sample window demands, meaning it
+// is wedged on geometry rather than closing. The first sample of a chase has nothing to
+// compare against, so it never reports a stall.
+inline bool MM_Horde_PursuitStalled(bool sample_valid, float moved_units, float min_progress_units)
+{
+	if (!sample_valid || !std::isfinite(moved_units))
+		return false;
+
+	return moved_units < std::max(0.f, min_progress_units);
+}
+
+// True when the cached pursuit goal has drifted far enough from the live target to be
+// re-pinned. Vanilla walks a player trail that goes cold, stranding monsters behind the fight.
+inline bool MM_Horde_ShouldRepinPursuitGoal(float goal_to_target_units, float slack_units)
+{
+	if (!std::isfinite(goal_to_target_units))
+		return true;
+
+	return goal_to_target_units > std::max(0.f, slack_units);
 }
 
 inline bool MM_Horde_IsBossWave(int wave, int min_wave, int interval)

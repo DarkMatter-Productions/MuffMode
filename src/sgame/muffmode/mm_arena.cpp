@@ -2,6 +2,7 @@
 // Licensed under the GNU General Public License 2.0.
 
 #include "g_local.h"
+#include "muffmode/mm_announcer.h"
 #include "muffmode/mm_arena.h"
 #include "muffmode/mm_arena_rules.h"
 #include "muffmode/mm_captain.h"
@@ -11,6 +12,7 @@
 #include "muffmode/mm_menu.h"
 #include "muffmode/mm_parse.h"
 #include "muffmode/mm_red_rover_rules.h"
+#include "muffmode/mm_scoreboard_layout.h"
 #include "muffmode/mm_scoring.h"
 #include "muffmode/mm_spawn_rules.h"
 #include "muffmode/mm_team.h"
@@ -93,6 +95,12 @@ struct Arena {
 	mm_arena_settings_t settings {};
 	mm_arena_state_t state = mm_arena_state_t::Empty;
 	mm_arena_state_t state_before_pause = mm_arena_state_t::Empty;
+	// Per-room warmup. MuffMode's native warmup lives on level_locals_t singletons, which cannot
+	// describe N rooms warming up at once, so every room carries its own copy.
+	mm_arena_warmup_req_t warmup_requisite = mm_arena_warmup_req_t::None;
+	gtime_t warmup_notice_time {};
+	int countdown_check = 0;	// Last announced second; 0 = nothing announced yet.
+	bool prepare_announced = false;
 	gtime_t state_timer {};
 	gtime_t paused_remaining {};
 	bool resume_countdown = false;
@@ -352,6 +360,12 @@ bool IsLegacyIdmap()
 bool IsTaggedMultiMap()
 {
 	return s_map_profile == mm_arena_map_profile_t::TaggedMulti;
+}
+
+bool IsBotClient(const gentity_t *ent)
+{
+	return ent && ent->client &&
+		((ent->svflags & SVF_BOT) || ent->client->sess.is_a_bot);
 }
 
 bool IsConnected(const gentity_t *ent)
@@ -630,7 +644,7 @@ std::string SafeText(std::string_view input, size_t max_length = 40)
 		if (result.size() >= max_length)
 			break;
 		const unsigned char u = static_cast<unsigned char>(c);
-		if (u < 32 || c == '"' || c == '\\')
+		if (u < 32 || u == 0x7F || c == '"' || c == '\\')
 			continue;
 		result.push_back(c);
 	}
@@ -1723,10 +1737,27 @@ void ArenaPrint(const Arena &arena, print_type_t level_, std::string_view text,
 		if (!IsConnected(ent) || ent->client->resp.arena_id != arena.id)
 			continue;
 		if (center)
-			gi.Center_Print(ent, message.c_str());
+			// Route through the Loc wrapper so MM_MarkCenterPrint marks the message and
+			// MuffMode clients drop the console echo, matching every other match notice.
+			gi.LocCenter_Print(ent, "{}", message.c_str());
 		else
 			gi.Client_Print(ent, level_, message.c_str());
 	}
+}
+
+// Bind-carrying centerprints must pass the literal base so MM_CenterPrintMarkerOffset can
+// place the marker after the %bind:...% run; stock clients only honour a bind at offset 0.
+// Format strings are byte-identical to muffmode::match::SendWarmupReadyNudge.
+void ArenaReadyNudge(gentity_t *ent, int ready_humans, int playing_humans)
+{
+	if (!IsConnected(ent))
+		return;
+	if (playing_humans > 0)
+		gi.LocCenter_Print(ent, "%bind:inven:Open menu%You are NOT ready. ({}/{} ready)",
+			ready_humans, playing_humans);
+	else
+		gi.LocCenter_Print(ent, "%bind:inven:Open menu%You are NOT ready.");
+	ent->client->last_warmup_nudge_time = level.time;
 }
 
 bool TeamPingsAllowed(const Arena &arena, uint16_t team_id)
@@ -1851,35 +1882,149 @@ void EnsurePairing(Arena &arena)
 		arena.active_blue = OldestEligibleTeam(arena, arena.active_red);
 }
 
-bool AllReady(const Arena &arena)
+// A room requires ready-up when the server asks for it globally or the room is in competition
+// mode. Competition mode has always implied it; the cvar is what makes an ordinary room run a
+// real MuffMode warmup instead of starting the instant two teams happen to pair up.
+bool ReadyUpRequired(const Arena &arena)
 {
-	if (!arena.settings.competition_mode)
-		return true;
-	if (!arena.active_red || !arena.active_blue)
-		return false;
+	return arena.settings.competition_mode ||
+		muffmode::CvarEnabled(g_arena_warmup_readyup);
+}
+
+// Room-scoped mirror of muffmode::match::GetWarmupReadyCounts. Only players on an active side
+// and actually in this round's line count; coaches and late joiners are bystanders.
+void GetRoomReadyCounts(const Arena &arena, int &ready_humans, int &playing_humans,
+	int &playing_bots)
+{
+	ready_humans = 0;
+	playing_humans = 0;
+	playing_bots = 0;
+
 	for (const uint16_t team_id : { arena.active_red, arena.active_blue }) {
-		bool found = false;
+		if (!team_id)
+			continue;
 		for (gentity_t *ent : TeamMembers(team_id)) {
 			if (!ent->client->resp.arena_line_enabled ||
 				ent->client->resp.arena_late_join)
 				continue;
 			if (!PingAllowed(ent, arena))
 				continue;
-			found = true;
-			if (!ent->client->sess.is_a_bot &&
-				!(ent->svflags & SVF_BOT) &&
-				!ent->client->resp.ready)
-				return false;
+			if (IsBotClient(ent)) {
+				playing_bots++;
+				continue;
+			}
+			playing_humans++;
+			if (ent->client->resp.ready)
+				ready_humans++;
 		}
-		if (!found)
-			return false;
 	}
-	return true;
 }
 
-int CountdownSeconds()
+mm_arena_warmup_status_t WarmupStatus(const Arena &arena)
 {
-	return MM_ArenaClampCountdown(g_round_countdown ? g_round_countdown->integer : 10);
+	const bool rover = arena.settings.type == mm_arena_type_t::RedRover;
+	mm_arena_warmup_inputs_t in;
+	in.red_size = EligibleMemberCount(arena, arena.active_red);
+	in.blue_size = EligibleMemberCount(arena, arena.active_blue);
+	// Red Rover reshuffles one shared pool across both fixed sides in PrepareRound, so requiring
+	// each side to be independently populated would deadlock a room whose whole roster is
+	// currently parked on one side. Mirror the rover rule TickArena already applies: both sides
+	// resolved, pings clear, and at least two players between them.
+	in.paired = rover
+		? (arena.active_red != 0 && arena.active_blue != 0 &&
+			TeamPingsAllowed(arena, arena.active_red) &&
+			TeamPingsAllowed(arena, arena.active_blue) &&
+			in.red_size + in.blue_size >= 2)
+		: (arena.active_red != 0 && arena.active_blue != 0 &&
+			TeamEligible(arena, arena.active_red) &&
+			TeamEligible(arena, arena.active_blue));
+	// For the same reason its sides are never expected to match.
+	in.allow_unbalanced = arena.settings.unbalanced || rover;
+	in.eligible_fighters = in.red_size + in.blue_size;
+	in.min_players = muffmode::CvarInteger(minplayers);
+	in.readyup_required = ReadyUpRequired(arena);
+	in.ready_percentage = muffmode::CvarValue(g_warmup_ready_percentage);
+	in.allow_no_humans = muffmode::CvarEnabled(g_dm_allow_no_humans);
+	GetRoomReadyCounts(arena, in.ready_humans, in.playing_humans, in.playing_bots);
+	return MM_ArenaWarmupStatus(in);
+}
+
+// Records the room's warmup requisite, resetting the notice throttle whenever it changes so the
+// new reason is broadcast immediately rather than up to 30s later.
+void SetWarmupRequisite(Arena &arena, mm_arena_warmup_req_t requisite)
+{
+	if (arena.warmup_requisite == requisite)
+		return;
+	arena.warmup_requisite = requisite;
+	arena.warmup_notice_time = {};
+}
+
+// Drops every warmup/countdown latch so the next warmup starts from a clean slate: the notice
+// throttle, the announced-second latch and the one-shot prepare sting.
+void ClearWarmupTracking(Arena &arena)
+{
+	arena.warmup_requisite = mm_arena_warmup_req_t::None;
+	arena.warmup_notice_time = {};
+	arena.countdown_check = 0;
+	arena.prepare_announced = false;
+}
+
+bool EvaluateWarmup(Arena &arena)
+{
+	const mm_arena_warmup_status_t status = WarmupStatus(arena);
+	SetWarmupRequisite(arena, status.requisite);
+	return status.ready_to_start;
+}
+
+void TickArenaWarmupNotices(Arena &arena)
+{
+	if (arena.state != mm_arena_state_t::Warmup &&
+		arena.state != mm_arena_state_t::Empty)
+		return;
+
+	if (arena.warmup_requisite == mm_arena_warmup_req_t::MorePlayers ||
+		arena.warmup_requisite == mm_arena_warmup_req_t::Balance) {
+		if (arena.warmup_notice_time &&
+			level.time < arena.warmup_notice_time + WARMUP_READY_NUDGE_INTERVAL)
+			return;
+		ArenaPrint(arena, PRINT_CENTER,
+			arena.warmup_requisite == mm_arena_warmup_req_t::Balance
+				? std::string("Teams are imbalanced.")
+				: fmt::format("Waiting for players ({} minimum)",
+					std::max(2, muffmode::CvarInteger(minplayers))),
+			true);
+		arena.warmup_notice_time = level.time;
+		return;
+	}
+
+	if (arena.warmup_requisite != mm_arena_warmup_req_t::ReadyUp)
+		return;
+
+	int ready = 0, humans = 0, bots = 0;
+	GetRoomReadyCounts(arena, ready, humans, bots);
+	for (gentity_t *ent : active_clients()) {
+		if (!IsConnected(ent) || ent->client->resp.arena_id != arena.id)
+			continue;
+		if (!ent->client->resp.arena_team_id || ent->client->resp.ready)
+			continue;
+		if (IsBotClient(ent) || Role(ent->client) == mm_arena_role_t::Coach)
+			continue;
+		if (ent->client->last_warmup_nudge_time &&
+			level.time < ent->client->last_warmup_nudge_time +
+				WARMUP_READY_NUDGE_INTERVAL)
+			continue;
+		ArenaReadyNudge(ent, ready, humans);
+	}
+}
+
+// The first countdown of a series is the match countdown and uses g_warmup_countdown, matching
+// native play; every subsequent round countdown uses g_round_countdown. Unlike the native path
+// this deliberately has no modified_count restart hook: restarting N rooms because a global
+// cvar was edited mid-match would be a surprise, not a feature.
+int CountdownSeconds(bool first_of_series)
+{
+	const cvar_t *source = first_of_series ? g_warmup_countdown : g_round_countdown;
+	return MM_ArenaClampCountdown(source ? source->integer : 10);
 }
 
 void FreezeFighters(const Arena &arena, bool freeze)
@@ -1975,14 +2120,71 @@ void BeginCountdown(Arena &arena)
 		ResetPlayerScores(arena);
 	arena.state = first ? mm_arena_state_t::MatchCountdown
 		: mm_arena_state_t::RoundCountdown;
-	arena.state_timer = level.time + gtime_t::from_sec(CountdownSeconds());
+	arena.state_timer = level.time + gtime_t::from_sec(CountdownSeconds(first));
+	arena.countdown_check = 0;
+	arena.warmup_requisite = mm_arena_warmup_req_t::None;
+	arena.warmup_notice_time = {};
+
+	// Wipe any lingering warmup centerprint in this room before the countdown header lands.
+	for (gentity_t *ent : active_clients())
+		if (IsConnected(ent) && ent->client->resp.arena_id == arena.id) {
+			gi.LocClient_Print(ent, PRINT_CENTER, "");
+			ent->client->last_warmup_nudge_time = 0_sec;
+		}
+
 	ArenaPrint(arena, PRINT_CENTER,
-		fmt::format("{}\nMatch begins in {}", arena.name, CountdownSeconds()), true);
+		fmt::format("{}\nBegins in...", arena.name), true);
+
+	if (!arena.prepare_announced) {
+		const bool team_scale = arena.settings.players_per_team > 1 ||
+			MM_ArenaUsesFixedTeams(arena.settings.type);
+		for (gentity_t *ent : active_clients())
+			if (IsConnected(ent) && ent->client->resp.arena_id == arena.id)
+				MM_Announce_ToClient(ent, team_scale
+					? mm_announce_event_t::PrepareYourTeam
+					: mm_announce_event_t::PrepareToFight);
+		arena.prepare_announced = true;
+	}
+}
+
+// Per-second countdown, room-scoped. Mirrors muffmode::match::TickCountdown: a beep on every
+// multiple of ten and every second below ten, spoken numbers for the last three, and a reprint
+// of the header so the centerprint does not fade before FIGHT.
+void TickArenaCountdown(Arena &arena)
+{
+	if (!arena.state_timer)
+		return;
+	const int seconds = (arena.state_timer + 1_sec - level.time).seconds<int>();
+	if (seconds <= 0) {
+		arena.countdown_check = 0;
+		return;
+	}
+	if (!MM_ArenaCountdownBeepDue(seconds, arena.countdown_check))
+		return;
+
+	const std::string beep = fmt::format("world/{}{}.wav", seconds,
+		seconds >= 20 ? "sec" : "");
+	for (gentity_t *ent : active_clients()) {
+		if (!IsConnected(ent) || ent->client->resp.arena_id != arena.id)
+			continue;
+		// Null stem: the backup tick plays regardless of the announcer preference.
+		MM_AnnounceRaw_ToClient(ent, nullptr, beep.c_str(), false);
+		if (seconds <= 3) {
+			static constexpr mm_announce_event_t spoken[] = {
+				mm_announce_event_t::One, mm_announce_event_t::Two,
+				mm_announce_event_t::Three };
+			MM_Announce_ToClient(ent, spoken[seconds - 1]);
+		}
+	}
+	ArenaPrint(arena, PRINT_CENTER,
+		fmt::format("{}\nBegins in...", arena.name), true);
+	arena.countdown_check = seconds;
 }
 
 void BeginFight(Arena &arena)
 {
 	arena.state = mm_arena_state_t::Running;
+	ClearWarmupTracking(arena);
 	arena.state_timer = roundtimelimit && roundtimelimit->value > 0
 		? level.time + gtime_t::from_min(roundtimelimit->value) : gtime_t {};
 	FreezeFighters(arena, false);
@@ -2209,6 +2411,7 @@ void ResetEmptyArena(Arena &arena)
 	arena.settings = arena.defaults;
 	arena.state = mm_arena_state_t::Empty;
 	arena.state_before_pause = mm_arena_state_t::Empty;
+	ClearWarmupTracking(arena);
 	arena.state_timer = {};
 	arena.paused_remaining = {};
 	arena.resume_countdown = false;
@@ -2238,6 +2441,7 @@ void ResetArenaSeries(Arena &arena)
 	arena.series_winner = 0;
 	arena.state = ArenaPopulation(arena.id)
 		? mm_arena_state_t::Warmup : mm_arena_state_t::Empty;
+	ClearWarmupTracking(arena);
 	arena.state_timer = {};
 	arena.state_before_pause = arena.state;
 	arena.paused_remaining = {};
@@ -2529,19 +2733,31 @@ void TickArena(Arena &arena)
 		}
 		arena.state = mm_arena_state_t::Warmup;
 		arena.state_timer = {};
+		arena.countdown_check = 0;
+		arena.prepare_announced = false;
 		SetQueuedRoles(arena);
+		// This branch returns before the state switch below, and it is the single most common
+		// warmup case: a room that has no runnable pairing yet. Say why here, or the notice
+		// would never fire in exactly the situation it exists for.
+		SetWarmupRequisite(arena, unequal_sides
+			? mm_arena_warmup_req_t::Balance
+			: mm_arena_warmup_req_t::MorePlayers);
+		TickArenaWarmupNotices(arena);
 		return;
 	}
 
 	switch (arena.state) {
 	case mm_arena_state_t::Empty:
 	case mm_arena_state_t::Warmup:
-		if (AllReady(arena))
+		if (EvaluateWarmup(arena))
 			BeginCountdown(arena);
+		else
+			TickArenaWarmupNotices(arena);
 		break;
 	case mm_arena_state_t::MatchCountdown:
 	case mm_arena_state_t::RoundCountdown:
 		FreezeFighters(arena, true);
+		TickArenaCountdown(arena);
 		if (level.time >= arena.state_timer)
 			BeginFight(arena);
 		break;
@@ -2556,6 +2772,7 @@ void TickArena(Arena &arena)
 				ResetPlayerScores(arena);
 				arena.state = mm_arena_state_t::Warmup;
 				arena.state_timer = {};
+				ClearWarmupTracking(arena);
 				SetQueuedRoles(arena);
 				break;
 			}
@@ -2597,6 +2814,7 @@ void TickArena(Arena &arena)
 		else
 			ResetFixedSeries(arena);
 		arena.state = mm_arena_state_t::Warmup;
+		ClearWarmupTracking(arena);
 		break;
 	}
 	case mm_arena_state_t::Paused:
@@ -2782,6 +3000,187 @@ bool CreatePlayerTeam(gentity_t *ent, std::string_view requested_name,
 	return JoinLogicalTeam(ent, *team, nullptr, false, force);
 }
 
+// Deferred bot decisions are throttled per client slot. Kept in a file-static array rather than
+// on gclient_t so the savegame field tables are untouched.
+std::array<gtime_t, MAX_CLIENTS> s_bot_next_decision {};
+
+void CountRoomOccupants(int arena_id, int &humans, int &bots)
+{
+	humans = 0;
+	bots = 0;
+	for (gentity_t *ent : active_clients()) {
+		if (!IsConnected(ent) || ent->client->resp.arena_id != arena_id)
+			continue;
+		if (IsBotClient(ent))
+			bots++;
+		else
+			humans++;
+	}
+}
+
+int EligibleTeamCount(const Arena &arena)
+{
+	int count = 0;
+	for (uint16_t id = 1; id <= kMaxLogicalTeams; id++) {
+		const LogicalTeam &team = s_teams[id];
+		if (team.valid && team.arena_id == arena.id && TeamEligible(arena, id))
+			count++;
+	}
+	return count;
+}
+
+mm_arena_bot_room_view_t BuildBotRoomView(const gentity_t *bot, const Arena &arena)
+{
+	mm_arena_bot_room_view_t view;
+	view.id = arena.id;
+	CountRoomOccupants(arena.id, view.humans, view.bots);
+	view.practice = arena.settings.type == mm_arena_type_t::Practice;
+	view.eligible_teams = EligibleTeamCount(arena);
+	// Eligibility, not side ids: EnsureFixedTeams pins both ids for Clan Arena and Red Rover the
+	// moment anyone is in the room, so an id test would call every fixed-team room paired and
+	// hide the "a human here has nobody to fight" signal the whole policy turns on.
+	view.paired = arena.active_red != 0 && arena.active_blue != 0 &&
+		TeamEligible(arena, arena.active_red) &&
+		TeamEligible(arena, arena.active_blue);
+	// Bots always satisfy the ping gate, so joinability is only about locks and capacity.
+	view.already_here = bot->client->resp.arena_id == arena.id;
+	const bool full = arena.settings.max_players > 0 && !view.already_here &&
+		ArenaPopulation(arena.id) >= arena.settings.max_players;
+	view.joinable = !full && (view.already_here || !ArenaEntryLocked(bot, arena));
+	return view;
+}
+
+// Picks the room a bot should be in. Humans anchor the choice: a bot follows them into their
+// room and, in doing so, gives them an opponent rather than warming an empty room next door.
+int ChooseBotRoom(const gentity_t *bot)
+{
+	if (!IsConnected(bot) || s_arena_count < 1)
+		return 0;
+
+	int best_id = 0;
+	mm_arena_bot_room_view_t best {};
+	for (int id = 1; id <= s_arena_count; id++) {
+		const Arena &arena = s_arenas[id];
+		if (!arena.valid)
+			continue;
+		const mm_arena_bot_room_view_t view = BuildBotRoomView(bot, arena);
+		if (MM_ArenaBotRoomScore(view) < 0)
+			continue;
+		if (!best_id || MM_ArenaBotPrefersRoom(view, best)) {
+			best_id = id;
+			best = view;
+		}
+	}
+	return best_id;
+}
+
+// Nominates the team a bot should join: the smallest one with room, preferring a side with no
+// humans on it so bots line up opposite the players rather than crowding in beside them.
+LogicalTeam *ChooseBotJoinTarget(const gentity_t *bot, const Arena &arena)
+{
+	const uint16_t own = bot->client->resp.arena_team_id;
+	LogicalTeam *best = nullptr;
+	int best_size = 0;
+	bool best_has_human = true;
+
+	const auto consider = [&](LogicalTeam &team) {
+		if (!team.valid || team.arena_id != arena.id || team.id == own)
+			return;
+		if (team.locked)
+			return;
+		const int size = MemberCount(team.id);
+		if (!MM_ArenaTeamSizeIsUnlimited(arena.settings.type) &&
+			size >= arena.settings.players_per_team)
+			return;
+		bool has_human = false;
+		for (const gentity_t *member : TeamMembers(team.id)) {
+			if (!IsBotClient(member)) {
+				has_human = true;
+				break;
+			}
+		}
+		// Human-free sides win outright; among equals the smaller side wins, so bots even out
+		// the roster instead of stacking one side. Ties fall to the lower id by iteration order.
+		if (best) {
+			if (has_human != best_has_human) {
+				if (has_human)
+					return;
+			} else if (size >= best_size)
+				return;
+		}
+		best = &team;
+		best_size = size;
+		best_has_human = has_human;
+	};
+
+	if (MM_ArenaUsesFixedTeams(arena.settings.type)) {
+		for (const uint16_t id : { arena.fixed_red, arena.fixed_blue })
+			if (LogicalTeam *team = FindTeam(id))
+				consider(*team);
+		return best;
+	}
+	for (uint16_t id = 1; id <= kMaxLogicalTeams; id++)
+		consider(s_teams[id]);
+	return best;
+}
+
+void ApplyBotTeamAction(gentity_t *bot)
+{
+	if (!IsConnected(bot))
+		return;
+	Arena *arena = ArenaFor(bot->client);
+	if (!arena)
+		return;
+
+	EnsureFixedTeams(*arena);
+	mm_arena_bot_team_view_t view;
+	view.room_uses_teams = MM_ArenaUsesLogicalTeams(arena->settings.type);
+	view.room_uses_fixed = MM_ArenaUsesFixedTeams(arena->settings.type);
+	view.has_own_team = bot->client->resp.arena_team_id != 0;
+	view.can_create = !arena->settings.lock_arena &&
+		(arena->settings.max_teams <= 0 ||
+			LogicalTeamCount(arena->id) < arena->settings.max_teams);
+
+	LogicalTeam *target = ChooseBotJoinTarget(bot, *arena);
+	view.has_join_target = target != nullptr;
+
+	if (!view.has_own_team && !view.room_uses_fixed) {
+		// Exactly one team here and a human is on it: that player is waiting for someone to
+		// fight, so found the opposing team instead of padding theirs.
+		int team_count = 0;
+		const LogicalTeam *only = nullptr;
+		for (uint16_t id = 1; id <= kMaxLogicalTeams; id++) {
+			const LogicalTeam &team = s_teams[id];
+			if (!team.valid || team.arena_id != arena->id)
+				continue;
+			team_count++;
+			only = &team;
+		}
+		if (team_count == 1 && only) {
+			for (const gentity_t *member : TeamMembers(only->id)) {
+				if (!IsBotClient(member)) {
+					view.lone_human_team = true;
+					break;
+				}
+			}
+		}
+	}
+
+	switch (MM_ArenaBotTeamAction(view)) {
+	case mm_arena_bot_team_action_t::JoinOpposing:
+		// Re-resolve nothing here: no team-destroying call has run since ChooseBotJoinTarget.
+		if (target)
+			JoinLogicalTeam(bot, *target, nullptr, false, true);
+		break;
+	case mm_arena_bot_team_action_t::CreateNew:
+		CreatePlayerTeam(bot, {}, true);
+		break;
+	case mm_arena_bot_team_action_t::Stay:
+	case mm_arena_bot_team_action_t::None:
+		break;
+	}
+}
+
 LogicalTeam *FindJoinTarget(gentity_t *ent, std::string_view token)
 {
 	int id = 0;
@@ -2926,8 +3325,14 @@ bool SetTeamLocked(gentity_t *ent, LogicalTeam &team, bool locked,
 int ReadyLogicalTeam(gentity_t *ent, LogicalTeam &team, bool ready)
 {
 	Arena *a = FindArena(team.arena_id);
-	if (!RequireCompetitionCommand(ent, a, "Team ready control", true))
+	// Available wherever ready-up is actually in play, not just competition mode; admins keep
+	// their override either way.
+	if (a && !ReadyUpRequired(*a) &&
+		(!ent || !ent->client || !ent->client->sess.admin)) {
+		gi.Client_Print(ent, PRINT_HIGH,
+			"This arena starts as soon as the sides are set; ready status is unused.\n");
 		return -1;
+	}
 	if (!IsCaptain(ent, &team) &&
 		(!ent || !ent->client || !ent->client->sess.admin)) {
 		gi.Client_Print(ent, PRINT_HIGH,
@@ -2945,6 +3350,8 @@ int ReadyLogicalTeam(gentity_t *ent, LogicalTeam &team, bool ready)
 		if (member->client->resp.ready == ready)
 			continue;
 		member->client->resp.ready = ready;
+		member->client->last_warmup_nudge_time = 0_sec;
+		gi.LocClient_Print(member, PRINT_CENTER, "");
 		changed++;
 	}
 	if (changed)
@@ -3630,12 +4037,20 @@ gentity_t *FarthestPoint(const std::vector<gentity_t *> &points,
 	return best;
 }
 
-void AppendLayout(std::string &layout, std::string_view text)
+// Returns false when the chunk does not fit. Callers must stop appending on a refusal rather
+// than continue: a dropped chunk followed by a smaller one that still fits renders the board
+// out of order, and a split "ifgef ... endif" block makes the client Com_Error out entirely.
+// `footer_reserve` is the measured length of the already-composed footer, not a constant: the
+// Arena footer is richer than the shared deathmatch one and its size varies by room, so
+// budgeting against a fixed number would let a busy board push the footer out entirely.
+[[nodiscard]] bool AppendLayout(std::string &layout, std::string_view text,
+	size_t footer_reserve)
 {
-	if (!MM_ScoreboardCanAppend(layout.size(), text.size(),
-		MAX_STRING_CHARS, false))
-		return;
+	if (!MM_ArenaLayoutCanAppend(layout.size(), text.size(),
+		MAX_STRING_CHARS, footer_reserve))
+		return false;
 	layout.append(text);
+	return true;
 }
 
 const char *RoleLabel(const gclient_t *client)
@@ -4153,8 +4568,10 @@ void MM_Arena_OnMatchStart()
 		return;
 	for (int id = 1; id <= arena::s_arena_count; id++) {
 		arena::Arena &a = arena::s_arenas[id];
-		if (arena::ArenaPopulation(id))
+		if (arena::ArenaPopulation(id)) {
 			a.state = mm_arena_state_t::Warmup;
+			arena::ClearWarmupTracking(a);
+		}
 	}
 }
 
@@ -4192,14 +4609,15 @@ void MM_Arena_OnClientBegin(gentity_t *ent)
 	// here and then spawning the same client again in the caller.
 	ent->client->sess.team = TEAM_SPECTATOR;
 	P_PublishEngineTeam(ent);
-	if (!(ent->svflags & SVF_BOT) && !ent->client->sess.is_a_bot)
+	if (client_num >= 0 && client_num < MAX_CLIENTS)
+		arena::s_bot_next_decision[client_num] = {};
+	if (!arena::IsBotClient(ent))
 		arena::s_had_human_participant = true;
-	if (ent->client->sess.is_a_bot || (ent->svflags & SVF_BOT)) {
-		int best = 1;
-		for (int id = 2; id <= arena::s_arena_count; id++)
-			if (arena::ArenaPopulation(id) < arena::ArenaPopulation(best))
-				best = id;
-		MM_Arena_MoveTo(ent, best, false);
+	else if (const int room = arena::ChooseBotRoom(ent)) {
+		// Place the bot immediately so it is never stranded if Bot_BeginFrame is starved, but
+		// only as an observer: MM_Arena_BotBeginFrame settles the team on the next tick, once
+		// the caller's ClientSpawn has run and the room state has been re-evaluated.
+		MM_Arena_MoveTo(ent, room, true, true);
 	}
 }
 
@@ -4210,6 +4628,8 @@ void MM_Arena_OnClientDisconnect(gentity_t *ent)
 	const uint16_t old_team = ent->client->resp.arena_team_id;
 	const int client_num = arena::ClientNumber(ent);
 	arena::ClearClientSlotState(client_num);
+	if (client_num >= 0 && client_num < MAX_CLIENTS)
+		arena::s_bot_next_decision[client_num] = {};
 	ent->client->resp.arena_team_id = 0;
 	ent->client->resp.arena_id = 0;
 	arena::SetRoleField(ent->client, mm_arena_role_t::Lobby);
@@ -4303,6 +4723,51 @@ void MM_Arena_OnDeath(gentity_t *victim, gentity_t *attacker)
 		arena::s_rover_pending_arena[client_num] =
 			static_cast<int16_t>(a->id);
 	}
+}
+
+void MM_Arena_BotBeginFrame(gentity_t *bot)
+{
+	if (!arena::IsArenaGametype() || !arena::IsConnected(bot) ||
+		!arena::IsBotClient(bot))
+		return;
+
+	// A menu left open on a bot suppresses Think_Weapon for the rest of the map. Nothing should
+	// open one now, but recover from any that predates the guard (e.g. after a gametype switch).
+	if (bot->client->menu)
+		P_Menu_Close(bot);
+
+	const int client_num = arena::ClientNumber(bot);
+	if (client_num < 0 || client_num >= MAX_CLIENTS)
+		return;
+	const arena::Arena *current = arena::ArenaForConst(bot->client);
+	const bool practice_room = current &&
+		current->settings.type == mm_arena_type_t::Practice;
+	// Never churn a settled roster: a fighter, or anyone the match has locked in, stays put.
+	// Practice is the exception — it auto-enrols every entrant as a fighter and never demotes
+	// them, so treating that as settled would strand the bot in the room for the whole map.
+	if ((!practice_room && arena::Role(bot->client) == mm_arena_role_t::Fighter) ||
+		arena::FighterRosterLocked(bot))
+		return;
+	if (level.time < arena::s_bot_next_decision[client_num])
+		return;
+	arena::s_bot_next_decision[client_num] = level.time + 1_sec;
+
+	// A bot that already holds a team in a live room has finished deciding; re-running the room
+	// choice from here is what would make it wander, since its own arrival is what pairs the
+	// room it just joined.
+	const bool settled = current && bot->client->resp.arena_team_id != 0;
+	if (!settled) {
+		const int room = arena::ChooseBotRoom(bot);
+		if (room > 0 && room != bot->client->resp.arena_id) {
+			// Observe on arrival; the team decision below runs against the room we actually
+			// landed in. force=true keeps MM_Arena_MoveTo's refusal prints away from a client
+			// that cannot read them.
+			if (!MM_Arena_MoveTo(bot, room, true, true))
+				return;
+		}
+	}
+	if (bot->client->resp.arena_id > 0)
+		arena::ApplyBotTeamAction(bot);
 }
 
 bool MM_Arena_RunFrame()
@@ -4834,7 +5299,7 @@ bool MM_Arena_CanToggleReady(const gentity_t *ent)
 	if (!arena::IsArenaGametype() || !arena::IsConnected(ent))
 		return false;
 	const arena::Arena *a = arena::ArenaForConst(ent->client);
-	return a && a->settings.competition_mode &&
+	return a && arena::ReadyUpRequired(*a) &&
 		a->settings.type != mm_arena_type_t::Practice &&
 		ent->client->resp.arena_team_id &&
 		arena::Role(ent->client) != mm_arena_role_t::Coach &&
@@ -5392,18 +5857,48 @@ bool MM_Arena_SetReady(gentity_t *ent, bool ready)
 			"Join an Arena team before changing ready status.\n");
 		return true;
 	}
-	if (!arena::RequireCompetitionCommand(ent, a, "Ready"))
+	if (!arena::ReadyUpRequired(*a)) {
+		gi.Client_Print(ent, PRINT_HIGH,
+			"This arena starts as soon as the sides are set; ready status is unused.\n");
 		return true;
+	}
 	if (a->state != mm_arena_state_t::Empty &&
 		a->state != mm_arena_state_t::Warmup) {
 		gi.Client_Print(ent, PRINT_HIGH,
 			"Ready status can only change between matches.\n");
 		return true;
 	}
+	if (ent->client->resp.ready == ready && ready) {
+		gi.Client_Print(ent, PRINT_HIGH, "You are already ready.\n");
+		return true;
+	}
 	ent->client->resp.ready = ready;
-	arena::ArenaPrint(*a, PRINT_HIGH,
-		fmt::format("{} is {}ready.\n", ent->client->resp.netname,
+	// Clear the nudge throttle and any lingering "You are NOT ready" centerprint so the reply is
+	// immediate, matching MM_CmdReady in native play.
+	ent->client->last_warmup_nudge_time = 0_sec;
+	gi.LocClient_Print(ent, PRINT_CENTER, "");
+	int room_ready = 0, room_humans = 0, room_bots = 0;
+	arena::GetRoomReadyCounts(*a, room_ready, room_humans, room_bots);
+	arena::ArenaPrint(*a, PRINT_HIGH, room_humans > 0
+		? fmt::format("{} is {}ready. ({}/{} ready)\n", ent->client->resp.netname,
+			ready ? "" : "not ", room_ready, room_humans)
+		: fmt::format("{} is {}ready.\n", ent->client->resp.netname,
 			ready ? "" : "not "));
+	// Say what is still missing, rather than leaving the player to guess why nothing happened.
+	if (ready) {
+		switch (arena::WarmupStatus(*a).requisite) {
+		case mm_arena_warmup_req_t::MorePlayers:
+			gi.Client_Print(ent, PRINT_HIGH,
+				"Still waiting for enough players to start.\n");
+			break;
+		case mm_arena_warmup_req_t::Balance:
+			gi.Client_Print(ent, PRINT_HIGH,
+				"Still waiting for the teams to balance.\n");
+			break;
+		default:
+			break;
+		}
+	}
 	return true;
 }
 
@@ -5847,108 +6342,252 @@ void MM_Arena_OpenRoomMenu(gentity_t *ent, menu_hnd_t *)
 	MM_Arena_OpenMenuPage(ent, 0, true);
 }
 
-void MM_Arena_ScoreboardMessage(gentity_t *viewer, gentity_t *)
+void MM_Arena_ScoreboardMessage(gentity_t *viewer, gentity_t *killer)
 {
-	std::string layout;
+	const bool intermission = level.intermission_time != 0_sec;
 	const arena::Arena *a = viewer && viewer->client
 		? arena::ArenaForConst(viewer->client) : nullptr;
+	const bool practice = a && a->settings.type == mm_arena_type_t::Practice;
+	const bool live_series = a && arena::IsActiveSeriesState(a->state);
+
+	// The footer is composed first and its measured length becomes the body's reserve, so a busy
+	// board can never squeeze out the block that names the room. Every body chunk is then
+	// appended whole or not at all; a refused chunk ends its section rather than being skipped,
+	// because a gap followed by a later chunk that still fits would render out of order.
+	mm_scoreboard_footer_ctx_t footer;
+	footer.intermission = intermission;
+	footer.intermission_frame = level.intermission_server_frame + (5_sec).frames();
+	footer.victor_msg = level.intermission_victor_msg;
+	if (intermission && level.match_start_time)
+		footer.total_match_ms =
+			(level.intermission_time - level.match_start_time - 1_sec).milliseconds();
+
+	std::string title;
+	std::string limit_label;
+	std::string limit_value;
+	std::string status_line;
+
 	if (!a) {
-		arena::AppendLayout(layout,
-			fmt::format("xv 0 yv -48 cstring2 \"MuffMode Arena on {}\" "
-				"xv 0 yv -36 cstring \"Select an Arena Room\" ",
-				arena::SafeText(level.level_name)));
-		int y = -18;
-		for (int id = 1; id <= arena::s_arena_count && id <= 16; id++, y += 9) {
-			const arena::Arena &item = arena::s_arenas[id];
-			arena::AppendLayout(layout,
-				fmt::format("xv -120 yv {} string2 \"{}: {}\" "
-					"xv 120 yv {} string \"{} {}\" ",
-					y, id, arena::SafeText(item.name, 28), y,
-					arena::ArenaPopulation(id), arena::StateName(item.state)));
-		}
-		if (arena::s_arena_count > 16)
-			arena::AppendLayout(layout,
-				fmt::format("xv 0 yv 132 cstring \"...and {} more; use the Join menu\" ",
-					arena::s_arena_count - 16));
+		title = fmt::format("MuffMode Arena on {}",
+			arena::SafeText(level.level_name, 24));
+		limit_label = "Rooms";
+		limit_value = fmt::format("{}", arena::s_arena_count);
+		status_line = "Select an Arena Room";
 	} else {
-		const bool practice = a->settings.type == mm_arena_type_t::Practice;
-		const std::string progress =
-			a->settings.type == mm_arena_type_t::RedRover
-				? fmt::format("continuous rover | round {}", a->round + 1)
-				: (practice
-					? std::string("continuous free practice")
-					: fmt::format("best of {} | round {}",
-						a->settings.rounds, a->round));
-		arena::AppendLayout(layout,
-			fmt::format("xv 0 yv -48 cstring2 \"{} - {}\" "
-				"xv 0 yv -38 cstring \"{} | {}\" ",
-				arena::SafeText(a->name), arena::TypeName(a->settings.type),
-				arena::StateName(a->state), progress));
-		if (practice)
-			arena::AppendLayout(layout,
-				"xv 0 yv -22 cstring2 \"PLAYERS\" ");
-		else
-			arena::AppendLayout(layout,
-				fmt::format("xv -40 yv -22 string2 \"RED {}\" "
-					"xv 200 yv -22 string2 \"BLUE {}\" ",
-					a->red_score, a->blue_score));
-		int red_row = 0;
-		int blue_row = 0;
-		int red_total = 0;
-		int blue_total = 0;
-		for (gentity_t *ent : active_clients()) {
-			if (!arena::IsConnected(ent) ||
-				ent->client->resp.arena_id != a->id ||
-				arena::Role(ent->client) != mm_arena_role_t::Fighter)
-				continue;
-			const bool red = practice
-				? ((red_total + blue_total) & 1) == 0
-				: ent->client->resp.arena_side == TEAM_RED;
-			if (red)
-				red_total++;
-			else
-				blue_total++;
-			int &row = red ? red_row : blue_row;
-			if (row >= 8)
-				continue;
-			arena::AppendLayout(layout, fmt::format("ctf {} {} {} {} {} \"\" ",
-				red ? -40 : 200, -10 + row * 9, ent->s.number - 1,
-				ent->client->resp.score, std::min(ent->client->ping, 999)));
-			row++;
+		title = fmt::format("{} on {}", arena::TypeName(a->settings.type),
+			arena::SafeText(level.level_name, 20));
+		if (practice) {
+			limit_label = "Practice";
+			limit_value = "free play";
+		} else if (a->settings.type == mm_arena_type_t::RedRover) {
+			limit_label = "Round";
+			limit_value = fmt::format("{}", a->round + 1);
+		} else {
+			limit_label = "Best of";
+			limit_value = fmt::format("{} (round {})", a->settings.rounds,
+				std::max(1, a->round));
 		}
-		int y = 66;
-		int rows = 0;
-		int waiting_total = 0;
-		arena::AppendLayout(layout, "xv 0 yv 54 cstring2 \"WAITING / OBSERVING\" ");
-		for (gentity_t *ent : active_clients()) {
-			if (!arena::IsConnected(ent) ||
-				ent->client->resp.arena_id != a->id ||
-				arena::Role(ent->client) == mm_arena_role_t::Fighter)
-				continue;
-			waiting_total++;
-			if (rows >= 10)
-				continue;
-			const int x = (rows & 1) ? 200 : -40;
-			const int row_y = y + (rows / 2) * 9;
-			arena::AppendLayout(layout, fmt::format("ctf {} {} {} {} {} \"\" ",
-				x, row_y, ent->s.number - 1, ent->client->resp.score,
-				std::min(ent->client->ping, 999)));
-			rows++;
-		}
-		const int hidden_red = std::max(0, red_total - red_row);
-		const int hidden_blue = std::max(0, blue_total - blue_row);
-		const int hidden_waiting = std::max(0, waiting_total - rows);
-		if (hidden_red || hidden_blue || hidden_waiting) {
-			if (practice)
-				arena::AppendLayout(layout,
-					fmt::format("xv 0 yv 120 cstring \"Not shown: {} players, {} waiting\" ",
-						hidden_red + hidden_blue, hidden_waiting));
-			else
-				arena::AppendLayout(layout,
-					fmt::format("xv 0 yv 120 cstring \"Not shown: {} Red, {} Blue, {} waiting\" ",
-						hidden_red, hidden_blue, hidden_waiting));
+
+		// The status line carries the room's warmup reason, so a player who opens the board
+		// during warmup is told what is missing instead of only that nothing is happening.
+		if (!live_series && !practice) {
+			switch (a->warmup_requisite) {
+			case mm_arena_warmup_req_t::MorePlayers:
+				status_line = fmt::format("Waiting for players ({} minimum)",
+					std::max(2, muffmode::CvarInteger(minplayers)));
+				break;
+			case mm_arena_warmup_req_t::Balance:
+				status_line = "Teams are imbalanced.";
+				break;
+			case mm_arena_warmup_req_t::ReadyUp:
+			{
+				int ready = 0, humans = 0, bots = 0;
+				arena::GetRoomReadyCounts(*a, ready, humans, bots);
+				status_line = fmt::format("{} of {} players ready", ready, humans);
+				break;
+			}
+			default:
+				break;
+			}
 		}
 	}
+
+	footer.title = title;
+	footer.limit_label = limit_label;
+	footer.limit_value = limit_value;
+	footer.status_line = status_line;
+
+	const std::string footer_block = MM_BuildArenaScoreboardFooter(footer);
+	const size_t reserve = footer_block.size();
+
+	std::string layout;
+	if (!a) {
+		static_cast<void>(arena::AppendLayout(layout,
+			"xv -40 yv 42 string2 \"ROOM\" xv 140 yv 42 string2 \"POP\" ", reserve));
+		int shown = 0;
+		for (int id = 1; id <= arena::s_arena_count; id++) {
+			const arena::Arena &item = arena::s_arenas[id];
+			const int y = MM_ArenaScoreboardRowY(MM_ARENA_SB_FIGHTER_TOP, shown);
+			if (!arena::AppendLayout(layout,
+				fmt::format("xv -40 yv {} string \"{}: {}\" "
+					"xv 140 yv {} string \"{}\" xv 176 yv {} string \"{}\" ",
+					y, id, arena::SafeText(item.name, 18),
+					y, arena::ArenaPopulation(id),
+					y, arena::StateName(item.state)),
+				reserve))
+				break;
+			shown++;
+		}
+		if (shown < arena::s_arena_count)
+			static_cast<void>(arena::AppendLayout(layout,
+				fmt::format("xv 0 yb -60 cstring \"...and {} more; use the Join menu\" ",
+					arena::s_arena_count - shown), reserve));
+	} else {
+		const bool readyup = arena::ReadyUpRequired(*a);
+		const bool show_ready =
+			MM_ArenaScoreboardShowsReadyMarkers(a->state, readyup);
+		const arena::LogicalTeam *red_team = arena::FindTeam(a->active_red, 0);
+		const arena::LogicalTeam *blue_team = arena::FindTeam(a->active_blue, 0);
+
+		static_cast<void>(arena::AppendLayout(layout,
+			fmt::format("xv 0 yv 8 cstring2 \"{}\" xv 0 yv 20 cstring \"{}\" ",
+				arena::SafeText(a->name, 32), arena::StateName(a->state)),
+			reserve));
+
+		if (practice)
+			static_cast<void>(arena::AppendLayout(layout,
+				"xv 0 yv 32 cstring2 \"PLAYERS\" "
+				"xv -40 yv 42 string \"SC\" xv -12 yv 42 picn ping "
+				"xv 200 yv 42 string \"SC\" xv 228 yv 42 picn ping ",
+				reserve));
+		else
+			static_cast<void>(arena::AppendLayout(layout,
+				fmt::format("xv -40 yv 32 string2 \"{} {}\" "
+					"xv 200 yv 32 string2 \"{} {}\" "
+					"xv -40 yv 42 string \"SC\" xv -12 yv 42 picn ping "
+					"xv 200 yv 42 string \"SC\" xv 228 yv 42 picn ping ",
+					arena::SafeText(red_team ? red_team->name : "Red", 12),
+					a->red_score,
+					arena::SafeText(blue_team ? blue_team->name : "Blue", 12),
+					a->blue_score),
+				reserve));
+
+		// Warmup lists the rostered sides, not only fighters: during warmup nobody is a fighter
+		// yet, and who is lined up on which side is exactly what players want to see.
+		std::vector<gentity_t *> sides[2];
+		std::vector<gentity_t *> waiting;
+		int practice_seat = 0;
+		for (gentity_t *ent : active_clients()) {
+			if (!arena::IsConnected(ent) || ent->client->resp.arena_id != a->id)
+				continue;
+			const mm_arena_role_t role = arena::Role(ent->client);
+			if (practice) {
+				if (role == mm_arena_role_t::Fighter)
+					sides[(practice_seat++) & 1].push_back(ent);
+				else
+					waiting.push_back(ent);
+				continue;
+			}
+			int side = -1;
+			if (live_series) {
+				if (role == mm_arena_role_t::Fighter)
+					side = ent->client->resp.arena_side == TEAM_RED ? 0 : 1;
+			} else if (ent->client->resp.arena_team_id &&
+				role != mm_arena_role_t::Coach) {
+				if (a->active_red &&
+					ent->client->resp.arena_team_id == a->active_red)
+					side = 0;
+				else if (a->active_blue &&
+					ent->client->resp.arena_team_id == a->active_blue)
+					side = 1;
+			}
+			if (side < 0)
+				waiting.push_back(ent);
+			else
+				sides[side].push_back(ent);
+		}
+
+		int rows_shown[2] = { 0, 0 };
+		for (int row = 0; row < MM_ARENA_SB_MAX_ROWS_PER_SIDE; row++) {
+			bool blocked = false;
+			for (int side = 0; side < 2 && !blocked; side++) {
+				if (row >= static_cast<int>(sides[side].size()))
+					continue;
+				gentity_t *ent = sides[side][row];
+				const gclient_t *cl = ent->client;
+				const int x = side == 0
+					? MM_ARENA_SB_COL_LEFT_X : MM_ARENA_SB_COL_RIGHT_X;
+				const int y = MM_ArenaScoreboardRowY(MM_ARENA_SB_FIGHTER_TOP, row);
+
+				std::string entry;
+				const arena::LogicalTeam *team =
+					arena::FindTeam(cl->resp.arena_team_id, 0);
+				if (team && team->captain == arena::ClientNumber(ent))
+					entry += fmt::format("xv {} yv {} string2 \"*\" ",
+						x + MM_ARENA_SB_CAPTAIN_DX, y);
+				if (show_ready && (cl->resp.ready || arena::IsBotClient(ent)))
+					entry += fmt::format("xv {} yv {} picn {} ",
+						x + MM_ARENA_SB_READY_DX, y - 2,
+						"wheel/p_compass_selected");
+				else if (live_series && !practice && !cl->eliminated)
+					entry += fmt::format("xv {} yv {} picn {} ",
+						x + MM_ARENA_SB_ALIVE_DX, y,
+						side == 0 ? "sbfctf1" : "sbfctf2");
+				entry += fmt::format("ctf {} {} {} {} {} {} ", x, y,
+					ent->s.number - 1, cl->resp.score,
+					std::min(cl->ping, 999),
+					ent == killer ? "\"/tags/bloody\"" : "\"\"");
+
+				if (!arena::AppendLayout(layout, entry, reserve)) {
+					blocked = true;
+					break;
+				}
+				rows_shown[side]++;
+			}
+			if (blocked)
+				break;
+		}
+
+		int waiting_shown = 0;
+		if (!waiting.empty()) {
+			const int header_y = MM_ArenaScoreboardWaitingHeaderY(
+				rows_shown[0], rows_shown[1]);
+			if (arena::AppendLayout(layout,
+				fmt::format("xv 0 yv {} cstring2 \"WAITING / OBSERVING\" ",
+					header_y), reserve)) {
+				for (gentity_t *ent : waiting) {
+					if (waiting_shown >= MM_ARENA_SB_MAX_WAITING_ROWS)
+						break;
+					const int x = (waiting_shown & 1)
+						? MM_ARENA_SB_COL_RIGHT_X : MM_ARENA_SB_COL_LEFT_X;
+					const int y = MM_ArenaScoreboardRowY(
+						header_y + MM_ARENA_SB_ROW_STRIDE, waiting_shown / 2);
+					if (!arena::AppendLayout(layout,
+						fmt::format("ctf {} {} {} {} {} \"\" ", x, y,
+							ent->s.number - 1, ent->client->resp.score,
+							std::min(ent->client->ping, 999)),
+						reserve))
+						break;
+					waiting_shown++;
+				}
+			}
+		}
+
+		const int hidden = std::max<int>(0,
+			static_cast<int>(sides[0].size()) - rows_shown[0]) +
+			std::max<int>(0, static_cast<int>(sides[1].size()) - rows_shown[1]) +
+			std::max<int>(0, static_cast<int>(waiting.size()) - waiting_shown);
+		if (hidden)
+			static_cast<void>(arena::AppendLayout(layout,
+				fmt::format("xv 0 yb -60 cstring \"...and {} more\" ", hidden),
+				reserve));
+	}
+
+	// The reserve above guarantees this fits; the guard is a belt-and-braces against a future
+	// edit that changes the footer after it has been measured.
+	if (layout.size() + footer_block.size() < MAX_STRING_CHARS)
+		layout += footer_block;
+
 	gi.WriteByte(svc_layout);
 	gi.WriteString(layout.c_str());
 }
@@ -6063,7 +6702,26 @@ void MM_Arena_SetTimerHudStats(gentity_t *ent)
 	switch (a->state) {
 	case mm_arena_state_t::Empty:
 	case mm_arena_state_t::Warmup:
-		text = "WARMUP";
+		// Say what the room is waiting on, so a player staring at "WARMUP" knows whether to
+		// ready up, wait for a body, or fix the balance.
+		switch (a->warmup_requisite) {
+		case mm_arena_warmup_req_t::MorePlayers:
+			text = "WARMUP - NEED PLAYERS";
+			break;
+		case mm_arena_warmup_req_t::Balance:
+			text = "WARMUP - UNBALANCED";
+			break;
+		case mm_arena_warmup_req_t::ReadyUp:
+		{
+			int ready = 0, humans = 0, bots = 0;
+			arena::GetRoomReadyCounts(*a, ready, humans, bots);
+			text = fmt::format("WARMUP ({}/{} READY)", ready, humans);
+			break;
+		}
+		default:
+			text = "WARMUP";
+			break;
+		}
 		break;
 	case mm_arena_state_t::MatchCountdown:
 	case mm_arena_state_t::RoundCountdown:

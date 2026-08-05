@@ -3,6 +3,7 @@
 
 #include "messages.h"
 #include "hud_text.h"
+#include "muffmode/mm_centerprint.h"
 
 #include <array>
 #include <optional>
@@ -369,33 +370,44 @@ void CG_ParseCenterPrint(const char *str, int isplit, bool instant)
 		text = text.substr(end_of_bind + 1);
 	}
 
-	cgi.Com_Print("\n\n\35\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\37\n\n");
+	// [MuffMode] A marker space here (after any bind run, where the server inserts it) means this is
+	// a MuffMode deathmatch centerprint: strip it and keep the message out of the console. Stock
+	// clients have no such rule, which is why the marker is a space and not a visible glyph. Exactly
+	// one is removed, so text that legitimately begins with a space still arrives intact.
+	const bool echo_to_console = text.empty() || text.front() != MM_CENTERPRINT_MARKER;
+	if (!echo_to_console)
+		text.erase(0, 1);
 
-	s = text.c_str();
-	do {
-		for (length = 0; length < 40; length++)
-			if (s[length] == '\n' || !s[length])
+	if (echo_to_console) {
+		cgi.Com_Print("\n\n\35\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\37\n\n");
+
+		s = text.c_str();
+		do {
+			for (length = 0; length < 40; length++)
+				if (s[length] == '\n' || !s[length])
+					break;
+			for (i = 0; i < (40 - length) / 2; i++)
+				line[i] = ' ';
+
+			for (j = 0; j < length; j++)
+				line[i++] = s[j];
+
+			line[i] = '\n';
+			line[i + 1] = 0;
+
+			cgi.Com_Print(line);
+
+			while (*s && *s != '\n')
+				s++;
+
+			if (!*s)
 				break;
-		for (i = 0; i < (40 - length) / 2; i++)
-			line[i] = ' ';
-
-		for (j = 0; j < length; j++)
-			line[i++] = s[j];
-
-		line[i] = '\n';
-		line[i + 1] = 0;
-
-		cgi.Com_Print(line);
-
-		while (*s && *s != '\n')
 			s++;
+		} while (true);
 
-		if (!*s)
-			break;
-		s++;
-	} while (true);
+		cgi.Com_Print("\n\n\35\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\37\n\n");
+	}
 
-	cgi.Com_Print("\n\n\35\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\37\n\n");
 	CG_ClearNotify(isplit);
 
 	for (size_t line_end = 0;;) {

@@ -373,10 +373,10 @@ void ApplyMatchAction(gentity_t *ent, menu_hnd_t *p)
 		return;
 	}
 
-	if (level.match_state <= matchst_t::MATCH_COUNTDOWN) {
+	if (level.match_state <= match_state_t::MATCH_COUNTDOWN) {
 		gi.LocBroadcast_Print(PRINT_CHAT, "Match has been forced to start.\n");
 		Match_Start();
-	} else if (level.match_state == matchst_t::MATCH_IN_PROGRESS) {
+	} else if (level.match_state == match_state_t::MATCH_IN_PROGRESS) {
 		gi.LocBroadcast_Print(PRINT_CHAT, "Match has been forced to terminate.\n");
 		Match_Reset();
 	}
@@ -422,11 +422,11 @@ void Open(gentity_t *ent, menu_hnd_t *p)
 	menu::SetText(admin_menu[4], "");
 	admin_menu[4].SelectFunc = nullptr;
 
-	if (level.match_state <= matchst_t::MATCH_COUNTDOWN) {
+	if (level.match_state <= match_state_t::MATCH_COUNTDOWN) {
 		menu::SetText(admin_menu[3], "Force start match");
 		admin_menu[3].SelectFunc = ApplyMatchAction;
 
-	} else if (level.match_state == matchst_t::MATCH_IN_PROGRESS) {
+	} else if (level.match_state == match_state_t::MATCH_IN_PROGRESS) {
 		menu::SetText(admin_menu[3], "Reset match");
 		admin_menu[3].SelectFunc = ApplyMatchAction;
 	}
@@ -1573,7 +1573,7 @@ void Update(gentity_t *ent)
 			ent->client->resp.ready ? "Not Ready" : "Ready Up");
 		entries[index].SelectFunc = ToggleReady;
 	} else if (!arena_active && muffmode::CvarEnabled(g_dm_do_readyup) &&
-		level.match_state == matchst_t::MATCH_WARMUP_READYUP) {
+		level.match_state == match_state_t::MATCH_WARMUP_READYUP) {
 		menu::SetText(entries[index], ent->client->resp.ready ? "Not Ready" : "Ready Up");
 		entries[index].SelectFunc = ToggleReady;
 	} else {

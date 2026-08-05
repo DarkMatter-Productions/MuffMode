@@ -75,6 +75,70 @@ enum class mm_match_high_value_item_t : uint8_t {
 	total
 };
 
+// [MuffMode] Position dwell, sampled once a second while a player is alive and
+// playing, is what tells a camper apart from someone who merely favours a route.
+// The samples are bucketed into coarse world cells and only the busiest few are
+// kept: the awards reel asks "what share of the match was spent in one place",
+// which needs a mode, not a track.
+constexpr float MM_MATCH_CAMP_CELL_SIZE = 512.0f;
+constexpr size_t MM_MATCH_CAMP_CELL_SLOTS = 16;
+
+struct mm_match_camp_cell_t {
+	int16_t x = 0;
+	int16_t y = 0;
+	int16_t z = 0;
+	uint32_t samples = 0;
+};
+
+// Files one sample into a player's dwell table.
+//
+// The table is a Space-Saving counter set, not a plain first-come histogram. A
+// fixed sixteen slots cannot hold every cell a player visits -- 512 units on all
+// three axes means ordinary movement, and any lift or stairwell, exhausts the
+// table inside the first half-minute -- and a table that simply stopped
+// accepting new cells would record the first sixteen places somebody went and
+// then miss the spot they spent the rest of the match in, which is precisely the
+// thing the camping award is looking for.
+//
+// So a miss against a full table evicts the weakest slot and inherits its count.
+// That is the standard heavy-hitter guarantee: with k counters, any cell holding
+// more than 1/k of the samples is certain to still be in the table, and its
+// recorded count overstates the truth by at most the evicted minimum. Sixteen
+// counters therefore cannot lose a cell holding more than 6.25% of a match, and
+// the award's threshold is an order of magnitude above that.
+inline void MM_MatchStatsRecordCampCell(mm_match_camp_cell_t *cells, size_t count,
+	int16_t x, int16_t y, int16_t z)
+{
+	if (!cells || !count)
+		return;
+
+	size_t weakest = 0;
+	for (size_t i = 0; i < count; i++) {
+		if (!cells[i].samples) {
+			// Slots fill in order, so the first empty one is past every used
+			// slot: reaching it means this cell is genuinely new.
+			cells[i].x = x;
+			cells[i].y = y;
+			cells[i].z = z;
+			cells[i].samples = 1;
+			return;
+		}
+		if (cells[i].x == x && cells[i].y == y && cells[i].z == z) {
+			if (cells[i].samples < UINT32_MAX)
+				cells[i].samples++;
+			return;
+		}
+		if (cells[i].samples < cells[weakest].samples)
+			weakest = i;
+	}
+
+	cells[weakest].x = x;
+	cells[weakest].y = y;
+	cells[weakest].z = z;
+	if (cells[weakest].samples < UINT32_MAX)
+		cells[weakest].samples++;
+}
+
 constexpr size_t MM_MATCH_WEAPON_COUNT =
 	static_cast<size_t>(mm_match_weapon_t::total);
 constexpr size_t MM_MATCH_MEDAL_COUNT =
@@ -142,6 +206,18 @@ struct mm_match_player_stats_t {
 	uint32_t total_spawn_deaths = 0;
 	uint32_t total_suicides = 0;
 
+	// [MuffMode] Kills landed while the attacker's Quad Damage was still running.
+	// Pickup counts alone say who took the Quad; this says who used it.
+	uint32_t quad_kills = 0;
+
+	// [MuffMode] Position dwell. camp_samples counts every 1 Hz sample taken
+	// while alive and playing; camp_idle_samples counts the subset taken while
+	// the inactivity timer had already flagged the player, which is what stops an
+	// AFK body from out-camping everyone who was actually playing.
+	uint32_t camp_samples = 0;
+	uint32_t camp_idle_samples = 0;
+	std::array<mm_match_camp_cell_t, MM_MATCH_CAMP_CELL_SLOTS> camp_cells{};
+
 	std::array<uint32_t, MM_MATCH_MOD_COUNT> mod_total_kills{};
 	std::array<uint32_t, MM_MATCH_MOD_COUNT> mod_total_deaths{};
 	std::array<uint64_t, MM_MATCH_MOD_COUNT> mod_total_dmg_dealt{};
@@ -181,6 +257,12 @@ struct mm_match_overall_stats_t {
 	uint32_t total_suicides = 0;
 	uint32_t total_team_kills = 0;
 	uint32_t total_spawn_kills = 0;
+
+	// [MuffMode] How many times a Quad Damage became available to be taken --
+	// its placement at match start plus every respawn. Quad control is a share of
+	// this, so a map with no Quad simply produces no Quad award.
+	uint32_t quad_spawns = 0;
+
 	std::array<uint32_t, MM_MATCH_MOD_COUNT> mod_kills{};
 	std::array<uint32_t, MM_MATCH_MOD_COUNT> mod_deaths{};
 	std::array<uint32_t, MM_MATCH_MEDAL_COUNT> medal_count{};

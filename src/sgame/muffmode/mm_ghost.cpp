@@ -302,7 +302,7 @@ bool SnapshotMatchesCurrentMatch(const AutoGhostSnapshot &snapshot)
 		(snapshot.remaining > 0_ms ||
 			snapshot.phase == AutoGhostPhase::Reinstating ||
 			snapshot.phase == AutoGhostPhase::Expiring) &&
-		level.match_state == matchst_t::MATCH_IN_PROGRESS &&
+		level.match_state == match_state_t::MATCH_IN_PROGRESS &&
 		!level.intermission_time &&
 		!level.intermission_queued;
 }
@@ -1405,7 +1405,7 @@ bool EntityCanOwnGhost(gentity_t *ent)
 	return ent &&
 		ent->client &&
 		deathmatch->integer &&
-		level.match_state == matchst_t::MATCH_IN_PROGRESS &&
+		level.match_state == match_state_t::MATCH_IN_PROGRESS &&
 		ClientIsPlaying(ent->client) &&
 		!EntityIsBot(ent);
 }
@@ -2292,7 +2292,7 @@ void MM_Ghost_DoAssign(gentity_t *ent) {
 	}
 
 	// assign a ghost code
-	if (level.match_state == matchst_t::MATCH_IN_PROGRESS) {
+	if (level.match_state == match_state_t::MATCH_IN_PROGRESS) {
 		if (int ghost_index = ghost_snapshot::GhostIndex(ent->client->resp.ghost); ghost_index >= 0) {
 			ghost_snapshot::ClearSnapshot(static_cast<size_t>(ghost_index));
 			level.ghosts[ghost_index] = ghost_t{};
@@ -2633,7 +2633,7 @@ void MM_Ghost_RunFrame() {
 	}
 
 	if (!MM_GhostMayRunRestoreCommit(
-			level.match_state == matchst_t::MATCH_IN_PROGRESS,
+			level.match_state == match_state_t::MATCH_IN_PROGRESS,
 			level.intermission_time != 0_ms,
 			level.intermission_queued != 0_ms)) {
 		for (size_t i = 0; i < ghost_snapshot::GhostSlotCapacity(); i++) {
@@ -2724,7 +2724,7 @@ commits require an active match.
 void MM_Ghost_RunServerFrame()
 {
 	const bool restore_commit_allowed = MM_GhostMayRunRestoreCommit(
-		level.match_state == matchst_t::MATCH_IN_PROGRESS,
+		level.match_state == match_state_t::MATCH_IN_PROGRESS,
 		level.intermission_time != 0_ms,
 		level.intermission_queued != 0_ms);
 	const bool presentation_allowed = MM_GhostMayRunDeferredPresentation(
@@ -2841,7 +2841,7 @@ void MM_CmdGhost(gentity_t *ent) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "You are already in the game.\n");
 		return;
 	}
-	if (level.match_state != matchst_t::MATCH_IN_PROGRESS) {
+	if (level.match_state != match_state_t::MATCH_IN_PROGRESS) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "No match is in progress.\n");
 		return;
 	}

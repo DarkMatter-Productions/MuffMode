@@ -3,6 +3,8 @@
 // Miscellaneous brush/function entities.
 
 #include "brush_misc.h"
+// [MuffMode] Deathmatch prop respawning for func_explosive.
+#include "muffmode/mm_ent_respawn.h"
 
 namespace {
 
@@ -237,6 +239,9 @@ static DIE(func_explosive_explode) (gentity_t *self, gentity_t *inflictor, genti
 		? use_attacker->spawn_count : 0;
 
 	self->takedamage = false;
+	// [MuffMode] Queue the deathmatch rebuild up front: the paths below can free
+	// this entity, and the record already holds everything the rebuild needs.
+	MM_EntRespawn_Schedule(self);
 
 	if (self->dmg)
 		T_RadiusDamage(self, attacker, (float)self->dmg, nullptr, (float)(self->dmg + 40), DAMAGE_NONE, MOD_EXPLOSIVE);

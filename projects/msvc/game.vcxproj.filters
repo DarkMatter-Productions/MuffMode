@@ -196,6 +196,12 @@
     <ClInclude Include="..\..\src\sgame\muffmode\mm_gametype_cfg_rules.h">
       <Filter>sgame\muffmode</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_ent_respawn.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_ent_respawn_rules.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\src\sgame\muffmode\mm_freezetag.h">
       <Filter>sgame\muffmode</Filter>
     </ClInclude>
@@ -203,6 +209,9 @@
       <Filter>sgame\muffmode</Filter>
     </ClInclude>
     <ClInclude Include="..\..\src\sgame\muffmode\mm_captain.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_centerprint.h">
       <Filter>sgame\muffmode</Filter>
     </ClInclude>
     <ClInclude Include="..\..\src\sgame\muffmode\mm_chat.h">
@@ -254,6 +263,18 @@
       <Filter>sgame\muffmode</Filter>
     </ClInclude>
     <ClInclude Include="..\..\src\sgame\muffmode\mm_loc_parse.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_awards.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_awards_rules.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_map_pick.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_map_pick_rules.h">
       <Filter>sgame\muffmode</Filter>
     </ClInclude>
     <ClInclude Include="..\..\src\sgame\muffmode\mm_map_pool.h">
@@ -642,6 +663,9 @@
     <ClCompile Include="..\..\src\sgame\muffmode\mm_captain.cpp">
       <Filter>sgame\muffmode</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_centerprint.cpp">
+      <Filter>sgame\muffmode</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\src\sgame\muffmode\mm_chat.cpp">
       <Filter>sgame\muffmode</Filter>
     </ClCompile>
@@ -661,6 +685,12 @@
       <Filter>sgame\muffmode</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\sgame\muffmode\mm_loc.cpp">
+      <Filter>sgame\muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_awards.cpp">
+      <Filter>sgame\muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_map_pick.cpp">
       <Filter>sgame\muffmode</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\sgame\muffmode\mm_map_pool.cpp">
@@ -733,6 +763,9 @@
       <Filter>sgame\muffmode</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\sgame\muffmode\mm_duel.cpp">
+      <Filter>sgame\muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_ent_respawn.cpp">
       <Filter>sgame\muffmode</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\sgame\muffmode\mm_horde.cpp">

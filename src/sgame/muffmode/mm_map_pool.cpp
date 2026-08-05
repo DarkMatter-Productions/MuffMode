@@ -1601,6 +1601,69 @@ bool MM_SelectStructuredCycleStartMap(std::string &mapname)
 	return MM_SelectStructuredMap(mapname, true);
 }
 
+std::vector<map_pool::map_choice_t> MM_CollectStructuredMapChoices(
+	size_t max_choices)
+{
+	std::vector<map_pool::map_choice_t> choices;
+	if (!max_choices)
+		return choices;
+
+	MM_HandleMapPoolCvarChanges();
+	if (!MM_StructuredMapCycleActive() || !MM_IsSafeMapToken(level.mapname))
+		return choices;
+
+	const int gametype = map_pool::RequestedGametype();
+	const int repeat_delay = clamp(
+		g_maps_repeat_delay ? g_maps_repeat_delay->integer : 1800,
+		0, 86400);
+	const int player_count =
+		static_cast<int>(level.num_playing_human_clients);
+	const std::string current_key =
+		map_pool::CanonicalMapKey(level.mapname);
+	const int64_t now = map_pool::SteadySeconds();
+	const map_pool::mode_selection_t modes =
+		map_pool::ModesForGametype(gametype);
+
+	// Relax in the same order the automatic selection does, but keep going until
+	// there are at least two offers: a one-map "choice" is not worth an
+	// intermission pause, so the caller drops the pick instead.
+	std::vector<size_t> candidates;
+	for (const map_pool::selection_relaxation_t relaxation :
+		map_pool::SELECTION_RELAXATIONS) {
+		candidates = map_pool::BuildPreferredCandidates(
+			modes, player_count, now, repeat_delay, current_key,
+			relaxation.enforce_player_bounds,
+			relaxation.enforce_cooldown,
+			true);
+		if (candidates.size() > 1)
+			break;
+	}
+	if (candidates.empty())
+		return choices;
+
+	std::shuffle(candidates.begin(), candidates.end(), mt_rand);
+
+	choices.reserve(std::min(candidates.size(), max_choices));
+	for (size_t index : candidates) {
+		if (choices.size() >= max_choices)
+			break;
+		if (index >= map_pool::s_state.snapshot.pool.size())
+			continue;
+
+		const map_pool::map_entry_t &entry =
+			map_pool::s_state.snapshot.pool[index];
+		if (!MM_IsSafeMapToken(entry.bsp.c_str()))
+			continue;
+
+		choices.push_back({
+			entry.bsp,
+			entry.title.empty() ? entry.bsp : entry.title
+		});
+	}
+
+	return choices;
+}
+
 void MM_CmdMapPool(gentity_t *ent)
 {
 	if (!map_pool::IsUsableClient(ent))

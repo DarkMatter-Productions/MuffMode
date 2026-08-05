@@ -138,14 +138,14 @@ bool ThawedPlayersRespawnAtThawLocation()
 
 bool IsRoundLive()
 {
-	return level.match_state == matchst_t::MATCH_IN_PROGRESS &&
-		level.round_state == roundst_t::ROUND_IN_PROGRESS;
+	return level.match_state == match_state_t::MATCH_IN_PROGRESS &&
+		level.round_state == round_state_t::ROUND_IN_PROGRESS;
 }
 
 bool RoundKeepsFrozenPlayers()
 {
-	return level.match_state == matchst_t::MATCH_IN_PROGRESS &&
-		level.round_state == roundst_t::ROUND_ENDED;
+	return level.match_state == match_state_t::MATCH_IN_PROGRESS &&
+		level.round_state == round_state_t::ROUND_ENDED;
 }
 
 bool IsFreezeTeam(team_t team)
@@ -1629,17 +1629,17 @@ bool MM_FreezeTag_ShouldHoldSpawnForRound()
 {
 	return MM_FreezeTagSpawnShouldWaitForNextRound(
 		MM_FreezeTag_IsActive(),
-		level.match_state == matchst_t::MATCH_IN_PROGRESS,
-		level.round_state == roundst_t::ROUND_IN_PROGRESS,
-		level.round_state == roundst_t::ROUND_ENDED);
+		level.match_state == match_state_t::MATCH_IN_PROGRESS,
+		level.round_state == round_state_t::ROUND_IN_PROGRESS,
+		level.round_state == round_state_t::ROUND_ENDED);
 }
 
 bool MM_FreezeTag_ShouldRespawnForRoundCountdown(gentity_t *ent)
 {
 	return MM_FreezeTagRoundCountdownShouldRespawn(
 		MM_FreezeTag_IsActive(),
-		level.match_state == matchst_t::MATCH_IN_PROGRESS,
-		level.round_state == roundst_t::ROUND_COUNTDOWN,
+		level.match_state == match_state_t::MATCH_IN_PROGRESS,
+		level.round_state == round_state_t::ROUND_COUNTDOWN,
 		ent && ent->client && ClientIsPlaying(ent->client));
 }
 

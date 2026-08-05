@@ -63,10 +63,10 @@ const char *ResolveWorldTextMessage(gentity_t *self, std::string &scratch)
 	if (!deathmatch->integer || !self->spawnflags.has(SPAWNFLAG_WORLD_TEXT_LEADER_BOARD))
 		return self->message;
 
-	if (level.match_state == matchst_t::MATCH_WARMUP_READYUP)
+	if (level.match_state == match_state_t::MATCH_WARMUP_READYUP)
 		return "Welcome to Muff Mode\nKindly ready the fuck up...";
 
-	if (level.match_state <= matchst_t::MATCH_WARMUP_DEFAULT)
+	if (level.match_state <= match_state_t::MATCH_WARMUP_DEFAULT)
 		return "Welcome to Muff Mode";
 
 	gentity_t *leader = CurrentLeaderEntity();

@@ -790,7 +790,7 @@ void UpdateMonsterMarkers()
 {
 	if (!Active())
 		return;
-	if (level.round_state != roundst_t::ROUND_IN_PROGRESS)
+	if (level.round_state != round_state_t::ROUND_IN_PROGRESS)
 		return;
 
 	const int threshold = g_horde_mark_monsters_threshold->integer;
@@ -1449,7 +1449,7 @@ void MM_Horde_NotifyEliminatedSpectator(gentity_t *ent)
 {
 	if (!horde::Active())
 		return;
-	if (level.round_state != roundst_t::ROUND_IN_PROGRESS)
+	if (level.round_state != round_state_t::ROUND_IN_PROGRESS)
 		return;
 	if (!ent || !ent->client || !ent->client->eliminated)
 		return;
@@ -1474,7 +1474,7 @@ void MM_Horde_OnPlayerDeath(gentity_t *ent)
 {
 	if (!horde::Active())
 		return;
-	if (level.round_state != roundst_t::ROUND_IN_PROGRESS)
+	if (level.round_state != round_state_t::ROUND_IN_PROGRESS)
 		return;
 	if (!ent || !ent->client || !ClientIsPlaying(ent->client))
 		return;
@@ -1501,7 +1501,7 @@ void MM_Horde_OnPlayerDeath(gentity_t *ent)
 
 void MM_Horde_OnMonsterKilled(gentity_t *ent)
 {
-	if (!horde::Active() || level.round_state != roundst_t::ROUND_IN_PROGRESS || !ent)
+	if (!horde::Active() || level.round_state != round_state_t::ROUND_IN_PROGRESS || !ent)
 		return;
 
 	horde::InvalidateLivingCounts();
@@ -1613,7 +1613,7 @@ void MM_Horde_OnMonsterKilled(gentity_t *ent)
 
 void MM_Horde_OnMonsterDamaged(gentity_t *ent, int damage)
 {
-	if (!horde::Active() || level.round_state != roundst_t::ROUND_IN_PROGRESS ||
+	if (!horde::Active() || level.round_state != round_state_t::ROUND_IN_PROGRESS ||
 		!ent || damage <= 0 || !(ent->svflags & SVF_MONSTER) ||
 		(ent->monsterinfo.aiflags & (AI_GOOD_GUY | AI_DO_NOT_COUNT)))
 		return;
@@ -1625,7 +1625,7 @@ bool MM_Horde_CheckAllFightersLost()
 {
 	if (!horde::Active())
 		return false;
-	if (level.round_state != roundst_t::ROUND_IN_PROGRESS)
+	if (level.round_state != round_state_t::ROUND_IN_PROGRESS)
 		return false;
 	if (level.num_playing_clients < 1)
 		return false;
@@ -1641,7 +1641,7 @@ bool MM_Horde_CheckDesertionDefeat()
 {
 	if (!horde::Active())
 		return false;
-	if (level.match_state != matchst_t::MATCH_IN_PROGRESS)
+	if (level.match_state != match_state_t::MATCH_IN_PROGRESS)
 		return false;
 	if (level.intermission_queued || level.intermission_time)
 		return false;
@@ -2783,7 +2783,7 @@ void RecoverStalledCombat()
 bool MM_Horde_MonsterEdgeDropsEnabled(const gentity_t *ent)
 {
 	if (!muffmode::horde::Active() || !g_horde_monster_edge_drops->integer ||
-		level.round_state != roundst_t::ROUND_IN_PROGRESS ||
+		level.round_state != round_state_t::ROUND_IN_PROGRESS ||
 		!ent || !ent->inuse || !(ent->svflags & SVF_MONSTER) ||
 		ent->health <= 0 || ent->deadflag || !ent->groundentity ||
 		(ent->flags & (FL_FLY | FL_SWIM)) ||
@@ -2801,7 +2801,7 @@ int MM_Horde_ModifyDamage(const gentity_t *target, const gentity_t *attacker,
 	int damage, int means_of_death)
 {
 	if (!muffmode::horde::Active() ||
-		level.round_state != roundst_t::ROUND_IN_PROGRESS || damage <= 0 ||
+		level.round_state != round_state_t::ROUND_IN_PROGRESS || damage <= 0 ||
 		!target || !attacker)
 		return damage;
 
@@ -2826,7 +2826,7 @@ int MM_Horde_ModifyKnockback(const gentity_t *target, const gentity_t *attacker,
 	int knockback)
 {
 	if (!muffmode::horde::Active() ||
-		level.round_state != roundst_t::ROUND_IN_PROGRESS ||
+		level.round_state != round_state_t::ROUND_IN_PROGRESS ||
 		muffmode::horde::director.preset != muffmode::horde::WildcardPreset::PinballNight ||
 		!target || !target->client || knockback <= 0 ||
 		(attacker && (attacker->svflags & SVF_MONSTER) &&
@@ -2839,7 +2839,7 @@ int MM_Horde_ModifyKnockback(const gentity_t *target, const gentity_t *attacker,
 void MM_Horde_ApplyDamagePull(gentity_t *target, const gentity_t *attacker, int damage)
 {
 	if (!muffmode::horde::Active() ||
-		level.round_state != roundst_t::ROUND_IN_PROGRESS ||
+		level.round_state != round_state_t::ROUND_IN_PROGRESS ||
 		muffmode::horde::director.preset != muffmode::horde::WildcardPreset::GetOverHere ||
 		!target || !target->client || !attacker || attacker == target ||
 		!(attacker->svflags & SVF_MONSTER) ||
@@ -2862,7 +2862,7 @@ void MM_Horde_ApplyDamagePull(gentity_t *target, const gentity_t *attacker, int 
 float MM_Horde_PlayerGravityScale()
 {
 	if (!muffmode::horde::Active() ||
-		level.round_state != roundst_t::ROUND_IN_PROGRESS)
+		level.round_state != round_state_t::ROUND_IN_PROGRESS)
 		return 1.f;
 
 	switch (muffmode::horde::director.preset) {
@@ -2887,7 +2887,7 @@ bool MM_Horde_ValidateMonsterPlacement(gentity_t *ent)
 	// connectivity to at least one living fighter is mandatory, which rejects
 	// sealed voids and disconnected map leaves even when their contents are not
 	// reported as solid by a malformed BSP.
-	if (level.round_state == roundst_t::ROUND_IN_PROGRESS &&
+	if (level.round_state == round_state_t::ROUND_IN_PROGRESS &&
 		MM_Horde_CountFighters() > 0 &&
 		!muffmode::horde::OriginSharesFighterPHS(ent->s.origin))
 		return false;
@@ -2897,7 +2897,7 @@ bool MM_Horde_ValidateMonsterPlacement(gentity_t *ent)
 
 bool MM_Horde_CountAuxiliaryMonster(gentity_t *ent)
 {
-	if (!muffmode::horde::Active() || level.round_state != roundst_t::ROUND_IN_PROGRESS)
+	if (!muffmode::horde::Active() || level.round_state != round_state_t::ROUND_IN_PROGRESS)
 		return true;
 	if (!ent || !ent->inuse || !(ent->svflags & SVF_MONSTER) ||
 		ent->health <= 0 || ent->deadflag || (ent->svflags & SVF_DEADMONSTER) ||

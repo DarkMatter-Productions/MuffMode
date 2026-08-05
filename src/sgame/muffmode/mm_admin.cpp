@@ -4,8 +4,10 @@
 #include "g_local.h"
 #include "muffmode/mm_admin.h"
 #include "muffmode/mm_arena.h"
+#include "muffmode/mm_awards.h"
 #include "muffmode/mm_command_contracts.h"
 #include "muffmode/mm_gametype.h"
+#include "muffmode/mm_map_pick.h"
 #include "muffmode/mm_map_pool.h"
 #include "muffmode/mm_maps.h"
 #include "muffmode/mm_match.h"
@@ -403,7 +405,7 @@ void MM_CmdStartMatch(gentity_t *ent) {
 	if (MM_Arena_AdminStart(ent))
 		return;
 
-	if (level.match_state > matchst_t::MATCH_WARMUP_READYUP) {
+	if (level.match_state > match_state_t::MATCH_WARMUP_READYUP) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "Match has already started.\n");
 		return;
 	}
@@ -427,7 +429,7 @@ void MM_CmdEndMatch(gentity_t *ent) {
 	if (MM_Arena_AdminEnd(ent))
 		return;
 
-	if (level.match_state < matchst_t::MATCH_IN_PROGRESS) {
+	if (level.match_state < match_state_t::MATCH_IN_PROGRESS) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "Match has not yet begun.\n");
 		return;
 	}
@@ -453,7 +455,7 @@ void MM_CmdResetMatch(gentity_t *ent) {
 	if (MM_Arena_AdminReset(ent))
 		return;
 
-	if (level.match_state < matchst_t::MATCH_IN_PROGRESS) {
+	if (level.match_state < match_state_t::MATCH_IN_PROGRESS) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "Match has not yet begun.\n");
 		return;
 	}
@@ -532,6 +534,12 @@ void MM_CmdNextMap(gentity_t *ent) {
 
 	gi.Broadcast_Print(PRINT_HIGH, "[ADMIN]: Changing to next map.\n");
 	Match_End();
+	// [MuffMode] An admin asking for the next map outranks whatever screen the
+	// intermission is currently showing. Both post-scoreboard stages own the exit
+	// while they are open, so they are retired here rather than being left to
+	// swallow the request and, in the pick's case, choose a different map.
+	MM_Awards_Reset();
+	MM_MapPick_Reset();
 	level.intermission_exit = true;
 }
 

@@ -3,6 +3,8 @@
 // g_misc.c
 
 #include "g_local.h"
+// [MuffMode] Deathmatch prop respawning for misc_explobox.
+#include "muffmode/mm_ent_respawn.h"
 
 /*QUAKED func_group (0 0 0) ? x x x x x x x x NOT_EASY NOT_MEDIUM NOT_HARD NOT_DM NOT_COOP
 Used to group brushes together just for editor convenience.
@@ -226,6 +228,9 @@ static TOUCH(barrel_touch) (gentity_t *self, gentity_t *other, const trace_t &tr
 
 static THINK(barrel_explode) (gentity_t *self) -> void {
 	self->takedamage = false;
+	// [MuffMode] Queue the deathmatch rebuild before anything downstream can free
+	// the entity; the record already holds everything the rebuild needs.
+	MM_EntRespawn_Schedule(self);
 	gentity_t *attacker = self->activator;
 	if (!attacker || !attacker->inuse || attacker->spawn_count != self->count ||
 		(attacker->client && !attacker->client->pers.connected))

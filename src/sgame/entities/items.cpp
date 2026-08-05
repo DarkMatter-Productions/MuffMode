@@ -1238,6 +1238,10 @@ THINK(RespawnItem) (gentity_t *ent) -> void {
 		}
 	}
 
+	// [MuffMode] Quad control is scored as a share of how many times the Quad was
+	// there to be taken, so every return to the floor has to be counted.
+	MM_MatchStats_RecordItemAvailable(ent);
+
 	MM_OnPowerupItemRespawned(ent);
 }
 
@@ -2766,6 +2770,10 @@ static THINK(FinishSpawningItem) (gentity_t *ent) -> void {
 
 	if (MM_DeferInitialPowerupSpawn(ent))
 		return;
+
+	// [MuffMode] The Quad's opening placement counts toward the spawn total the
+	// post-match Quad awards are a share of, exactly as each later respawn does.
+	MM_MatchStats_RecordItemAvailable(ent);
 
 	ent->watertype = gi.pointcontents(ent->s.origin);
 	gi.linkentity(ent);

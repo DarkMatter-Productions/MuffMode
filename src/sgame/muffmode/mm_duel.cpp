@@ -324,7 +324,7 @@ bool MM_Duel_AddPlayer()
 	if (MM_Duel_OccupiedSlots() >= 2)
 		return false;
 
-	if (level.match_state > matchst_t::MATCH_WARMUP_READYUP || level.intermission_time || level.intermission_queued)
+	if (level.match_state > match_state_t::MATCH_WARMUP_READYUP || level.intermission_time || level.intermission_queued)
 		return false;
 
 	gclient_t *next_in_line = nullptr;
@@ -484,7 +484,7 @@ void MM_Duel_ScoreboardMessage(gentity_t *ent, gentity_t *killer) {
 				fmt::format_to(std::back_inserter(entry), FMT_STRING("xv {} yv {} picn {} "), x, y, s);
 
 			// player ready marker
-			if (level.match_state == matchst_t::MATCH_WARMUP_READYUP && (cl->sess.is_a_bot || cl->resp.ready))
+			if (level.match_state == match_state_t::MATCH_WARMUP_READYUP && (cl->sess.is_a_bot || cl->resp.ready))
 				fmt::format_to(std::back_inserter(entry), FMT_STRING("xv {} yv {} picn {} "), x + 16, y + 16, "wheel/p_compass_selected");
 
 			if (!duel::MM_DuelAppendLayout(string, entry))
@@ -648,7 +648,7 @@ void MM_Duel_CmdForfeit(gentity_t *ent) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "Forfeit is only available in a duel.\n");
 		return;
 	}
-	if (level.match_state != matchst_t::MATCH_IN_PROGRESS ||
+	if (level.match_state != match_state_t::MATCH_IN_PROGRESS ||
 		level.intermission_queued || level.intermission_time) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "Forfeit is not available during warmup.\n");
 		return;

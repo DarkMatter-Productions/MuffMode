@@ -192,11 +192,20 @@ void BroadcastTeamChange(gentity_t *ent, int old_team, bool inactive, bool silen
 	std::string t;
 	const std::string name = muffmode::team::DisplayName(ent);
 
+	// [MuffMode] Ported from WORR: the joining player's own notice carries their skill rating.
+	// Only on a ranked session — an unranked one would otherwise advertise a default placeholder
+	// rating that never moves, which is worse than saying nothing.
+	const int32_t rating = MM_PlayerStats_SessionIsRanked(ent)
+		? MM_PlayerStats_DisplayRating(MM_PlayerStats_Rating(ent))
+		: 0;
+
 	switch (ent->client->sess.team) {
 	case TEAM_FREE:
 		s = fmt::format("{} joined the battle.\n", name);
 		//t = "%bind:inven:Toggles Menu%You have joined the game.";
-		t = "You have joined the game.";
+		t = rating > 0
+			? fmt::format("You have joined the game.\nYour Skill Rating: {}", rating)
+			: "You have joined the game.";
 		break;
 	case TEAM_SPECTATOR:
 		if (inactive) {
@@ -215,7 +224,10 @@ void BroadcastTeamChange(gentity_t *ent, int old_team, bool inactive, bool silen
 	case TEAM_RED:
 	case TEAM_BLUE:
 		s = fmt::format("{} joined the {} Team.\n", name, Teams_TeamName(ent->client->sess.team));
-		t = fmt::format("You have joined the {} Team.\n", Teams_TeamName(ent->client->sess.team));
+		t = rating > 0
+			? fmt::format("You have joined the {} Team.\nYour Skill Rating: {}",
+				Teams_TeamName(ent->client->sess.team), rating)
+			: fmt::format("You have joined the {} Team.\n", Teams_TeamName(ent->client->sess.team));
 		break;
 	}
 
@@ -230,7 +242,7 @@ void BroadcastTeamChange(gentity_t *ent, int old_team, bool inactive, bool silen
 		//gi.Com_Print(s);
 	}
 
-	if (muffmode::CvarEnabled(g_dm_do_readyup) && level.match_state == matchst_t::MATCH_WARMUP_READYUP) {
+	if (muffmode::CvarEnabled(g_dm_do_readyup) && level.match_state == match_state_t::MATCH_WARMUP_READYUP) {
 		BroadcastReadyReminderMessage();
 	} else if (!t.empty()) {
 		gi.LocClient_Print(ent, PRINT_CENTER, "%bind:inven:Open menu%{}", t.c_str());
@@ -252,7 +264,7 @@ bool AllowTeamSwitch(gentity_t *ent, team_t desired_team) {
 	// already-playing player from manually switching sides to dodge the defect mechanic.
 	// Joining from spectator is allowed (otherwise nobody could enter a match in progress),
 	// and leaving to spectator is allowed - that's quitting, not dodging a defect.
-	if (MM_RedRoverBlocksManualTeamSwitch(ent->client->sess.team, desired_team, TEAM_SPECTATOR, GT(GT_RR), level.match_state == matchst_t::MATCH_IN_PROGRESS)) {
+	if (MM_RedRoverBlocksManualTeamSwitch(ent->client->sess.team, desired_team, TEAM_SPECTATOR, GT(GT_RR), level.match_state == match_state_t::MATCH_IN_PROGRESS)) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "You cannot change teams during a Red Rover match.\n");
 		return false;
 	}
@@ -617,8 +629,10 @@ bool SetTeam(gentity_t *ent, team_t desired_team, bool inactive, bool force, boo
 
 	ent->client->sess.initialised = true;
 
-	// joining the match re-arms the top-right gametype/ruleset notice
-	if (will_be_match_player)
+	// Joining the match re-arms the top-right gametype/ruleset notice. Test the real playing
+	// predicate, not IsPlayingTeam(): that one is red/blue only, so FFA/Duel/LMS/Horde joins land
+	// on TEAM_FREE and would never arm it. sess.team is already assigned above.
+	if (ClientIsPlaying(ent->client))
 		MM_MatchInfoHud_Show(ent);
 
 	// if they are playing a duel, count as a loss

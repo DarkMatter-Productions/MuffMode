@@ -5,8 +5,10 @@
 #include "core/debug_log.h"
 #include "muffmode/mm_announcer.h"
 #include "muffmode/mm_arena.h"
+#include "muffmode/mm_awards.h"
 #include "muffmode/mm_captain.h"
 #include "muffmode/mm_gametype.h"
+#include "muffmode/mm_map_pick.h"
 #include "muffmode/mm_map_pool.h"
 #include "muffmode/mm_maps.h"
 #include "muffmode/mm_match.h"
@@ -647,6 +649,12 @@ void MM_VotePassRestartMatch()
 void MM_VotePassNextMap()
 {
 	Match_End();
+	// [MuffMode] A passed nextmap vote outranks whatever screen the intermission
+	// is currently showing. Both post-scoreboard stages own the exit while they
+	// are open, so they are retired here rather than being left to swallow the
+	// result and, in the pick's case, choose a different map.
+	MM_Awards_Reset();
+	MM_MapPick_Reset();
 	level.intermission_exit = true;
 }
 
@@ -958,7 +966,7 @@ bool MM_VoteValBalanceTeams(gentity_t *ent)
 
 void MM_VotePassReadyAll()
 {
-	if (!g_dm_do_readyup->integer || level.match_state != matchst_t::MATCH_WARMUP_READYUP)
+	if (!g_dm_do_readyup->integer || level.match_state != match_state_t::MATCH_WARMUP_READYUP)
 	{
 		gi.LocBroadcast_Print(PRINT_HIGH, "Ready all vote failed: not in ready-up warmup.\n");
 		return;
@@ -969,7 +977,7 @@ void MM_VotePassReadyAll()
 
 bool MM_VoteValReadyAll(gentity_t *ent)
 {
-	if (!g_dm_do_readyup->integer || level.match_state != matchst_t::MATCH_WARMUP_READYUP)
+	if (!g_dm_do_readyup->integer || level.match_state != match_state_t::MATCH_WARMUP_READYUP)
 	{
 		gi.LocClient_Print(ent, PRINT_HIGH, "Ready all is only available during ready-up warmup.\n");
 		return false;
@@ -1091,7 +1099,7 @@ void MM_VoteCommandStore(gentity_t *ent)
 	}
 
 	if (!g_allow_vote_midgame->integer &&
-		(level.match_state >= matchst_t::MATCH_COUNTDOWN ||
+		(level.match_state >= match_state_t::MATCH_COUNTDOWN ||
 		 MM_Arena_GlobalVoteBlocked(ent)))
 	{
 		gi.LocClient_Print(ent, PRINT_HIGH, "Voting is only allowed during the warm up period.\n");

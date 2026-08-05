@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <vector>
 
 struct gclient_t;
 struct gentity_t;
@@ -40,6 +41,11 @@ struct mm_client_profile_match_result_t {
 	// Exact trusted preference state captured with the queued result. It is
 	// consulted only when a missing/corrupt profile must be recreated.
 	std::string_view recovery_preferences_json;
+	// [MuffMode] Stable keys of the post-match awards this player took, from
+	// MM_AwardKey. Borrowed from the queued settlement, which owns the storage
+	// because profile writes are retried across frames. Null or empty means the
+	// player earned nothing, which is the overwhelmingly common case.
+	const std::vector<std::string> *match_awards = nullptr;
 };
 
 enum class mm_weapon_preference_result_t : uint8_t {

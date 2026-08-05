@@ -9,6 +9,7 @@ namespace muffmode::horde {
 
 void ResetRuntimeState();
 void RefreshTargetLoadCache();
+void HarvestReachEvidence(gentity_t *monster);
 float AdaptivePressureMult();
 void Adaptive_BeginWave();
 void Adaptive_RecordWaveEnd();
@@ -21,5 +22,6 @@ void ApplySpawnRoleTuning(gentity_t *ent, const char *classname);
 
 gentity_t *PickTarget(gentity_t *from);
 bool MaybeRetarget(gentity_t *monster);
+void DrivePursuit(gentity_t *monster);
 
 } // namespace muffmode::horde

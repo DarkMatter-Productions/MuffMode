@@ -183,6 +183,10 @@ void MM_PlayerStats_OnTeamTransition(
 
 float MM_PlayerStats_Rating(const gentity_t *ent) noexcept;
 int32_t MM_PlayerStats_RatingChange(const gentity_t *ent) noexcept;
+// Is this session one where the rating actually means something? Arena Rooms are explicitly
+// unranked, bots never carry a profile, and a client whose persistent profile failed to load is
+// unranked for the session. Shared so `sr` and the join notice can never disagree about it.
+bool MM_PlayerStats_SessionIsRanked(const gentity_t *ent) noexcept;
 std::optional<mm_player_stats_outcome_t> MM_PlayerStats_CurrentOutcome(
 	const gentity_t *ent) noexcept;
 const char *MM_PlayerStats_OutcomeName(mm_player_stats_outcome_t outcome) noexcept;

@@ -2,6 +2,7 @@
 // Licensed under the GNU General Public License 2.0.
 #include "g_local.h"
 #include "core/debug_log.h"
+#include "muffmode/mm_map_pick.h"
 #include "muffmode/mm_util.h"
 #include "muffmode/mm_vote_menu.h"
 
@@ -495,7 +496,10 @@ void P_Menu_Select(gentity_t *ent) {
 	}
 
 	// no selecting during intermission
-	if (level.intermission_queued || level.intermission_time)
+	// [MuffMode] ...except for the post-scoreboard next-map pick, which is only
+	// ever shown there.
+	if ((level.intermission_queued || level.intermission_time) &&
+		!MM_MapPick_MenuOpen(ent))
 		return;
 
 	hnd = ent->client->menu;

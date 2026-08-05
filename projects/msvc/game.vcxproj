@@ -179,7 +179,10 @@
     <ClInclude Include="..\..\src\sgame\muffmode\mm_announcer_rules.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_arena.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_arena_rules.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_awards.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_awards_rules.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_captain.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_centerprint.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_chat.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_client_profile.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_client_refs.h" />
@@ -189,6 +192,8 @@
     <ClInclude Include="..\..\src\sgame\muffmode\mm_combat_heatmap.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_debug.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_duel.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_ent_respawn.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_ent_respawn_rules.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_freezetag.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_freezetag_rules.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_gametype.h" />
@@ -203,6 +208,8 @@
     <ClInclude Include="..\..\src\sgame\muffmode\mm_lms_rules.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_loc.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_loc_parse.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_map_pick.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_map_pick_rules.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_map_pool.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_maps.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_match.h" />
@@ -323,7 +330,9 @@
     <ClCompile Include="..\..\src\sgame\muffmode\mm_alloc_guard.cpp" />
     <ClCompile Include="..\..\src\sgame\muffmode\mm_announcer.cpp" />
     <ClCompile Include="..\..\src\sgame\muffmode\mm_arena.cpp" />
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_awards.cpp" />
     <ClCompile Include="..\..\src\sgame\muffmode\mm_captain.cpp" />
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_centerprint.cpp" />
     <ClCompile Include="..\..\src\sgame\muffmode\mm_chat.cpp" />
     <ClCompile Include="..\..\src\sgame\muffmode\mm_client_profile.cpp" />
     <ClCompile Include="..\..\src\sgame\muffmode\mm_client_refs.cpp" />
@@ -331,6 +340,7 @@
     <ClCompile Include="..\..\src\sgame\muffmode\mm_combat_heatmap.cpp" />
     <ClCompile Include="..\..\src\sgame\muffmode\mm_debug.cpp" />
     <ClCompile Include="..\..\src\sgame\muffmode\mm_duel.cpp" />
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_ent_respawn.cpp" />
     <ClCompile Include="..\..\src\sgame\muffmode\mm_freezetag.cpp" />
     <ClCompile Include="..\..\src\sgame\muffmode\mm_gametype.cpp" />
     <ClCompile Include="..\..\src\sgame\muffmode\mm_ghost.cpp" />
@@ -340,6 +350,7 @@
     <ClCompile Include="..\..\src\sgame\muffmode\mm_items_rules.cpp" />
     <ClCompile Include="..\..\src\sgame\muffmode\mm_lms.cpp" />
     <ClCompile Include="..\..\src\sgame\muffmode\mm_loc.cpp" />
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_map_pick.cpp" />
     <ClCompile Include="..\..\src\sgame\muffmode\mm_map_pool.cpp" />
     <ClCompile Include="..\..\src\sgame\muffmode\mm_maps.cpp" />
     <ClCompile Include="..\..\src\sgame\muffmode\mm_match.cpp" />

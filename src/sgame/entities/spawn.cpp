@@ -18,8 +18,11 @@
 #include "shadow_lights.h"
 // [MuffMode] Spawn filtering, statusbar and gametype hooks
 #include "muffmode/mm_arena.h"
+#include "muffmode/mm_awards.h"
 #include "muffmode/mm_combat_heatmap.h"
+#include "muffmode/mm_ent_respawn.h"
 #include "muffmode/mm_gametype.h"
+#include "muffmode/mm_map_pick.h"
 #include "muffmode/mm_ghost.h"
 #include "muffmode/mm_parse.h"
 #include "muffmode/mm_horde.h"
@@ -1359,6 +1362,11 @@ static world_spawn_stats_t ParseWorldEntities() {
 
 		ED_CallSpawn(ent);
 
+		// [MuffMode] Record map-authored props that respawn in deathmatch. Done
+		// here rather than inside ED_CallSpawn so that runtime spawns -- a
+		// target_spawner firing barrels, a debug "sv spawn" -- stay untracked.
+		MM_EntRespawn_CaptureMapEntity(ent);
+
 		ent->s.renderfx |= RF_IR_VISIBLE;
 	}
 
@@ -1560,6 +1568,13 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
 	}
 
 	Bot_ResetDebug();
+	// [MuffMode] Prop respawn records borrow TAG_LEVEL strings; retire them while
+	// those pointers are still valid.
+	MM_EntRespawn_ClearAll();
+	// [MuffMode] The next-map pick and the post-match awards reel keep their
+	// state module-side, so neither comes back cleared with level_locals_t.
+	MM_MapPick_Reset();
+	MM_Awards_Reset();
 	gi.FreeTags(TAG_LEVEL);
 
 	// Proper C++ reset: destroy and reconstruct the whole object instead of
@@ -1717,8 +1732,8 @@ struct world_reload_state_t {
 
 	std::array<int, TEAM_NUM_TEAMS> team_scores {};
 	std::array<int, TEAM_NUM_TEAMS> team_old_scores {};
-	matchst_t match_state = matchst_t::MATCH_NONE;
-	warmupreq_t warmup_requisite = warmupreq_t::WARMUP_REQ_NONE;
+	match_state_t match_state = match_state_t::MATCH_NONE;
+	warmup_req_t warmup_requisite = warmup_req_t::WARMUP_REQ_NONE;
 	gtime_t warmup_notice_time;
 	gtime_t warmup_gametype_hud_time;
 	gtime_t match_time;
@@ -1733,7 +1748,7 @@ struct world_reload_state_t {
 	int round_number = 0;
 	uint32_t round_epoch = 0;
 	uint32_t world_epoch = 0;
-	roundst_t round_state = roundst_t::ROUND_NONE;
+	round_state_t round_state = round_state_t::ROUND_NONE;
 	int round_state_queued = 0;
 	gtime_t round_state_timer;
 	bool restarted = false;
@@ -2349,6 +2364,13 @@ world_entity_reload_result_t G_ResetWorldEntitiesFromSavedString()
 	Bot_ResetDebug();
 	PrepareClientsForWorldReload(*state);
 	ClearWorldEntitySlots();
+	// [MuffMode] The lump is about to recreate every prop, so any queued rebuild is
+	// now a duplicate. Drop the records before their TAG_LEVEL strings go away.
+	MM_EntRespawn_ClearAll();
+	// [MuffMode] The next-map pick and the post-match awards reel keep their
+	// state module-side, so neither comes back cleared with level_locals_t.
+	MM_MapPick_Reset();
+	MM_Awards_Reset();
 	gi.FreeTags(TAG_LEVEL);
 
 	level.~level_locals_t();

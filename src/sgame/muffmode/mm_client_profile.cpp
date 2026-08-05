@@ -1271,6 +1271,17 @@ void RepairStats(
 	EnsureCounter(stats, "totalAbandons", modified, schema_repaired);
 	EnsureCounter(stats, "totalTimePlayedMs", modified, schema_repaired);
 
+	// [MuffMode] Career post-match award tallies. Deliberately not back-filled
+	// when absent: most profiles will never earn one, and creating an empty
+	// object in every stored document would rewrite the whole profile directory
+	// for a key nobody reads. It is only normalized when it exists but is the
+	// wrong shape, so the increment path can index it safely.
+	if (stats.isMember("awards") && !stats["awards"].isObject()) {
+		stats["awards"] = Json::Value(Json::objectValue);
+		modified = true;
+		schema_repaired = true;
+	}
+
 	float ignored_rating = 0.0f;
 	if (!stats.isMember("bestSkillRating") ||
 		!JsonRating(stats["bestSkillRating"], ignored_rating)) {
@@ -2501,6 +2512,20 @@ bool MM_ClientProfilePersistMatchResult(
 		? static_cast<uint64_t>(result.duration_ms)
 		: 0;
 	IncrementCounter(stats, "totalTimePlayedMs", duration);
+
+	// [MuffMode] Career award tallies, one counter per catalog key. RepairStats
+	// only normalizes a malformed object, so the first award a profile ever
+	// earns is what creates it.
+	if (result.match_awards && !result.match_awards->empty()) {
+		Json::Value &awards = stats["awards"];
+		if (!awards.isObject())
+			awards = Json::Value(Json::objectValue);
+		for (const std::string &key : *result.match_awards) {
+			if (!key.empty())
+				IncrementCounter(awards, key.c_str());
+		}
+	}
+
 	root["ratings"][*gametype] = result.skill_rating;
 	root["ratingChanges"][*gametype] = result.skill_rating_change;
 

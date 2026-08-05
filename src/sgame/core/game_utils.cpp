@@ -1473,7 +1473,7 @@ Format a match timer string with minute precision.
 const char *G_TimeString(const int msec, bool state) {
 	static char buffer[32];
 	if (state) {
-		if (level.match_state < matchst_t::MATCH_COUNTDOWN)
+		if (level.match_state < match_state_t::MATCH_COUNTDOWN)
 			return "WARMUP";
 
 		if (level.intermission_queued || level.intermission_time)
@@ -1493,7 +1493,7 @@ Format a match timer string with millisecond precision.
 const char *G_TimeStringMs(const int msec, bool state) {
 	static char buffer[32];
 	if (state) {
-		if (level.match_state < matchst_t::MATCH_COUNTDOWN)
+		if (level.match_state < match_state_t::MATCH_COUNTDOWN)
 			return "WARMUP";
 
 		if (level.intermission_queued || level.intermission_time)
@@ -1526,7 +1526,7 @@ bool InAMatch() {
 		return false;
 	if (level.intermission_queued)
 		return false;
-	if (level.match_state == matchst_t::MATCH_IN_PROGRESS)
+	if (level.match_state == match_state_t::MATCH_IN_PROGRESS)
 		return true;
 
 	return false;
@@ -1539,12 +1539,12 @@ bool IsCombatDisabled() {
 		return true;
 	if (level.intermission_time)
 		return true;
-	if (level.match_state == matchst_t::MATCH_COUNTDOWN)
+	if (level.match_state == match_state_t::MATCH_COUNTDOWN)
 		return true;
-	if (GTF(GTF_ROUNDS) && level.match_state == matchst_t::MATCH_IN_PROGRESS) {
+	if (GTF(GTF_ROUNDS) && level.match_state == match_state_t::MATCH_IN_PROGRESS) {
 		// added round ended to allow gibbing etc. at end of rounds
 		// scoring to be explicitly disabled during this time
-		if (level.round_state == roundst_t::ROUND_COUNTDOWN && (notGT(GT_HORDE)))
+		if (level.round_state == round_state_t::ROUND_COUNTDOWN && (notGT(GT_HORDE)))
 			return true;
 	}
 	return false;
@@ -1557,17 +1557,17 @@ bool IsPickupsDisabled() {
 		return true;
 	if (level.intermission_time)
 		return true;
-	if (level.match_state == matchst_t::MATCH_COUNTDOWN)
+	if (level.match_state == match_state_t::MATCH_COUNTDOWN)
 		return true;
 	return false;
 }
 
 bool IsScoringDisabled() {
-	if (level.match_state != matchst_t::MATCH_IN_PROGRESS)
+	if (level.match_state != match_state_t::MATCH_IN_PROGRESS)
 		return true;
 	if (IsCombatDisabled())
 		return true;
-	if (GTF(GTF_ROUNDS) && level.round_state != roundst_t::ROUND_IN_PROGRESS)
+	if (GTF(GTF_ROUNDS) && level.round_state != round_state_t::ROUND_IN_PROGRESS)
 		return true;
 	return false;
 }
@@ -1667,7 +1667,7 @@ static bool MS_Validation(gclient_t *cl, mstats_t index, bool write) {
 		return false;
 	}
 
-	bool active_match = level.match_state == matchst_t::MATCH_IN_PROGRESS;
+	bool active_match = level.match_state == match_state_t::MATCH_IN_PROGRESS;
 	if (GT(GT_ARENA)) {
 		const ptrdiff_t client_num = cl - game.clients;
 		if (client_num < 0 ||

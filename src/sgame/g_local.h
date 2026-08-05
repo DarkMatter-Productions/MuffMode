@@ -6,6 +6,7 @@
 
 #include "shared/gameplay.h"
 #include "muffmode/mm_arena_rules.h"
+#include "muffmode/mm_centerprint.h"
 #include "muffmode/mm_gametype.h"
 #include "muffmode/mm_match_stats_types.h"
 #include "muffmode/mm_maps.h"
@@ -15,7 +16,7 @@
 constexpr const char *GAMEVERSION = "baseq2";
 
 constexpr const char *GAMEMOD_TITLE = "Muff Mode";
-constexpr const char *GAMEMOD_VERSION = "0.70.7";
+constexpr const char *GAMEMOD_VERSION = "0.70.15";
 
 //==================================================================
 
@@ -311,7 +312,7 @@ constexpr const char *gt_long_name[GT_NUM_GAMETYPES] = {
 	"MuffMode Arena"
 };
 
-typedef enum {
+enum match_state_t {
 	MATCH_NONE,
 	MATCH_WARMUP_DELAYED,	// pre-warmup (delay is active)
 	MATCH_WARMUP_DEFAULT,	// 'waiting for players' / match short of players / imbalanced teams
@@ -319,21 +320,21 @@ typedef enum {
 	MATCH_COUNTDOWN,		// all conditions met, counting down to match start, check conditions again at end of countdown before match start
 	MATCH_IN_PROGRESS,		// match is in progress, not used in round-based gametypes
 	MATCH_ENDED				// match or final round has ended
-} matchst_t;
+};
 
-typedef enum {
+enum warmup_req_t {
 	WARMUP_REQ_NONE,
 	WARMUP_REQ_MORE_PLAYERS,
 	WARMUP_REQ_BALANCE,
 	WARMUP_REQ_READYUP
-} warmupreq_t;
+};
 
-typedef enum {
+enum round_state_t {
 	ROUND_NONE,
 	ROUND_COUNTDOWN,	// round-based gametypes only: initial delay before round starts
 	ROUND_IN_PROGRESS,	// round-based gametypes only: round is in progress
 	ROUND_ENDED			// round-based gametypes only: round has ended
-} roundst_t;
+};
 
 enum playerspawn_t {
 	SPAWN_FULL_RAND,
@@ -357,16 +358,16 @@ enum medal_t : uint8_t {
 
 #define	RANK_TIED_FLAG		0x4000
 
-typedef enum {
+enum spectator_state_t {
 	SPECTATOR_NOT,
 	SPECTATOR_FREE,
 	SPECTATOR_FOLLOW
-} spectator_state_t;
+};
 
-typedef enum {
+enum player_team_status_t {
 	TEAM_BEGIN,		// Beginning a team game, spawn at base
 	TEAM_ACTIVE		// Now actively playing
-} player_team_state_state_t;
+};
 
 enum grapple_state_t {
 	GRAPPLE_STATE_FLY,
@@ -467,7 +468,8 @@ public:
 		size_t n = 0;
 		((loc_embed(args, buffers[n], buffer_ptrs[n]), ++n), ...);
 
-		Loc_Print(e, level, base, &buffer_ptrs.front(), sizeof...(args));
+		// [MuffMode] mark deathmatch centerprints so MuffMode clients can drop the console echo
+		Loc_Print(e, level, MM_MarkCenterPrint(level, base), &buffer_ptrs.front(), sizeof...(args));
 	}
 
 	template<typename... Args>
@@ -480,7 +482,8 @@ public:
 		size_t n = 0;
 		((loc_embed(args, buffers[n], buffer_ptrs[n]), ++n), ...);
 
-		Loc_Print(nullptr, (print_type_t)(level | print_type_t::PRINT_BROADCAST), base, &buffer_ptrs.front(), sizeof...(args));
+		// [MuffMode] mark deathmatch centerprints so MuffMode clients can drop the console echo
+		Loc_Print(nullptr, (print_type_t)(level | print_type_t::PRINT_BROADCAST), MM_MarkCenterPrint(level, base), &buffer_ptrs.front(), sizeof...(args));
 	}
 
 	template<typename... Args>
@@ -493,7 +496,8 @@ public:
 		size_t n = 0;
 		((loc_embed(args, buffers[n], buffer_ptrs[n]), ++n), ...);
 
-		Loc_Print(e, PRINT_CENTER, base, &buffer_ptrs.front(), sizeof...(args));
+		// [MuffMode] mark deathmatch centerprints so MuffMode clients can drop the console echo
+		Loc_Print(e, PRINT_CENTER, MM_MarkCenterPrint(PRINT_CENTER, base), &buffer_ptrs.front(), sizeof...(args));
 	}
 
 	// collision detection
@@ -1528,8 +1532,8 @@ struct ghost_t {
 	gentity_t *ent;
 };
 
-typedef struct {
-	player_team_state_state_t	state;
+struct player_team_state_t {
+	player_team_status_t state;
 
 	gtime_t		returned_flag_time;
 	gtime_t		flag_pickup_time;
@@ -1545,7 +1549,7 @@ typedef struct {
 	int			assists;
 
 	int			hurt_carrier_time;
-} player_team_state_t;
+};
 
 //
 // this structure is cleared as each map is entered
@@ -1693,8 +1697,8 @@ struct level_locals_t {
 	// g_matchstats, which only controls the live player-stats menu.
 	mm_match_overall_stats_t match;
 
-	matchst_t	match_state;
-	warmupreq_t	warmup_requisite;
+	match_state_t match_state;
+	warmup_req_t warmup_requisite;
 	gtime_t		warmup_notice_time;
 	gtime_t		warmup_gametype_hud_time;	// reserved: gametype/ruleset HUD pulse anchor
 	gtime_t		match_time;
@@ -1710,7 +1714,7 @@ struct level_locals_t {
 	int			round_number;
 	uint32_t	round_epoch;				// increments before every round reset
 	uint32_t	world_epoch;				// increments before a same-match world rebuild
-	roundst_t	round_state;
+	round_state_t round_state;
 	int			round_state_queued;
 	gtime_t		round_state_timer;			// change match state at this time
 
@@ -2208,7 +2212,16 @@ struct monsterinfo_t {
 	int32_t   health_scaling; // number of players we've been scaled up to
 	float	  champion_damage_scale; // horde: positive outgoing-damage multiplier for champions/bosses; 0 means inactive
 	gtime_t	  horde_retarget_time; // next enhanced-Horde target load rebalance
+	gtime_t	  horde_pursuit_sample_time; // next relentless-pursuit progress sample; 0 means none held
+	vec3_t	  horde_pursuit_last_origin; // origin captured at the last pursuit progress sample
 	uint8_t	  horde_reward_class; // horde: 0=none, 1=regular, 2=champion, 3=boss
+	// [MuffMode] horde: cached targeting strategy plus a per-fighter unreachable memory, so
+	// scoring never re-derives a strategy from classname and never pays for gi.GetPathToGoal.
+	uint8_t	  horde_strategy; // mm_horde_strategy_t + 1; 0 means not classified yet
+	uint64_t  horde_unreach_lo; // unreachable-fighter bits for entity slots 1..64
+	uint64_t  horde_unreach_hi; // unreachable-fighter bits for entity slots 65..128
+	gtime_t	  horde_unreach_time; // when the newest bit was set; the whole mask decays from here
+	gtime_t	  horde_reach_sample_time; // next allowed reachability-evidence harvest
 	gtime_t   next_move_time; // high tick rate
 	gtime_t	  bad_move_time; // don't try straight moves until this is over
 	gtime_t	  bump_time; // don't slide against walls for a bit
@@ -2406,6 +2419,10 @@ extern cvar_t *noplayerstime;
 
 extern cvar_t *g_ruleset;
 
+// [MuffMode] Master switch for ranking: skill ratings and match statistics. Default on; hosts that
+// turn it off run a purely casual server (player preference profiles still persist).
+extern cvar_t *g_ranked;
+
 extern cvar_t *password;
 extern cvar_t *spectator_password;
 extern cvar_t *admin_password;
@@ -2470,6 +2487,7 @@ extern cvar_t *g_arena_fast_switch;
 extern cvar_t *g_arena_grapple;
 extern cvar_t *g_arena_excessive;
 extern cvar_t *g_arena_competition;
+extern cvar_t *g_arena_warmup_readyup;
 extern cvar_t *g_arena_unbalanced;
 extern cvar_t *g_arena_lock;
 extern cvar_t *g_arena_lock_count;
@@ -2554,6 +2572,7 @@ extern cvar_t *g_dm_death_scoreboard;
 extern cvar_t *g_dm_do_readyup;
 extern cvar_t *g_dm_do_warmup;
 extern cvar_t *g_dm_exec_level_cfg;
+extern cvar_t *g_dm_explosive_respawn_time;
 extern cvar_t *g_dm_force_join;
 extern cvar_t *g_dm_force_respawn;
 extern cvar_t *g_dm_force_respawn_time;
@@ -2616,6 +2635,8 @@ extern cvar_t *g_lag_compensation;
 extern cvar_t *g_lag_compensation_enhanced;
 extern cvar_t *g_map_list;
 extern cvar_t *g_map_list_shuffle;
+extern cvar_t *g_map_pick;
+extern cvar_t *g_match_awards;
 extern cvar_t *g_map_pool;
 extern cvar_t *g_maps_pool_file;
 extern cvar_t *g_maps_cycle_file;
@@ -3680,6 +3701,11 @@ struct client_session_t {
 	// real time of team joining
 	gtime_t			team_join_time;
 
+	// [MuffMode] Top-right gametype/ruleset notice stays up until this time; refreshed by joining
+	// a team and by gametype/ruleset changes (see MM_MatchInfoHud_Show). Lives in sess because
+	// ClientSpawn memsets everything outside pers/resp/sess, and SetTeam respawns on join.
+	gtime_t			match_info_hud_time;
+
 	// [MuffMode] Durable player profile/rating state. Keep this POD because
 	// gclient_t is allocated and reset through the engine's C-style paths.
 	bool			profile_persistence_ready;
@@ -3973,10 +3999,6 @@ struct gclient_t {
 	gtime_t		initial_menu_delay;
 	bool		initial_menu_shown;
 	bool		initial_menu_closure;
-
-	// [MuffMode] Top-right gametype/ruleset info stays up until this time; refreshed by
-	// joining a team and by gametype/ruleset changes (see MM_MatchInfoHud_Show).
-	gtime_t		match_info_hud_time;
 
 	gtime_t		pu_last_message_time;
 

@@ -978,7 +978,7 @@ void UpdateCallVote(gentity_t *ent)
 		MenuVote_SetText(entries[shuffle_index], "Shuffle Teams: N/A");
 	}
 
-	if (g_dm_do_readyup->integer && level.match_state == matchst_t::MATCH_WARMUP_READYUP)
+	if (g_dm_do_readyup->integer && level.match_state == match_state_t::MATCH_WARMUP_READYUP)
 	{
 		entries[readyall_index].SelectFunc = StartReadyAllVote;
 		MenuVote_SetText(entries[readyall_index], "Ready All");

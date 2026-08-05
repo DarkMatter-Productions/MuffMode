@@ -343,12 +343,28 @@ override them by map and room.
 | `g_arena_excessive` | `0` | Enables rapid fire, faster rockets, and infinite ammo with matching HUD reporting. |
 | `g_arena_rocket_speed` | `900` | Default room rocket speed. |
 | `g_arena_competition` | `0` | Requires the per-room ready/competition flow. |
+| `g_arena_warmup_readyup` | `1` | Requires the per-room MuffMode warmup ready-up even when competition mode is off. With `0` a room starts as soon as two eligible sides pair up, and `ready` is rejected. |
 | `g_arena_unbalanced` | `0` | Allows unequal team sizes. |
 | `g_arena_lock` | `0` | Starts playable rooms locked to new entrants. |
 | `g_arena_lock_count` | `6` | Minimum eligible population for the unanimous special lock-arena proposal. It does not lock entry by itself. |
 | `g_arena_max_players` | `0` | Per-room player cap; `0` uses the available server capacity. |
 | `g_arena_vote_time` | `30` | Seconds allowed for a room-local proposal. |
 | `g_arena_timeouts` | `3` | Competition timeouts available to each side. |
+
+Each room runs its own warmup rather than sharing the level-wide match state, so
+several rooms can be waiting for players, balancing, or counting down at the same
+time. A room reports what it is waiting on through the HUD (`WARMUP - NEED
+PLAYERS`, `WARMUP - UNBALANCED`, `WARMUP (n/m READY)`), a centerprint every 30
+seconds, and the scoreboard status line. Room warmup reuses the shared warmup
+cvars: `minplayers` for the player floor, `g_warmup_ready_percentage` for the
+ready threshold, `g_dm_allow_no_humans` to permit a bots-only room, and
+`g_warmup_countdown` for the first countdown of a series while `g_round_countdown`
+covers each later round. Both countdowns clamp to 1-30 seconds.
+
+Arena bots choose their own room: they follow players into an occupied room,
+prefer one where somebody is waiting for an opponent, and take an opposing team,
+creating one when a lone player has nobody to fight. Set `bot_minClients` in
+`gt-ARENA.cfg` to populate rooms automatically.
 
 Arena timeouts use the existing `g_dm_timeout_length` duration and
 `g_dm_timeout_resume_countdown` time-in countdown. `g_arena_timeouts` remains
@@ -514,6 +530,8 @@ uncapped by default.
 | `g_maps_repeat_delay` | `1800` | Preferred seconds before a structured-cycle map repeats; clamped to `0`–`86400` and relaxed if necessary to keep rotation moving. |
 | `g_map_list` | empty | Space-separated map rotation. |
 | `g_map_list_shuffle` | `1` | `0` disables shuffle, `1` shuffles on wrap, `2` shuffles once per gametype session. |
+| `g_map_pick` | `15` | Seconds the post-scoreboard next-map pick stays open; `0` disables it. Clamped to `5`–`60`. See [Next-Map Pick](#next-map-pick). |
+| `g_match_awards` | `10` | Seconds the post-match awards reel stays up unattended before handing on to the next-map pick; `0` disables it. Clamped to `3`–`30`, and skippable with any key after the first three seconds. Ranked matches only. See [Post-Match Awards](#post-match-awards). |
 | `g_map_pool` | empty | Additional voting map pool. |
 | `g_gametype_cfg` | `1` | Executes `gt-[GAMETYPE].cfg` on gametype changes. |
 | `g_dm_exec_level_cfg` | `0` | Executes level-specific configs when enabled. |
@@ -523,6 +541,93 @@ uncapped by default.
 | `g_entity_override_dir` | `maps` | Directory for entity override `.ent` files. |
 | `g_entity_override_load` | `1` | Loads entity override files on map load. |
 | `g_entity_override_save` | `0` | Saves entity override files when none exist. |
+
+### Next-Map Pick
+
+When the end-of-match scoreboard — and the awards reel after it, where one runs —
+is done, the level normally changes straight to whatever the rotation picked.
+With `g_map_pick` set, the intermission camera instead holds and everyone chooses
+the next map from up to three candidates:
+
+```text
+set g_map_pick "15"
+```
+
+Candidates come from the same eligibility rules the automatic rotation uses, so
+the pick can only ever offer a map the rotation would have been willing to load
+next. The current map is always excluded. With a structured pool the candidates
+carry their `title`; on the legacy `g_map_pool`/`g_map_list` sources they show
+the BSP name.
+
+Players choose with the movement keys and attack/jump, or with `mappick <1-3>`
+from the console. Live tallies are shown beside each map and a vote can be
+changed until the window closes. Once a map holds more than half of the eligible
+voters the pick ends early. Ties are broken at random, and a pick that nobody
+voted in still resolves to one of the offered maps.
+
+Eligibility follows `g_allow_spec_vote`, exactly as regular votes do. Bots never
+vote and are not counted toward the majority.
+
+The pick stands down and the level changes as usual when:
+
+- `g_map_pick` is `0`, or the gametype is Rocket Arena;
+- the next map was already chosen deliberately — a `mymap` queue entry,
+  `g_dm_same_level`, or a forced map;
+- fewer than two eligible candidates exist;
+- no human players remain to ask.
+
+### Post-Match Awards
+
+The end of a ranked match is three screens in a row, each handing on to the next
+the same way: a minimum hold so nobody presses straight through it, then any key,
+with a timeout so an unattended server still moves.
+
+```text
+scoreboard  ->  awards reel  ->  next-map pick  ->  level changes
+```
+
+The awards reel replaces the scoreboard with a title in green and the player who
+earned it in white underneath.
+
+```text
+set g_match_awards "10"
+```
+
+`g_match_awards` is how long the reel stays up unattended; `0` disables it. Any
+key advances it early, but not for the first three seconds — otherwise the press
+that dismissed the scoreboard would carry straight through the reel before
+anybody had seen it. Once the reel is done the next-map pick opens under its own
+rules, and the level changes after that.
+
+At most 12 awards are shown, ordered so that the honours come first and the
+wooden spoons are what get dropped when more than 12 qualify. A single player
+takes at most 3 titles before the remainder are offered to everyone else, and any
+slots still unused after that are back-filled from what the cap skipped.
+
+Every award needs a strict winner, so a tie awards nobody, and every award has a
+floor to clear — "most rail kills" with four kills is not a marksman. Awards
+range from the earned (`SHOTGUN SHERIFF`, `RAIL SLUT`, `QUAD GOD`, `AIMBOT
+ALLEGATIONS`, `UNTOUCHABLE`) through the observed (`SPAWN FRAGGER`, `DIRTY ROTTEN
+CAMPER`, `KLEPTOMANIAC`) to the deserved (`QUAD DUMMY` for hoarding the Quad and
+doing nothing with it, `STORMTROOPER`, `THE PUNCHING BAG`, `BUTTERFINGERS`).
+Capture the Flag and team modes add their own.
+
+Awards are a ranked-match feature and are only offered when:
+
+- `g_ranked` is on and the gametype is not Rocket Arena;
+- no bot took part, and at least two humans did;
+- the match ran for at least a minute.
+
+Whatever a player earned is repeated in their end-of-match summary, is available
+from the console with `awards`, and is written into the match export (`matchAwards`
+per match and per player) and into their career profile under `stats.awards`.
+
+Two of the awards need counters the mod did not previously keep, both collected
+only while a match is being recorded: kills landed while the attacker's Quad was
+still running, and a once-a-second sample of where each living player is standing,
+bucketed into 512-unit cells. The camping award is a share of those samples in one
+cell, and it explicitly disqualifies anyone the inactivity timer had flagged, so
+an idle body cannot out-camp a player who was actually playing.
 
 ### Structured Map Pools (Optional)
 
@@ -648,6 +753,7 @@ dedicated console can use `sv load_mappool` and `sv load_mapcycle`.
 | `g_coop_health_scaling` | `0` | Scales co-op health by player count. |
 | `g_corpse_sink_time` | `15` | Seconds before corpses sink and disappear. |
 | `g_damage_scale` | `1` | Global damage scale. |
+| `g_dm_explosive_respawn_time` | `60` | Seconds before a destroyed `misc_explobox` or `func_explosive` returns in deathmatch; `0` disables prop respawning entirely. Values are clamped to `1`-`3600`. A prop only returns once no player can see its spot, nothing is standing in it, and no player is within 128 units, so the wait can exceed this time on a busy map. |
 | `g_dm_holdable_adrenaline` | `1` | Allows holdable Adrenaline in deathmatch. |
 | `g_dm_instant_items` | `1` | Makes holdable items activate instantly in deathmatch. |
 | `g_dm_item_respawn_rate` | `1.0` | Global multiplier on every item's respawn time (weapons included). |
@@ -719,10 +825,11 @@ dedicated console can use `sv load_mappool` and `sv load_mapcycle`.
 | `g_item_bobbing` | `1` | Enables item bobbing. |
 | `g_matchstats` | `0` | Enables the live in-game match-statistics menu. It does not control completed-match artifact exports. |
 | `g_muffmode_debug` | `0` | Enables `muffmode_debug.log` output. |
+| `g_ranked` | `1` | Master switch for ranking. Set to `0` to run a purely casual server: skill ratings never move, `sr` reports the server as unranked, the join centerprint omits the rating line, and no match statistics are collected or exported (`g_statex_*` has nothing to write). Player preference profiles still load and save. Advertised in serverinfo. |
 | `g_select_empty` | `0` | Allows selecting weapons without ammo. |
 | `g_showhelp` | `1` | Prints quick explanations for game modifications. |
 | `g_showmotd` | `1` | Shows message of the day behavior when enabled. |
-| `g_statex_enabled` | `1` | Writes completed singleton-match JSON artifacts and maintains `baseq2/matches/catalog.json`; concurrent Arena room series are excluded. |
+| `g_statex_enabled` | `1` | Writes completed singleton-match JSON artifacts and maintains `baseq2/matches/catalog.json`; concurrent Arena room series are excluded. Requires `g_ranked 1`. |
 | `g_statex_export_html` | `1` | Writes a companion HTML report for each exported match. JSON and the catalog remain enabled when this is `0`. |
 | `g_statex_humans_present` | `1` | Exports only matches with at least one human participant; set to `0` to include bot-only matches. |
 | `g_verbose` | `0` | Enables extra console diagnostics. |
@@ -1075,9 +1182,15 @@ Defaults to `1` (enabled); set to `0` to restore legacy horde monster targeting 
 
 | Cvar | Default | Purpose |
 | --- | --- | --- |
-| `g_horde_enhanced_ai` | `1` | Target spread, tactical hull-aware placement, adaptive pacing, per-spawn roles, periodic retargeting, extended aggro, attack stagger, and medic corpse-resurrect priority. |
-| `g_horde_target_spread_weight` | `512` | Score penalty for each monster already assigned to a fighter. Hunters also use half this value to prefer isolated fighters; heavies use 37.5% to prefer healthier fighters. `0` leaves distance as the main target score. |
+| `g_horde_enhanced_ai` | `1` | Target spread, tactical hull-aware placement, adaptive pacing, per-spawn roles, periodic retargeting, extended aggro, relentless pursuit, attack stagger, and medic corpse-resurrect priority. |
+| `g_horde_target_spread_weight` | `512` | How strongly monsters avoid piling onto one fighter. Under the strategy model (`g_horde_target_model 1`) this scales the target-load weight, where `512` is the reference (`1024` doubles it, `0` ignores target load entirely). Under `g_horde_target_model 0` it keeps its legacy meaning: a raw score penalty per monster already assigned, with hunters using half this value to prefer isolated fighters and heavies 37.5% to prefer healthier ones. |
+| `g_horde_target_model` | `1` | Strategy-driven target selection. Monsters weigh proximity, target load, how dangerous a fighter is right now, how finishable they are, and how isolated they are, then multiply by a reachability gate covering area connectivity, climbable height, habitat, PHS, and remembered failed routes. Large monsters weigh reachability far more heavily and stop chasing stragglers into geometry they cannot follow through. `0` restores the previous role-based scorer exactly. Requires `g_horde_enhanced_ai 1`. |
+| `g_horde_target_aggression` | `1.0` | Multiplier (`0`-`2`) on how much monsters prefer the most dangerous fighter. `0` ignores threat entirely; `2` produces a pronounced "hunt the carry" feel. |
+| `g_horde_target_opportunism` | `1.0` | Multiplier (`0`-`2`) on how much monsters prefer a finishable fighter (hurt, unarmoured, out of ammo, helpless). `0` never prefers a weakened target. |
+| `g_horde_reach_probe_budget` | `512` | Maximum PHS reachability probes per server frame, claimed all-or-nothing per monster so a shortfall can never reorder that monster's candidates. `0` disables PHS probing; reachability still uses area connectivity, climbable height, habitat, and remembered failed routes. |
 | `g_horde_retarget_interval` | `8.0` | Seconds between per-monster target-load rebalance checks. Close engagements and special AI goals remain sticky. `0` disables periodic retargeting. |
+| `g_horde_pursuit` | `1` | Relentless pursuit. A threat that loses sight of its fighter keeps chasing the fighter's live position instead of a player trail that has gone cold, never times out of its search, drops hold orders, and clears its movement penalties when it stops covering ground. Scripted goals, escorts, medics, noise chases, and immobile monsters are untouched. `0` restores vanilla trail pursuit. |
+| `g_horde_pursuit_repath_time` | `2.0` | Maximum seconds a pursuing threat will sit out a navigation failure before retrying, replacing vanilla's 5-10 second lockout. Higher values trade responsiveness for fewer path queries; `0` retries on the next frame. Ignored when `g_horde_pursuit` is `0`. |
 | `g_horde_stall_timeout` | `90` | Seconds with no damage to a counted Horde monster after all spawns are committed before recovery runs. The first timeout retargets every threat; another timeout relocates one stranded threat to a validated in-PHS combat spawn. Invalid or escaped world-space positions are recovered immediately regardless of this value. `0` disables only the timed recovery. |
 
 ## Debug-Only Weapon Balance Cvars

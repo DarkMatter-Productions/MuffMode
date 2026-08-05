@@ -716,6 +716,262 @@ inline constexpr bool MM_ArenaTeamEligibleForType(mm_arena_type_t type,
 		: MM_ArenaTeamEligible(member_count, players_per_team);
 }
 
+// ---------------------------------------------------------------------------
+// Bot room and team selection.
+//
+// Arena rooms have no engine-side team concept, so a bot has to choose a room
+// and a logical team itself. These helpers stay free of gentity_t/gclient_t and
+// cvars: the caller collects the per-room counts and the decision is pure, so
+// the policy is host-tested instead of only observable in a live server.
+// ---------------------------------------------------------------------------
+
+struct mm_arena_bot_room_view_t {
+	int id = 0;
+	int humans = 0;			// Connected humans in the room, any role.
+	int bots = 0;			// Connected bots in the room, any role.
+	int eligible_teams = 0;	// Teams that currently satisfy TeamEligible.
+	// Both active sides are resolved AND eligible: the room can actually run.
+	// Side ids alone are not enough — fixed-team rooms pin both ids the moment
+	// anyone is present, so an id test would report every Clan Arena room as
+	// paired and hide the one signal this policy is built on.
+	bool paired = false;
+	bool joinable = false;	// Not locked and under max_players for this bot.
+	bool practice = false;
+	bool already_here = false;	// The deciding bot is in this room right now.
+};
+
+// Higher is better. Bands are spaced far enough apart that the population
+// tie-breaker can never promote a room across a band.
+inline constexpr int MM_ArenaBotRoomScore(const mm_arena_bot_room_view_t &room)
+{
+	const auto crowding = [](int count) {
+		return count < 0 ? 0 : (count > 99 ? 99 : count);
+	};
+
+	if (!room.joinable)
+		return -1;
+	// Break within-band ties toward not moving, so a bot does not hop between
+	// two comparable rooms as their populations drift. Crowding is capped at 99,
+	// so this exactly absorbs same-band noise and can never carry a room across
+	// a band — a bot idling in an empty room still leaves for a human who needs
+	// an opponent. Cross-band churn is prevented at the decision site instead:
+	// a bot that already holds a team never re-picks a room at all.
+	const int sticky = room.already_here ? 100 : 0;
+	if (room.practice)
+		return (room.humans > 0 ? 4000 : 1000) + sticky;
+	// A human is in a room that cannot run: they are waiting for an opponent,
+	// so this is the most useful place a bot can be.
+	if (room.humans > 0 && !room.paired)
+		return 5000 - crowding(room.bots) + sticky;
+	// A human's room that is already running: still follow them, and queue.
+	if (room.humans > 0)
+		return 3000 - crowding(room.bots) + sticky;
+	// A lone bot team elsewhere needs an opponent before anything can start.
+	if (room.eligible_teams == 1)
+		return 2000 + sticky;
+	return 1000 - crowding(room.humans + room.bots) + sticky;
+}
+
+// Total order over rooms: score first, then the lowest room id, so the choice
+// is stable across frames and identical for every bot evaluating at once.
+inline constexpr bool MM_ArenaBotPrefersRoom(
+	const mm_arena_bot_room_view_t &candidate,
+	const mm_arena_bot_room_view_t &best)
+{
+	const int candidate_score = MM_ArenaBotRoomScore(candidate);
+	const int best_score = MM_ArenaBotRoomScore(best);
+	return candidate_score > best_score ||
+		(candidate_score == best_score && candidate.id < best.id);
+}
+
+enum class mm_arena_bot_team_action_t : uint8_t {
+	None,			// Nothing useful to do this frame.
+	Stay,			// Already on a team; never churn a settled roster.
+	JoinOpposing,	// Join the team the caller nominated.
+	CreateNew		// No suitable team to oppose: found one.
+};
+
+struct mm_arena_bot_team_view_t {
+	bool room_uses_teams = true;	// False for Practice, which auto-enrols.
+	bool room_uses_fixed = false;	// Clan Arena / Red Rover: pick a side, never create.
+	bool has_own_team = false;
+	bool has_join_target = false;	// The caller found a joinable team with room.
+	bool can_create = true;			// Under max_teams and the arena is not locked.
+	// Exactly one team exists in the room, a human is on it, and the bot is not.
+	// Creating here hands that human an immediate opponent instead of padding
+	// their side while they wait.
+	bool lone_human_team = false;
+};
+
+inline constexpr mm_arena_bot_team_action_t MM_ArenaBotTeamAction(
+	const mm_arena_bot_team_view_t &view)
+{
+	if (!view.room_uses_teams)
+		return mm_arena_bot_team_action_t::None;
+	if (view.room_uses_fixed)
+		return view.has_own_team
+			? mm_arena_bot_team_action_t::Stay
+			: (view.has_join_target
+				? mm_arena_bot_team_action_t::JoinOpposing
+				: mm_arena_bot_team_action_t::None);
+	if (view.has_own_team)
+		return mm_arena_bot_team_action_t::Stay;
+	if (view.lone_human_team && view.can_create)
+		return mm_arena_bot_team_action_t::CreateNew;
+	if (view.has_join_target)
+		return mm_arena_bot_team_action_t::JoinOpposing;
+	if (view.can_create)
+		return mm_arena_bot_team_action_t::CreateNew;
+	return mm_arena_bot_team_action_t::None;
+}
+
+// ---------------------------------------------------------------------------
+// Per-room warmup.
+//
+// MuffMode's native warmup lives entirely on level_locals_t singletons, which
+// cannot express N simultaneous room warmups. This mirrors the same decision
+// order as muffmode::match::ReadyConditionsMet so both machines feel identical,
+// while keeping Arena off level.* completely.
+// ---------------------------------------------------------------------------
+
+enum class mm_arena_warmup_req_t : uint8_t {
+	None,
+	MorePlayers,	// No runnable pairing, or below the player minimum.
+	Balance,		// Two sides exist but differ in size.
+	ReadyUp			// Everything else satisfied; waiting on ready-up.
+};
+
+struct mm_arena_warmup_inputs_t {
+	bool paired = false;			// Both active sides resolved and eligible.
+	int red_size = 0;
+	int blue_size = 0;
+	bool allow_unbalanced = false;
+	int eligible_fighters = 0;		// Line-enabled, non-late-join members, both sides.
+	int min_players = 2;			// `minplayers`, floored at 2 by the evaluator.
+	bool readyup_required = false;	// competition_mode || g_arena_warmup_readyup.
+	int ready_humans = 0;
+	int playing_humans = 0;
+	int playing_bots = 0;
+	float ready_percentage = 0.51f;	// g_warmup_ready_percentage.
+	bool allow_no_humans = true;	// g_dm_allow_no_humans.
+};
+
+struct mm_arena_warmup_status_t {
+	mm_arena_warmup_req_t requisite = mm_arena_warmup_req_t::None;
+	bool ready_to_start = false;
+};
+
+inline mm_arena_warmup_status_t MM_ArenaWarmupStatus(
+	const mm_arena_warmup_inputs_t &in)
+{
+	mm_arena_warmup_status_t out {};
+
+	if (!in.paired || in.eligible_fighters < std::max(2, in.min_players)) {
+		out.requisite = mm_arena_warmup_req_t::MorePlayers;
+		return out;
+	}
+	if (!in.allow_unbalanced && in.red_size != in.blue_size) {
+		out.requisite = mm_arena_warmup_req_t::Balance;
+		return out;
+	}
+	// A bots-only room only runs where the server permits it; otherwise it waits
+	// for a human rather than starting a match nobody can see.
+	if (in.playing_humans == 0 && !in.allow_no_humans) {
+		out.requisite = mm_arena_warmup_req_t::MorePlayers;
+		return out;
+	}
+	if (!in.readyup_required) {
+		out.ready_to_start = true;
+		return out;
+	}
+	if (in.playing_humans == 0) {
+		// Bots are implicitly ready; there is nobody left to ready up.
+		out.ready_to_start = in.playing_bots > 0;
+		if (!out.ready_to_start)
+			out.requisite = mm_arena_warmup_req_t::MorePlayers;
+		return out;
+	}
+
+	const float percentage = std::clamp(in.ready_percentage, 0.0f, 1.0f);
+	const bool met = in.ready_humans > 0 &&
+		(static_cast<float>(in.ready_humans) /
+			static_cast<float>(in.playing_humans)) >= percentage;
+	out.ready_to_start = met;
+	if (!met)
+		out.requisite = mm_arena_warmup_req_t::ReadyUp;
+	return out;
+}
+
+// Countdown cadence, mirroring muffmode::match::TickCountdown: every multiple of
+// ten, plus every second below ten, at most once per second. `last_announced` is
+// a monotonically decreasing latch, so 0 means nothing has been announced yet.
+inline constexpr bool MM_ArenaCountdownBeepDue(int seconds_remaining,
+	int last_announced)
+{
+	if (seconds_remaining <= 0)
+		return false;
+	if (last_announced != 0 && last_announced <= seconds_remaining)
+		return false;
+	return (seconds_remaining % 10) == 0 || seconds_remaining < 10;
+}
+
+// ---------------------------------------------------------------------------
+// Scoreboard geometry. The 8px stride matches every other MuffMode `ctf` board;
+// keeping the ladder pure means the row/header collision is host-tested rather
+// than eyeballed against a screenshot.
+// ---------------------------------------------------------------------------
+
+inline constexpr int MM_ARENA_SB_ROW_STRIDE = 8;
+// Rows begin below the header block, on the same ladder the vanilla team board uses so the two
+// read as one design: header art at yv 8..42, first player row at yv 52.
+inline constexpr int MM_ARENA_SB_FIGHTER_TOP = 52;
+inline constexpr int MM_ARENA_SB_MAX_ROWS_PER_SIDE = 10;
+inline constexpr int MM_ARENA_SB_MAX_WAITING_ROWS = 8;
+inline constexpr int MM_ARENA_SB_COL_LEFT_X = -40;
+inline constexpr int MM_ARENA_SB_COL_RIGHT_X = 200;
+// Decoration offsets from a row's name column, matching the vanilla board's marker positions.
+inline constexpr int MM_ARENA_SB_CAPTAIN_DX = -24;
+inline constexpr int MM_ARENA_SB_READY_DX = -16;
+inline constexpr int MM_ARENA_SB_ALIVE_DX = -10;
+
+// Same arithmetic as MM_ScoreboardCanAppend, but the reserve is supplied rather
+// than derived from a fixed table. The Arena footer is richer than the shared
+// deathmatch one and its size depends on the room, so the caller measures the
+// composed footer and budgets the body against that exact number instead of
+// borrowing a constant that no longer describes it.
+inline constexpr bool MM_ArenaLayoutCanAppend(size_t current_length,
+	size_t append_length, size_t max_length, size_t footer_reserve)
+{
+	if (max_length <= footer_reserve ||
+		current_length > max_length - footer_reserve)
+		return false;
+	return append_length <= (max_length - footer_reserve - current_length);
+}
+
+inline constexpr int MM_ArenaScoreboardRowY(int top, int row)
+{
+	return top + row * MM_ARENA_SB_ROW_STRIDE;
+}
+
+// First row strictly below the taller fighter column, plus a one-row gutter.
+inline constexpr int MM_ArenaScoreboardWaitingHeaderY(int red_rows,
+	int blue_rows)
+{
+	const int rows = red_rows > blue_rows ? red_rows : blue_rows;
+	return MM_ArenaScoreboardRowY(MM_ARENA_SB_FIGHTER_TOP, rows) +
+		MM_ARENA_SB_ROW_STRIDE;
+}
+
+// Same rule the vanilla boards use, keyed on the room's own warmup rather than
+// the level-wide match state, which never leaves warmup under GT_ARENA.
+inline constexpr bool MM_ArenaScoreboardShowsReadyMarkers(
+	mm_arena_state_t state, bool readyup_required)
+{
+	return readyup_required &&
+		(state == mm_arena_state_t::Empty ||
+		 state == mm_arena_state_t::Warmup);
+}
+
 inline constexpr bool MM_ArenaShouldDestroyEmptyTeam(int member_count,
 	bool transfer_destination)
 {

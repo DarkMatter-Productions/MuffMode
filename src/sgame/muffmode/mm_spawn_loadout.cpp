@@ -306,7 +306,7 @@ void MM_ApplySpawnLoadout(gentity_t *ent, gclient_t *client, bool taken_loadout)
 			}
 
 			if (deathmatch->integer && game.ruleset != RS_QC) {
-				if (level.match_state < matchst_t::MATCH_IN_PROGRESS) {
+				if (level.match_state < match_state_t::MATCH_IN_PROGRESS) {
 					for (int i = FIRST_WEAPON; i < LAST_WEAPON; i++) {
 						if (!level.weapon_count[i - FIRST_WEAPON])
 							continue;

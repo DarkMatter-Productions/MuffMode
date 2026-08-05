@@ -7,10 +7,13 @@
 #include "muffmode/mm_admin.h"
 #include "muffmode/mm_announcer_rules.h"
 #include "muffmode/mm_arena_rules.h"
+#include "muffmode/mm_awards_rules.h"
 #include "muffmode/mm_client_profile.h"
 #include "muffmode/mm_client_refs.h"
+#include "muffmode/mm_centerprint.h"
 #include "muffmode/mm_command_contracts.h"
 #include "muffmode/mm_duel.h"
+#include "muffmode/mm_ent_respawn_rules.h"
 #include "muffmode/mm_freezetag_rules.h"
 #include "muffmode/mm_gametype.h"
 #include "muffmode/mm_gametype_cfg_rules.h"
@@ -20,6 +23,7 @@
 #include "muffmode/mm_items_rules.h"
 #include "muffmode/mm_lms_rules.h"
 #include "muffmode/mm_loc_parse.h"
+#include "muffmode/mm_map_pick_rules.h"
 #include "muffmode/mm_map_pool.h"
 #include "muffmode/mm_maps.h"
 #include "muffmode/mm_match_stats.h"
@@ -1656,6 +1660,348 @@ MM_TEST(arena_menu_pagination_clamps_pages_and_keeps_every_item_reachable) {
 	MM_CHECK_EQ(last.last, 25);
 }
 
+MM_TEST(arena_bot_room_score_prefers_a_human_who_has_nobody_to_fight) {
+	const auto room = [](int id, int humans, int bots, int eligible_teams,
+		bool paired, bool joinable, bool practice) {
+		mm_arena_bot_room_view_t view;
+		view.id = id;
+		view.humans = humans;
+		view.bots = bots;
+		view.eligible_teams = eligible_teams;
+		view.paired = paired;
+		view.joinable = joinable;
+		view.practice = practice;
+		return view;
+	};
+
+	const auto human_waiting = room(1, 1, 0, 1, false, true, false);
+	const auto human_fighting = room(2, 2, 0, 2, true, true, false);
+	const auto lone_bot = room(3, 0, 1, 1, false, true, false);
+	const auto deserted = room(4, 0, 0, 0, false, true, false);
+	const auto locked = room(5, 1, 0, 1, false, false, false);
+
+	MM_CHECK(MM_ArenaBotRoomScore(human_waiting) > MM_ArenaBotRoomScore(human_fighting));
+	MM_CHECK(MM_ArenaBotRoomScore(human_fighting) > MM_ArenaBotRoomScore(lone_bot));
+	MM_CHECK(MM_ArenaBotRoomScore(lone_bot) > MM_ArenaBotRoomScore(deserted));
+	MM_CHECK_EQ(MM_ArenaBotRoomScore(locked), -1);
+
+	// Crowding only reorders rooms inside a band; it can never beat a better band.
+	const auto crowded_human_room = room(6, 1, 40, 1, false, true, false);
+	MM_CHECK(MM_ArenaBotRoomScore(crowded_human_room) > MM_ArenaBotRoomScore(human_fighting));
+	MM_CHECK(MM_ArenaBotRoomScore(human_waiting) > MM_ArenaBotRoomScore(crowded_human_room));
+
+	// A practice room with a human in it still outranks an empty one.
+	MM_CHECK(MM_ArenaBotRoomScore(room(7, 1, 0, 0, false, true, true)) >
+		MM_ArenaBotRoomScore(room(8, 0, 0, 0, false, true, true)));
+}
+
+MM_TEST(arena_bot_room_stickiness_absorbs_band_noise_without_crossing_a_band) {
+	// Within a band, staying put wins: a bot should not hop between two comparable rooms just
+	// because their populations drift. Crowding is capped at 99, so the bonus covers exactly
+	// that much noise.
+	mm_arena_bot_room_view_t here;
+	here.id = 5;
+	here.humans = 1;
+	here.bots = 99;
+	here.paired = true;
+	here.joinable = true;
+	here.already_here = true;
+
+	mm_arena_bot_room_view_t peer;
+	peer.id = 1;
+	peer.humans = 1;
+	peer.bots = 0;
+	peer.paired = true;
+	peer.joinable = true;
+
+	MM_CHECK(MM_ArenaBotRoomScore(here) > MM_ArenaBotRoomScore(peer));
+	MM_CHECK_FALSE(MM_ArenaBotPrefersRoom(peer, here));
+
+	// It must never carry a room across a band: a bot idling in a deserted room still leaves for
+	// a human who has nobody to fight.
+	mm_arena_bot_room_view_t idle;
+	idle.id = 3;
+	idle.joinable = true;
+	idle.already_here = true;
+
+	mm_arena_bot_room_view_t human_waiting;
+	human_waiting.id = 9;
+	human_waiting.humans = 1;
+	human_waiting.paired = false;
+	human_waiting.joinable = true;
+
+	MM_CHECK(MM_ArenaBotRoomScore(human_waiting) > MM_ArenaBotRoomScore(idle));
+	MM_CHECK(MM_ArenaBotPrefersRoom(human_waiting, idle));
+
+	// Nor can it keep a bot in a room it may no longer enter.
+	here.joinable = false;
+	MM_CHECK_EQ(MM_ArenaBotRoomScore(here), -1);
+	MM_CHECK(MM_ArenaBotPrefersRoom(peer, here));
+}
+
+MM_TEST(arena_rover_warmup_accepts_a_roster_parked_on_one_side) {
+	// Red Rover reshuffles one pool across both fixed sides at round start, so a roster sitting
+	// entirely on Red is a startable room, not a player shortage. The caller supplies the rover
+	// pairing rule; this pins the balance side of it.
+	mm_arena_warmup_inputs_t in;
+	in.paired = true;
+	in.red_size = 3;
+	in.blue_size = 0;
+	in.eligible_fighters = 3;
+	in.allow_unbalanced = true;
+	in.min_players = 2;
+
+	const auto status = MM_ArenaWarmupStatus(in);
+	MM_CHECK(status.ready_to_start);
+	MM_CHECK(status.requisite == mm_arena_warmup_req_t::None);
+
+	// The same lopsided roster in a room that does NOT allow unbalanced sides is still a balance
+	// problem, so the rover exemption cannot leak into Clan Arena.
+	in.allow_unbalanced = false;
+	MM_CHECK(MM_ArenaWarmupStatus(in).requisite == mm_arena_warmup_req_t::Balance);
+	MM_CHECK_FALSE(MM_ArenaWarmupStatus(in).ready_to_start);
+}
+
+MM_TEST(arena_layout_budget_reserves_the_measured_footer_not_a_constant) {
+	// The arena footer is richer than the shared deathmatch one and its length varies by room,
+	// so the body is budgeted against the footer actually composed.
+	MM_CHECK(MM_ArenaLayoutCanAppend(0, 800, 1024, 224));
+	MM_CHECK(MM_ArenaLayoutCanAppend(0, 224, 1024, 800));
+
+	// Exact boundary: the last byte that still leaves the reserve intact, and the first that
+	// does not.
+	MM_CHECK(MM_ArenaLayoutCanAppend(0, 1024 - 224, 1024, 224));
+	MM_CHECK_FALSE(MM_ArenaLayoutCanAppend(0, 1024 - 223, 1024, 224));
+	MM_CHECK(MM_ArenaLayoutCanAppend(700, 100, 1024, 224));
+	MM_CHECK_FALSE(MM_ArenaLayoutCanAppend(700, 101, 1024, 224));
+
+	// A body already past the reserve boundary refuses everything, including a zero-length
+	// append, rather than wrapping around on unsigned arithmetic.
+	MM_CHECK_FALSE(MM_ArenaLayoutCanAppend(900, 0, 1024, 224));
+	MM_CHECK_FALSE(MM_ArenaLayoutCanAppend(0, 0, 224, 224));
+	MM_CHECK_FALSE(MM_ArenaLayoutCanAppend(0, 0, 100, 224));
+
+	// A zero reserve degenerates to a plain capacity check.
+	MM_CHECK(MM_ArenaLayoutCanAppend(0, 1024, 1024, 0));
+	MM_CHECK_FALSE(MM_ArenaLayoutCanAppend(1, 1024, 1024, 0));
+}
+
+MM_TEST(arena_bot_room_choice_breaks_ties_on_the_lowest_room_id) {
+	mm_arena_bot_room_view_t low;
+	low.id = 2;
+	low.humans = 1;
+	low.joinable = true;
+
+	mm_arena_bot_room_view_t high = low;
+	high.id = 9;
+
+	MM_CHECK(MM_ArenaBotPrefersRoom(low, high));
+	MM_CHECK_FALSE(MM_ArenaBotPrefersRoom(high, low));
+	// Strictly irreflexive, so the caller's "first or better" scan is a total order.
+	MM_CHECK_FALSE(MM_ArenaBotPrefersRoom(low, low));
+
+	// A better score wins regardless of id ordering.
+	mm_arena_bot_room_view_t unpaired_human = high;
+	unpaired_human.paired = false;
+	mm_arena_bot_room_view_t paired_human = low;
+	paired_human.paired = true;
+	MM_CHECK(MM_ArenaBotPrefersRoom(unpaired_human, paired_human));
+}
+
+MM_TEST(arena_bot_team_action_founds_an_opposing_side_for_a_waiting_human) {
+	mm_arena_bot_team_view_t view;
+
+	// A lone human with a team of their own: create the other side rather than join theirs.
+	view.lone_human_team = true;
+	MM_CHECK(MM_ArenaBotTeamAction(view) == mm_arena_bot_team_action_t::CreateNew);
+
+	// ...unless the room forbids new teams, in which case filling a side beats sitting out.
+	view.can_create = false;
+	view.has_join_target = true;
+	MM_CHECK(MM_ArenaBotTeamAction(view) == mm_arena_bot_team_action_t::JoinOpposing);
+
+	// With more than one team present the bot fills whichever side the caller nominated.
+	view = {};
+	view.has_join_target = true;
+	MM_CHECK(MM_ArenaBotTeamAction(view) == mm_arena_bot_team_action_t::JoinOpposing);
+
+	// No team has room: found one.
+	view.has_join_target = false;
+	MM_CHECK(MM_ArenaBotTeamAction(view) == mm_arena_bot_team_action_t::CreateNew);
+
+	// Nowhere to go and nothing to create: do nothing rather than thrash.
+	view.can_create = false;
+	MM_CHECK(MM_ArenaBotTeamAction(view) == mm_arena_bot_team_action_t::None);
+
+	// A settled roster is never churned.
+	view = {};
+	view.has_own_team = true;
+	view.has_join_target = true;
+	MM_CHECK(MM_ArenaBotTeamAction(view) == mm_arena_bot_team_action_t::Stay);
+
+	// Fixed-team rooms pick a side and never create.
+	view = {};
+	view.room_uses_fixed = true;
+	view.has_join_target = true;
+	MM_CHECK(MM_ArenaBotTeamAction(view) == mm_arena_bot_team_action_t::JoinOpposing);
+	view.has_own_team = true;
+	MM_CHECK(MM_ArenaBotTeamAction(view) == mm_arena_bot_team_action_t::Stay);
+
+	// Practice auto-enrols, so there is nothing for the bot to decide.
+	view = {};
+	view.room_uses_teams = false;
+	view.lone_human_team = true;
+	view.has_join_target = true;
+	MM_CHECK(MM_ArenaBotTeamAction(view) == mm_arena_bot_team_action_t::None);
+}
+
+MM_TEST(arena_warmup_reports_players_before_balance_before_readyup) {
+	mm_arena_warmup_inputs_t in;
+	in.min_players = 2;
+
+	// No pairing at all: the room needs bodies.
+	MM_CHECK(MM_ArenaWarmupStatus(in).requisite == mm_arena_warmup_req_t::MorePlayers);
+	MM_CHECK_FALSE(MM_ArenaWarmupStatus(in).ready_to_start);
+
+	// Paired but below the server's minimum is still a player shortage.
+	in.paired = true;
+	in.red_size = 1;
+	in.blue_size = 1;
+	in.eligible_fighters = 2;
+	in.min_players = 4;
+	MM_CHECK(MM_ArenaWarmupStatus(in).requisite == mm_arena_warmup_req_t::MorePlayers);
+
+	// Uneven sides are a balance problem, not a player shortage.
+	in.min_players = 2;
+	in.blue_size = 2;
+	in.eligible_fighters = 3;
+	MM_CHECK(MM_ArenaWarmupStatus(in).requisite == mm_arena_warmup_req_t::Balance);
+
+	// ...but not when the room explicitly allows unbalanced sides.
+	in.allow_unbalanced = true;
+	MM_CHECK(MM_ArenaWarmupStatus(in).requisite == mm_arena_warmup_req_t::None);
+	MM_CHECK(MM_ArenaWarmupStatus(in).ready_to_start);
+
+	// Everything satisfied and no ready-up required: start immediately.
+	in.allow_unbalanced = false;
+	in.blue_size = 1;
+	in.eligible_fighters = 2;
+	MM_CHECK(MM_ArenaWarmupStatus(in).ready_to_start);
+	MM_CHECK(MM_ArenaWarmupStatus(in).requisite == mm_arena_warmup_req_t::None);
+
+	// Ready-up required and nobody ready: hold, and say so.
+	in.readyup_required = true;
+	in.playing_humans = 2;
+	in.ready_humans = 0;
+	MM_CHECK_FALSE(MM_ArenaWarmupStatus(in).ready_to_start);
+	MM_CHECK(MM_ArenaWarmupStatus(in).requisite == mm_arena_warmup_req_t::ReadyUp);
+}
+
+MM_TEST(arena_warmup_readyup_uses_a_clamped_ready_percentile) {
+	mm_arena_warmup_inputs_t in;
+	in.paired = true;
+	in.red_size = 1;
+	in.blue_size = 1;
+	in.eligible_fighters = 2;
+	in.readyup_required = true;
+	in.playing_humans = 2;
+	in.ready_humans = 1;
+
+	in.ready_percentage = 0.51f;
+	MM_CHECK_FALSE(MM_ArenaWarmupStatus(in).ready_to_start);
+	in.ready_humans = 2;
+	MM_CHECK(MM_ArenaWarmupStatus(in).ready_to_start);
+
+	// Out-of-range cvar values clamp rather than producing nonsense.
+	in.ready_humans = 1;
+	in.ready_percentage = -1.0f;
+	MM_CHECK(MM_ArenaWarmupStatus(in).ready_to_start);
+	in.ready_percentage = 2.0f;
+	MM_CHECK_FALSE(MM_ArenaWarmupStatus(in).ready_to_start);
+
+	// A zero percentile still requires at least one ready human, matching native warmup.
+	in.ready_humans = 0;
+	in.ready_percentage = 0.0f;
+	MM_CHECK_FALSE(MM_ArenaWarmupStatus(in).ready_to_start);
+}
+
+MM_TEST(arena_warmup_runs_a_bots_only_room_only_where_humans_are_optional) {
+	mm_arena_warmup_inputs_t in;
+	in.paired = true;
+	in.red_size = 1;
+	in.blue_size = 1;
+	in.eligible_fighters = 2;
+	in.readyup_required = true;
+	in.playing_humans = 0;
+	in.playing_bots = 2;
+
+	in.allow_no_humans = true;
+	MM_CHECK(MM_ArenaWarmupStatus(in).ready_to_start);
+
+	in.allow_no_humans = false;
+	MM_CHECK_FALSE(MM_ArenaWarmupStatus(in).ready_to_start);
+	MM_CHECK(MM_ArenaWarmupStatus(in).requisite == mm_arena_warmup_req_t::MorePlayers);
+
+	// An empty room never starts, however permissive the server is.
+	in.allow_no_humans = true;
+	in.playing_bots = 0;
+	MM_CHECK_FALSE(MM_ArenaWarmupStatus(in).ready_to_start);
+}
+
+MM_TEST(arena_countdown_beeps_on_tens_and_every_second_under_ten) {
+	MM_CHECK(MM_ArenaCountdownBeepDue(30, 0));
+	MM_CHECK(MM_ArenaCountdownBeepDue(20, 30));
+	MM_CHECK(MM_ArenaCountdownBeepDue(10, 20));
+	MM_CHECK(MM_ArenaCountdownBeepDue(9, 10));
+	MM_CHECK(MM_ArenaCountdownBeepDue(1, 2));
+
+	MM_CHECK_FALSE(MM_ArenaCountdownBeepDue(29, 30));
+	MM_CHECK_FALSE(MM_ArenaCountdownBeepDue(11, 20));
+
+	// The latch is monotonic: never re-announce a second already spoken.
+	MM_CHECK_FALSE(MM_ArenaCountdownBeepDue(9, 9));
+	MM_CHECK_FALSE(MM_ArenaCountdownBeepDue(9, 3));
+
+	MM_CHECK_FALSE(MM_ArenaCountdownBeepDue(0, 1));
+	MM_CHECK_FALSE(MM_ArenaCountdownBeepDue(-1, 1));
+}
+
+MM_TEST(arena_scoreboard_waiting_header_clears_the_tallest_player_column) {
+	MM_CHECK_EQ(MM_ArenaScoreboardRowY(MM_ARENA_SB_FIGHTER_TOP, 0), MM_ARENA_SB_FIGHTER_TOP);
+	MM_CHECK_EQ(MM_ArenaScoreboardRowY(MM_ARENA_SB_FIGHTER_TOP, 3),
+		MM_ARENA_SB_FIGHTER_TOP + 3 * MM_ARENA_SB_ROW_STRIDE);
+
+	// The header always sits at least one full row below the last drawn player row.
+	for (int red = 0; red <= MM_ARENA_SB_MAX_ROWS_PER_SIDE; red++) {
+		for (int blue = 0; blue <= MM_ARENA_SB_MAX_ROWS_PER_SIDE; blue++) {
+			const int tallest = red > blue ? red : blue;
+			const int last_row_y = MM_ArenaScoreboardRowY(MM_ARENA_SB_FIGHTER_TOP,
+				tallest > 0 ? tallest - 1 : 0);
+			MM_CHECK(MM_ArenaScoreboardWaitingHeaderY(red, blue) >=
+				last_row_y + MM_ARENA_SB_ROW_STRIDE);
+		}
+	}
+
+	// Asymmetric columns are cleared by the taller of the two, not the first.
+	MM_CHECK_EQ(MM_ArenaScoreboardWaitingHeaderY(0, 6), MM_ArenaScoreboardWaitingHeaderY(6, 0));
+}
+
+MM_TEST(arena_scoreboard_ready_markers_track_the_rooms_own_warmup) {
+	MM_CHECK(MM_ArenaScoreboardShowsReadyMarkers(mm_arena_state_t::Warmup, true));
+	MM_CHECK(MM_ArenaScoreboardShowsReadyMarkers(mm_arena_state_t::Empty, true));
+
+	MM_CHECK_FALSE(MM_ArenaScoreboardShowsReadyMarkers(mm_arena_state_t::MatchCountdown, true));
+	MM_CHECK_FALSE(MM_ArenaScoreboardShowsReadyMarkers(mm_arena_state_t::RoundCountdown, true));
+	MM_CHECK_FALSE(MM_ArenaScoreboardShowsReadyMarkers(mm_arena_state_t::Running, true));
+	MM_CHECK_FALSE(MM_ArenaScoreboardShowsReadyMarkers(mm_arena_state_t::RoundOver, true));
+	MM_CHECK_FALSE(MM_ArenaScoreboardShowsReadyMarkers(mm_arena_state_t::MatchOver, true));
+	MM_CHECK_FALSE(MM_ArenaScoreboardShowsReadyMarkers(mm_arena_state_t::Paused, true));
+
+	// Rooms that do not use ready-up never draw the marker column.
+	MM_CHECK_FALSE(MM_ArenaScoreboardShowsReadyMarkers(mm_arena_state_t::Warmup, false));
+	MM_CHECK_FALSE(MM_ArenaScoreboardShowsReadyMarkers(mm_arena_state_t::Empty, false));
+}
+
 MM_TEST(arena_queue_order_uses_team_id_as_a_stable_tiebreaker) {
 	MM_CHECK(MM_ArenaQueueKeyPrecedes(1, 250, 2, 1));
 	MM_CHECK_FALSE(MM_ArenaQueueKeyPrecedes(2, 1, 1, 250));
@@ -2341,6 +2687,154 @@ MM_TEST(lms_round_is_a_draw_only_on_mutual_elimination) {
 	MM_CHECK_FALSE(MM_LMSRoundIsDraw(0, 1));
 }
 
+MM_TEST(map_pick_duration_reads_zero_and_negatives_as_disabled) {
+	MM_CHECK_EQ(MM_MapPickDurationSeconds(0), 0);
+	MM_CHECK_EQ(MM_MapPickDurationSeconds(-15), 0);
+
+	MM_CHECK_EQ(MM_MapPickDurationSeconds(15), 15);
+	// Anything shorter than the floor clamps up; anything past the ceiling clamps down.
+	MM_CHECK_EQ(MM_MapPickDurationSeconds(1), MM_MAP_PICK_MIN_SECONDS);
+	MM_CHECK_EQ(MM_MapPickDurationSeconds(6000), MM_MAP_PICK_MAX_SECONDS);
+}
+
+MM_TEST(map_pick_majority_needs_more_than_half_the_voters) {
+	// Two of three cannot be overturned by the last voter.
+	MM_CHECK(MM_MapPickHasMajority(2, 3));
+	MM_CHECK_FALSE(MM_MapPickHasMajority(1, 3));
+
+	// With an even count a bare half still leaves a tie available.
+	MM_CHECK_FALSE(MM_MapPickHasMajority(2, 4));
+	MM_CHECK(MM_MapPickHasMajority(3, 4));
+
+	// A lone voter decides immediately; no voters decide nothing.
+	MM_CHECK(MM_MapPickHasMajority(1, 1));
+	MM_CHECK_FALSE(MM_MapPickHasMajority(0, 0));
+	MM_CHECK_FALSE(MM_MapPickHasMajority(1, 0));
+}
+
+MM_TEST(map_pick_winner_takes_the_lead_and_ignores_unoffered_slots) {
+	const mm_map_pick_offered_t two_offers { true, true, false };
+
+	MM_CHECK_EQ(MM_MapPickWinner({ 1, 3, 0 }, two_offers, 0), 1);
+	MM_CHECK_EQ(MM_MapPickWinner({ 4, 2, 0 }, two_offers, 7), 0);
+
+	// A tally left over on a slot that was never offered cannot win.
+	MM_CHECK_EQ(MM_MapPickWinner({ 1, 0, 9 }, two_offers, 0), 0);
+
+	// Nothing offered means nothing to pick.
+	MM_CHECK_EQ(MM_MapPickWinner({ 5, 5, 5 }, { false, false, false }, 0), -1);
+}
+
+MM_TEST(map_pick_winner_breaks_ties_and_still_lands_on_a_map_with_no_votes) {
+	const mm_map_pick_offered_t all_offered { true, true, true };
+
+	// A three-way tie draws from all three; the roll selects which.
+	MM_CHECK_EQ(MM_MapPickWinner({ 2, 2, 2 }, all_offered, 0), 0);
+	MM_CHECK_EQ(MM_MapPickWinner({ 2, 2, 2 }, all_offered, 1), 1);
+	MM_CHECK_EQ(MM_MapPickWinner({ 2, 2, 2 }, all_offered, 5), 2);
+
+	// A two-way tie only draws from the tied pair, never from the trailing map.
+	MM_CHECK_EQ(MM_MapPickWinner({ 3, 1, 3 }, all_offered, 0), 0);
+	MM_CHECK_EQ(MM_MapPickWinner({ 3, 1, 3 }, all_offered, 1), 2);
+
+	// Nobody voted: every offer is still a live candidate rather than a dead pick.
+	MM_CHECK_EQ(MM_MapPickWinner({ 0, 0, 0 }, all_offered, 1), 1);
+	MM_CHECK_EQ(MM_MapPickWinner({ 0, 0, 0 }, { false, true, true }, 0), 1);
+	MM_CHECK_EQ(MM_MapPickWinner({ 0, 0, 0 }, { false, true, true }, 1), 2);
+}
+
+MM_TEST(map_pick_bar_fills_on_open_and_empties_only_when_time_is_up) {
+	MM_CHECK_EQ(MM_MapPickBarSegments(15.0f, 15.0f), MM_MAP_PICK_BAR_SEGMENTS);
+	MM_CHECK_EQ(MM_MapPickBarSegments(0.0f, 15.0f), 0);
+
+	// Rounding up keeps a sliver of bar for the last partial second.
+	MM_CHECK_EQ(MM_MapPickBarSegments(0.1f, 15.0f), 1);
+	MM_CHECK_EQ(MM_MapPickBarSegments(7.5f, 15.0f), MM_MAP_PICK_BAR_SEGMENTS / 2);
+
+	// Degenerate inputs draw nothing rather than overrunning the row.
+	MM_CHECK_EQ(MM_MapPickBarSegments(5.0f, 0.0f), 0);
+	MM_CHECK_EQ(MM_MapPickBarSegments(-5.0f, 15.0f), 0);
+	MM_CHECK_EQ(MM_MapPickBarSegments(90.0f, 15.0f), MM_MAP_PICK_BAR_SEGMENTS);
+}
+
+MM_TEST(ent_respawn_delay_reads_zero_and_garbage_as_disabled) {
+	MM_CHECK_EQ(MM_EntRespawnDelaySeconds(0.0f), 0.0f);
+	MM_CHECK_EQ(MM_EntRespawnDelaySeconds(-30.0f), 0.0f);
+	MM_CHECK_EQ(MM_EntRespawnDelaySeconds(std::numeric_limits<float>::quiet_NaN()), 0.0f);
+
+	MM_CHECK_EQ(MM_EntRespawnDelaySeconds(60.0f), 60.0f);
+	// Sub-second delays clamp up to the retry cadence; anything past an hour clamps down.
+	MM_CHECK_EQ(MM_EntRespawnDelaySeconds(0.25f), MM_ENT_RESPAWN_MIN_DELAY_SECONDS);
+	MM_CHECK_EQ(MM_EntRespawnDelaySeconds(99999.0f), MM_ENT_RESPAWN_MAX_DELAY_SECONDS);
+}
+
+MM_TEST(ent_respawn_box_center_handles_brush_model_origins) {
+	// A misc_explobox carries its bounds around its own origin.
+	const mm_ent_respawn_vec_t barrel = MM_EntRespawnBoxCenter(
+		{ 128.0f, -64.0f, 32.0f }, { -16.0f, -16.0f, 0.0f }, { 16.0f, 16.0f, 40.0f });
+	MM_CHECK_EQ(barrel.x, 128.0f);
+	MM_CHECK_EQ(barrel.y, -64.0f);
+	MM_CHECK_EQ(barrel.z, 52.0f);
+
+	// A func_explosive brush sits at origin 0,0,0 with world-space bounds, so the
+	// recorded origin on its own is not a usable reference point.
+	const mm_ent_respawn_vec_t brush = MM_EntRespawnBoxCenter(
+		{ 0.0f, 0.0f, 0.0f }, { 200.0f, 300.0f, 0.0f }, { 264.0f, 364.0f, 64.0f });
+	MM_CHECK_EQ(brush.x, 232.0f);
+	MM_CHECK_EQ(brush.y, 332.0f);
+	MM_CHECK_EQ(brush.z, 32.0f);
+}
+
+MM_TEST(ent_respawn_facing_test_blocks_viewers_turned_toward_the_spot) {
+	const mm_ent_respawn_vec_t viewer { 0.0f, 0.0f, 0.0f };
+	const mm_ent_respawn_vec_t looking_east { 1.0f, 0.0f, 0.0f };
+
+	MM_CHECK(MM_EntRespawnFacesPoint(viewer, looking_east, { 512.0f, 0.0f, 0.0f }));
+	MM_CHECK(!MM_EntRespawnFacesPoint(viewer, looking_east, { -512.0f, 0.0f, 0.0f }));
+
+	// 60 degrees off-axis is cos 0.5, still inside the cone; 85 degrees is not.
+	MM_CHECK(MM_EntRespawnFacesPoint(viewer, looking_east, { 100.0f, 173.2f, 0.0f }));
+	MM_CHECK(!MM_EntRespawnFacesPoint(viewer, looking_east, { 100.0f, 1143.0f, 0.0f }));
+
+	// A viewer standing exactly on the spot has no direction to compare against.
+	// Normalizing anyway gives NaN, which would read as "clear" and drop the prop
+	// straight into the player, so the degenerate case has to block.
+	MM_CHECK(MM_EntRespawnFacesPoint(viewer, looking_east, viewer));
+}
+
+MM_TEST(ent_respawn_clearance_keeps_props_off_nearby_players) {
+	const mm_ent_respawn_vec_t spot { 0.0f, 0.0f, 0.0f };
+	const mm_ent_respawn_vec_t player_mins { -16.0f, -16.0f, -24.0f };
+	const mm_ent_respawn_vec_t player_maxs { 16.0f, 16.0f, 32.0f };
+
+	auto player_at = [&](float x, float y, float z) {
+		return MM_EntRespawnWithinClearance(spot,
+			{ x + player_mins.x, y + player_mins.y, z + player_mins.z },
+			{ x + player_maxs.x, y + player_maxs.y, z + player_maxs.z });
+	};
+
+	MM_CHECK(player_at(0.0f, 0.0f, 0.0f));
+	MM_CHECK(player_at(120.0f, 0.0f, 0.0f));
+	// The box is a half-extent, so a player's own bounds still reach in past 128.
+	MM_CHECK(player_at(140.0f, 0.0f, 0.0f));
+	MM_CHECK(!player_at(160.0f, 0.0f, 0.0f));
+	MM_CHECK(!player_at(0.0f, 0.0f, 300.0f));
+	// Clearance is a box, not a sphere: the corners reach further than the faces.
+	MM_CHECK(player_at(140.0f, 140.0f, 140.0f));
+}
+
+MM_TEST(ent_respawn_box_overlap_counts_touching_faces) {
+	const mm_ent_respawn_vec_t a_mins { 0.0f, 0.0f, 0.0f };
+	const mm_ent_respawn_vec_t a_maxs { 10.0f, 10.0f, 10.0f };
+
+	MM_CHECK(MM_EntRespawnBoxesOverlap(a_mins, a_maxs, { 5.0f, 5.0f, 5.0f }, { 15.0f, 15.0f, 15.0f }));
+	MM_CHECK(MM_EntRespawnBoxesOverlap(a_mins, a_maxs, { 10.0f, 0.0f, 0.0f }, { 20.0f, 10.0f, 10.0f }));
+	MM_CHECK(!MM_EntRespawnBoxesOverlap(a_mins, a_maxs, { 10.1f, 0.0f, 0.0f }, { 20.0f, 10.0f, 10.0f }));
+	MM_CHECK(!MM_EntRespawnBoxesOverlap(a_mins, a_maxs, { 0.0f, 0.0f, -20.0f }, { 10.0f, 10.0f, -0.1f }));
+	// Fully contained on every axis still overlaps.
+	MM_CHECK(MM_EntRespawnBoxesOverlap(a_mins, a_maxs, { 2.0f, 2.0f, 2.0f }, { 3.0f, 3.0f, 3.0f }));
+}
+
 MM_TEST(freezetag_round_resolves_wipes_draws_and_time_ties) {
 	const mm_freezetag_team_counts_t red_full { 3, 3, 260 };
 	const mm_freezetag_team_counts_t blue_full { 2, 2, 180 };
@@ -2471,6 +2965,17 @@ MM_TEST(scoreboard_footer_reserve_keeps_layout_room_available) {
 	MM_CHECK(MM_ScoreboardCanAppend(1304, 0, 1400, false));
 	MM_CHECK_FALSE(MM_ScoreboardCanAppend(1304, 1, 1400, false));
 	MM_CHECK_FALSE(MM_ScoreboardCanAppend(1080, 1, 1400, true));
+
+	// The real budget is MAX_STRING_CHARS (1024), not the 1400 above; the boundaries there are
+	// what actually decide whether an arena board keeps its footer.
+	MM_CHECK(MM_ScoreboardCanAppend(0, 928, 1024, false));
+	MM_CHECK_FALSE(MM_ScoreboardCanAppend(0, 929, 1024, false));
+	MM_CHECK(MM_ScoreboardCanAppend(0, 704, 1024, true));
+	MM_CHECK_FALSE(MM_ScoreboardCanAppend(0, 705, 1024, true));
+
+	// A budget smaller than its own footer reserve can never accept anything, not even nothing.
+	MM_CHECK_FALSE(MM_ScoreboardCanAppend(0, 0, 96, false));
+	MM_CHECK_FALSE(MM_ScoreboardCanAppend(0, 0, 320, true));
 }
 
 MM_TEST(fake_command_import_models_argv_contract) {
@@ -2505,6 +3010,485 @@ MM_TEST(horde_role_targeting_distinguishes_hunters_and_bulwarks) {
 	const float healthy_bulwark = MM_Horde_ComputeRoleTargetScore(1, 800.f, 256.f, 1.0f,
 		512.f, 256.f, 192.f, mm_horde_target_role_t::Bulwark);
 	MM_CHECK(healthy_bulwark < wounded_bulwark);
+}
+
+MM_TEST(horde_relentless_pursuit_never_parks_a_threat) {
+	// A nav failure may only hold a pursuer for the configured retry window.
+	MM_CHECK_EQ(MM_Horde_ClampPursuitLockoutMs(12'000, 2'000, 2.f), 4'000);
+	// Shorter waits are left alone.
+	MM_CHECK_EQ(MM_Horde_ClampPursuitLockoutMs(2'500, 2'000, 2.f), 2'500);
+	// Zero seconds retries on the next frame; non-finite falls back to the 2 second default.
+	MM_CHECK_EQ(MM_Horde_ClampPursuitLockoutMs(12'000, 2'000, 0.f), 2'000);
+	MM_CHECK_EQ(MM_Horde_ClampPursuitLockoutMs(12'000, 2'000,
+		std::numeric_limits<float>::quiet_NaN()), 4'000);
+	// The clamp is bounded, so an absurd value cannot restore an indefinite park.
+	MM_CHECK_EQ(MM_Horde_ClampPursuitLockoutMs(1'000'000, 0, 1.0e9f), 60'000);
+
+	// The first sample of a chase has no baseline, so it never reports a stall.
+	MM_CHECK_FALSE(MM_Horde_PursuitStalled(false, 0.f, 24.f));
+	MM_CHECK(MM_Horde_PursuitStalled(true, 8.f, 24.f));
+	MM_CHECK_FALSE(MM_Horde_PursuitStalled(true, 24.f, 24.f));
+	MM_CHECK_FALSE(MM_Horde_PursuitStalled(true,
+		std::numeric_limits<float>::quiet_NaN(), 24.f));
+
+	// A goal within slack of the fighter is still good; drift or garbage re-pins it.
+	MM_CHECK_FALSE(MM_Horde_ShouldRepinPursuitGoal(64.f, 128.f));
+	MM_CHECK(MM_Horde_ShouldRepinPursuitGoal(512.f, 128.f));
+	MM_CHECK(MM_Horde_ShouldRepinPursuitGoal(
+		std::numeric_limits<float>::infinity(), 128.f));
+}
+
+// Shared helpers for the strategy-targeting tests below.
+namespace horde_strategy_test {
+
+constexpr float kTol = 1e-4f;
+
+inline bool Near(float lhs, float rhs, float tol = kTol) {
+	return std::isfinite(lhs) && std::isfinite(rhs) && std::fabs(lhs - rhs) <= tol;
+}
+
+inline float TotalWeight(const mm_horde_strategy_weights_t &w) {
+	return w.prox + w.free + w.threat + w.vuln + w.isolation;
+}
+
+inline float MaxWeight(const mm_horde_strategy_weights_t &w) {
+	return std::max({ w.prox, w.free, w.threat, w.vuln, w.isolation });
+}
+
+inline mm_horde_target_terms_t UniformTerms(float value) {
+	return { value, value, value, value, value };
+}
+
+} // namespace horde_strategy_test
+
+MM_TEST(horde_legacy_role_score_is_unchanged) {
+	// Pins the legacy scorer so the g_horde_target_model 0 rollback path cannot drift.
+	MM_CHECK_EQ(MM_Horde_ComputeTargetLoadScore(2, 100.f, 512.f), 1124.f);
+
+	MM_CHECK_EQ(MM_Horde_ComputeRoleTargetScore(1, 800.f, 256.f, 0.5f, 512.f, 256.f, 192.f,
+		mm_horde_target_role_t::Balanced), 1312.f);
+	MM_CHECK_EQ(MM_Horde_ComputeRoleTargetScore(1, 800.f, 256.f, 0.5f, 512.f, 256.f, 192.f,
+		mm_horde_target_role_t::Hunter), 1248.f);
+	// Lower is better in the legacy model, so a Bulwark subtracting on health prefers healthy targets.
+	MM_CHECK_EQ(MM_Horde_ComputeRoleTargetScore(1, 800.f, 256.f, 0.5f, 512.f, 256.f, 192.f,
+		mm_horde_target_role_t::Bulwark), 1216.f);
+}
+
+MM_TEST(horde_no_single_soft_factor_dominates) {
+	using namespace horde_strategy_test;
+
+	for (uint8_t i = 0; i < static_cast<uint8_t>(mm_horde_strategy_t::Count); i++) {
+		const mm_horde_strategy_weights_t w =
+			MM_Horde_StrategyWeights(static_cast<mm_horde_strategy_t>(i));
+
+		MM_CHECK(w.prox >= 0.f && w.free >= 0.f && w.threat >= 0.f && w.vuln >= 0.f &&
+			w.isolation >= 0.f);
+		MM_CHECK(TotalWeight(w) > 0.f);
+		MM_CHECK(w.prox_half > 0.f);
+		// The shipped dominance bound: no term can move the score by more than 35%.
+		MM_CHECK(MaxWeight(w) / TotalWeight(w) <= 0.35f);
+	}
+
+	// Operator tuning may deliberately bias the model, but must never produce a negative,
+	// non-finite, or all-zero weight set -- that would make the score meaningless.
+	const float extremes[] = { 0.f, 1.f, 2.f, -5.f, 1.0e9f,
+		std::numeric_limits<float>::quiet_NaN() };
+	for (uint8_t i = 0; i < static_cast<uint8_t>(mm_horde_strategy_t::Count); i++) {
+		for (float spread : extremes) {
+			for (float mult : extremes) {
+				const mm_horde_strategy_weights_t w = MM_Horde_ApplyWeightTuning(
+					MM_Horde_StrategyWeights(static_cast<mm_horde_strategy_t>(i)),
+					MM_Horde_NormalizedSpreadWeight(spread, 512.f, 8.f), mult, mult);
+
+				MM_CHECK(std::isfinite(w.prox) && std::isfinite(w.free) &&
+					std::isfinite(w.threat) && std::isfinite(w.vuln) &&
+					std::isfinite(w.isolation));
+				MM_CHECK(w.prox >= 0.f && w.free >= 0.f && w.threat >= 0.f && w.vuln >= 0.f &&
+					w.isolation >= 0.f);
+				MM_CHECK(TotalWeight(w) > 0.f);
+			}
+		}
+	}
+}
+
+MM_TEST(horde_gated_score_is_bounded_and_reach_can_veto) {
+	using namespace horde_strategy_test;
+
+	const mm_horde_strategy_weights_t balanced =
+		MM_Horde_StrategyWeights(mm_horde_strategy_t::Balanced);
+
+	MM_CHECK(Near(MM_Horde_ComputeGatedTargetScore(UniformTerms(1.f), balanced, 1.f, 0.f,
+		MM_HORDE_GATE_FLOOR), 1.f));
+	MM_CHECK(Near(MM_Horde_ComputeGatedTargetScore(UniformTerms(0.f), balanced, 1.f, 0.f,
+		MM_HORDE_GATE_FLOOR), 0.f));
+
+	// A weightless strategy scores zero rather than dividing by zero.
+	const mm_horde_strategy_weights_t weightless = {};
+	MM_CHECK_EQ(MM_Horde_ComputeCoreUtility(UniformTerms(1.f), weightless), 0.f);
+
+	// Reachability is a real veto: a perfect but unreachable fighter loses to a mediocre
+	// reachable one, for every strategy.
+	for (uint8_t i = 0; i < static_cast<uint8_t>(mm_horde_strategy_t::Count); i++) {
+		const mm_horde_strategy_weights_t w =
+			MM_Horde_StrategyWeights(static_cast<mm_horde_strategy_t>(i));
+
+		const float unreachable = MM_Horde_ComputeGatedTargetScore(UniformTerms(1.f), w, 0.f,
+			0.f, MM_HORDE_GATE_FLOOR);
+		const float reachable = MM_Horde_ComputeGatedTargetScore(UniformTerms(0.30f), w, 1.f,
+			0.f, MM_HORDE_GATE_FLOOR);
+
+		MM_CHECK(Near(unreachable, MM_HORDE_GATE_FLOOR));
+		MM_CHECK(unreachable < reachable);
+	}
+
+	// Non-finite terms clamp instead of poisoning the score.
+	const float nan = std::numeric_limits<float>::quiet_NaN();
+	const float poisoned = MM_Horde_ComputeGatedTargetScore({ nan, nan, nan, nan, nan },
+		balanced, nan, nan, nan);
+	MM_CHECK(std::isfinite(poisoned) && poisoned >= 0.f && poisoned <= 1.f);
+}
+
+MM_TEST(horde_gate_sharpening_hits_heavies_hardest) {
+	using namespace horde_strategy_test;
+
+	const float floor_value = MM_HORDE_GATE_FLOOR;
+
+	for (float a = 0.f; a <= 1.0f; a += 0.125f) {
+		// sharpen 0 is linear in access; sharpen 1 is the squared form.
+		MM_CHECK(Near(MM_Horde_GateFromAccess(a, 0.f, floor_value),
+			floor_value + (1.f - floor_value) * a));
+		MM_CHECK(Near(MM_Horde_GateFromAccess(a, 1.f, floor_value),
+			floor_value + (1.f - floor_value) * a * a));
+	}
+
+	// Endpoints are shared by every sharpening, so a heavy is never penalised on a fully
+	// reachable or fully unreachable fighter -- only in between.
+	for (float s = 0.f; s <= 1.f; s += 0.25f) {
+		MM_CHECK(Near(MM_Horde_GateFromAccess(0.f, s, floor_value), floor_value));
+		MM_CHECK(Near(MM_Horde_GateFromAccess(1.f, s, floor_value), 1.f));
+	}
+
+	// Monotone increasing in access, monotone decreasing in sharpening.
+	MM_CHECK(MM_Horde_GateFromAccess(0.25f, 0.5f, floor_value) <
+		MM_Horde_GateFromAccess(0.75f, 0.5f, floor_value));
+	MM_CHECK(MM_Horde_GateFromAccess(0.5f, 1.f, floor_value) <
+		MM_Horde_GateFromAccess(0.5f, 0.f, floor_value));
+
+	const float nan = std::numeric_limits<float>::quiet_NaN();
+	const float guarded = MM_Horde_GateFromAccess(nan, nan, nan);
+	MM_CHECK(std::isfinite(guarded) && guarded >= 0.f && guarded <= 1.f);
+}
+
+MM_TEST(horde_proximity_utility_is_monotone_and_bounded) {
+	using namespace horde_strategy_test;
+
+	MM_CHECK(Near(MM_Horde_ProximityUtility(0.f, 768.f), 1.f));
+	MM_CHECK(Near(MM_Horde_ProximityUtility(768.f, 768.f), 0.5f));
+
+	// Strictly decreasing and never saturating, which is why distance no longer swamps
+	// every other consideration at range.
+	MM_CHECK(MM_Horde_ProximityUtility(0.f, 768.f) > MM_Horde_ProximityUtility(768.f, 768.f));
+	MM_CHECK(MM_Horde_ProximityUtility(768.f, 768.f) > MM_Horde_ProximityUtility(2048.f, 768.f));
+	MM_CHECK(MM_Horde_ProximityUtility(2048.f, 768.f) > MM_Horde_ProximityUtility(8000.f, 768.f));
+	MM_CHECK(MM_Horde_ProximityUtility(1.0e6f, 768.f) > 0.f);
+
+	const float nan = std::numeric_limits<float>::quiet_NaN();
+	MM_CHECK(Near(MM_Horde_ProximityUtility(nan, 768.f), 1.f));
+	MM_CHECK(Near(MM_Horde_ProximityUtility(768.f, nan), 0.5f));
+}
+
+MM_TEST(horde_load_utility_keeps_spread_dominant) {
+	using namespace horde_strategy_test;
+
+	MM_CHECK(Near(MM_Horde_LoadUtility(0, 3.f), 1.f));
+	MM_CHECK(Near(MM_Horde_LoadUtility(1, 3.f), 2.f / 3.f));
+	MM_CHECK(Near(MM_Horde_LoadUtility(3, 3.f), 0.f));
+	MM_CHECK(Near(MM_Horde_LoadUtility(9, 3.f), 0.f));
+	MM_CHECK(Near(MM_Horde_LoadUtility(-4, 3.f), 1.f));
+	MM_CHECK(Near(MM_Horde_LoadUtility(1, std::numeric_limits<float>::quiet_NaN()), 2.f / 3.f));
+
+	// Target spread must remain the dominant retarget driver, as it is today: a GENUINE extra
+	// attacker has to move the score by more than the switch margin. This only holds as a
+	// statement about real load differences because the incumbent's self-count is normalized
+	// away first -- see horde_target_load_comparison_cancels_the_self_count below.
+	const mm_horde_strategy_weights_t w = MM_Horde_StrategyWeights(mm_horde_strategy_t::Balanced);
+	const float delta = (w.free / TotalWeight(w)) *
+		(MM_Horde_LoadUtility(0, 3.f) - MM_Horde_LoadUtility(1, 3.f));
+	MM_CHECK(delta > MM_Horde_TargetSwitchMargin(0.05f, w.switch_scale));
+}
+
+MM_TEST(horde_target_load_comparison_cancels_the_self_count) {
+	using namespace horde_strategy_test;
+
+	// The load histogram counts a monster against its own enemy, so scoring raw counts would
+	// give every challenger a free one-attacker edge. Challengers are scored post-switch.
+	MM_CHECK_EQ(MM_Horde_ComparableTargetLoad(2, true, true), 2);   // incumbent: already counts me
+	MM_CHECK_EQ(MM_Horde_ComparableTargetLoad(2, false, true), 3);  // challenger: would gain me
+	// Acquiring with no current enemy contributes to nobody, so raw counts are already fair.
+	MM_CHECK_EQ(MM_Horde_ComparableTargetLoad(2, false, false), 2);
+	MM_CHECK_EQ(MM_Horde_ComparableTargetLoad(0, false, false), 0);
+	MM_CHECK_EQ(MM_Horde_ComparableTargetLoad(std::numeric_limits<int>::max(), false, true),
+		std::numeric_limits<int>::max());
+
+	// Two identical fighters must tie once the self-count is cancelled, so the switch margin
+	// is real hysteresis. Scoring the raw counts instead flips it into a permanent switch bias
+	// that exceeds the margin for every strategy, and the monster thrashes forever.
+	for (uint8_t i = 0; i < static_cast<uint8_t>(mm_horde_strategy_t::Count); i++) {
+		const mm_horde_strategy_weights_t w =
+			MM_Horde_StrategyWeights(static_cast<mm_horde_strategy_t>(i));
+
+		const int incumbent = MM_Horde_ComparableTargetLoad(1, true, true);
+		const int challenger = MM_Horde_ComparableTargetLoad(0, false, true);
+		MM_CHECK_EQ(incumbent, challenger);
+
+		mm_horde_target_terms_t a = UniformTerms(0.5f);
+		mm_horde_target_terms_t b = UniformTerms(0.5f);
+		a.free = MM_Horde_LoadUtility(incumbent, 3.f);
+		b.free = MM_Horde_LoadUtility(challenger, 3.f);
+
+		const float current_score = MM_Horde_ComputeGatedTargetScore(a, w, 1.f, 0.f,
+			MM_HORDE_GATE_FLOOR);
+		const float best_score = MM_Horde_ComputeGatedTargetScore(b, w, 1.f, 0.f,
+			MM_HORDE_GATE_FLOOR);
+
+		MM_CHECK_FALSE(MM_Horde_ShouldSwitchTarget(best_score, current_score,
+			MM_Horde_TargetSwitchMargin(0.05f, w.switch_scale), 1.f, 1.f, 0.25f, 0.55f));
+	}
+}
+
+MM_TEST(horde_isolation_treats_solo_fighter_as_isolated) {
+	using namespace horde_strategy_test;
+
+	// The legacy helper reported a lone fighter as maximally grouped; it is the opposite.
+	MM_CHECK(Near(MM_Horde_IsolationUtility(0.f, 0, 1024.f), 1.f));
+	MM_CHECK(Near(MM_Horde_IsolationUtility(4096.f, 0, 1024.f), 1.f));
+
+	MM_CHECK(Near(MM_Horde_IsolationUtility(0.f, 3, 1024.f), 0.f));
+	MM_CHECK(Near(MM_Horde_IsolationUtility(1024.f, 3, 1024.f), 1.f));
+	MM_CHECK(Near(MM_Horde_IsolationUtility(2048.f, 3, 1024.f), 1.f));
+
+	const float nan = std::numeric_limits<float>::quiet_NaN();
+	MM_CHECK(Near(MM_Horde_IsolationUtility(nan, 3, 1024.f), 0.f));
+	MM_CHECK(Near(MM_Horde_IsolationUtility(512.f, 3, nan), 0.5f));
+}
+
+MM_TEST(horde_threat_and_vulnerability_are_normalized) {
+	using namespace horde_strategy_test;
+
+	MM_CHECK(Near(MM_Horde_ThreatUtility(1.f, 1.f, 1.f, 1.f, 1.f), 1.f));
+	MM_CHECK(Near(MM_Horde_ThreatUtility(0.f, 0.f, 0.f, 0.f, 0.f), 0.f));
+	// A quad carrier reads as more dangerous than an unbuffed one; a railgun beats a blaster.
+	MM_CHECK(MM_Horde_ThreatUtility(1.f, 0.5f, 0.f, 0.f, 0.f) >
+		MM_Horde_ThreatUtility(0.f, 0.5f, 0.f, 0.f, 0.f));
+	MM_CHECK(MM_Horde_ThreatUtility(0.f, 0.90f, 0.f, 0.f, 0.f) >
+		MM_Horde_ThreatUtility(0.f, 0.10f, 0.f, 0.f, 0.f));
+	// Streak saturates, so a runaway score cannot make one fighter a permanent magnet.
+	MM_CHECK_EQ(MM_Horde_ThreatUtility(0.f, 0.f, 20.f, 0.f, 0.f),
+		MM_Horde_ThreatUtility(0.f, 0.f, 1.f, 0.f, 0.f));
+
+	MM_CHECK(Near(MM_Horde_VulnerabilityUtility(1.f, 1.f, 1.f, 1.f, 1.f, false), 1.f));
+	MM_CHECK(Near(MM_Horde_VulnerabilityUtility(0.f, 0.f, 0.f, 0.f, 0.f, false), 0.f));
+	// A hurt fighter is a better finisher pick than a healthy one.
+	MM_CHECK(MM_Horde_VulnerabilityUtility(0.8f, 0.f, 0.f, 0.f, 0.f, false) >
+		MM_Horde_VulnerabilityUtility(0.0f, 0.f, 0.f, 0.f, 0.f, false));
+	// Protection makes a fighter a poor finisher pick rather than an invisible one.
+	MM_CHECK(Near(MM_Horde_VulnerabilityUtility(1.f, 1.f, 1.f, 1.f, 1.f, true), 0.30f));
+
+	const float nan = std::numeric_limits<float>::quiet_NaN();
+	MM_CHECK(std::isfinite(MM_Horde_ThreatUtility(nan, nan, nan, nan, nan)));
+	MM_CHECK(std::isfinite(MM_Horde_VulnerabilityUtility(nan, nan, nan, nan, nan, false)));
+}
+
+MM_TEST(horde_climb_budget_matches_monster_traversal) {
+	using namespace horde_strategy_test;
+
+	MM_CHECK(Near(MM_Horde_ClimbBudget(true, false, false, 0.f, 0.f, 18.f), 1024.f));
+	MM_CHECK(Near(MM_Horde_ClimbBudget(false, true, false, 0.f, 0.f, 18.f), 320.f));
+
+	// A tank sets no jump or drop height anywhere in the tree, so it runs on a bare step.
+	MM_CHECK(Near(MM_Horde_ClimbBudget(false, false, false, 0.f, 0.f, 18.f), 18.f));
+	MM_CHECK(Near(MM_Horde_ClimbBudget(false, false, true, 68.f, 256.f, 18.f), 274.f));
+	MM_CHECK(Near(MM_Horde_ClimbBudget(false, false, true, 40.f, 192.f, 18.f), 210.f));
+	// Traversal heights only count when the monster can actually jump, mirroring the engine.
+	MM_CHECK(Near(MM_Horde_ClimbBudget(false, false, false, 68.f, 256.f, 18.f), 18.f));
+
+	const float nan = std::numeric_limits<float>::quiet_NaN();
+	MM_CHECK(Near(MM_Horde_ClimbBudget(false, false, true, nan, nan, 18.f), 18.f));
+}
+
+MM_TEST(horde_vertical_access_believes_in_ramps) {
+	using namespace horde_strategy_test;
+
+	// Tank: 18-unit climb budget, 0.79 slope after size modulation.
+	const float tank_budget = 18.f, tank_slope = 0.79f;
+
+	// A long ramp is walkable, so height alone must not veto the fighter at the top of it.
+	MM_CHECK(Near(MM_Horde_VerticalAccess(128.f, 400.f, tank_budget, tank_slope, 512.f), 1.f));
+	MM_CHECK(Near(MM_Horde_VerticalAccess(400.f, 1000.f, tank_budget, tank_slope, 512.f), 1.f));
+	// A sheer drop right next to the monster is not.
+	const float ledge = MM_Horde_VerticalAccess(128.f, 60.f, tank_budget, tank_slope, 512.f);
+	const float storey = MM_Horde_VerticalAccess(400.f, 60.f, tank_budget, tank_slope, 512.f);
+	MM_CHECK(ledge > 0.85f && ledge < 0.90f);
+	MM_CHECK(storey > 0.30f && storey < 0.40f);
+	MM_CHECK(storey < ledge);
+
+	// A gekk clears the same ledge outright.
+	MM_CHECK(Near(MM_Horde_VerticalAccess(128.f, 60.f, 274.f, 1.f, 512.f), 1.f));
+	// A supertank's gentler slope is strictly less permissive than a tank's.
+	MM_CHECK(MM_Horde_VerticalAccess(128.f, 60.f, tank_budget, 0.50f, 512.f) < ledge);
+
+	// Height below reads the same as height above.
+	MM_CHECK_EQ(MM_Horde_VerticalAccess(-400.f, 60.f, tank_budget, tank_slope, 512.f), storey);
+
+	const float nan = std::numeric_limits<float>::quiet_NaN();
+	const float guarded = MM_Horde_VerticalAccess(nan, nan, nan, nan, nan);
+	MM_CHECK(std::isfinite(guarded) && guarded >= 0.f && guarded <= 1.f);
+}
+
+MM_TEST(horde_hull_bulk_and_slope_scale_with_size) {
+	using namespace horde_strategy_test;
+
+	// Real hull widths: soldier 32, guncmdr 40, tank 64, arachnid 96, supertank 128.
+	MM_CHECK(Near(MM_Horde_HullBulk(32.f, 40.f, 96.f), 0.f));
+	MM_CHECK(Near(MM_Horde_HullBulk(40.f, 40.f, 96.f), 0.f));
+	MM_CHECK(Near(MM_Horde_HullBulk(64.f, 40.f, 96.f), 24.f / 56.f));
+	MM_CHECK(Near(MM_Horde_HullBulk(96.f, 40.f, 96.f), 1.f));
+	MM_CHECK(Near(MM_Horde_HullBulk(192.f, 40.f, 96.f), 1.f));
+	MM_CHECK(Near(MM_Horde_HullBulk(std::numeric_limits<float>::quiet_NaN(), 40.f, 96.f), 0.f));
+	// Inverted bounds are swapped rather than producing a negative span.
+	MM_CHECK(Near(MM_Horde_HullBulk(64.f, 96.f, 40.f), 24.f / 56.f));
+
+	MM_CHECK(Near(MM_Horde_ClimbSlope(1.f, 0.f), 1.f));
+	MM_CHECK(Near(MM_Horde_ClimbSlope(1.f, 1.f), 0.5f));
+	MM_CHECK(MM_Horde_ClimbSlope(1.f, 1.f) < MM_Horde_ClimbSlope(1.f, 0.5f));
+	MM_CHECK(MM_Horde_ClimbSlope(1.f, 0.5f) < MM_Horde_ClimbSlope(1.f, 0.f));
+
+	// A bulky body stops chasing stragglers and grows less distance-sensitive.
+	const mm_horde_strategy_weights_t base =
+		MM_Horde_StrategyWeights(mm_horde_strategy_t::Balanced);
+	const mm_horde_strategy_weights_t heavy = MM_Horde_ApplySizeToWeights(base, 1.f);
+	MM_CHECK(heavy.isolation < base.isolation);
+	MM_CHECK(heavy.prox < base.prox);
+	MM_CHECK(heavy.prox_half > base.prox_half);
+	MM_CHECK(heavy.isolation >= 0.f && std::isfinite(heavy.isolation));
+	MM_CHECK(TotalWeight(heavy) > 0.f);
+
+	// Gate sharpening rises with bulk and falls with agility, so a flyer is barely affected.
+	MM_CHECK(MM_Horde_GateSharpen(0.35f, 1.f, 0.07f) > MM_Horde_GateSharpen(0.35f, 0.f, 0.07f));
+	MM_CHECK(Near(MM_Horde_GateSharpen(0.10f, 1.f, 1.f), 0.10f));
+	MM_CHECK(Near(MM_Horde_GateSharpen(-0.35f, 0.f, 1.f), 0.f));
+}
+
+MM_TEST(horde_access_is_a_bounded_feasibility_product) {
+	using namespace horde_strategy_test;
+
+	MM_CHECK(Near(MM_Horde_ComputeAccess(1.f, 1.f, 1.f, 1.f, 1.f, false, 0.90f), 1.f));
+
+	// Any single impossible factor collapses the product.
+	MM_CHECK(Near(MM_Horde_ComputeAccess(0.f, 1.f, 1.f, 1.f, 1.f, false, 0.90f), 0.f));
+	MM_CHECK(Near(MM_Horde_ComputeAccess(1.f, 0.f, 1.f, 1.f, 1.f, false, 0.90f), 0.f));
+	MM_CHECK(Near(MM_Horde_ComputeAccess(1.f, 1.f, 0.f, 1.f, 1.f, false, 0.90f), 0.f));
+
+	// Stacked discounts compound but stay positive.
+	const float stacked = MM_Horde_ComputeAccess(0.30f, 1.f, 0.15f, 0.45f, 1.f, false, 0.90f);
+	MM_CHECK(stacked > 0.f && stacked < 0.03f);
+
+	// An enemy we are in contact with is reachable by definition.
+	MM_CHECK(Near(MM_Horde_ComputeAccess(0.f, 0.f, 0.f, 0.f, 0.f, true, 0.90f), 0.90f));
+
+	const float nan = std::numeric_limits<float>::quiet_NaN();
+	MM_CHECK(Near(MM_Horde_ComputeAccess(nan, nan, nan, nan, nan, false, nan), 1.f));
+}
+
+MM_TEST(horde_unreach_mask_remembers_multiple_fighters) {
+	using namespace horde_strategy_test;
+
+	uint64_t lo = 0, hi = 0;
+	MM_Horde_UnreachMaskSet(lo, hi, 3);
+	MM_Horde_UnreachMaskSet(lo, hi, 70);
+	MM_CHECK(MM_Horde_UnreachMaskTest(lo, hi, 3));
+	MM_CHECK(MM_Horde_UnreachMaskTest(lo, hi, 70));
+	MM_CHECK_FALSE(MM_Horde_UnreachMaskTest(lo, hi, 4));
+	MM_CHECK_FALSE(MM_Horde_UnreachMaskTest(lo, hi, 69));
+
+	// Out-of-range slots are inert in both directions.
+	MM_Horde_UnreachMaskSet(lo, hi, 0);
+	MM_Horde_UnreachMaskSet(lo, hi, 129);
+	MM_Horde_UnreachMaskSet(lo, hi, -1);
+	MM_CHECK_FALSE(MM_Horde_UnreachMaskTest(lo, hi, 0));
+	MM_CHECK_FALSE(MM_Horde_UnreachMaskTest(lo, hi, 129));
+	MM_CHECK_FALSE(MM_Horde_UnreachMaskTest(lo, hi, -1));
+
+	// The anti-oscillation property: clearing one fighter must not clear another, or a
+	// monster ping-pongs forever between two fighters it cannot reach.
+	MM_Horde_UnreachMaskClear(lo, hi, 3);
+	MM_CHECK_FALSE(MM_Horde_UnreachMaskTest(lo, hi, 3));
+	MM_CHECK(MM_Horde_UnreachMaskTest(lo, hi, 70));
+
+	// Boundary slots of each word.
+	uint64_t blo = 0, bhi = 0;
+	MM_Horde_UnreachMaskSet(blo, bhi, 1);
+	MM_Horde_UnreachMaskSet(blo, bhi, 64);
+	MM_Horde_UnreachMaskSet(blo, bhi, 65);
+	MM_Horde_UnreachMaskSet(blo, bhi, 128);
+	MM_CHECK(MM_Horde_UnreachMaskTest(blo, bhi, 1) && MM_Horde_UnreachMaskTest(blo, bhi, 64));
+	MM_CHECK(MM_Horde_UnreachMaskTest(blo, bhi, 65) && MM_Horde_UnreachMaskTest(blo, bhi, 128));
+
+	// Fresh evidence is a near-veto that decays back to neutral so the monster retries.
+	MM_CHECK(Near(MM_Horde_UnreachFactor(true, 0, 12000, 0.12f), 0.12f));
+	MM_CHECK(Near(MM_Horde_UnreachFactor(true, 6000, 12000, 0.12f), 0.56f));
+	MM_CHECK(Near(MM_Horde_UnreachFactor(true, 12000, 12000, 0.12f), 1.f));
+	MM_CHECK(Near(MM_Horde_UnreachFactor(false, 0, 12000, 0.12f), 1.f));
+	MM_CHECK(Near(MM_Horde_UnreachFactor(true, -5, 12000, 0.12f), 1.f));
+	MM_CHECK(Near(MM_Horde_UnreachFactor(true, 0, 0, 0.12f), 1.f));
+	MM_CHECK(MM_Horde_UnreachFactor(true, 3000, 12000, 0.12f) <
+		MM_Horde_UnreachFactor(true, 9000, 12000, 0.12f));
+}
+
+MM_TEST(horde_spread_weight_maps_onto_a_normalized_weight) {
+	using namespace horde_strategy_test;
+
+	// The cvar keeps its name and its 512 default, but now scales a bounded weight.
+	MM_CHECK(Near(MM_Horde_NormalizedSpreadWeight(512.f, 512.f, 8.f), 1.f));
+	MM_CHECK(Near(MM_Horde_NormalizedSpreadWeight(0.f, 512.f, 8.f), 0.f));
+	MM_CHECK(Near(MM_Horde_NormalizedSpreadWeight(1024.f, 512.f, 8.f), 2.f));
+	MM_CHECK(Near(MM_Horde_NormalizedSpreadWeight(1.0e30f, 512.f, 8.f), 8.f));
+	MM_CHECK(Near(MM_Horde_NormalizedSpreadWeight(-100.f, 512.f, 8.f), 0.f));
+	MM_CHECK(Near(MM_Horde_NormalizedSpreadWeight(
+		std::numeric_limits<float>::quiet_NaN(), 512.f, 8.f), 1.f));
+
+	// Zeroing the cvar still means "ignore target load entirely", as documented.
+	const mm_horde_strategy_weights_t w = MM_Horde_ApplyWeightTuning(
+		MM_Horde_StrategyWeights(mm_horde_strategy_t::Balanced),
+		MM_Horde_NormalizedSpreadWeight(0.f, 512.f, 8.f), 1.f, 1.f);
+	MM_CHECK_EQ(w.free, 0.f);
+	MM_CHECK(TotalWeight(w) > 0.f);
+}
+
+MM_TEST(horde_switch_margin_prevents_thrashing_and_releases_traps) {
+	using namespace horde_strategy_test;
+
+	MM_CHECK(Near(MM_Horde_TargetSwitchMargin(0.05f, 1.0f), 0.05f));
+	MM_CHECK(Near(MM_Horde_TargetSwitchMargin(0.05f, 1.6f), 0.08f));
+	MM_CHECK(Near(MM_Horde_TargetSwitchMargin(0.05f, 0.75f), 0.0375f));
+	MM_CHECK(Near(MM_Horde_TargetSwitchMargin(0.05f,
+		std::numeric_limits<float>::quiet_NaN()), 0.05f));
+
+	// A marginally better candidate does not steal the target.
+	MM_CHECK_FALSE(MM_Horde_ShouldSwitchTarget(0.50f, 0.47f, 0.05f, 1.f, 1.f, 0.25f, 0.55f));
+	// A clearly better one does.
+	MM_CHECK(MM_Horde_ShouldSwitchTarget(0.56f, 0.47f, 0.05f, 1.f, 1.f, 0.25f, 0.55f));
+	// An incumbent the monster provably cannot reach waives the margin -- staying latched
+	// onto an unreachable fighter is the failure this model exists to fix.
+	MM_CHECK(MM_Horde_ShouldSwitchTarget(0.48f, 0.47f, 0.05f, 0.10f, 0.80f, 0.25f, 0.55f));
+	// ...but only when there is a genuinely reachable rescue candidate.
+	MM_CHECK_FALSE(MM_Horde_ShouldSwitchTarget(0.48f, 0.47f, 0.05f, 0.10f, 0.30f, 0.25f, 0.55f));
+	// Never switch on a worse score, even with the override armed.
+	MM_CHECK_FALSE(MM_Horde_ShouldSwitchTarget(0.40f, 0.47f, 0.05f, 0.10f, 0.80f, 0.25f, 0.55f));
+
+	const float nan = std::numeric_limits<float>::quiet_NaN();
+	MM_CHECK_FALSE(MM_Horde_ShouldSwitchTarget(nan, 0.47f, 0.05f, 1.f, 1.f, 0.25f, 0.55f));
+	MM_CHECK_FALSE(MM_Horde_ShouldSwitchTarget(0.56f, nan, 0.05f, 1.f, 1.f, 0.25f, 0.55f));
 }
 
 MM_TEST(horde_boss_wave_cadence_is_configurable) {
@@ -2942,6 +3926,48 @@ MM_TEST(hud_stat_contract_miniscore_val_visibility) {
 	MM_CHECK(MM_MiniscoreValVisible(1));
 	MM_CHECK(MM_StatusbarLayoutLengthWithinBudget(MM_STATUSBAR_LAYOUT_MAX_CHARS));
 	MM_CHECK_FALSE(MM_StatusbarLayoutLengthWithinBudget(MM_STATUSBAR_LAYOUT_MAX_CHARS + 1));
+}
+
+MM_TEST(centerprint_marker_goes_after_any_leading_bind_run) {
+	// Stock clients only parse binds at offset 0, so the marker must never precede them.
+	MM_CHECK_EQ(MM_CenterPrintMarkerOffset(""), (size_t)0);
+	MM_CHECK_EQ(MM_CenterPrintMarkerOffset("You have joined the game."), (size_t)0);
+	MM_CHECK_EQ(MM_CenterPrintMarkerOffset("%bind:inven:Open menu%ready?"),
+		strlen("%bind:inven:Open menu%"));
+	MM_CHECK_EQ(MM_CenterPrintMarkerOffset("%bind:a%%bind:b%go"),
+		strlen("%bind:a%%bind:b%"));
+
+	// An unterminated bind is left alone rather than running off the end.
+	MM_CHECK_EQ(MM_CenterPrintMarkerOffset("%bind:inven"), (size_t)0);
+	MM_CHECK_EQ(MM_CenterPrintMarkerOffset("%bin"), (size_t)0);
+}
+
+MM_TEST(centerprint_marker_skips_localization_keys_and_empty_messages) {
+	MM_CHECK(MM_CenterPrintBaseAcceptsMarker("You fragged someone"));
+	MM_CHECK(MM_CenterPrintBaseAcceptsMarker("%bind:inven:Open menu%ready?"));
+
+	// '$' keys are looked up whole on the client; a marker would break the lookup.
+	MM_CHECK_FALSE(MM_CenterPrintBaseAcceptsMarker("$g_already_have_tech"));
+	MM_CHECK_FALSE(MM_CenterPrintBaseAcceptsMarker("%bind:inven:Open menu%$g_you_need"));
+
+	// Nothing to mark.
+	MM_CHECK_FALSE(MM_CenterPrintBaseAcceptsMarker(""));
+	MM_CHECK_FALSE(MM_CenterPrintBaseAcceptsMarker("%bind:inven:Open menu%"));
+
+	// Text that already starts with a space is still marked: the client strips exactly one, so
+	// the original leading space survives the round trip.
+	MM_CHECK(MM_CenterPrintBaseAcceptsMarker(" leading space"));
+}
+
+MM_TEST(centerprint_marker_level_masks_broadcast_and_notify_bitflags) {
+	MM_CHECK(MM_IsCenterPrintLevel(PRINT_CENTER));
+	MM_CHECK(MM_IsCenterPrintLevel((print_type_t)(PRINT_CENTER | PRINT_BROADCAST)));
+	MM_CHECK(MM_IsCenterPrintLevel((print_type_t)(PRINT_CENTER | PRINT_NO_NOTIFY)));
+
+	MM_CHECK_FALSE(MM_IsCenterPrintLevel(PRINT_HIGH));
+	MM_CHECK_FALSE(MM_IsCenterPrintLevel(PRINT_CHAT));
+	MM_CHECK_FALSE(MM_IsCenterPrintLevel(PRINT_TYPEWRITER));
+	MM_CHECK_FALSE(MM_IsCenterPrintLevel((print_type_t)(PRINT_HIGH | PRINT_BROADCAST)));
 }
 
 MM_TEST(announcer_decision_off_with_backup_plays_backup_only) {
@@ -3765,6 +4791,641 @@ MM_TEST(ghost_skin_sync_stress_bounds_repeated_max_client_reconnects) {
 				involves_later ? 1u : 0u);
 		}
 	}
+}
+
+// --- Post-match awards ------------------------------------------------------
+
+namespace awards_test {
+
+// A match long enough and full enough to be judged, so each test only has to
+// state the thing it is actually about.
+mm_award_match_facts_t Match(size_t participants)
+{
+	mm_award_match_facts_t match;
+	match.participants = participants;
+	match.duration_msec = MM_AWARD_MIN_DURATION_MSEC;
+	return match;
+}
+
+std::vector<mm_award_result_t> Select(std::vector<mm_award_player_facts_t> players,
+	mm_award_match_facts_t match)
+{
+	match.participants = players.size();
+	std::array<mm_award_result_t, MM_AWARDS_DISPLAY_LIMIT> reel {};
+	const size_t count = MM_AwardsSelect(players.data(), players.size(), match,
+		reel.data(), reel.size());
+	return std::vector<mm_award_result_t>(reel.begin(), reel.begin() + count);
+}
+
+bool Holds(const std::vector<mm_award_result_t> &reel, mm_match_award_t award,
+	size_t player_index)
+{
+	return std::any_of(reel.begin(), reel.end(),
+		[&](const mm_award_result_t &result) {
+			return result.award == award && result.player_index == player_index;
+		});
+}
+
+bool Awarded(const std::vector<mm_award_result_t> &reel, mm_match_award_t award)
+{
+	return std::any_of(reel.begin(), reel.end(),
+		[&](const mm_award_result_t &result) { return result.award == award; });
+}
+
+} // namespace awards_test
+
+MM_TEST(awards_duration_reads_zero_and_negatives_as_disabled) {
+	MM_CHECK_EQ(MM_AwardsDurationSeconds(0), 0);
+	MM_CHECK_EQ(MM_AwardsDurationSeconds(-10), 0);
+	MM_CHECK_EQ(MM_AwardsDurationSeconds(10), 10);
+	MM_CHECK_EQ(MM_AwardsDurationSeconds(1), MM_AWARDS_MIN_SECONDS);
+	MM_CHECK_EQ(MM_AwardsDurationSeconds(9999), MM_AWARDS_MAX_SECONDS);
+}
+
+MM_TEST(awards_skip_hold_always_leaves_room_to_skip) {
+	// The hold must stay strictly inside the reel's own length, or a short reel
+	// would refuse the key press for its entire duration and read as unskippable.
+	for (int seconds = MM_AWARDS_MIN_SECONDS; seconds <= MM_AWARDS_MAX_SECONDS; seconds++) {
+		const int hold = MM_AwardsSkipHoldSeconds(seconds);
+		MM_CHECK(hold >= 1);
+		MM_CHECK(hold < seconds);
+		MM_CHECK(hold <= MM_AWARDS_MIN_HOLD_SECONDS);
+	}
+
+	// A disabled reel has no hold to serve.
+	MM_CHECK_EQ(MM_AwardsSkipHoldSeconds(0), 0);
+	MM_CHECK_EQ(MM_AwardsSkipHoldSeconds(-5), 0);
+
+	// The default reel gives the full hold.
+	MM_CHECK_EQ(MM_AwardsSkipHoldSeconds(10), MM_AWARDS_MIN_HOLD_SECONDS);
+}
+
+MM_TEST(awards_percent_is_division_safe_and_saturates) {
+	MM_CHECK_EQ(MM_AwardPercent(1, 0), 0u);
+	MM_CHECK_EQ(MM_AwardPercent(0, 0), 0u);
+	MM_CHECK_EQ(MM_AwardPercent(1, 4), 25u);
+	MM_CHECK_EQ(MM_AwardPercent(4, 4), 100u);
+	// More pickups than spawns cannot happen, but it must not read as 400%.
+	MM_CHECK_EQ(MM_AwardPercent(8, 4), 100u);
+}
+
+MM_TEST(awards_block_top_centres_the_reel_whatever_its_length) {
+	// A single pair straddles the centre line; a full reel is symmetric about it.
+	const int one = MM_AwardsBlockTop(1);
+	MM_CHECK_EQ(one, MM_AWARDS_LAYOUT_CENTRE_Y - MM_AWARDS_TITLE_TO_NAME / 2);
+
+	const size_t full = MM_AWARDS_DISPLAY_LIMIT;
+	const int top = MM_AwardsBlockTop(full);
+	const int bottom = top + static_cast<int>(full - 1) * MM_AWARDS_PAIR_PITCH +
+		MM_AWARDS_TITLE_TO_NAME;
+	MM_CHECK(top < MM_AWARDS_LAYOUT_CENTRE_Y);
+	MM_CHECK(bottom > MM_AWARDS_LAYOUT_CENTRE_Y);
+	MM_CHECK_EQ((top + bottom) / 2, MM_AWARDS_LAYOUT_CENTRE_Y);
+}
+
+MM_TEST(awards_display_name_strips_layout_hostile_bytes) {
+	// A quote would close the layout token early and hand the rest of the name
+	// to the parser as commands.
+	MM_CHECK_EQ(MM_AwardsDisplayName("ra\"ge"), std::string("rage"));
+	MM_CHECK_EQ(MM_AwardsDisplayName("ra\\ge"), std::string("rage"));
+	MM_CHECK_EQ(MM_AwardsDisplayName("ra\nge"), std::string("rage"));
+	MM_CHECK_EQ(MM_AwardsDisplayName("plain"), std::string("plain"));
+}
+
+MM_TEST(awards_display_name_truncation_never_splits_utf8) {
+	const std::string wide(MM_AWARDS_MAX_NAME_CHARS + 8, 'x');
+	const std::string clipped = MM_AwardsDisplayName(wide);
+	MM_CHECK_EQ(clipped.size(), MM_AWARDS_MAX_NAME_CHARS + 3);
+	MM_CHECK_EQ(clipped.substr(clipped.size() - 3), std::string("..."));
+
+	// Two-byte sequences packed so the cut lands mid-character; the trailing
+	// continuation byte must be dropped rather than emitted on its own.
+	std::string multibyte;
+	while (multibyte.size() < MM_AWARDS_MAX_NAME_CHARS + 6)
+		multibyte += "\xC3\xA9";
+	const std::string cut = MM_AwardsDisplayName(multibyte);
+	const std::string body = cut.substr(0, cut.size() - 3);
+	MM_CHECK_EQ(body.size() % 2, 0u);
+}
+
+MM_TEST(awards_short_or_thin_matches_produce_no_reel) {
+	using namespace awards_test;
+	mm_award_player_facts_t sheriff;
+	sheriff.kills = 30;
+	sheriff.shotgun_kills = 30;
+	mm_award_player_facts_t victim;
+	victim.kills = 1;
+
+	// Long enough, but only one participant.
+	mm_award_match_facts_t solo = Match(1);
+	MM_CHECK(Select({ sheriff }, solo).empty());
+
+	// Two participants, but over before it started.
+	mm_award_match_facts_t brief = Match(2);
+	brief.duration_msec = MM_AWARD_MIN_DURATION_MSEC - 1;
+	MM_CHECK(Select({ sheriff, victim }, brief).empty());
+}
+
+MM_TEST(awards_shotgun_sheriff_needs_volume_share_and_a_strict_lead) {
+	using namespace awards_test;
+	mm_award_player_facts_t sheriff;
+	sheriff.kills = 25;
+	sheriff.shotgun_kills = 22;	// 88% share, clears the 20-kill floor
+	mm_award_player_facts_t rival;
+	rival.kills = 30;
+	rival.shotgun_kills = 5;
+
+	MM_CHECK(Holds(Select({ sheriff, rival }, Match(2)),
+		mm_match_award_t::shotgun_sheriff, 0));
+
+	// Same volume, but the shotgun is no longer most of their work.
+	mm_award_player_facts_t dabbler = sheriff;
+	dabbler.kills = 60;
+	MM_CHECK_FALSE(Awarded(Select({ dabbler, rival }, Match(2)),
+		mm_match_award_t::shotgun_sheriff));
+
+	// Under the minimum body count, however pure the diet.
+	mm_award_player_facts_t novice;
+	novice.kills = 10;
+	novice.shotgun_kills = 10;
+	MM_CHECK_FALSE(Awarded(Select({ novice, rival }, Match(2)),
+		mm_match_award_t::shotgun_sheriff));
+
+	// A dead heat awards nobody rather than picking by slot number.
+	MM_CHECK_FALSE(Awarded(Select({ sheriff, sheriff }, Match(2)),
+		mm_match_award_t::shotgun_sheriff));
+}
+
+MM_TEST(awards_rail_slut_follows_the_same_signature_rules) {
+	using namespace awards_test;
+	mm_award_player_facts_t sniper;
+	sniper.kills = 24;
+	sniper.rail_kills = 21;
+	mm_award_player_facts_t rival;
+	rival.kills = 20;
+	rival.rail_kills = 4;
+
+	MM_CHECK(Holds(Select({ sniper, rival }, Match(2)),
+		mm_match_award_t::rail_slut, 0));
+}
+
+MM_TEST(awards_quad_god_needs_control_and_conversion) {
+	using namespace awards_test;
+	mm_award_match_facts_t match = Match(2);
+	match.quad_spawns = 10;
+
+	mm_award_player_facts_t boss;
+	boss.quad_pickups = 9;	// 90% control
+	boss.kills = 20;
+	boss.quad_kills = 12;	// 60% of kills quadded
+	mm_award_player_facts_t rival;
+	rival.quad_pickups = 1;
+	rival.kills = 10;
+
+	MM_CHECK(Holds(Select({ boss, rival }, match), mm_match_award_t::quad_god, 0));
+	MM_CHECK_FALSE(Awarded(Select({ boss, rival }, match),
+		mm_match_award_t::quad_dummy));
+}
+
+MM_TEST(awards_quad_control_without_conversion_is_the_dummy) {
+	using namespace awards_test;
+	mm_award_match_facts_t match = Match(2);
+	match.quad_spawns = 10;
+
+	mm_award_player_facts_t hoarder;
+	hoarder.quad_pickups = 10;	// took every single one
+	hoarder.kills = 20;
+	hoarder.quad_kills = 2;		// and did nothing with them
+	mm_award_player_facts_t rival;
+	rival.kills = 10;
+
+	const std::vector<mm_award_result_t> reel = Select({ hoarder, rival }, match);
+	MM_CHECK(Holds(reel, mm_match_award_t::quad_dummy, 0));
+	MM_CHECK_FALSE(Awarded(reel, mm_match_award_t::quad_god));
+}
+
+MM_TEST(awards_quad_titles_need_near_total_control_of_the_spawns) {
+	using namespace awards_test;
+	mm_award_match_facts_t match = Match(2);
+	match.quad_spawns = 10;
+
+	mm_award_player_facts_t sharer;
+	sharer.quad_pickups = 6;	// 60% control -- the quad was contested
+	sharer.kills = 20;
+	sharer.quad_kills = 18;
+	mm_award_player_facts_t rival;
+	rival.quad_pickups = 4;
+	rival.kills = 10;
+
+	const std::vector<mm_award_result_t> reel = Select({ sharer, rival }, match);
+	MM_CHECK_FALSE(Awarded(reel, mm_match_award_t::quad_god));
+	MM_CHECK_FALSE(Awarded(reel, mm_match_award_t::quad_dummy));
+}
+
+MM_TEST(awards_map_with_no_quad_hands_out_no_quad_titles) {
+	using namespace awards_test;
+	mm_award_player_facts_t player;
+	player.kills = 20;
+	player.quad_kills = 20;
+	mm_award_player_facts_t rival;
+	rival.kills = 10;
+
+	// quad_spawns stays 0: MM_AwardPercent would otherwise read as full control.
+	const std::vector<mm_award_result_t> reel = Select({ player, rival }, Match(2));
+	MM_CHECK_FALSE(Awarded(reel, mm_match_award_t::quad_god));
+	MM_CHECK_FALSE(Awarded(reel, mm_match_award_t::quad_dummy));
+}
+
+MM_TEST(awards_aimbot_needs_a_real_sample_not_one_lucky_shot) {
+	using namespace awards_test;
+	mm_award_player_facts_t crack;
+	crack.shots = MM_AWARD_ACCURACY_MIN_SHOTS;
+	crack.hits = MM_AWARD_ACCURACY_MIN_SHOTS * 85 / 100;
+	mm_award_player_facts_t sniper;
+	sniper.shots = 2;
+	sniper.hits = 2;	// 100%, and completely meaningless
+
+	MM_CHECK(Holds(Select({ crack, sniper }, Match(2)),
+		mm_match_award_t::aimbot, 0));
+
+	mm_award_player_facts_t merely_good = crack;
+	merely_good.hits = MM_AWARD_ACCURACY_MIN_SHOTS * 70 / 100;
+	MM_CHECK_FALSE(Awarded(Select({ merely_good, sniper }, Match(2)),
+		mm_match_award_t::aimbot));
+}
+
+MM_TEST(awards_punching_bag_needs_to_be_bad_on_both_axes) {
+	using namespace awards_test;
+	mm_award_player_facts_t bag;
+	bag.kills = 2;
+	bag.deaths = 20;			// K/D 0.10
+	bag.damage_dealt = 400;
+	bag.damage_received = 4000;	// ratio 0.10
+	mm_award_player_facts_t winner;
+	winner.kills = 20;
+	winner.deaths = 2;
+	winner.damage_dealt = 4000;
+	winner.damage_received = 400;
+
+	MM_CHECK(Holds(Select({ bag, winner }, Match(2)),
+		mm_match_award_t::punching_bag, 0));
+
+	// Trades badly but hits hard: having a rough match, not a punching bag.
+	mm_award_player_facts_t brawler = bag;
+	brawler.damage_dealt = 3800;
+	MM_CHECK_FALSE(Awarded(Select({ brawler, winner }, Match(2)),
+		mm_match_award_t::punching_bag));
+
+	// Bad ratios but barely played.
+	mm_award_player_facts_t latecomer = bag;
+	latecomer.deaths = MM_AWARD_PUNCHING_BAG_DEATHS - 1;
+	MM_CHECK_FALSE(Awarded(Select({ latecomer, winner }, Match(2)),
+		mm_match_award_t::punching_bag));
+}
+
+MM_TEST(awards_camper_must_have_been_playing_not_parked) {
+	using namespace awards_test;
+	mm_award_player_facts_t camper;
+	camper.camp_samples = 200;
+	camper.camp_best_cell_samples = 150;	// 75% of the match in one cell
+	camper.shots = 120;
+	mm_award_player_facts_t rover;
+	rover.camp_samples = 200;
+	rover.camp_best_cell_samples = 40;
+	rover.shots = 120;
+
+	MM_CHECK(Holds(Select({ camper, rover }, Match(2)),
+		mm_match_award_t::dirty_rotten_camper, 0));
+
+	// Same dwell share, but the inactivity timer had them flagged: AFK, not
+	// camping, which is exactly the case the award must not reward.
+	mm_award_player_facts_t afk = camper;
+	afk.camp_idle_samples = 120;
+	MM_CHECK_FALSE(Awarded(Select({ afk, rover }, Match(2)),
+		mm_match_award_t::dirty_rotten_camper));
+
+	// Standing still all match without firing a shot is not camping either.
+	mm_award_player_facts_t spectatorish = camper;
+	spectatorish.shots = MM_AWARD_CAMP_MIN_SHOTS - 1;
+	MM_CHECK_FALSE(Awarded(Select({ spectatorish, rover }, Match(2)),
+		mm_match_award_t::dirty_rotten_camper));
+}
+
+MM_TEST(awards_spawn_fragger_needs_share_as_well_as_volume) {
+	using namespace awards_test;
+	mm_award_player_facts_t vulture;
+	vulture.kills = 20;
+	vulture.spawn_kills = 8;	// 40% of their kills
+	mm_award_player_facts_t rival;
+	rival.kills = 30;
+	rival.spawn_kills = 2;
+
+	MM_CHECK(Holds(Select({ vulture, rival }, Match(2)),
+		mm_match_award_t::spawn_fragger, 0));
+
+	// Same raw count, but incidental against a much bigger frag total.
+	mm_award_player_facts_t busy = vulture;
+	busy.kills = 100;
+	MM_CHECK_FALSE(Awarded(Select({ busy, rival }, Match(2)),
+		mm_match_award_t::spawn_fragger));
+}
+
+MM_TEST(awards_team_only_titles_stay_out_of_free_for_all) {
+	using namespace awards_test;
+	mm_award_player_facts_t traitor;
+	traitor.kills = 10;
+	traitor.team_kills = 6;
+	mm_award_player_facts_t clean;
+	clean.kills = 10;
+
+	MM_CHECK_FALSE(Awarded(Select({ traitor, clean }, Match(2)),
+		mm_match_award_t::benedict_arnold));
+
+	mm_award_match_facts_t teams = Match(2);
+	teams.team_mode = true;
+	MM_CHECK(Holds(Select({ traitor, clean }, teams),
+		mm_match_award_t::benedict_arnold, 0));
+}
+
+MM_TEST(awards_ctf_titles_stay_out_of_non_ctf_matches) {
+	using namespace awards_test;
+	mm_award_player_facts_t runner;
+	runner.ctf_captures = 5;
+	runner.kills = 10;
+	mm_award_player_facts_t rival;
+	rival.kills = 10;
+
+	MM_CHECK_FALSE(Awarded(Select({ runner, rival }, Match(2)),
+		mm_match_award_t::flag_runner));
+
+	mm_award_match_facts_t ctf = Match(2);
+	ctf.team_mode = true;
+	ctf.ctf_mode = true;
+	MM_CHECK(Holds(Select({ runner, rival }, ctf), mm_match_award_t::flag_runner, 0));
+}
+
+MM_TEST(awards_reel_is_capped_and_ordered_honours_first) {
+	using namespace awards_test;
+	// One player good at everything, plus a field for them to beat.
+	mm_award_player_facts_t ace;
+	ace.score = 50;
+	ace.kills = 60;
+	ace.deaths = 5;
+	ace.first_frag_medals = 1;
+	ace.shotgun_kills = 50;
+	ace.shots = 400;
+	ace.hits = 360;
+	ace.damage_dealt = 40000;
+	ace.excellent_medals = 20;
+	ace.humiliation_medals = 10;
+	ace.high_value_pickups = 40;
+	ace.spawn_kills = 30;
+
+	mm_award_player_facts_t filler;
+	filler.score = 5;
+	filler.kills = 5;
+	filler.deaths = 40;
+
+	mm_award_player_facts_t filler2;
+	filler2.score = 3;
+	filler2.kills = 3;
+	filler2.deaths = 30;
+
+	const std::vector<mm_award_result_t> reel =
+		Select({ ace, filler, filler2 }, Match(3));
+
+	MM_CHECK(reel.size() <= MM_AWARDS_DISPLAY_LIMIT);
+	MM_CHECK(!reel.empty());
+	// Honours lead the reel, so a truncated list drops the jokes, not the wins.
+	MM_CHECK_EQ(static_cast<int>(reel.front().award),
+		static_cast<int>(mm_match_award_t::top_dog));
+	for (size_t i = 1; i < reel.size(); i++) {
+		MM_CHECK(MM_AwardTier(reel[i - 1].award) <= MM_AwardTier(reel[i].award));
+	}
+}
+
+MM_TEST(awards_soft_per_player_cap_spreads_a_short_reel) {
+	using namespace awards_test;
+	// Two players who between them qualify for well over the soft cap, so the
+	// first pass has to move on rather than hand everything to slot zero.
+	mm_award_player_facts_t ace;
+	ace.score = 50;
+	ace.kills = 60;
+	ace.deaths = 5;
+	ace.first_frag_medals = 1;
+	ace.shotgun_kills = 50;
+	ace.shots = 400;
+	ace.hits = 360;
+	ace.excellent_medals = 20;
+	ace.humiliation_medals = 10;
+
+	mm_award_player_facts_t goat;
+	goat.score = 20;
+	goat.kills = 3;
+	goat.deaths = 30;
+	goat.damage_dealt = 100;
+	goat.damage_received = 9000;
+	goat.suicides = 8;
+	goat.environment_deaths = 9;
+	goat.high_value_pickups = 40;
+
+	mm_award_player_facts_t filler;
+	filler.score = 1;
+	filler.kills = 1;
+	filler.deaths = 2;
+
+	const std::vector<mm_award_result_t> reel =
+		Select({ ace, goat, filler }, Match(3));
+
+	size_t ace_titles = 0;
+	size_t goat_titles = 0;
+	for (const mm_award_result_t &result : reel) {
+		if (result.player_index == 0)
+			ace_titles++;
+		else if (result.player_index == 1)
+			goat_titles++;
+	}
+
+	// Between them the two qualify for more than the reel holds, so the cap is
+	// what decides who gets squeezed out.
+	MM_CHECK_EQ(reel.size(), MM_AWARDS_DISPLAY_LIMIT);
+	MM_CHECK(ace_titles > 0);
+
+	// The telling result: THE PUNCHING BAG is bottom-tier and belongs to the
+	// player who did nothing all match, yet it survives a reel otherwise full of
+	// the ace's higher-tier honours. Without the first-pass cap the ace's seven
+	// titles would all be seated before any tier-5 entry was considered.
+	MM_CHECK(Awarded(reel, mm_match_award_t::punching_bag));
+	MM_CHECK(goat_titles >= MM_AWARDS_SOFT_PER_PLAYER_LIMIT);
+}
+
+MM_TEST(awards_damage_superlatives_are_actually_winnable) {
+	using namespace awards_test;
+	// Regression: routing this through MM_AwardPercent made both awards dead
+	// code, because the leader's damage is always >= the average and the helper
+	// saturates at 100 while the gate demanded 150.
+	mm_award_player_facts_t monster;
+	monster.kills = 20;
+	monster.damage_dealt = 9000;
+	monster.damage_received = 9000;
+	mm_award_player_facts_t quiet;
+	quiet.kills = 2;
+	quiet.damage_dealt = 300;
+	quiet.damage_received = 300;
+
+	const std::vector<mm_award_result_t> reel =
+		Select({ monster, quiet, quiet }, Match(3));
+	MM_CHECK(Holds(reel, mm_match_award_t::wrecking_ball, 0));
+	MM_CHECK(Holds(reel, mm_match_award_t::bullet_sponge, 0));
+
+	// A leader who merely edged the field does not get either.
+	mm_award_player_facts_t even = quiet;
+	even.damage_dealt = 320;
+	even.damage_received = 320;
+	const std::vector<mm_award_result_t> close =
+		Select({ even, quiet, quiet }, Match(3));
+	MM_CHECK_FALSE(Awarded(close, mm_match_award_t::wrecking_ball));
+	MM_CHECK_FALSE(Awarded(close, mm_match_award_t::bullet_sponge));
+}
+
+MM_TEST(awards_punching_bag_ignores_a_player_who_took_no_damage) {
+	using namespace awards_test;
+	// 0/0 reads as ratio 0, which would pass a "dealt almost nothing" test
+	// rather than failing it.
+	mm_award_player_facts_t ghost;
+	ghost.deaths = 20;
+	ghost.damage_received = 0;
+	ghost.damage_dealt = 0;
+	mm_award_player_facts_t winner;
+	winner.kills = 20;
+	winner.deaths = 2;
+	winner.damage_dealt = 4000;
+	winner.damage_received = 400;
+
+	MM_CHECK_FALSE(Awarded(Select({ ghost, winner }, Match(2)),
+		mm_match_award_t::punching_bag));
+}
+
+MM_TEST(awards_quad_titles_stand_down_when_pickups_exceed_spawns) {
+	using namespace awards_test;
+	// Hand-dropped Quads are picked up without a corresponding spawn, so the
+	// share is not a share at all; MM_AwardPercent would saturate it to 100.
+	mm_award_match_facts_t match = Match(2);
+	match.quad_spawns = 4;
+
+	mm_award_player_facts_t hoarder;
+	hoarder.quad_pickups = 6;
+	hoarder.kills = 20;
+	hoarder.quad_kills = 15;
+	mm_award_player_facts_t rival;
+	rival.kills = 10;
+
+	const std::vector<mm_award_result_t> reel = Select({ hoarder, rival }, match);
+	MM_CHECK_FALSE(Awarded(reel, mm_match_award_t::quad_god));
+	MM_CHECK_FALSE(Awarded(reel, mm_match_award_t::quad_dummy));
+}
+
+MM_TEST(camp_cells_keep_a_dominant_area_discovered_after_the_table_filled) {
+	// Regression: a first-come table recorded the first sixteen cells a player
+	// visited and then dropped everything afterwards, so somebody who wandered
+	// at the start and then camped for eight minutes scored as a wanderer.
+	std::array<mm_match_camp_cell_t, MM_MATCH_CAMP_CELL_SLOTS> cells {};
+	const size_t slots = cells.size();
+
+	// Fill every slot with a different transient cell, one sample each.
+	for (size_t i = 0; i < slots; i++)
+		MM_MatchStatsRecordCampCell(cells.data(), slots,
+			static_cast<int16_t>(i), 0, 0);
+
+	// Then park somewhere entirely new for the rest of the match.
+	constexpr uint32_t kCampSamples = 400;
+	for (uint32_t i = 0; i < kCampSamples; i++)
+		MM_MatchStatsRecordCampCell(cells.data(), slots, 999, 999, 999);
+
+	uint32_t busiest = 0;
+	const mm_match_camp_cell_t *best = nullptr;
+	for (const mm_match_camp_cell_t &cell : cells) {
+		if (cell.samples > busiest) {
+			busiest = cell.samples;
+			best = &cell;
+		}
+	}
+
+	MM_CHECK(best != nullptr);
+	MM_CHECK_EQ(best->x, static_cast<int16_t>(999));
+	// The count carries the evicted slot's total, so it may overstate by at most
+	// that minimum -- here a single sample.
+	MM_CHECK(busiest >= kCampSamples);
+	MM_CHECK(busiest <= kCampSamples + 1);
+}
+
+MM_TEST(camp_cells_accumulate_repeat_visits_into_one_slot) {
+	std::array<mm_match_camp_cell_t, MM_MATCH_CAMP_CELL_SLOTS> cells {};
+	for (int i = 0; i < 5; i++)
+		MM_MatchStatsRecordCampCell(cells.data(), cells.size(), 3, -4, 1);
+
+	MM_CHECK_EQ(cells[0].samples, 5u);
+	MM_CHECK_EQ(cells[0].x, static_cast<int16_t>(3));
+	MM_CHECK_EQ(cells[0].y, static_cast<int16_t>(-4));
+	MM_CHECK_EQ(cells[0].z, static_cast<int16_t>(1));
+	for (size_t i = 1; i < cells.size(); i++)
+		MM_CHECK_EQ(cells[i].samples, 0u);
+}
+
+MM_TEST(camp_cells_tolerate_a_degenerate_table) {
+	// Never dereferences a null table or a zero-length one.
+	MM_MatchStatsRecordCampCell(nullptr, 4, 1, 1, 1);
+	std::array<mm_match_camp_cell_t, 1> single {};
+	MM_MatchStatsRecordCampCell(single.data(), 0, 1, 1, 1);
+	MM_CHECK_EQ(single[0].samples, 0u);
+
+	// A one-slot table degenerates to "whatever was seen last", which is still
+	// correct for a genuine majority holder.
+	MM_MatchStatsRecordCampCell(single.data(), 1, 7, 7, 7);
+	MM_CHECK_EQ(single[0].samples, 1u);
+	MM_MatchStatsRecordCampCell(single.data(), 1, 7, 7, 7);
+	MM_CHECK_EQ(single[0].samples, 2u);
+}
+
+MM_TEST(awards_every_catalog_entry_has_a_title_a_key_and_a_tier) {
+	for (size_t i = 1; i < MM_MATCH_AWARD_COUNT; i++) {
+		const mm_match_award_t award = static_cast<mm_match_award_t>(i);
+		MM_CHECK(MM_AwardTitle(award)[0] != '\0');
+		MM_CHECK(MM_AwardKey(award)[0] != '\0');
+		MM_CHECK(MM_AwardTier(award) >= 0);
+	}
+	MM_CHECK_EQ(MM_AwardTitle(mm_match_award_t::none)[0], '\0');
+	MM_CHECK_EQ(MM_AwardKey(mm_match_award_t::none)[0], '\0');
+}
+
+MM_TEST(awards_catalog_keys_are_unique) {
+	// The keys are what career tallies accumulate under, so a duplicate would
+	// silently merge two unrelated titles in every stored profile.
+	std::vector<std::string> keys;
+	for (size_t i = 1; i < MM_MATCH_AWARD_COUNT; i++)
+		keys.emplace_back(MM_AwardKey(static_cast<mm_match_award_t>(i)));
+	std::sort(keys.begin(), keys.end());
+	MM_CHECK(std::adjacent_find(keys.begin(), keys.end()) == keys.end());
+}
+
+MM_TEST(awards_a_full_reel_fits_the_client_layout_budget) {
+	// The reel is one svc_layout message. Measured the same way the module
+	// builds it: one sticky "xv 0", a header, then a yv + centred string per
+	// line, using the longest title in the catalog and a full-width name.
+	size_t widest_title = 0;
+	for (size_t i = 1; i < MM_MATCH_AWARD_COUNT; i++)
+		widest_title = std::max(widest_title,
+			std::strlen(MM_AwardTitle(static_cast<mm_match_award_t>(i))));
+
+	const size_t name_chars = MM_AWARDS_MAX_NAME_CHARS + 3;	// ellipsised
+	const size_t y_digits = 5;								// sign plus four
+	const size_t title_line = 3 + y_digits + 1 + 9 + 1 + widest_title + 1 + 1;
+	const size_t name_line = 3 + y_digits + 1 + 8 + 1 + name_chars + 1 + 1;
+	const size_t header = 5 + 3 + y_digits + 1 + 9 + 1 + 12 + 1 + 1;
+
+	const size_t total =
+		header + MM_AWARDS_DISPLAY_LIMIT * (title_line + name_line);
+	MM_CHECK(total <= MM_AWARDS_LAYOUT_BUDGET);
 }
 
 } // namespace

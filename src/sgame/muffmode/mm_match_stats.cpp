@@ -2,7 +2,9 @@
 // Licensed under the GNU General Public License 2.0.
 
 #include "g_local.h"
+#include "muffmode/mm_awards.h"
 #include "muffmode/mm_duel.h"
+#include "muffmode/mm_freezetag.h"
 #include "muffmode/mm_match_stats.h"
 #include "muffmode/mm_parse.h"
 #include "muffmode/mm_player_stats.h"
@@ -298,6 +300,13 @@ struct FrozenMatch {
 	int blue_score = 0;
 	mm_match_overall_stats_t overall{};
 	std::vector<FrozenPlayer> players;
+	// [MuffMode] Post-match awards, decided once the participant set is final.
+	// awards_ranked records whether the match cleared the ranked bar; an unranked
+	// match still exports its (empty) award list so a reader can tell the
+	// difference between "nobody qualified" and "awards were not offered".
+	std::vector<mm_award_result_t> awards;
+	bool awards_ranked = false;
+	bool awards_decided = false;
 };
 
 // Players may leave the playing set before Match_End. Keep a game-thread-only
@@ -524,8 +533,20 @@ json PlayerToJson(const FrozenPlayer &player, int64_t match_end_msec,
 		result["totalEnvironmentDeaths"] = stats.total_environment_deaths;
 	if (stats.total_spawn_deaths) result["totalSpawnDeaths"] = stats.total_spawn_deaths;
 	if (stats.total_suicides) result["totalSuicides"] = stats.total_suicides;
+	if (stats.quad_kills) result["totalQuadKills"] = stats.quad_kills;
 	if (stats.total_kills || stats.total_deaths)
 		result["totalKDR"] = Ratio(stats.total_kills, stats.total_deaths);
+	// Position dwell, from which the camping award is derived. Exported as the
+	// share rather than the raw histogram: the cell coordinates are an internal
+	// bucketing detail, but "spent 71% of the match in one spot" is readable.
+	if (stats.camp_samples) {
+		uint32_t busiest = 0;
+		for (const mm_match_camp_cell_t &cell : stats.camp_cells)
+			busiest = std::max(busiest, cell.samples);
+		result["dwellSamples"] = stats.camp_samples;
+		result["dwellIdleSamples"] = stats.camp_idle_samples;
+		result["dwellLargestAreaShare"] = Percent(busiest, stats.camp_samples);
+	}
 	if (stats.total_hits) result["totalHits"] = Json::UInt64(stats.total_hits);
 	if (stats.total_shots) result["totalShots"] = Json::UInt64(stats.total_shots);
 	if (stats.total_shots)
@@ -735,11 +756,52 @@ json MatchToJson(const FrozenMatch &match)
 	if (!total_mod_deaths.empty()) result["totalDeathsByMOD"] = std::move(total_mod_deaths);
 	if (!total_mod_kdr.empty()) result["totalKDRByMOD"] = std::move(total_mod_kdr);
 
+	// [MuffMode] The post-match awards reel. Unlike the per-player medal tallies
+	// next door, an award has exactly one holder, so this is a match-level list
+	// rather than a per-player count. `value` is the number that won it.
+	result["matchAwardsOffered"] = match.awards_ranked;
+	result["totalQuadSpawns"] = match.overall.quad_spawns;
+	json match_awards(Json::arrayValue);
+	for (const mm_award_result_t &award : match.awards) {
+		if (award.player_index >= match.players.size())
+			continue;
+		const FrozenPlayer &winner = match.players[award.player_index];
+		json entry(Json::objectValue);
+		entry["award"] = MM_AwardKey(award.award);
+		entry["title"] = MM_AwardTitle(award.award);
+		entry["playerName"] = winner.player_name;
+		entry["playerIdentifier"] = winner.social_id.empty()
+			? winner.player_name : winner.social_id;
+		entry["value"] = award.value;
+		match_awards.append(std::move(entry));
+	}
+	result["matchAwards"] = std::move(match_awards);
+
+	// Awards are indexed against match.players, so a player's own titles are
+	// resolved by their position in that vector rather than by name -- two
+	// players can share a name, but not a slot.
+	const auto award_titles_for = [&match](const FrozenPlayer &player) {
+		json titles(Json::arrayValue);
+		const size_t index =
+			static_cast<size_t>(&player - match.players.data());
+		for (const mm_award_result_t &award : match.awards)
+			if (award.player_index == index)
+				titles.append(MM_AwardTitle(award.award));
+		return titles;
+	};
+	const auto player_json_with_awards = [&](const FrozenPlayer &player) {
+		json entry = PlayerToJson(player, match.end_msec, match.ctf_mode,
+			match.ruleset_id);
+		json titles = award_titles_for(player);
+		if (!titles.empty())
+			entry["matchAwards"] = std::move(titles);
+		return entry;
+	};
+
 	json all_players(Json::arrayValue);
 	if (!match.team_mode)
 		for (const FrozenPlayer &player : match.players)
-			all_players.append(PlayerToJson(
-				player, match.end_msec, match.ctf_mode, match.ruleset_id));
+			all_players.append(player_json_with_awards(player));
 
 	result["players"] = std::move(all_players);
 	if (match.team_mode) {
@@ -757,9 +819,7 @@ json MatchToJson(const FrozenMatch &match)
 			team_json["players"] = json(Json::arrayValue);
 			for (const FrozenPlayer &player : match.players)
 				if (player.team == team)
-					team_json["players"].append(
-						PlayerToJson(player, match.end_msec, match.ctf_mode,
-							match.ruleset_id));
+					team_json["players"].append(player_json_with_awards(player));
 			result["teams"].append(std::move(team_json));
 		}
 	}
@@ -979,6 +1039,26 @@ std::string MatchToHtml(const FrozenMatch &match)
 		html << "</tbody></table></section>";
 	}
 
+	// [MuffMode] The post-match awards reel, in the order it was shown.
+	html << "<section><h2>Match Awards</h2><table><thead><tr><th>Award</th>"
+		"<th>Player</th><th>Value</th></tr></thead><tbody>";
+	for (const mm_award_result_t &award : match.awards) {
+		if (award.player_index >= match.players.size())
+			continue;
+		html << "<tr><td>" << HtmlEscape(MM_AwardTitle(award.award))
+			<< "</td><td>"
+			<< HtmlEscape(match.players[award.player_index].player_name)
+			<< "</td><td>" << award.value << "</td></tr>";
+	}
+	if (match.awards.empty()) {
+		html << "<tr><td colspan=\"3\">"
+			<< (match.awards_ranked
+				? "No awards were earned."
+				: "Awards are only offered in ranked matches.")
+			<< "</td></tr>";
+	}
+	html << "</tbody></table></section>";
+
 	html << "<section><h2>High-value Pickups</h2><table><thead><tr><th>Item</th>"
 		"<th>Pickups</th><th>Average Delay</th></tr></thead><tbody>";
 	bool wrote_pickup = false;
@@ -1131,7 +1211,7 @@ std::string MatchToHtml(const FrozenMatch &match)
 		}
 		if (!wrote_player_mod)
 			html << "<tr><td colspan=\"6\">No means-of-death data recorded.</td></tr>";
-		html << "</tbody></table><h3>Awards</h3><table><thead><tr><th>Award</th>"
+		html << "</tbody></table><h3>Medals</h3><table><thead><tr><th>Medal</th>"
 			"<th>Count</th></tr></thead><tbody>";
 		bool wrote_award = false;
 		for (size_t index = 1; index < MM_MATCH_MEDAL_COUNT; index++) {
@@ -1142,8 +1222,30 @@ std::string MatchToHtml(const FrozenMatch &match)
 				<< "</td><td>" << stats.medal_count[index] << "</td></tr>";
 		}
 		if (!wrote_award)
-			html << "<tr><td colspan=\"2\">No awards recorded.</td></tr>";
-		html << "</tbody></table></section>";
+			html << "<tr><td colspan=\"2\">No medals recorded.</td></tr>";
+		html << "</tbody></table>";
+
+		// [MuffMode] The titles this player took off the post-match reel. The
+		// section list is sorted, so the award index is resolved against the
+		// underlying participant vector the pointers came from.
+		const size_t player_index =
+			static_cast<size_t>(player - match.players.data());
+		bool wrote_match_award = false;
+		for (const mm_award_result_t &award : match.awards) {
+			if (award.player_index != player_index)
+				continue;
+			if (!wrote_match_award) {
+				html << "<h3>Match Awards</h3><table><thead><tr><th>Award</th>"
+					"<th>Value</th></tr></thead><tbody>";
+				wrote_match_award = true;
+			}
+			html << "<tr><td>" << HtmlEscape(MM_AwardTitle(award.award))
+				<< "</td><td>" << award.value << "</td></tr>";
+		}
+		if (wrote_match_award)
+			html << "</tbody></table>";
+
+		html << "</section>";
 	}
 
 	html << "<p class=\"muted\">Compiled by " << HtmlEscape(GAMEMOD_TITLE)
@@ -2321,6 +2423,8 @@ void SendMiniSummaries(const FrozenMatch &match)
 		gentity_t *entity = ResolveParticipantEntity(player);
 		if (!entity || !entity->client)
 			continue;
+		const size_t player_index =
+			static_cast<size_t>(&player - match.players.data());
 		std::ostringstream message;
 		message << ":: Match Summary ::\n" << player.player_name
 			<< " - Result: " << OutcomeName(player.outcome)
@@ -2335,6 +2439,21 @@ void SendMiniSummaries(const FrozenMatch &match)
 			message << player.metadata.skill_rating_change << ')';
 		}
 		message << '\n';
+
+		// [MuffMode] Whatever this player took off the post-match awards reel.
+		// The reel itself is gone once the map changes, so the summary is the
+		// only lasting record a player sees without opening the export.
+		bool wrote_award = false;
+		for (const mm_award_result_t &award : match.awards) {
+			if (award.player_index != player_index)
+				continue;
+			message << (wrote_award ? ", " : "Awards: ")
+				<< MM_AwardTitle(award.award);
+			wrote_award = true;
+		}
+		if (wrote_award)
+			message << '\n';
+
 		gi.LocClient_Print(entity, PRINT_HIGH, "{}", message.str().c_str());
 	}
 }
@@ -2397,6 +2516,291 @@ void RecordCarrierDuration(gclient_t *client, size_t flag_index,
 		flag.flag_hold_time_longest_msec, clamped);
 }
 
+// --- Post-match awards ------------------------------------------------------
+// The awards reel is decided here rather than in mm_awards because the frozen
+// participant set -- including everyone who left mid-match -- only exists on this
+// side of the anonymous namespace. mm_awards owns presentation; the catalog
+// itself is pure arithmetic in mm_awards_rules.h.
+
+// One position sample per player per second. Anything finer just multiplies the
+// sample count without changing the share the camping award actually measures.
+constexpr gtime_t kCampSampleInterval = 1_sec;
+gtime_t g_next_camp_sample = 0_ms;
+
+// Buckets a live origin into the player's dwell table. An idle sample is counted
+// toward the total but never toward a cell, so a player the inactivity timer has
+// flagged can only ever dilute their own camping share. The table's eviction
+// policy lives with the table itself, in MM_MatchStatsRecordCampCell.
+void RecordCampSample(mm_match_player_stats_t &stats, const vec3_t &origin,
+	bool idle)
+{
+	SaturatingAdd(stats.camp_samples, 1u);
+	if (idle) {
+		SaturatingAdd(stats.camp_idle_samples, 1u);
+		return;
+	}
+
+	const auto quantize = [](float value) {
+		const float cell = std::floor(value / MM_MATCH_CAMP_CELL_SIZE);
+		return static_cast<int16_t>(std::clamp(cell, -32768.0f, 32767.0f));
+	};
+	MM_MatchStatsRecordCampCell(stats.camp_cells.data(), stats.camp_cells.size(),
+		quantize(origin[0]), quantize(origin[1]), quantize(origin[2]));
+}
+
+void SampleCampPositions()
+{
+	if (!MM_MatchStats_IsCollecting())
+		return;
+	if (level.match_state != match_state_t::MATCH_IN_PROGRESS)
+		return;
+	if (level.time < g_next_camp_sample)
+		return;
+
+	g_next_camp_sample = level.time + kCampSampleInterval;
+
+	for (gentity_t *entity : active_players()) {
+		if (!entity->client || !entity->client->pers.spawned)
+			continue;
+		// A dead, eliminated or frozen player is not choosing where to stand. A
+		// Freeze Tag block in particular keeps health at 1 and stays on its team,
+		// so it passes every other test here while being the clearest case of
+		// somebody standing still against their will.
+		if (entity->health <= 0 || entity->client->eliminated ||
+			MM_FreezeTag_IsFrozen(entity))
+			continue;
+
+		RecordCampSample(entity->client->pers.match, entity->s.origin,
+			entity->client->sess.inactive);
+	}
+}
+
+// Quads already lying on the floor at the moment the match opens.
+//
+// This is the exact complement of MM_MatchStats_RecordItemAvailable, not a
+// duplicate of it: that hook counts a Quad BECOMING available, this counts one
+// that ALREADY is, and the two sets cannot overlap. On the normal reset the
+// entity lump has only just been re-parsed and every item is still SOLID_NOT
+// with its FinishSpawningItem think pending, so this finds nothing and the hook
+// does all the work. On the legacy reset a non-teamed Quad resting on the floor
+// is deliberately left untouched under rulesets other than RS_MM/RS_Q3A, so no
+// think will ever fire for that appearance and this is the only thing that
+// counts it. Missing it would not merely lose a spawn: the pickup of that same
+// Quad is still recorded, so the control percentage the Quad awards are gated on
+// would read high against a short denominator.
+uint32_t CountAvailableQuads()
+{
+	// QuadHog keeps one Quad permanently in circulation rather than respawning
+	// it on the floor, so there are no spawns to take a share of.
+	if (g_quadhog && g_quadhog->integer)
+		return 0;
+
+	uint32_t available = 0;
+	for (size_t i = 1; i < globals.num_entities; i++) {
+		const gentity_t *entity = &g_entities[i];
+		if (!entity->inuse || entity->client || !entity->item)
+			continue;
+		if (entity->item->id != IT_POWERUP_QUAD)
+			continue;
+		if (entity->solid != SOLID_TRIGGER || (entity->svflags & SVF_NOCLIENT))
+			continue;
+		if (entity->spawnflags.has(SPAWNFLAG_ITEM_DROPPED_PLAYER) &&
+			!entity->spawnflags.has(SPAWNFLAG_ITEM_DROPPED))
+			continue;
+		available++;
+	}
+
+	return available;
+}
+
+// Folds one participant's raw counters into the flat snapshot the catalog reads.
+// Kill counts arrive per means-of-death; the catalog thinks in weapon families,
+// so the existing MOD-to-weapon bridge does the collapsing rather than a second
+// hand-written MOD table that could drift away from it.
+mm_award_player_facts_t AwardFacts(const FrozenPlayer &player,
+	int64_t match_end_msec)
+{
+	const mm_match_player_stats_t &stats = player.stats;
+	mm_award_player_facts_t facts;
+
+	facts.kills = stats.total_kills;
+	facts.deaths = stats.total_deaths;
+	facts.suicides = stats.total_suicides;
+	facts.team_kills = stats.total_team_kills;
+	facts.spawn_kills = stats.total_spawn_kills;
+	facts.environment_deaths = stats.total_environment_deaths;
+	facts.shots = stats.total_shots;
+	facts.hits = stats.total_hits;
+	facts.damage_dealt = stats.total_dmg_dealt;
+	facts.damage_received = stats.total_dmg_received;
+	facts.quad_pickups =
+		stats.pickup_counts[static_cast<size_t>(mm_match_high_value_item_t::quad_damage)];
+	facts.quad_kills = stats.quad_kills;
+	facts.excellent_medals =
+		stats.medal_count[static_cast<size_t>(mm_match_medal_t::excellent)];
+	facts.humiliation_medals =
+		stats.medal_count[static_cast<size_t>(mm_match_medal_t::humiliation)];
+	facts.rampage_medals =
+		stats.medal_count[static_cast<size_t>(mm_match_medal_t::rampage)];
+	facts.first_frag_medals =
+		stats.medal_count[static_cast<size_t>(mm_match_medal_t::first_frag)];
+	facts.ctf_captures = stats.ctf_flag_captures;
+	facts.ctf_defences = stats.ctf_flag_defences;
+	facts.ctf_returns = stats.ctf_flag_returns;
+	facts.ctf_carrier_time_msec = stats.ctf_flag_carrier_time_total_msec;
+	facts.completed_lives = stats.completed_lives;
+	facts.life_average_msec = stats.life_average_msec;
+	facts.camp_samples = stats.camp_samples;
+	facts.camp_idle_samples = stats.camp_idle_samples;
+	facts.play_time_msec = PlayerPlayTime(player, match_end_msec);
+	facts.score = player.score;
+	facts.bot = player.bot;
+
+	for (size_t index = 1; index < MM_MATCH_HIGH_VALUE_ITEM_COUNT; index++)
+		SaturatingAdd(facts.high_value_pickups, stats.pickup_counts[index]);
+
+	for (size_t index = 0; index < MM_MATCH_MOD_COUNT; index++) {
+		const uint32_t kills = stats.mod_total_kills[index];
+		if (!kills)
+			continue;
+
+		switch (MM_MatchStats_WeaponForMod(
+			mod_t(static_cast<mod_id_t>(index)))) {
+		case mm_match_weapon_t::shotgun:
+		case mm_match_weapon_t::super_shotgun:
+			SaturatingAdd(facts.shotgun_kills, kills);
+			break;
+		case mm_match_weapon_t::railgun:
+			SaturatingAdd(facts.rail_kills, kills);
+			break;
+		case mm_match_weapon_t::rocket_launcher:
+			SaturatingAdd(facts.rocket_kills, kills);
+			break;
+		case mm_match_weapon_t::machinegun:
+		case mm_match_weapon_t::chaingun:
+			SaturatingAdd(facts.bullet_kills, kills);
+			break;
+		case mm_match_weapon_t::hand_grenades:
+			SaturatingAdd(facts.grenade_kills, kills);
+			break;
+		case mm_match_weapon_t::bfg10k:
+			SaturatingAdd(facts.bfg_kills, kills);
+			break;
+		default:
+			break;
+		}
+	}
+
+	for (const mm_match_camp_cell_t &cell : stats.camp_cells)
+		facts.camp_best_cell_samples =
+			std::max(facts.camp_best_cell_samples, cell.samples);
+
+	return facts;
+}
+
+// A match earns awards when it was a real ranked contest. Bots never carry a
+// profile and a padded match is not a ranking, so one bot participant disarms
+// the reel entirely -- the same bar MM_PlayerStatsMatchCanBeRanked applies to
+// rating settlement, evaluated here against the frozen participant set so it
+// does not depend on which module ran first.
+bool AwardsMatchIsRanked(const FrozenMatch &match)
+{
+	if (!CvarEnabled(g_ranked, true) || GT(GT_ARENA))
+		return false;
+
+	size_t humans = 0;
+	for (const FrozenPlayer &player : match.players) {
+		if (player.bot)
+			return false;
+		humans++;
+	}
+
+	return humans >= MM_AWARD_MIN_PARTICIPANTS;
+}
+
+std::vector<mm_award_result_t> DecideAwards(const FrozenMatch &match)
+{
+	std::vector<mm_award_result_t> decided;
+	if (match.players.empty())
+		return decided;
+
+	std::vector<mm_award_player_facts_t> facts;
+	facts.reserve(match.players.size());
+	for (const FrozenPlayer &player : match.players) {
+		// A bot keeps its slot so award indices still line up with the
+		// participant list, but contributes no counters: every catalog entry has
+		// a positive floor, so an all-zero entrant cannot win anything. The
+		// ranked gate already excludes bot matches outright; this is what makes
+		// that a belt-and-braces guarantee rather than the only guard.
+		if (player.bot) {
+			mm_award_player_facts_t bot_facts;
+			bot_facts.bot = true;
+			facts.push_back(bot_facts);
+			continue;
+		}
+		facts.push_back(AwardFacts(player, match.end_msec));
+	}
+
+	mm_award_match_facts_t match_facts;
+	match_facts.quad_spawns = match.overall.quad_spawns;
+	match_facts.total_kills = match.overall.total_kills;
+	match_facts.duration_msec = match.duration_msec > 0
+		? static_cast<uint64_t>(match.duration_msec) : 0;
+	match_facts.participants = facts.size();
+	match_facts.team_mode = match.team_mode;
+	match_facts.ctf_mode = match.ctf_mode;
+
+	std::array<mm_award_result_t, MM_AWARDS_DISPLAY_LIMIT> reel {};
+	const size_t count = MM_AwardsSelect(facts.data(), facts.size(), match_facts,
+		reel.data(), reel.size());
+
+	decided.assign(reel.begin(),
+		reel.begin() + static_cast<ptrdiff_t>(count));
+	return decided;
+}
+
+// Resolves the decided reel against the participant list and hands it to
+// mm_awards, which owns everything the players actually see.
+void PublishAwards(const FrozenMatch &match,
+	const std::vector<mm_award_result_t> &decided)
+{
+	std::vector<mm_award_entry_t> entries;
+	entries.reserve(decided.size());
+	for (const mm_award_result_t &result : decided) {
+		if (result.player_index >= match.players.size())
+			continue;
+		const FrozenPlayer &winner = match.players[result.player_index];
+		mm_award_entry_t entry;
+		entry.award = result.award;
+		entry.player_name = winner.player_name;
+		entry.social_id = winner.social_id;
+		entry.value = result.value;
+		entries.push_back(std::move(entry));
+	}
+
+	MM_Awards_Publish(std::move(entries), match.awards_ranked);
+}
+
+// Idempotent: the result is frozen once by QueueIntermission and consumed later
+// by Match_End, but a direct target_changelevel exit can reach the freeze and the
+// end in the same call, and the fallback path in MM_MatchStats_End may re-freeze.
+void FinalizeAwards(FrozenMatch &match)
+{
+	if (match.awards_decided)
+		return;
+
+	match.awards_decided = true;
+	match.awards_ranked = AwardsMatchIsRanked(match);
+	// Awards are a ranked-match feature all the way down, not merely a reel that
+	// is hidden. An unranked match decides nothing, so it exports an empty list,
+	// says nothing in the end-of-match summaries, and writes no career tallies.
+	if (match.awards_ranked)
+		match.awards = DecideAwards(match);
+	// Published either way: an empty publish is what retires the previous
+	// match's reel, so an unranked match cannot leave the last ranked one armed.
+	PublishAwards(match, match.awards);
+}
+
 } // namespace
 
 void MM_MatchStats_RegisterCvars()
@@ -2408,7 +2812,9 @@ void MM_MatchStats_RegisterCvars()
 
 bool MM_MatchStats_IsCollecting()
 {
-	return deathmatch && deathmatch->integer && level.match.collecting &&
+	// g_ranked 0 turns the whole statistics system off, so no Record* call does any work.
+	return CvarEnabled(g_ranked, true) &&
+		deathmatch && deathmatch->integer && level.match.collecting &&
 		!level.match.finalized;
 }
 
@@ -2417,6 +2823,7 @@ void MM_MatchStats_Reset()
 	level.match = {};
 	g_departed_players.clear();
 	g_frozen_result.reset();
+	g_next_camp_sample = 0_ms;
 	for (gentity_t *entity : active_clients())
 		if (entity && entity->client)
 			entity->client->pers.match = {};
@@ -2549,12 +2956,19 @@ void MM_MatchStats_Init()
 	if (!deathmatch || !deathmatch->integer || GT(GT_ARENA))
 		return;
 
+	// Host opted out of ranking and statistics; never open a match context to collect into.
+	if (!CvarEnabled(g_ranked, true))
+		return;
+
 	MM_MatchStats_Reset();
 	level.match.collecting = true;
 	level.match.finalized = false;
 	level.match.team_mode = Teams();
 	level.match.ctf_mode = GTF(GTF_CTF);
 	level.match.match_start_real_time_ms = NowUnixMsec();
+	// Seeds the Quad spawn total with whatever is already on the floor; every
+	// later appearance arrives through MM_MatchStats_RecordItemAvailable.
+	level.match.quad_spawns = CountAvailableQuads();
 	level.match.event_log.reserve(MM_MATCH_EVENT_LIMIT);
 	level.match.death_log.reserve(MM_MATCH_DEATH_EVENT_LIMIT);
 	for (gentity_t *entity : active_players())
@@ -2567,6 +2981,7 @@ void MM_MatchStats_Init()
 void MM_MatchStats_RunFrame()
 {
 	ExportWorker().DrainNotices();
+	SampleCampPositions();
 }
 
 void MM_MatchStats_FreezeResultTime()
@@ -2581,6 +2996,9 @@ void MM_MatchStats_FreezeResultTime()
 	for (gentity_t *entity : active_players())
 		MM_MatchStats_ClientEnd(entity);
 	g_frozen_result = FreezeCurrentMatch();
+	// The complete participant set exists exactly here, which is also early
+	// enough for the reel to be published before intermission begins.
+	FinalizeAwards(*g_frozen_result);
 }
 
 void MM_MatchStats_End()
@@ -2597,6 +3015,7 @@ void MM_MatchStats_End()
 		? std::move(*g_frozen_result)
 		: FreezeCurrentMatch();
 	g_frozen_result.reset();
+	FinalizeAwards(match);
 	ValidateModTotals(match);
 	try {
 		SendMiniSummaries(match);
@@ -2917,6 +3336,11 @@ void MM_MatchStats_RecordDeath(gentity_t *victim, gentity_t *attacker,
 		SaturatingAdd(attacker->client->pers.match.mod_total_kills[mod_index], 1);
 		SaturatingAdd(level.match.total_kills, 1);
 		SaturatingAdd(level.match.mod_kills[mod_index], 1);
+		// [MuffMode] Whether the Quad was still running decides which of the two
+		// Quad awards its owner walks away with. Sampled here rather than passed
+		// in, because the kill and the damage that caused it share a frame.
+		if (attacker->client->pu_time_quad > level.time)
+			SaturatingAdd(attacker->client->pers.match.quad_kills, 1);
 		if (spawn_death) {
 			SaturatingAdd(attacker->client->pers.match.total_spawn_kills, 1);
 			SaturatingAdd(level.match.total_spawn_kills, 1);
@@ -2980,6 +3404,41 @@ void MM_MatchStats_RecordDeath(gentity_t *victim, gentity_t *attacker,
 void MM_MatchStats_RecordMedal(gclient_t *client, medal_t medal, uint32_t count)
 {
 	RecordMappedMedal(client, MM_MatchStats_MedalForNative(medal), count);
+}
+
+void MM_MatchStats_RecordItemAvailable(const gentity_t *ent)
+{
+	// Quad control is measured as a share of the times the Quad was there to be
+	// taken, so this is called from both places that make one takeable: the
+	// initial FinishSpawningItem and every later RespawnItem. Counting the
+	// transition rather than scanning the world at match start is deliberate --
+	// at that moment the entity lump has only just been re-parsed and no item
+	// think has run yet, so every item is still SOLID_NOT and a scan sees none
+	// of them.
+	if (!ent || !ent->item || ent->item->id != IT_POWERUP_QUAD)
+		return;
+	if (!MM_MatchStats_IsCollecting())
+		return;
+
+	// Only an item that is actually on the floor and visible counts. Team slaves
+	// and deferred powerup spawns leave FinishSpawningItem hidden and come back
+	// through RespawnItem; a trigger-spawned item comes back through
+	// Item_TriggeredSpawn, which clears SVF_NOCLIENT and re-enters
+	// FinishSpawningItem. Either way each appearance passes here exactly once.
+	if (ent->solid != SOLID_TRIGGER || (ent->svflags & SVF_NOCLIENT))
+		return;
+
+	// Mirrors the exclusions at the MM_MatchStats_RecordPickup call site, so the
+	// spawn count and the pickup count it is divided into describe the same set
+	// of Quads. Dropped items never reach either caller, but keeping the test
+	// identical stops the two from drifting apart.
+	if (ent->spawnflags.has(SPAWNFLAG_ITEM_DROPPED_PLAYER) &&
+		!ent->spawnflags.has(SPAWNFLAG_ITEM_DROPPED))
+		return;
+	if (g_quadhog && g_quadhog->integer)
+		return;
+
+	SaturatingAdd(level.match.quad_spawns, 1u);
 }
 
 void MM_MatchStats_RecordPickup(gclient_t *client, item_id_t item,

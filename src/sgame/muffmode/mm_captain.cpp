@@ -431,7 +431,7 @@ bool ReadyConditions(gentity_t *ent, bool desired_status, bool admin_cmd) {
 		return false;
 	}
 
-	if (level.match_state == matchst_t::MATCH_WARMUP_READYUP)
+	if (level.match_state == match_state_t::MATCH_WARMUP_READYUP)
 		return true;
 
 	const char *s = nullptr;
@@ -442,14 +442,14 @@ bool ReadyConditions(gentity_t *ent, bool desired_status, bool admin_cmd) {
 	}
 
 	switch (level.warmup_requisite) {
-	case warmupreq_t::WARMUP_REQ_MORE_PLAYERS:
+	case warmup_req_t::WARMUP_REQ_MORE_PLAYERS:
 	{
 		const int minp = GT(GT_DUEL) ? 2 : std::max(1, muffmode::CvarInteger(minplayers));
 		const int req = std::max(1, minp - level.num_playing_clients);
 		gi.LocClient_Print(ent, PRINT_HIGH, "{}{} more player{} present.\n", s, req, req > 1 ? "s are" : " is");
 		break;
 	}
-	case warmupreq_t::WARMUP_REQ_BALANCE:
+	case warmup_req_t::WARMUP_REQ_BALANCE:
 		gi.LocClient_Print(ent, PRINT_HIGH, "{}teams are balanced.\n", s);
 		break;
 	default:
@@ -576,7 +576,7 @@ void MM_CmdReady(gentity_t *ent) {
 	if (!captain::ReadyConditions(ent, true, false))
 		return;
 
-	if (level.match_state != matchst_t::MATCH_WARMUP_READYUP) {
+	if (level.match_state != match_state_t::MATCH_WARMUP_READYUP) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "You cannot ready at this stage of the match.\n");
 		return;
 	}

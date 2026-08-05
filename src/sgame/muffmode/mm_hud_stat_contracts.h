@@ -20,8 +20,9 @@
 // STAT_ROUND_NUMBER       — unused in the DM layout (the match limit rides on STAT_SCORELIMIT)
 // STAT_CTF_FLAG_PIC       — CTF/Strike: carried flag blink; RR: current-team badge (top-right row 3)
 // STAT_CENTER_LINE        — duel header pic; LMS/Freeze Tag: primary POV configstring lane
-// STAT_SCORELIMIT         — CONFIG_STORY_SCORELIMIT index: match limit as small white stat_string
-//                           under the miniscore rows; 0 = hidden
+// STAT_SCORELIMIT         — CONFIG_STORY_SCORELIMIT index: match limit as small white right-aligned
+//                           text under the miniscore rows; 0 = hidden, and the layout MUST gate on
+//                           this stat (value 0 would otherwise index configstring 0, the level name)
 // STAT_COUNTDOWN          — layout xv 118 yb -256 num(3); vanilla: centre = xv+50-8*l (118 exact for 1-digit); MM cgame re-centres per digit count
 // STAT_MINISCORE_*        — SetMiniScoreStats; visible only during MATCH_IN_PROGRESS (hidden through
 //                           every warmup stage, the countdown, and intermission)
@@ -51,8 +52,9 @@ namespace muffmode::hud {
 inline constexpr int32_t kMiniscorePicXr = -26;
 inline constexpr int32_t kMiniscoreNumXr = -78;
 inline constexpr int32_t kMiniscoreHighlightXr = -28;
-// Match-limit line under the rows: left edge of the small white stat_string.
-inline constexpr int32_t kMiniscoreLimitTextXr = -28;
+// Match-limit line under the rows: right edge of the small white text, on the right HUD stack
+// column rather than the score-digit edge (num(3) at kMiniscoreNumXr would end at -28).
+inline constexpr int32_t kMiniscoreLimitTextXr = -2;
 inline constexpr int32_t kMiniscoreHighlightYInset = -2;
 inline constexpr int32_t kMiniscoreNumFieldWidth = 3;
 inline constexpr int32_t kMiniscoreRowStep = 27;

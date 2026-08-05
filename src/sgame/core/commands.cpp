@@ -6,6 +6,7 @@
 #include "debug_log.h"
 #include "muffmode/mm_admin.h"
 #include "muffmode/mm_arena.h"
+#include "muffmode/mm_awards.h"
 #include "muffmode/mm_captain.h"
 #include "muffmode/mm_chat.h"
 #include "muffmode/mm_command_contracts.h"
@@ -14,6 +15,7 @@
 #include "muffmode/mm_ghost.h"
 #include "muffmode/mm_items_rules.h"
 #include "muffmode/mm_loc.h"
+#include "muffmode/mm_map_pick.h"
 #include "muffmode/mm_map_pool.h"
 #include "muffmode/mm_maps.h"
 #include "muffmode/mm_match.h"
@@ -863,11 +865,11 @@ static bool ShouldShowMenuBindHint(const gentity_t *ent)
 {
 	if (!ent || !ent->client)
 		return false;
-	if (level.match_state >= matchst_t::MATCH_COUNTDOWN)
+	if (level.match_state >= match_state_t::MATCH_COUNTDOWN)
 		return false;
-	if (level.round_state == roundst_t::ROUND_COUNTDOWN)
+	if (level.round_state == round_state_t::ROUND_COUNTDOWN)
 		return false;
-	if (level.match_state == matchst_t::MATCH_WARMUP_READYUP && ent->client->resp.ready)
+	if (level.match_state == match_state_t::MATCH_WARMUP_READYUP && ent->client->resp.ready)
 		return false;
 	return true;
 }
@@ -882,6 +884,17 @@ static void Cmd_Inven_f(gentity_t *ent) {
 	gclient_t	*cl;
 
 	cl = ent->client;
+
+	// [MuffMode] The post-match screens own the intermission layout: the next-map
+	// pick draws its menu where the scoreboard was and the awards reel paints over
+	// it. This is the one intermission-allowed command that closes or replaces a
+	// menu, and an inven press here would take the pick away from the player who
+	// pressed it -- permanently once the winner reveal has started, since the pick
+	// stops reopening menus then -- or leave a join menu over the reel that
+	// P_Menu_Select refuses to act on during intermission anyway. The bind does
+	// nothing while either screen is up.
+	if (MM_MapPick_Active() || MM_Awards_Active())
+		return;
 
 	cl->showscores = false;
 	cl->showhelp = false;
@@ -1914,7 +1927,7 @@ static void Cmd_Stats_f(gentity_t *ent) {
 
 	text.clear();
 
-	if (level.match_state == matchst_t::MATCH_WARMUP_READYUP) {
+	if (level.match_state == match_state_t::MATCH_WARMUP_READYUP) {
 		for (auto ec : active_clients()) {
 			if (!ClientIsPlaying(ec->client))
 				continue;
@@ -2366,6 +2379,15 @@ static void Cmd_MapList_f(gentity_t *ent) {
 	MM_CmdMapList(ent);
 }
 
+static void Cmd_MapPick_f(gentity_t *ent) {
+	MM_CmdMapPick(ent);
+}
+
+// [MuffMode] Post-match awards reel body lives in muffmode/mm_awards
+static void Cmd_Awards_f(gentity_t *ent) {
+	MM_CmdAwards(ent);
+}
+
 static void Cmd_MapPool_f(gentity_t *ent) {
 	MM_CmdMapPool(ent);
 }
@@ -2417,6 +2439,7 @@ cmds_t client_cmds[] = {
 	{"alertall",		Cmd_AlertAll_f,			CF_ALLOW_SPEC | CF_CHEAT_PROTECT},
 	{"announcer",		Cmd_Announcer_f,		CF_ALLOW_SPEC | CF_ALLOW_DEAD},
 	{"arena",			Cmd_Arena_f,			CF_ALLOW_DEAD | CF_ALLOW_INT | CF_ALLOW_SPEC},
+	{"awards",			Cmd_Awards_f,			CF_ALLOW_DEAD | CF_ALLOW_INT | CF_ALLOW_SPEC},
 	{"balance",			Cmd_BalanceTeams_f,		CF_ADMIN_ONLY | CF_ALLOW_INT | CF_ALLOW_SPEC},
 	{"boot",			Cmd_Boot_f,				CF_ADMIN_ONLY | CF_ALLOW_INT | CF_ALLOW_SPEC},
 	{"callvote",		Cmd_CallVote_f,			CF_ALLOW_DEAD | CF_ALLOW_SPEC},
@@ -2472,6 +2495,7 @@ cmds_t client_cmds[] = {
 	{"mapcycle",		Cmd_MapCycle_f,			CF_ALLOW_DEAD | CF_ALLOW_SPEC},
 	{"mapinfo",			Cmd_MapInfo_f,			CF_ALLOW_DEAD | CF_ALLOW_SPEC},
 	{"maplist",			Cmd_MapList_f,			CF_ALLOW_DEAD | CF_ALLOW_SPEC},
+	{"mappick",			Cmd_MapPick_f,			CF_ALLOW_DEAD | CF_ALLOW_INT | CF_ALLOW_SPEC},
 	{"mappool",			Cmd_MapPool_f,			CF_ALLOW_DEAD | CF_ALLOW_SPEC},
 	{"motd",			Cmd_Motd_f,				CF_ALLOW_SPEC | CF_ALLOW_INT},
 	{"mymap",			Cmd_MyMap_f,			CF_ALLOW_DEAD | CF_ALLOW_SPEC},

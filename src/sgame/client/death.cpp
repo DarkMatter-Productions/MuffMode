@@ -456,10 +456,10 @@ static void ClientObituary(gentity_t *self, gentity_t *inflictor, gentity_t *att
 	// frag messages
 	if (deathmatch->integer && self != attacker && self->client && attacker->client) {
 		if (!(self->svflags & SVF_BOT)) {
-			if (level.match_state == matchst_t::MATCH_WARMUP_READYUP) {
+			if (level.match_state == match_state_t::MATCH_WARMUP_READYUP) {
 				BroadcastReadyReminderMessage();
 			} else {
-				if (GT(GT_HORDE) && level.round_state == roundst_t::ROUND_IN_PROGRESS && ClientIsPlaying(self->client)) {
+				if (GT(GT_HORDE) && level.round_state == round_state_t::ROUND_IN_PROGRESS && ClientIsPlaying(self->client)) {
 					const int remaining = max(0, self->client->pers.lives - 1);
 					if (remaining > 0) {
 						gi.LocClient_Print(self, PRINT_CENTER, "You were killed by {}\n{} {} remaining.",
@@ -468,7 +468,7 @@ static void ClientObituary(gentity_t *self, gentity_t *inflictor, gentity_t *att
 						gi.LocClient_Print(self, PRINT_CENTER, "You were killed by {}",
 							attacker->client->resp.netname);
 					}
-				} else if (GTF(GTF_ROUNDS) && GTF(GTF_ELIMINATION) && level.round_state == roundst_t::ROUND_IN_PROGRESS) {
+				} else if (GTF(GTF_ROUNDS) && GTF(GTF_ELIMINATION) && level.round_state == round_state_t::ROUND_IN_PROGRESS) {
 					gi.LocClient_Print(self, PRINT_CENTER, "You were fragged by {}\nYou will respawn next round.", attacker->client->resp.netname);
 				} else {
 					gi.LocClient_Print(self, PRINT_CENTER, "You were fragged by {}", attacker->client->resp.netname);
@@ -479,7 +479,7 @@ static void ClientObituary(gentity_t *self, gentity_t *inflictor, gentity_t *att
 			if ((Teams() || GT(GT_ARENA)) && OnSameTeam(self, attacker)) {
 				gi.LocClient_Print(attacker, PRINT_CENTER, "You fragged {}, your team mate :(", self->client->resp.netname);
 			} else {
-				if (level.match_state == matchst_t::MATCH_WARMUP_READYUP) {
+				if (level.match_state == match_state_t::MATCH_WARMUP_READYUP) {
 					BroadcastReadyReminderMessage();
 				} else if (attacker->client->resp.kill_count && !(attacker->client->resp.kill_count % 10)) {
 					if (ShouldShowRampageMessages()) {
@@ -498,7 +498,7 @@ static void ClientObituary(gentity_t *self, gentity_t *inflictor, gentity_t *att
 						ClientObituaryBroadcast(self, PRINT_CENTER, "{} put an end to {}'s\nrampage!",
 							attacker->client->resp.netname, self->client->resp.netname);
 					}
-				} else if (Teams() || level.match_state != matchst_t::MATCH_IN_PROGRESS) {
+				} else if (Teams() || level.match_state != match_state_t::MATCH_IN_PROGRESS) {
 					if (attacker->client->sess.pc.show_fragmessages)
 						gi.LocClient_Print(attacker, PRINT_CENTER, "You fragged {}", self->client->resp.netname);
 				} else {
@@ -677,11 +677,11 @@ static bool Match_CanScore() {
 		return false;
 
 	switch (level.match_state) {
-	case matchst_t::MATCH_WARMUP_DELAYED:
-	case matchst_t::MATCH_WARMUP_DEFAULT:
-	case matchst_t::MATCH_WARMUP_READYUP:
-	case matchst_t::MATCH_COUNTDOWN:
-	case matchst_t::MATCH_ENDED:
+	case match_state_t::MATCH_WARMUP_DELAYED:
+	case match_state_t::MATCH_WARMUP_DEFAULT:
+	case match_state_t::MATCH_WARMUP_READYUP:
+	case match_state_t::MATCH_COUNTDOWN:
+	case match_state_t::MATCH_ENDED:
 		return false;
 	}
 
@@ -778,7 +778,7 @@ DIE(player_die) (gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 	if (GT(GT_ARENA)) {
 		// [MuffMode] Logical teams and scores are owned by the victim's
 		// arena. The singleton frag/team score path below must stay untouched.
-	} else if (attacker && attacker->client && level.match_state == matchst_t::MATCH_IN_PROGRESS) {
+	} else if (attacker && attacker->client && level.match_state == match_state_t::MATCH_IN_PROGRESS) {
 		if (attacker == self || mod.friendly_fire) {
 			// LMS: resp.score is the round-win tally and the match-win quantity, so no
 			// kill/suicide frag adjustments may touch it - only round wins move the score.
@@ -857,8 +857,8 @@ DIE(player_die) (gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 	self->svflags |= SVF_DEADMONSTER;
 
 	if (GTF(GTF_ROUNDS) && GTF(GTF_ELIMINATION) &&
-			level.match_state == matchst_t::MATCH_IN_PROGRESS &&
-			level.round_state == roundst_t::ROUND_IN_PROGRESS &&
+			level.match_state == match_state_t::MATCH_IN_PROGRESS &&
+			level.round_state == round_state_t::ROUND_IN_PROGRESS &&
 			notGT(GT_HORDE) && notGT(GT_LMS) && ClientIsPlaying(self->client) &&
 			!self->client->eliminated) {
 		ClientSetEliminated(self);

@@ -6,15 +6,18 @@
 #include "entities/shadow_lights.h"
 #include "muffmode/mm_announcer.h"
 #include "muffmode/mm_arena.h"
+#include "muffmode/mm_awards.h"
 #include "muffmode/mm_captain.h"
 #include "muffmode/mm_client_profile.h"
 #include "muffmode/mm_combat_heatmap.h"
 #include "muffmode/mm_command_contracts.h"
 #include "muffmode/mm_duel.h"
+#include "muffmode/mm_ent_respawn.h"
 #include "muffmode/mm_gametype.h"
 #include "muffmode/mm_ghost.h"
 #include "muffmode/mm_horde.h"
 #include "muffmode/mm_loc.h"
+#include "muffmode/mm_map_pick.h"
 #include "muffmode/mm_map_pool.h"
 #include "muffmode/mm_maps.h"
 #include "muffmode/mm_match.h"
@@ -165,6 +168,7 @@ cvar_t *g_arena_fast_switch;
 cvar_t *g_arena_grapple;
 cvar_t *g_arena_excessive;
 cvar_t *g_arena_competition;
+cvar_t *g_arena_warmup_readyup;
 cvar_t *g_arena_unbalanced;
 cvar_t *g_arena_lock;
 cvar_t *g_arena_lock_count;
@@ -196,6 +200,7 @@ cvar_t *g_dm_death_scoreboard;
 cvar_t *g_dm_do_readyup;
 cvar_t *g_dm_do_warmup;
 cvar_t *g_dm_exec_level_cfg;
+cvar_t *g_dm_explosive_respawn_time;
 cvar_t *g_dm_force_join;
 cvar_t *g_dm_force_respawn;
 cvar_t *g_dm_force_respawn_time;
@@ -356,6 +361,12 @@ cvar_t *g_horde_reinforcements_per_wave;
 cvar_t *g_horde_reinforcement_protection;
 cvar_t *g_horde_target_spread_weight;
 cvar_t *g_horde_retarget_interval;
+cvar_t *g_horde_pursuit;
+cvar_t *g_horde_pursuit_repath_time;
+cvar_t *g_horde_target_model;
+cvar_t *g_horde_target_aggression;
+cvar_t *g_horde_target_opportunism;
+cvar_t *g_horde_reach_probe_budget;
 cvar_t *g_horde_stall_timeout;
 cvar_t *g_huntercam;
 cvar_t *g_inactivity;
@@ -400,6 +411,7 @@ cvar_t *g_owner_push_scores;
 cvar_t *g_gametype_cfg;
 cvar_t *g_quadhog;
 cvar_t *g_quick_weapon_switch;
+cvar_t *g_ranked;
 cvar_t *g_rollangle;
 cvar_t *g_rollspeed;
 cvar_t *g_round_countdown;
@@ -607,6 +619,9 @@ static void InitGame() {
 	gun_z = gi.cvar("gun_z", "0", CVAR_NOFLAGS);
 
 	g_rollspeed = gi.cvar("g_rollspeed", "200", CVAR_NOFLAGS);
+	// Master switch for skill ratings and match statistics. Advertised in serverinfo so a server
+	// browser can tell a ranked host from an unranked one.
+	g_ranked = gi.cvar("g_ranked", "1", CVAR_SERVERINFO);
 	g_rollangle = gi.cvar("g_rollangle", "2", CVAR_NOFLAGS);
 	g_maxvelocity = gi.cvar("g_maxvelocity", "2000", CVAR_NOFLAGS);
 	g_gravity = gi.cvar("g_gravity", "800", CVAR_NOFLAGS);
@@ -728,6 +743,12 @@ static void InitGame() {
 	g_horde_reinforcement_protection = gi.cvar("g_horde_reinforcement_protection", "2.0", CVAR_NOFLAGS);
 	g_horde_target_spread_weight = gi.cvar("g_horde_target_spread_weight", "512", CVAR_NOFLAGS);
 	g_horde_retarget_interval = gi.cvar("g_horde_retarget_interval", "8.0", CVAR_NOFLAGS);
+	g_horde_pursuit = gi.cvar("g_horde_pursuit", "1", CVAR_NOFLAGS);
+	g_horde_pursuit_repath_time = gi.cvar("g_horde_pursuit_repath_time", "2.0", CVAR_NOFLAGS);
+	g_horde_target_model = gi.cvar("g_horde_target_model", "1", CVAR_NOFLAGS);
+	g_horde_target_aggression = gi.cvar("g_horde_target_aggression", "1.0", CVAR_NOFLAGS);
+	g_horde_target_opportunism = gi.cvar("g_horde_target_opportunism", "1.0", CVAR_NOFLAGS);
+	g_horde_reach_probe_budget = gi.cvar("g_horde_reach_probe_budget", "512", CVAR_NOFLAGS);
 	g_horde_stall_timeout = gi.cvar("g_horde_stall_timeout", "90", CVAR_NOFLAGS);
 
 	g_huntercam = gi.cvar("g_huntercam", "1", CVAR_SERVERINFO | CVAR_LATCH);
@@ -852,6 +873,7 @@ static void InitGame() {
 	g_arena_grapple = gi.cvar("g_arena_grapple", "0", CVAR_NOFLAGS);
 	g_arena_excessive = gi.cvar("g_arena_excessive", "0", CVAR_NOFLAGS);
 	g_arena_competition = gi.cvar("g_arena_competition", "0", CVAR_NOFLAGS);
+	g_arena_warmup_readyup = gi.cvar("g_arena_warmup_readyup", "1", CVAR_NOFLAGS);
 	g_arena_unbalanced = gi.cvar("g_arena_unbalanced", "0", CVAR_NOFLAGS);
 	g_arena_lock = gi.cvar("g_arena_lock", "0", CVAR_NOFLAGS);
 	g_arena_lock_count = gi.cvar("g_arena_lock_count", "6", CVAR_NOFLAGS);
@@ -874,6 +896,7 @@ static void InitGame() {
 	g_dm_do_readyup = gi.cvar("g_dm_do_readyup", "0", CVAR_NOFLAGS);
 	g_dm_do_warmup = gi.cvar("g_dm_do_warmup", "1", CVAR_NOFLAGS);
 	g_dm_exec_level_cfg = gi.cvar("g_dm_exec_level_cfg", "0", CVAR_NOFLAGS);
+	g_dm_explosive_respawn_time = gi.cvar("g_dm_explosive_respawn_time", "60", CVAR_NOFLAGS);
 	g_dm_force_join = gi.cvar("g_dm_force_join", "0", CVAR_NOFLAGS);
 	g_dm_force_respawn = gi.cvar("g_dm_force_respawn", "1", CVAR_NOFLAGS);
 	g_dm_force_respawn_time = gi.cvar("g_dm_force_respawn_time", "3", CVAR_NOFLAGS);
@@ -935,6 +958,8 @@ static void InitGame() {
 	g_match_lock = gi.cvar("g_match_lock", "0", CVAR_SERVERINFO);
 	g_matchstats = gi.cvar("g_matchstats", "0", CVAR_NOFLAGS);
 	MM_MatchStats_RegisterCvars();
+	MM_MapPick_RegisterCvars();
+	MM_Awards_RegisterCvars();
 	g_loc = gi.cvar("g_loc", "1", CVAR_NOFLAGS);
 	g_loc_items = gi.cvar("g_loc_items", "1", CVAR_NOFLAGS);
 	g_motd_filename = gi.cvar("g_motd_filename", "motd.txt", CVAR_NOFLAGS);
@@ -1042,7 +1067,7 @@ static void InitGame() {
 
 	level.ready_to_exit = false;
 
-	level.match_state = matchst_t::MATCH_WARMUP_DELAYED;
+	level.match_state = match_state_t::MATCH_WARMUP_DELAYED;
 	level.match_state_timer = 0_sec;
 	level.match_time = level.time;
 	level.warmup_notice_time = level.time;
@@ -1162,8 +1187,6 @@ void FindIntermissionPoint(void) {
 	if (level.intermission_spot) // search only once
 		return;
 
-	gi.Com_Print("FindIntermissionPoint\n");
-
 	// find the intermission spot
 	ent = level.spawn_spots[SPAWN_SPOT_INTERMISSION];
 
@@ -1186,9 +1209,9 @@ void FindIntermissionPoint(void) {
 
 		// if it has a target, look towards it
 		if (ent->target) {
-			gi.Com_Print("FindIntermissionPoint target\n");
+			//gi.Com_Print("FindIntermissionPoint target\n");
 			if (SetIntermissionAngleTowardTarget(ent)) {
-				gi.Com_Print("FindIntermissionPoint target 2\n");
+				//gi.Com_Print("FindIntermissionPoint target 2\n");
 			}
 		}
 	}
@@ -1261,6 +1284,27 @@ Adapted from Quake III
 =================
 */
 
+/*
+=================
+ExitIntermissionLevel
+
+[MuffMode] The post-scoreboard next-map pick and then the post-match awards reel
+are offered every intermission exit before the level actually changes. Whichever
+takes the exit holds the intermission open and calls ExitLevel() itself when it
+is done. The pick goes first: the awards reel is the last thing shown before the
+map changes, so it plays after a map has already been chosen.
+=================
+*/
+static void ExitIntermissionLevel(void) {
+	if (MM_Awards_ClaimIntermissionExit())
+		return;
+
+	if (MM_MapPick_ClaimIntermissionExit())
+		return;
+
+	ExitLevel();
+}
+
 static void CheckDMIntermissionExit(void) {
 	int ready, not_ready;
 
@@ -1298,7 +1342,7 @@ static void CheckDMIntermissionExit(void) {
 
 	// if everyone wants to go, go now
 	if (!not_ready) {
-		ExitLevel();
+		ExitIntermissionLevel();
 		return;
 	}
 
@@ -1313,7 +1357,7 @@ static void CheckDMIntermissionExit(void) {
 	if (level.time < level.exit_time)
 		return;
 
-	ExitLevel();
+	ExitIntermissionLevel();
 }
 
 /*
@@ -1872,7 +1916,7 @@ void Match_End() {
 	// higher-priority MyMap queue is validated and consumed.
 	MM_HandleMapPoolCvarChanges();
 
-	level.match_state = matchst_t::MATCH_ENDED;
+	level.match_state = match_state_t::MATCH_ENDED;
 	level.match_state_timer = 0_sec;
 
 	// [MuffMode] Freeze every result consumer before settlement so direct admin
@@ -1881,6 +1925,12 @@ void Match_End() {
 	MM_MatchStats_FreezeResultTime();
 	MM_PlayerStats_OnMatchEnd();
 	MM_MatchStats_End();
+
+	// [MuffMode] The post-scoreboard next-map pick only offers alternatives to a
+	// map the rotation picked for us. A MyMap queue entry, a held level or a
+	// forced map is already somebody's deliberate choice.
+	MM_MapPick_NoteNextMapIsOpen(
+		!MM_MQ_Count() && !g_dm_same_level->integer && !level.forcemap[0]);
 
 	// see if there is a queued map to go to
 	if (const char *queued_map = MM_MQ_Go_Next(); queued_map && *queued_map) {
@@ -1951,7 +2001,7 @@ void QueueIntermission(const char *msg, bool boo, bool reset) {
 	// warmup while its rooms run independent state machines. Its session
 	// timelimit/no-human exit still needs the shared intermission path.
 	if (level.intermission_queued ||
-		(notGT(GT_ARENA) && level.match_state < matchst_t::MATCH_IN_PROGRESS))
+		(notGT(GT_ARENA) && level.match_state < match_state_t::MATCH_IN_PROGRESS))
 		return;
 
 	level.tied_overtime_start = 0_sec;
@@ -1972,7 +2022,7 @@ void QueueIntermission(const char *msg, bool boo, bool reset) {
 		MM_MatchStats_FreezeResultTime();
 		MM_PlayerStats_OnMatchEnd();
 
-		level.match_state = matchst_t::MATCH_ENDED;
+		level.match_state = match_state_t::MATCH_ENDED;
 		level.match_state_timer = 0_sec;
 		level.match_time = level.time;
 		level.intermission_queued = level.time;
@@ -2015,6 +2065,19 @@ void CheckDMExitRules() {
 	// if at the intermission, wait for all non-bots to
 	// signal ready, then go to next level
 	if (level.intermission_time) {
+		// [MuffMode] The scoreboard hands the intermission to the awards reel and
+		// the reel hands it to the next-map pick; whichever holds it owns the
+		// rest of the intermission, including the call to ExitLevel().
+		if (MM_Awards_Active()) {
+			MM_Awards_RunFrame();
+			return;
+		}
+
+		if (MM_MapPick_Active()) {
+			MM_MapPick_RunFrame();
+			return;
+		}
+
 		CheckDMIntermissionExit();
 		return;
 	}
@@ -2042,7 +2105,7 @@ void CheckDMExitRules() {
 		return;
 	}
 
-	if (level.match_state < matchst_t::MATCH_IN_PROGRESS)
+	if (level.match_state < match_state_t::MATCH_IN_PROGRESS)
 		return;
 	
 	if (level.time - level.match_time <= FRAME_TIME_MS)
@@ -2051,7 +2114,7 @@ void CheckDMExitRules() {
 	if (MM_Horde_CheckAllFightersLost())
 		return;
 
-	if (GTF(GTF_ROUNDS) && level.round_state != roundst_t::ROUND_ENDED)
+	if (GTF(GTF_ROUNDS) && level.round_state != round_state_t::ROUND_ENDED)
 		return;
 
 	if (MM_Horde_CheckMatchEnd())
@@ -2103,7 +2166,7 @@ void CheckDMExitRules() {
 	}
 
 	if (timelimit->value) {
-		if (!(GTF(GTF_ROUNDS)) || level.round_state == roundst_t::ROUND_ENDED) {
+		if (!(GTF(GTF_ROUNDS)) || level.round_state == round_state_t::ROUND_ENDED) {
 			if (level.time >= level.match_time + gtime_t::from_min(timelimit->value) + level.overtime) {
 				// check for overtime
 				if (ScoreIsTied()) {
@@ -2231,8 +2294,8 @@ void CheckDMExitRules() {
 }
 
 static bool Match_NextMap() {
-	if (level.match_state == matchst_t::MATCH_ENDED) {
-		level.match_state = matchst_t::MATCH_WARMUP_DELAYED;
+	if (level.match_state == match_state_t::MATCH_ENDED) {
+		level.match_state = match_state_t::MATCH_WARMUP_DELAYED;
 		level.warmup_notice_time = level.time;
 		level.warmup_gametype_hud_time = level.time;
 		Match_Reset();
@@ -2286,6 +2349,18 @@ void BeginIntermission(gentity_t *targ) {
 	game.autosaved = false;
 
 	level.intermission_time = level.time;
+
+	// [MuffMode] Start the ready-to-exit poll from scratch. Nothing else clears
+	// these, so a second intermission inside one level load -- after a match
+	// reset, say -- inherited an exit_time that had already elapsed and a
+	// ready_to_exit that was still true. CheckDMIntermissionExit reads a
+	// non-zero exit_time as "the five-second floor no longer applies", so the
+	// scoreboard was skipped on its very first frame and the awards reel opened
+	// straight over the top of it.
+	level.exit_time = 0_ms;
+	level.ready_to_exit = false;
+	for (auto ec : active_clients())
+		ec->client->ready_to_exit = false;
 
 	// respawn any dead clients
 	for (auto ec : active_clients()) {
@@ -2822,8 +2897,18 @@ static inline void G_RunFrame_(bool main_loop) {
 
 		// exit intermissions
 
-		if (level.intermission_exit) {
-			ExitLevel();
+		// [MuffMode] This is the only exit a humans-only server ever takes:
+		// ready_to_exit is set for bots alone, so CheckDMIntermissionExit never
+		// reaches its ExitLevel() without one. Routing through
+		// ExitIntermissionLevel is therefore what lets the next-map pick and the
+		// awards reel be offered the exit at all on a real ranked server.
+		//
+		// While either of them owns the intermission the flag stays latched
+		// rather than being cleared, so the level leaves on the first frame after
+		// they finish -- and the rest of this frame still runs, which is what
+		// keeps clients receiving playerstate updates while the reel is up.
+		if (level.intermission_exit && !MM_MapPick_Active() && !MM_Awards_Active()) {
+			ExitIntermissionLevel();
 			level.in_frame = false;
 			return;
 		}
@@ -2913,6 +2998,11 @@ static inline void G_RunFrame_(bool main_loop) {
 		MM_PROFILE_INC(frame_nonclients_visited);
 		G_RunEntity(ent);
 	}
+
+	// [MuffMode] Rebuild destroyed deathmatch props once their spot is unwatched.
+	// After the entity loop so a prop that arrives this frame gets a clean first
+	// think next frame rather than a partial one now.
+	MM_EntRespawn_RunFrame();
 
 	CheckDMEndFrame();
 
