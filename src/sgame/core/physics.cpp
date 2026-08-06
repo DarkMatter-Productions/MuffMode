@@ -1184,7 +1184,6 @@ static void G_Physics_Step(gentity_t *ent) {
 	const int32_t ent_generation = ent->spawn_count;
 	bool	   wasonground;
 	bool	   hitsound = false;
-	float *vel;
 	float	   speed, newspeed, control;
 	float	   friction;
 	gentity_t *groundentity;
@@ -1248,8 +1247,12 @@ static void G_Physics_Step(gentity_t *ent) {
 	if (ent->velocity[2] || ent->velocity[1] || ent->velocity[0]) {
 		// apply friction
 		if ((wasonground || (ent->flags & (FL_SWIM | FL_FLY))) && !(ent->monsterinfo.aiflags & AI_ALTERNATE_FLY)) {
-			vel = &ent->velocity.x;
-			speed = sqrtf(vel[0] * vel[0] + vel[1] * vel[1]);
+			// [MuffMode] Reach the horizontal components through vec3_t's own
+			// subscript instead of a float pointer taken from its first member:
+			// that pointer walks off the end of a scalar as far as the static
+			// analyzer is concerned, and the rest of this function already
+			// subscripts the velocity directly.
+			speed = sqrtf(ent->velocity[0] * ent->velocity[0] + ent->velocity[1] * ent->velocity[1]);
 			if (speed) {
 				friction = g_friction;
 
@@ -1264,8 +1267,8 @@ static void G_Physics_Step(gentity_t *ent) {
 					newspeed = 0;
 				newspeed /= speed;
 
-				vel[0] *= newspeed;
-				vel[1] *= newspeed;
+				ent->velocity[0] *= newspeed;
+				ent->velocity[1] *= newspeed;
 			}
 		}
 

@@ -503,17 +503,18 @@ Handles both ground friction and water friction
 ==================
 */
 static void PM_Friction() {
-	float *vel;
 	float  speed, newspeed, control;
 	float  friction;
 	float  drop;
 
-	vel = &pml.velocity.x;
-
-	speed = sqrt(vel[0] * vel[0] + vel[1] * vel[1] + vel[2] * vel[2]);
+	// [MuffMode] Reach the components through vec3_t's own subscript instead of a
+	// float pointer taken from its first member: that pointer walks off the end of
+	// a scalar as far as the static analyzer is concerned.
+	speed = sqrt(pml.velocity[0] * pml.velocity[0] + pml.velocity[1] * pml.velocity[1] +
+				 pml.velocity[2] * pml.velocity[2]);
 	if (speed < 1) {
-		vel[0] = 0;
-		vel[1] = 0;
+		pml.velocity[0] = 0;
+		pml.velocity[1] = 0;
 		return;
 	}
 
@@ -537,9 +538,9 @@ static void PM_Friction() {
 	}
 	newspeed /= speed;
 
-	vel[0] = vel[0] * newspeed;
-	vel[1] = vel[1] * newspeed;
-	vel[2] = vel[2] * newspeed;
+	pml.velocity[0] = pml.velocity[0] * newspeed;
+	pml.velocity[1] = pml.velocity[1] * newspeed;
+	pml.velocity[2] = pml.velocity[2] * newspeed;
 }
 
 /*
