@@ -242,7 +242,14 @@ static THINK(barrel_explode) (gentity_t *self) -> void {
 	if (!self->inuse || self->spawn_count != self_generation)
 		return;
 
-	ThrowGibs(self, (1.5f * self->dmg / 200.f), {
+	// [MuffMode] ThrowGibs takes an int32_t, and for GIB_DEBRIS that value is the
+	// outward velocity multiplier rather than a damage figure. Any barrel with
+	// dmg <= 133 truncated it to zero, leaving its chunks with nothing but the
+	// barrel's own velocity so they dropped straight down instead of blowing
+	// outwards. Keep the dmg scaling, but never below a real launch.
+	const int32_t debris_speed = max(1, static_cast<int32_t>(1.5f * self->dmg / 200.f));
+
+	ThrowGibs(self, debris_speed, {
 		{ 2, "models/objects/debris1/tris.md2", GIB_METALLIC | GIB_DEBRIS },
 		{ 4, "models/objects/debris3/tris.md2", GIB_METALLIC | GIB_DEBRIS },
 		{ 8, "models/objects/debris2/tris.md2", GIB_METALLIC | GIB_DEBRIS }

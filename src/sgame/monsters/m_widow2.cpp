@@ -1034,6 +1034,11 @@ void ThrowWidowGibReal(gentity_t *self, const char *gibname, int damage, gib_typ
 	if (startpos)
 		gib->s.origin = *startpos;
 	else {
+		// [MuffMode] size was read here without ever being assigned, so the
+		// jitter below scaled by whatever floats happened to be on the stack.
+		// Every startpos-less caller (widow2_die throws sixteen gibs this way)
+		// hit it. Half-extents match ThrowGib's convention.
+		size = self->size * 0.5f;
 		origin = (self->absmin + self->absmax) * 0.5f;
 		gib->s.origin[0] = origin[0] + crandom() * size[0];
 		gib->s.origin[1] = origin[1] + crandom() * size[1];

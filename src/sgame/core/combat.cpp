@@ -6,6 +6,7 @@
 #include "muffmode/mm_arena.h"
 #include "muffmode/mm_combat_heatmap.h"
 #include "muffmode/mm_freezetag.h"
+#include "muffmode/mm_freezetag_rules.h"
 #include "muffmode/mm_horde.h"
 #include "muffmode/mm_match_stats.h"
 #include "muffmode/mm_horde_ai_rules.h"
@@ -741,8 +742,16 @@ void T_Damage(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, const 
 			((targ->flags & FL_ALIVE_KNOCKBACK_ONLY) && (!targ->deadflag || targ->dead_time != level.time)))
 			knockback = 0;
 
+	// [MuffMode] Freeze Tag: bodies are meant to be shovable, but weapons that
+	// rely on splash for momentum pass no weapon kick at all, so scaling alone
+	// can never move one. Fall back on the Quake 3 convention of deriving
+	// knockback from damage before the frozen scale applies.
 	if (MM_FreezeTag_IsFrozen(targ))
-		knockback = static_cast<int>(ceilf(knockback * max(0.0f, g_freezetag_frozen_knockback_scale->value)));
+		knockback = MM_FreezeTagFrozenKnockback(
+			knockback,
+			damage,
+			g_freezetag_frozen_knockback_scale->value,
+			!(targ->flags & (FL_NO_KNOCKBACK | FL_ALIVE_KNOCKBACK_ONLY)));
 
 	// figure momentum add
 	if (!(dflags & DAMAGE_NO_KNOCKBACK)) {
@@ -781,7 +790,7 @@ void T_Damage(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, const 
 	if (MM_FreezeTag_IsFrozen(targ)) {
 		if (damage > 0 && !(targ->flags & FL_NO_DAMAGE_EFFECTS))
 			SpawnDamage(te_sparks, point, normal, damage);
-		MM_FreezeTag_OnFrozenDamage(targ, attacker);
+		MM_FreezeTag_OnFrozenDamage(targ, attacker, mod);
 		return;
 	}
 

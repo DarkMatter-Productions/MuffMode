@@ -20,6 +20,7 @@
 #include "mm_freezetag.h"
 #include "mm_gametype.h"
 #include "mm_ghost.h"
+#include "mm_gibs.h"
 #include "mm_horde.h"
 #include "mm_items_rules.h"
 #include "mm_loc.h"

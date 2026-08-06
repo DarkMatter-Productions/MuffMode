@@ -4,6 +4,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cmath>
 #include <string>
 
 struct mm_freezetag_team_counts_t {
@@ -236,4 +237,91 @@ inline bool MM_FreezeTagThawAssistQualifies(float contribution_seconds, float th
 		return false;
 
 	return contribution_seconds + 0.001f >= MM_FreezeTagThawAssistThreshold(thaw_seconds);
+}
+
+// vectoangles() returns PITCH as -pitch with pitch pre-wrapped into [0, 360),
+// so any downward look comes back in (-360, -270]. The model-pitch divide in
+// ClientEndServerFrame only special-cases PITCH > 180, so an un-normalized
+// -352 becomes a -117 degree model pitch: the player model lies flat. Wrap
+// into the [0, 89] u [271, 360) band that PM_ClampAngles produces for a real
+// player so no consumer ever sees an angle a human could not aim.
+inline float MM_FreezeTagNormalizeLookPitch(float pitch)
+{
+	float normalized = std::fmod(pitch, 360.0f);
+	if (normalized < 0.0f)
+		normalized += 360.0f;
+
+	if (normalized > 89.0f && normalized < 180.0f)
+		return 89.0f;
+	if (normalized >= 180.0f && normalized < 271.0f)
+		return 271.0f;
+
+	return normalized;
+}
+
+// Several weapons carry no weapon kick and rely on splash for momentum, so
+// scaling their knockback can never shift an ice block. Frozen bodies fall back
+// on the Quake 3 convention -- knockback derived from damage, capped at 200 --
+// which is the behaviour the mode is imitating in the first place.
+inline int MM_FreezeTagFrozenKnockback(int knockback, int damage, float scale, bool allow_damage_floor)
+{
+	int base = std::max(knockback, 0);
+	if (allow_damage_floor)
+		base = std::max(base, std::clamp(damage, 0, 200));
+	if (base <= 0)
+		return 0;
+
+	return static_cast<int>(std::ceil(base * std::max(scale, 0.0f)));
+}
+
+// G_Physics_Toss parks a MOVETYPE_TOSS entity when its speed drops below this
+// on a floor contact. Frozen bodies deliberately keep that rule rather than a
+// looser one of their own: a lower bar lets gravity's along-slope pull hold a
+// body above the threshold forever, so it creeps down every ramp it lands on.
+// Travel distance is bought with friction instead, which has no such failure.
+constexpr float kMMFreezeTagTossStopSpeed = 60.0f;
+
+inline float MM_FreezeTagFrozenSlideFriction(float configured)
+{
+	return std::clamp(configured, 0.1f, 0.99f);
+}
+
+// Only break ground contact when the shove can outlive the stop rule. A hit
+// that cannot is left to accumulate on the resting body instead, because
+// G_PushEntity re-seats a contacting entity half a unit off the plane -- so
+// unsticking on every chip-damage tick would bob a body in place under
+// machinegun fire without ever moving it anywhere.
+inline bool MM_FreezeTagShoveShouldUnstick(float horizontal_speed, float vertical_speed)
+{
+	return horizontal_speed >= kMMFreezeTagTossStopSpeed || vertical_speed > 0.0f;
+}
+
+// The shot direction already carries a vertical component, so a shot taken from
+// above yields a negative kvel[2]. Apply the hop as a floor rather than an
+// addition, or it cancels out for the most common case of all: shooting down at
+// a body lying on the floor.
+inline float MM_FreezeTagShoveLiftVelocity(float current_vertical, float lift)
+{
+	return std::max(current_vertical, std::max(lift, 0.0f));
+}
+
+// Scale factor that holds a velocity at or under the cap. A grounded body's
+// velocity is never integrated, so without this every hit stacks forever and
+// dumps at once the moment the body leaves the ground -- a super shotgun lands
+// twenty pellets before physics runs a single frame.
+inline float MM_FreezeTagShoveSpeedScale(float speed, float max_speed)
+{
+	const float cap = std::max(max_speed, 1.0f);
+	if (speed <= cap || speed <= 0.0f)
+		return 1.0f;
+
+	return cap / speed;
+}
+
+inline bool MM_FreezeTagHazardShouldRelease(float seconds_in_hazard, float release_seconds)
+{
+	if (release_seconds <= 0.0f)
+		return false;
+
+	return seconds_in_hazard >= release_seconds;
 }

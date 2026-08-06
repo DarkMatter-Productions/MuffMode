@@ -16,7 +16,7 @@
 constexpr const char *GAMEVERSION = "baseq2";
 
 constexpr const char *GAMEMOD_TITLE = "Muff Mode";
-constexpr const char *GAMEMOD_VERSION = "0.70.20";
+constexpr const char *GAMEMOD_VERSION = "0.70.22";
 
 //==================================================================
 
@@ -2608,7 +2608,11 @@ extern cvar_t *g_frag_messages;
 extern cvar_t *g_freezetag_arena_loadout;
 extern cvar_t *g_freezetag_auto_thaw_time;
 extern cvar_t *g_freezetag_bot_rescue;
+extern cvar_t *g_freezetag_frozen_hazard_release_time;
 extern cvar_t *g_freezetag_frozen_knockback_scale;
+extern cvar_t *g_freezetag_frozen_shove_lift;
+extern cvar_t *g_freezetag_frozen_shove_max_speed;
+extern cvar_t *g_freezetag_frozen_slide_friction;
 extern cvar_t *g_freezetag_multi_thaw_scale;
 extern cvar_t *g_freezetag_round_reset_alive_inventory;
 extern cvar_t *g_freezetag_round_respawn_all;
@@ -2617,6 +2621,9 @@ extern cvar_t *g_freezetag_thaw_respawn_at_location;
 extern cvar_t *g_freezetag_thaw_time;
 extern cvar_t *g_frenzy;
 extern cvar_t *g_friendly_fire;
+extern cvar_t *g_gib_enhanced;
+extern cvar_t *g_gib_impact_effects;
+extern cvar_t *g_gib_max;
 extern cvar_t *g_grapple_damage;
 extern cvar_t *g_grapple_fly_speed;
 extern cvar_t *g_grapple_offhand;

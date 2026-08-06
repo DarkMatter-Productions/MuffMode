@@ -236,7 +236,11 @@ cvar_t *g_frag_messages;
 cvar_t *g_freezetag_arena_loadout;
 cvar_t *g_freezetag_auto_thaw_time;
 cvar_t *g_freezetag_bot_rescue;
+cvar_t *g_freezetag_frozen_hazard_release_time;
 cvar_t *g_freezetag_frozen_knockback_scale;
+cvar_t *g_freezetag_frozen_shove_lift;
+cvar_t *g_freezetag_frozen_shove_max_speed;
+cvar_t *g_freezetag_frozen_slide_friction;
 cvar_t *g_freezetag_multi_thaw_scale;
 cvar_t *g_freezetag_round_reset_alive_inventory;
 cvar_t *g_freezetag_round_respawn_all;
@@ -245,6 +249,9 @@ cvar_t *g_freezetag_thaw_respawn_at_location;
 cvar_t *g_freezetag_thaw_time;
 cvar_t *g_frenzy;
 cvar_t *g_friendly_fire;
+cvar_t *g_gib_enhanced;
+cvar_t *g_gib_impact_effects;
+cvar_t *g_gib_max;
 cvar_t *g_grapple_damage;
 cvar_t *g_grapple_fly_speed;
 cvar_t *g_grapple_offhand;
@@ -626,6 +633,11 @@ static void InitGame() {
 	g_maxvelocity = gi.cvar("g_maxvelocity", "2000", CVAR_NOFLAGS);
 	g_gravity = gi.cvar("g_gravity", "800", CVAR_NOFLAGS);
 
+	// Gib and debris presentation. All three drive stock rerelease content only.
+	g_gib_enhanced = gi.cvar("g_gib_enhanced", "1", CVAR_NOFLAGS);
+	g_gib_impact_effects = gi.cvar("g_gib_impact_effects", "2", CVAR_NOFLAGS);
+	g_gib_max = gi.cvar("g_gib_max", "192", CVAR_NOFLAGS);
+
 	g_skip_view_modifiers = gi.cvar("g_skip_view_modifiers", "0", CVAR_NOSET);
 
 	g_stopspeed = gi.cvar("g_stopspeed", "100", CVAR_NOFLAGS);
@@ -930,7 +942,11 @@ static void InitGame() {
 	g_freezetag_arena_loadout = gi.cvar("g_freezetag_arena_loadout", "0", CVAR_NOFLAGS);
 	g_freezetag_auto_thaw_time = gi.cvar("g_freezetag_auto_thaw_time", "0", CVAR_NOFLAGS);
 	g_freezetag_bot_rescue = gi.cvar("g_freezetag_bot_rescue", "1", CVAR_NOFLAGS);
+	g_freezetag_frozen_hazard_release_time = gi.cvar("g_freezetag_frozen_hazard_release_time", "10", CVAR_NOFLAGS);
 	g_freezetag_frozen_knockback_scale = gi.cvar("g_freezetag_frozen_knockback_scale", "1.0", CVAR_NOFLAGS);
+	g_freezetag_frozen_shove_lift = gi.cvar("g_freezetag_frozen_shove_lift", "24", CVAR_NOFLAGS);
+	g_freezetag_frozen_shove_max_speed = gi.cvar("g_freezetag_frozen_shove_max_speed", "700", CVAR_NOFLAGS);
+	g_freezetag_frozen_slide_friction = gi.cvar("g_freezetag_frozen_slide_friction", "0.9", CVAR_NOFLAGS);
 	g_freezetag_multi_thaw_scale = gi.cvar("g_freezetag_multi_thaw_scale", "0.5", CVAR_NOFLAGS);
 	g_freezetag_round_reset_alive_inventory = gi.cvar("g_freezetag_round_reset_alive_inventory", "1", CVAR_NOFLAGS);
 	g_freezetag_round_respawn_all = gi.cvar("g_freezetag_round_respawn_all", "1", CVAR_NOFLAGS);

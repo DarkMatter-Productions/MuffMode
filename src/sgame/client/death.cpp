@@ -8,6 +8,7 @@
 #include "muffmode/mm_captain.h"
 #include "muffmode/mm_freezetag.h"
 #include "muffmode/mm_freezetag_rules.h"
+#include "muffmode/mm_gibs.h"
 #include "muffmode/mm_horde.h"
 #include "muffmode/mm_lms.h"
 #include "muffmode/mm_match_stats.h"
@@ -956,19 +957,11 @@ DIE(player_die) (gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 	if (self->health < GIB_HEALTH) {
 		// don't toss gibs if we got vaped by the nuke
 		if (!(self->flags & FL_NOGIB)) {
-			// gib
-			gi.sound(self, CHAN_BODY, gi.soundindex("misc/udeath.wav"), 1, ATTN_NORM, 0);
-
-			// more meaty gibs for your dollar!
-			if (deathmatch->integer) {
-				if (self->health < -160)
-					ThrowGibs(self, damage, { { 16, "models/objects/gibs/sm_meat/tris.md2", GIB_METALLIC } });
-				if (self->health < -120)
-					ThrowGibs(self, damage, { { 12, "models/objects/gibs/sm_meat/tris.md2", GIB_METALLIC } });
-				if (self->health < -80)
-					ThrowGibs(self, damage, { { 10, "models/objects/gibs/sm_meat/tris.md2", GIB_METALLIC } });
-			}
-			ThrowGibs(self, damage, { { 8, "models/objects/gibs/sm_meat/tris.md2", GIB_METALLIC } });
+			// [MuffMode] Vanilla throws 8 to 46 copies of the same meat chunk.
+			// MM_Gibs_ThrowPlayerGibs keeps that spine and mixes in the limb,
+			// bone and torso models the base game already precaches for
+			// monsters but never gives to a player.
+			MM_Gibs_ThrowPlayerGibs(self, damage);
 		}
 		self->flags &= ~FL_NOGIB;
 

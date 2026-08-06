@@ -18,6 +18,7 @@
 #include "muffmode/mm_gametype.h"
 #include "muffmode/mm_gametype_cfg_rules.h"
 #include "muffmode/mm_ghost.h"
+#include "muffmode/mm_gibs_rules.h"
 #include "muffmode/mm_hud_stat_contracts.h"
 #include "muffmode/mm_horde_ai_rules.h"
 #include "muffmode/mm_items_rules.h"
@@ -2958,6 +2959,91 @@ MM_TEST(freezetag_thaw_assist_threshold_scales_with_server_timing) {
 	MM_CHECK_FALSE(MM_FreezeTagThawAssistQualifies(1.0f, 0.0f));
 }
 
+MM_TEST(freezetag_bot_look_pitch_keeps_the_thawer_model_upright) {
+	// Mirrors the model-pitch fold in ClientEndServerFrame (src/sgame/client/view.cpp):
+	// it only folds the > 180 case, so a negative wrap falls straight through the divide.
+	const auto model_pitch = [](float v_angle_pitch) {
+		return v_angle_pitch > 180.0f ? (-360.0f + v_angle_pitch) / 3.0f : v_angle_pitch / 3.0f;
+	};
+
+	// The regression: vectoangles() returns -352 for a bot glancing 8 degrees down at a
+	// body by its feet, and the raw value renders the thawer past horizontal.
+	MM_CHECK(model_pitch(-352.0f) < -100.0f);
+	MM_CHECK_EQ(model_pitch(MM_FreezeTagNormalizeLookPitch(-352.0f)), 8.0f / 3.0f);
+
+	// Standing directly over a body: vectoangles special-cases straight down to -270.
+	MM_CHECK_EQ(MM_FreezeTagNormalizeLookPitch(-270.0f), 89.0f);
+	// Looking up stays negative-pitch in Quake's wrapped convention.
+	MM_CHECK_EQ(MM_FreezeTagNormalizeLookPitch(-8.0f), 352.0f);
+	MM_CHECK_EQ(MM_FreezeTagNormalizeLookPitch(-90.0f), 271.0f);
+	// Already-legal angles pass through untouched.
+	MM_CHECK_EQ(MM_FreezeTagNormalizeLookPitch(45.0f), 45.0f);
+	MM_CHECK_EQ(MM_FreezeTagNormalizeLookPitch(300.0f), 300.0f);
+	// Unreachable bands clamp to the edges PM_ClampAngles allows.
+	MM_CHECK_EQ(MM_FreezeTagNormalizeLookPitch(120.0f), 89.0f);
+	MM_CHECK_EQ(MM_FreezeTagNormalizeLookPitch(200.0f), 271.0f);
+	// Multiple wraps still land in range.
+	MM_CHECK_EQ(MM_FreezeTagNormalizeLookPitch(-720.5f), 359.5f);
+}
+
+MM_TEST(freezetag_frozen_knockback_floors_weapons_that_carry_no_kick) {
+	// Direct rocket/BFG hits pass knockback 0 and rely on splash, so scaling alone
+	// can never shove an ice block. Fall back on damage, Quake 3 style.
+	MM_CHECK_EQ(MM_FreezeTagFrozenKnockback(0, 110, 1.0f, true), 110);
+	// A weapon that does carry kick keeps it when it already beats the damage floor.
+	MM_CHECK_EQ(MM_FreezeTagFrozenKnockback(200, 100, 1.0f, true), 200);
+	// The floor is capped at the Quake 3 convention's 200.
+	MM_CHECK_EQ(MM_FreezeTagFrozenKnockback(0, 100000, 1.0f, true), 200);
+	// Scale still applies and rounds up, so small hits never silently vanish.
+	MM_CHECK_EQ(MM_FreezeTagFrozenKnockback(0, 8, 1.5f, true), 12);
+	MM_CHECK_EQ(MM_FreezeTagFrozenKnockback(2, 0, 0.1f, true), 1);
+	// Scale 0 (and a negative misconfiguration) disable shoving entirely.
+	MM_CHECK_EQ(MM_FreezeTagFrozenKnockback(200, 100, 0.0f, true), 0);
+	MM_CHECK_EQ(MM_FreezeTagFrozenKnockback(200, 100, -1.0f, true), 0);
+	// FL_NO_KNOCKBACK must not be resurrected by the damage floor.
+	MM_CHECK_EQ(MM_FreezeTagFrozenKnockback(0, 110, 1.0f, false), 0);
+	MM_CHECK_EQ(MM_FreezeTagFrozenKnockback(-5, 110, 1.0f, false), 0);
+}
+
+MM_TEST(freezetag_frozen_slide_friction_stays_in_a_usable_band) {
+	// A misconfigured value can neither freeze bodies in place nor make them
+	// perpetual sliders.
+	MM_CHECK_EQ(MM_FreezeTagFrozenSlideFriction(0.9f), 0.9f);
+	MM_CHECK_EQ(MM_FreezeTagFrozenSlideFriction(2.0f), 0.99f);
+	MM_CHECK_EQ(MM_FreezeTagFrozenSlideFriction(-1.0f), 0.1f);
+	// Bodies keep vanilla's stop rule, so gravity along a ramp can never hold
+	// one above a lower private threshold and creep it downhill all round.
+	MM_CHECK_EQ(kMMFreezeTagTossStopSpeed, 60.0f);
+}
+
+MM_TEST(freezetag_shove_unsticks_lifts_and_clamps) {
+	// A hit that the stop rule would erase in the same frame leaves the body
+	// parked rather than bobbing it in place; the velocity still accumulates,
+	// so sustained fire eventually crosses the bar.
+	MM_CHECK_FALSE(MM_FreezeTagShoveShouldUnstick(5.0f, -10.0f));
+	MM_CHECK_FALSE(MM_FreezeTagShoveShouldUnstick(59.0f, -10.0f));
+	// A real shove breaks ground contact.
+	MM_CHECK(MM_FreezeTagShoveShouldUnstick(60.0f, -10.0f));
+	MM_CHECK(MM_FreezeTagShoveShouldUnstick(250.0f, -10.0f));
+	// So does any upward component, matching G_Physics_Toss's own rule.
+	MM_CHECK(MM_FreezeTagShoveShouldUnstick(1.0f, 5.0f));
+
+	// The hop is a floor, not an addition, so shooting down at a body still lifts it.
+	MM_CHECK_EQ(MM_FreezeTagShoveLiftVelocity(-40.0f, 24.0f), 24.0f);
+	MM_CHECK_EQ(MM_FreezeTagShoveLiftVelocity(300.0f, 24.0f), 300.0f);
+	MM_CHECK_EQ(MM_FreezeTagShoveLiftVelocity(-40.0f, 0.0f), 0.0f);
+
+	MM_CHECK_EQ(MM_FreezeTagShoveSpeedScale(350.0f, 700.0f), 1.0f);
+	MM_CHECK_EQ(MM_FreezeTagShoveSpeedScale(1400.0f, 700.0f), 0.5f);
+	MM_CHECK_EQ(MM_FreezeTagShoveSpeedScale(0.0f, 700.0f), 1.0f);
+	MM_CHECK_EQ(MM_FreezeTagShoveSpeedScale(-5.0f, 700.0f), 1.0f);
+
+	MM_CHECK(MM_FreezeTagHazardShouldRelease(3.0f, 3.0f));
+	MM_CHECK_FALSE(MM_FreezeTagHazardShouldRelease(2.9f, 3.0f));
+	// Zero is a kill switch, not an instant release.
+	MM_CHECK_FALSE(MM_FreezeTagHazardShouldRelease(100.0f, 0.0f));
+}
+
 MM_TEST(scoreboard_footer_reserve_keeps_layout_room_available) {
 	MM_CHECK_EQ(MM_ScoreboardFooterReserve(false), 96u);
 	MM_CHECK_EQ(MM_ScoreboardFooterReserve(true), 320u);
@@ -5429,6 +5515,97 @@ MM_TEST(awards_a_full_reel_fits_the_client_layout_budget) {
 }
 
 } // namespace
+
+MM_TEST(gib_severity_tiers_scale_with_overkill_and_saturate) {
+	// At or above the gib threshold there is no overkill to measure.
+	MM_CHECK_EQ(MM_GibsSeverity(MM_GIBS_HEALTH_THRESHOLD), 1);
+	MM_CHECK_EQ(MM_GibsSeverity(0), 1);
+	MM_CHECK_EQ(MM_GibsSeverity(-41), 1);
+	MM_CHECK_EQ(MM_GibsSeverity(-80), 2);
+	MM_CHECK_EQ(MM_GibsSeverity(-120), 3);
+	MM_CHECK_EQ(MM_GibsSeverity(-160), 4);
+	// Saturates rather than growing without bound on an extreme overkill.
+	MM_CHECK_EQ(MM_GibsSeverity(-100000), MM_GIBS_MAX_SEVERITY);
+}
+
+MM_TEST(gib_limb_budget_grows_with_severity_and_clamps_out_of_range_tiers) {
+	const mm_gib_limb_budget_t low = MM_GibsLimbBudget(1);
+	MM_CHECK_EQ(low.legs, 1);
+	MM_CHECK_EQ(low.bones, 2);
+	// A torso chunk only appears once enough of the player is missing.
+	MM_CHECK_EQ(low.torsos, 0);
+
+	const mm_gib_limb_budget_t high = MM_GibsLimbBudget(MM_GIBS_MAX_SEVERITY);
+	MM_CHECK_EQ(high.legs, 2);
+	MM_CHECK_EQ(high.bones, 4);
+	MM_CHECK_EQ(high.forearms, 2);
+	MM_CHECK_EQ(high.arms, 2);
+	MM_CHECK_EQ(high.torsos, 1);
+	MM_CHECK(MM_GibsLimbBudgetTotal(high) > MM_GibsLimbBudgetTotal(low));
+
+	// Out-of-range tiers clamp instead of producing negative counts.
+	MM_CHECK_EQ(MM_GibsLimbBudgetTotal(MM_GibsLimbBudget(0)), MM_GibsLimbBudgetTotal(low));
+	MM_CHECK_EQ(MM_GibsLimbBudgetTotal(MM_GibsLimbBudget(99)), MM_GibsLimbBudgetTotal(high));
+}
+
+MM_TEST(gib_meat_count_stacks_deathmatch_tiers_only) {
+	// Outside deathmatch the flat set is all a death throws.
+	MM_CHECK_EQ(MM_GibsMeatCount(-1000, false), 8);
+	MM_CHECK_EQ(MM_GibsMeatCount(-41, true), 8);
+	MM_CHECK_EQ(MM_GibsMeatCount(-101, true), 18);
+	MM_CHECK_EQ(MM_GibsMeatCount(-201, true), 30);
+	MM_CHECK_EQ(MM_GibsMeatCount(-301, true), 46);
+	// Thresholds are exclusive, so landing exactly on one does not pay for it.
+	MM_CHECK_EQ(MM_GibsMeatCount(-100, true), 8);
+
+	// The worst case has to stay inside the shipped g_gib_max default of 192,
+	// otherwise one death can evict every gib thrown by the deaths around it.
+	MM_CHECK_EQ(MM_GibsWorstCaseCount(), 46 + 11 + 1);
+	MM_CHECK(MM_GibsWorstCaseCount() < 192);
+}
+
+MM_TEST(gib_launch_clip_preserves_bearing_and_bounds_vertical) {
+	// A launch inside the ceiling is left alone apart from the vertical floor.
+	const mm_gib_launch_t gentle = MM_GibsClipLaunch({ 100.0f, 0.0f, 300.0f }, mm_gib_launch_bounds_t{ 600.0f, 150.0f, 600.0f });
+	MM_CHECK_EQ(gentle.x, 100.0f);
+	MM_CHECK_EQ(gentle.y, 0.0f);
+	MM_CHECK_EQ(gentle.z, 300.0f);
+
+	// Over the ceiling, both axes scale together so the bearing survives. The
+	// vanilla per-axis clamp would have returned (600, 600) and rotated this
+	// 2:1 launch onto the diagonal.
+	const mm_gib_launch_t fast = MM_GibsClipLaunch({ 2000.0f, 1000.0f, 400.0f }, mm_gib_launch_bounds_t{ 600.0f, 150.0f, 600.0f });
+	MM_CHECK(std::abs(fast.x - (2.0f * fast.y)) < 0.01f);
+	const float horizontal = std::sqrt((fast.x * fast.x) + (fast.y * fast.y));
+	MM_CHECK(std::abs(horizontal - 600.0f) < 0.01f);
+
+	// Vertical is bounded from both ends.
+	MM_CHECK_EQ(MM_GibsClipLaunch({ 0.0f, 0.0f, -900.0f }, mm_gib_launch_bounds_t{ 600.0f, 150.0f, 600.0f }).z, 150.0f);
+	MM_CHECK_EQ(MM_GibsClipLaunch({ 0.0f, 0.0f, 5000.0f }, mm_gib_launch_bounds_t{ 600.0f, 150.0f, 600.0f }).z, 600.0f);
+
+	// A dead-stop launch must not divide by zero.
+	const mm_gib_launch_t still = MM_GibsClipLaunch({ 0.0f, 0.0f, 0.0f }, mm_gib_launch_bounds_t{ 600.0f, 150.0f, 600.0f });
+	MM_CHECK_EQ(still.x, 0.0f);
+	MM_CHECK_EQ(still.y, 0.0f);
+}
+
+MM_TEST(gib_water_drag_is_tick_rate_independent) {
+	// Applying the per-frame factor across a full second of frames has to land
+	// on the per-second figure, whatever the tick rate.
+	for (const float frame_time : { 0.1f, 0.025f, 0.0125f }) {
+		const float per_frame = MM_GibsWaterDrag(0.15f, frame_time);
+		float retained = 1.0f;
+		for (int i = 0; i < static_cast<int>(1.0f / frame_time); ++i)
+			retained *= per_frame;
+
+		MM_CHECK(std::abs(retained - 0.15f) < 0.001f);
+	}
+
+	// Degenerate inputs stay in range rather than producing NaN.
+	MM_CHECK_EQ(MM_GibsWaterDrag(0.0f, 0.025f), 0.0f);
+	MM_CHECK_EQ(MM_GibsWaterDrag(1.0f, 0.025f), 1.0f);
+	MM_CHECK_EQ(MM_GibsWaterDrag(-1.0f, 0.025f), 0.0f);
+}
 
 int main() {
 	int failures = 0;

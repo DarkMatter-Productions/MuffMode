@@ -4,6 +4,7 @@
 
 #include "g_local.h"
 #include "muffmode/mm_arena.h"
+#include "muffmode/mm_freezetag.h"
 #include "muffmode/mm_ordnance_identity.h"
 
 /*
@@ -271,6 +272,13 @@ bool G_Impact(gentity_t *e1, const trace_t &trace) {
 		if (!e2_is_current())
 			return true;
 	}
+
+	// [MuffMode] Freeze Tag: a sliding frozen body is an inert prop, the same as
+	// it is to triggers, so it must not press buttons or plates on its way past.
+	// Only what the body itself touches is suppressed -- the dispatch above is
+	// untouched, so rockets still detonate against a body.
+	if (MM_FreezeTag_IsFrozen(e1))
+		return e1_is_current();
 
 	if (e2->touch && (e2->solid != SOLID_NOT || (e2->flags & FL_ALWAYS_TOUCH)))
 		e2->touch(e2, e1, trace, true);
@@ -983,8 +991,12 @@ static void G_Physics_Toss(gentity_t *ent) {
 
 				// friction for tossing stuff (gibs, etc)
 				if (ent->movetype == MOVETYPE_TOSS) {
-					ent->velocity *= 0.75f;
-					ent->avelocity *= 0.75f;
+					// [MuffMode] Freeze Tag: a shoved frozen body slides on the
+					// module's friction so the push actually carries; this damping
+					// is the whole of its travel distance. Gibs keep vanilla's.
+					const float toss_friction = MM_FreezeTag_TossFriction(ent);
+					ent->velocity *= toss_friction;
+					ent->avelocity *= toss_friction;
 				}
 			}
 		}

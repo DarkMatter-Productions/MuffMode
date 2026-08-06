@@ -44,6 +44,16 @@ struct preserved_loadout_t {
 	int32_t power_cubes = 0;
 };
 
+// A frozen body cannot die -- T_Damage returns before any health change -- so
+// anything that would normally destroy it has to hand the body back to its
+// owner instead. Releases are queued and run from the client frame, never
+// inline: crush damage arrives inside the pusher's transaction.
+enum class frozen_release_t : uint8_t {
+	None,
+	Hazard,
+	OutOfWorld
+};
+
 struct freeze_state_t {
 	bool frozen = false;
 	bool crouched = false;
@@ -63,6 +73,9 @@ struct freeze_state_t {
 	vec3_t orbit_angles = {};
 	vec3_t last_cmd_angles = {};
 	bool has_last_cmd_angles = false;
+	gtime_t hazard_since = 0_ms;
+	frozen_release_t release_pending = frozen_release_t::None;
+	bool crush_displace_pending = false;
 };
 
 std::array<freeze_state_t, MAX_CLIENTS> s_freeze;
@@ -110,6 +123,32 @@ float ThawSeconds()
 float MultiThawScale()
 {
 	return g_freezetag_multi_thaw_scale ? g_freezetag_multi_thaw_scale->value : 0.5f;
+}
+
+float FrozenShoveLift()
+{
+	return g_freezetag_frozen_shove_lift ? max(0.0f, g_freezetag_frozen_shove_lift->value) : 24.0f;
+}
+
+float FrozenShoveMaxSpeed()
+{
+	return g_freezetag_frozen_shove_max_speed ? max(1.0f, g_freezetag_frozen_shove_max_speed->value) : 700.0f;
+}
+
+float FrozenSlideFriction()
+{
+	return MM_FreezeTagFrozenSlideFriction(
+		g_freezetag_frozen_slide_friction ? g_freezetag_frozen_slide_friction->value : 0.9f);
+}
+
+float FrozenHazardReleaseSeconds()
+{
+	return g_freezetag_frozen_hazard_release_time ? max(0.0f, g_freezetag_frozen_hazard_release_time->value) : 10.0f;
+}
+
+float HorizontalSpeed(const vec3_t &velocity)
+{
+	return sqrtf(velocity[0] * velocity[0] + velocity[1] * velocity[1]);
 }
 
 gtime_t AutoThawTime()
@@ -564,6 +603,10 @@ gentity_t *EnsureFrozenViewProxy(gentity_t *ent, freeze_state_t &state)
 	proxy->s.modelindex2 = 0;
 	proxy->s.modelindex3 = 0;
 	proxy->s.modelindex4 = 0;
+	// Seed the lerp basis so the proxy's first frame does not interpolate in
+	// from the world origin. G_RunFrame maintains old_origin from here on.
+	proxy->s.origin = ent->s.origin;
+	proxy->s.old_origin = ent->s.origin;
 	state.view_proxy_entnum = proxy->s.number;
 	return proxy;
 }
@@ -585,8 +628,10 @@ void SyncFrozenViewProxy(gentity_t *ent, freeze_state_t &state)
 	proxy->clipmask = CONTENTS_NONE;
 	proxy->mins = {};
 	proxy->maxs = {};
+	// Only origin: old_origin is the client's interpolation basis and G_RunFrame
+	// already snapshots it before movement. Overwriting it here would snap the
+	// frozen player's own third-person body once per tick as it slides.
 	proxy->s.origin = ent->s.origin;
-	proxy->s.old_origin = ent->s.origin;
 	proxy->s.angles = state.body_angles;
 	proxy->s.modelindex = MODELINDEX_PLAYER;
 	proxy->s.modelindex2 = 0;
@@ -749,6 +794,11 @@ void ApplyFrozenState(gentity_t *ent, freeze_state_t &state)
 	ent->movetype = MOVETYPE_TOSS;
 	ent->solid = SOLID_BBOX;
 	ent->clipmask = MASK_PLAYERSOLID;
+	// Servers that turned player collision off must not get it back through the
+	// body, or a body wedged against a standing teammate stops moving no matter
+	// how hard it is shot.
+	if (!G_ShouldPlayersCollide(false))
+		ent->clipmask &= ~CONTENTS_PLAYER;
 	ent->svflags &= ~(SVF_NOCLIENT | SVF_DEADMONSTER);
 	ent->svflags |= SVF_PLAYER;
 	ent->flags &= ~(FL_NO_KNOCKBACK | FL_ALIVE_KNOCKBACK_ONLY | FL_NO_DAMAGE_EFFECTS);
@@ -777,7 +827,9 @@ void ApplyFrozenState(gentity_t *ent, freeze_state_t &state)
 	ent->s.frame = FRAME_stand01;
 	ApplyFrozenShell(ent, state);
 
-	G_ClearLagCompensationHistory(ent);
+	// Lag compensation history is cleared once, when the player freezes -- not
+	// here. This runs every frame, and wiping the samples each tick leaves a
+	// sliding body un-rewindable, so a high-ping shooter would have to lead it.
 	gi.linkentity(ent);
 }
 
@@ -835,6 +887,35 @@ bool TryDropToSafeThawOrigin(gentity_t *ent, const vec3_t &base, bool crouched, 
 	return true;
 }
 
+// Ground candidates to try around a point, nearest ring first.
+constexpr float kPlacementOffsets[][3] = {
+	{ 48, 0, 0 },
+	{ -48, 0, 0 },
+	{ 0, 48, 0 },
+	{ 0, -48, 0 },
+	{ 34, 34, 0 },
+	{ 34, -34, 0 },
+	{ -34, 34, 0 },
+	{ -34, -34, 0 },
+	{ 96, 0, 0 },
+	{ -96, 0, 0 },
+	{ 0, 96, 0 },
+	{ 0, -96, 0 },
+};
+
+// Shifts a body out of a mover's path without thawing it. Unlike the thaw
+// search this never accepts the body's current spot -- that spot is the problem.
+bool FindClearFrozenBodyOrigin(gentity_t *ent, bool crouched, vec3_t &out)
+{
+	for (const auto &offset : kPlacementOffsets) {
+		const vec3_t base = ent->s.origin + vec3_t{ offset[0], offset[1], offset[2] };
+		if (TryDropToSafeThawOrigin(ent, base, crouched, out))
+			return true;
+	}
+
+	return false;
+}
+
 bool FindSafeThawOrigin(gentity_t *ent, gentity_t *thawer, bool crouched, vec3_t &out)
 {
 	if (IsSafeThawOrigin(ent, ent->s.origin, crouched)) {
@@ -842,20 +923,7 @@ bool FindSafeThawOrigin(gentity_t *ent, gentity_t *thawer, bool crouched, vec3_t
 		return true;
 	}
 
-	static constexpr float offsets[][3] = {
-		{ 48, 0, 0 },
-		{ -48, 0, 0 },
-		{ 0, 48, 0 },
-		{ 0, -48, 0 },
-		{ 34, 34, 0 },
-		{ 34, -34, 0 },
-		{ -34, 34, 0 },
-		{ -34, -34, 0 },
-		{ 96, 0, 0 },
-		{ -96, 0, 0 },
-		{ 0, 96, 0 },
-		{ 0, -96, 0 },
-	};
+	const auto &offsets = kPlacementOffsets;
 
 	for (const auto &offset : offsets) {
 		const vec3_t base = ent->s.origin + vec3_t{ offset[0], offset[1], offset[2] };
@@ -1121,6 +1189,29 @@ void RespawnThawedPlayerAtSpawnPoint(gentity_t *ent, const freeze_state_t &state
 
 	AwardThawCredit(ent, credit);
 	gi.LocClient_Print(ent, PRINT_CENTER, "THAWED!");
+}
+
+// Hands a body back to its owner when the world destroyed it rather than a
+// teammate rescuing it: no thaw credit, no score, only the deliberate thaw
+// pays. Deliberately respawns instead of eliminating -- MM_FreezeTagResolveRound
+// returns Continue while either side has no participants, so eliminating the
+// last member of a team would leave the round unresolvable.
+void ReleaseFrozenBody(gentity_t *ent, frozen_release_t reason)
+{
+	if (!ent || !ent->client)
+		return;
+
+	gi.sound(ent, CHAN_BODY, gi.soundindex("world/brkglas.wav"), 1, ATTN_NORM, 0);
+	ThrowFrozenThawGibs(ent);
+
+	ent->s.modelindex = 0;
+	ent->client->eliminated = false;
+	ent->client->respawn_min_time = 0_ms;
+	ent->client->respawn_time = level.time;
+	ClientRespawn(ent);
+
+	(void) reason;
+	gi.LocClient_Print(ent, PRINT_CENTER, "Your frozen body was lost.");
 }
 
 void RestoreFrozenPlayerAt(gentity_t *ent, const freeze_state_t &state, gentity_t *thawer, const vec3_t &thaw_origin)
@@ -1543,6 +1634,7 @@ void MM_FreezeTag_FreezePlayer(gentity_t *self, gentity_t *attacker, const mod_t
 
 	StripFrozenInventory(self, mod);
 	self->client->eliminated = false;
+	G_ClearLagCompensationHistory(self);
 	ApplyFrozenState(self, *state);
 	gi.sound(self, CHAN_BODY, gi.soundindex("boss3/d_hit.wav"), 1, ATTN_NORM, 0);
 	CalculateRanks();
@@ -1657,6 +1749,30 @@ bool MM_FreezeTag_RunClientFrame(gentity_t *ent)
 	if (!state)
 		return false;
 
+	if (state->release_pending != frozen_release_t::None) {
+		const frozen_release_t reason = state->release_pending;
+		state->release_pending = frozen_release_t::None;
+		ReleaseFrozenBody(ent, reason);
+		return false;
+	}
+
+	if (state->crush_displace_pending) {
+		state->crush_displace_pending = false;
+
+		// If there is nowhere to put it the mover keeps reversing off the body,
+		// which is what vanilla does with any blocker it cannot kill. The body
+		// stays frozen and thawable either way -- never a free respawn.
+		vec3_t clear_origin;
+		if (FindClearFrozenBodyOrigin(ent, state->crouched, clear_origin)) {
+			ent->s.origin = clear_origin;
+			ent->velocity = {};
+			ent->avelocity = {};
+			ent->groundentity = nullptr;
+			G_ClearLagCompensationHistory(ent);
+			gi.linkentity(ent);
+		}
+	}
+
 	if (!IsRoundLive()) {
 		if (RoundKeepsFrozenPlayers()) {
 			ent->velocity = {};
@@ -1675,6 +1791,40 @@ bool MM_FreezeTag_RunClientFrame(gentity_t *ent)
 	ent->client->ps.pmove.pm_type = PM_FREEZE;
 	ent->client->weapon_thunk = false;
 	ent->client->weapon_fire_buffered = false;
+
+	// Nothing can kill a frozen body: T_Damage returns before any health change
+	// and air_finished is refreshed every frame, so lava, slime, trigger_hurt
+	// and drowning are all no-ops. Without a watchdog a body shoved into the
+	// middle of a lava pool strands its owner in orbit cam and plays their team
+	// a man down for the rest of the round. This is a last-resort safety valve,
+	// so the default is deliberately much slower than a thaw: dying in lava must
+	// never be a cheaper way out than a teammate coming for you.
+	const float hazard_seconds = FrozenHazardReleaseSeconds();
+	if (hazard_seconds > 0.0f) {
+		const contents_t here = gi.pointcontents(ent->s.origin + vec3_t{ 0, 0, 8 });
+		const bool in_hazard = (here & (CONTENTS_LAVA | CONTENTS_SLIME)) != 0;
+		const bool out_of_world = ent->s.origin[2] < -8192.0f ||
+			fabsf(ent->s.origin[0]) > 16384.0f || fabsf(ent->s.origin[1]) > 16384.0f;
+
+		if (out_of_world) {
+			ReleaseFrozenBody(ent, frozen_release_t::OutOfWorld);
+			return false;
+		}
+
+		// A body at a pool's edge is reachable, so an active rescue always wins:
+		// hold the timer while a teammate is on it, and make a failed attempt
+		// restart the clock rather than bank progress toward a free respawn.
+		if (in_hazard && !state->thaw_started) {
+			if (!state->hazard_since)
+				state->hazard_since = level.time;
+			if (MM_FreezeTagHazardShouldRelease((level.time - state->hazard_since).seconds(), hazard_seconds)) {
+				ReleaseFrozenBody(ent, frozen_release_t::Hazard);
+				return false;
+			}
+		} else {
+			state->hazard_since = 0_ms;
+		}
+	}
 
 	const gtime_t auto_thaw = AutoThawTime();
 	if (auto_thaw > 0_ms && level.time >= state->frozen_at + auto_thaw) {
@@ -1772,6 +1922,11 @@ void HoldBotAtThaw(gentity_t *bot, gentity_t *target)
 	const vec3_t look_delta = look_target - (bot->s.origin + vec3_t{ 0, 0, static_cast<float>(bot->viewheight) });
 	if (look_delta.lengthSquared() > 1.0f) {
 		vec3_t look_angles = vectoangles(look_delta.normalized());
+		// A body by the bot's feet is a downward look, and vectoangles reports
+		// that as a large negative pitch. ClientEndServerFrame folds only the
+		// > 180 case before dividing by 3, so the raw value would render the
+		// rescuer's model lying flat for the whole thaw.
+		look_angles[PITCH] = MM_FreezeTagNormalizeLookPitch(look_angles[PITCH]);
 		look_angles[ROLL] = 0;
 		bot->client->v_angle = look_angles;
 		bot->client->ps.viewangles = look_angles;
@@ -1910,7 +2065,44 @@ int MM_FreezeTag_ThawProgressPercent(const gentity_t *ent)
 	return MM_FreezeTagThawProgressPercent(state->thaw_progress_seconds, ThawSeconds());
 }
 
-void MM_FreezeTag_OnFrozenDamage(gentity_t *target, gentity_t *)
+void MM_FreezeTag_ApplyBodyImpulse(gentity_t *ent)
+{
+	if (!RawFrozen(ent) || !ent->client)
+		return;
+
+	// A grounded body's velocity is never integrated, because G_Physics_Toss
+	// returns early while groundentity is set. Clamp on every hit or a super
+	// shotgun's twenty pellets -- all of which land before physics runs once --
+	// stack into a single map-crossing launch.
+	const float scale = MM_FreezeTagShoveSpeedScale(ent->velocity.length(), FrozenShoveMaxSpeed());
+	if (scale < 1.0f)
+		ent->velocity *= scale;
+
+	if (!ent->groundentity)
+		return;
+
+	if (!MM_FreezeTagShoveShouldUnstick(HorizontalSpeed(ent->velocity), ent->velocity[2]))
+		return;
+
+	// Give the shove a small vertical component so the body clears the floor
+	// plane, then break ground contact so toss physics will integrate it.
+	ent->velocity[2] = MM_FreezeTagShoveLiftVelocity(ent->velocity[2], FrozenShoveLift());
+	ent->groundentity = nullptr;
+	ent->groundentity_linkcount = 0;
+}
+
+float MM_FreezeTag_TossFriction(const gentity_t *ent)
+{
+	// Gibs and dropped items keep vanilla's 0.75 per-contact damping. A frozen
+	// body on that curve loses 87% of its speed in eight floor contacts and
+	// parks inside a quarter second -- about one bounding box of travel. This is
+	// the whole of the travel-distance fix, and it needs no tick-rate rescale:
+	// contacts per second are already tick-rate independent, because a slower
+	// frame descends further into the floor between contacts.
+	return RawFrozen(ent) ? FrozenSlideFriction() : 0.75f;
+}
+
+void MM_FreezeTag_OnFrozenDamage(gentity_t *target, gentity_t *, const mod_t &mod)
 {
 	if (!RawFrozen(target) || !target->client)
 		return;
@@ -1919,4 +2111,18 @@ void MM_FreezeTag_OnFrozenDamage(gentity_t *target, gentity_t *)
 	target->client->pers.health = 1;
 	target->client->damage_blood = 0;
 	target->client->damage_armor = 0;
+
+	// A body parked in a door or plat track blocks the mover but cannot be
+	// crushed out of the way, jamming it. Shift the body clear rather than
+	// destroying it: respawning the owner here would make shoving a teammate
+	// into the nearest door a faster, safer and uncontested substitute for
+	// thawing them. Queue it -- this runs inside the pusher's transaction,
+	// which must not see entities moved under it.
+	if (mod.id == MOD_CRUSH) {
+		if (freeze_state_t *state = StateFor(target))
+			state->crush_displace_pending = true;
+		return;
+	}
+
+	MM_FreezeTag_ApplyBodyImpulse(target);
 }

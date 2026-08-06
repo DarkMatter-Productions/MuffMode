@@ -229,6 +229,12 @@
     <ClInclude Include="..\..\src\sgame\muffmode\mm_ghost.h">
       <Filter>sgame\muffmode</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_gibs.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_gibs_rules.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\src\sgame\muffmode\mm_horde.h">
       <Filter>sgame\muffmode</Filter>
     </ClInclude>
@@ -682,6 +688,9 @@
       <Filter>sgame\muffmode</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\sgame\muffmode\mm_ghost.cpp">
+      <Filter>sgame\muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_gibs.cpp">
       <Filter>sgame\muffmode</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\sgame\muffmode\mm_loc.cpp">

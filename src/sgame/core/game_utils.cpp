@@ -7,6 +7,7 @@
 #include "debug_log.h"
 // [MuffMode] Team management lives in muffmode/mm_team
 #include "muffmode/mm_arena.h"
+#include "muffmode/mm_freezetag.h"
 #include "muffmode/mm_profile.h"
 #include "muffmode/mm_parse.h"
 #include "muffmode/mm_skin.h"
@@ -910,6 +911,12 @@ void G_TouchTriggers(gentity_t *ent) {
 		 ((ent->client || (ent->svflags & SVF_MONSTER)) && ent->health <= 0)))
 		return;
 
+	// [MuffMode] Freeze Tag: a shoved frozen body is an inert prop. It never
+	// reached this function before bodies could move; letting it in now would
+	// have bodies opening doors, riding jump pads and taking teleporters.
+	if (MM_FreezeTag_IsFrozen(ent))
+		return;
+
 	num = gi.BoxEntities(ent->absmin, ent->absmax, touch, MAX_ENTITIES, AREA_TRIGGERS, G_TouchTriggers_BoxFilter, nullptr);
 	MM_PROFILE_ADD(trigger_box_entities, num);
 	// BoxEntities scratch can be overwritten by a nested trigger scan. Copy the
@@ -1059,6 +1066,12 @@ bool KillBox(gentity_t *ent, bool from_spawning, mod_id_t mod, bool bsp_clipping
 
 	// don't telefrag as spectator or noclip player...
 	if (ent->movetype == MOVETYPE_NOCLIP || ent->movetype == MOVETYPE_FREECAM)
+		return true;
+
+	// [MuffMode] Freeze Tag: a frozen body must never be the telefragger. It is
+	// immune to KillBox damage itself, so a body coming to rest on a spawn point
+	// would otherwise freeze whoever lands there and score for its owner.
+	if (MM_FreezeTag_IsFrozen(ent))
 		return true;
 
 	contents_t mask = CONTENTS_MONSTER | CONTENTS_PLAYER;

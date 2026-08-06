@@ -199,6 +199,8 @@
     <ClInclude Include="..\..\src\sgame\muffmode\mm_gametype.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_gametype_cfg_rules.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_ghost.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_gibs.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_gibs_rules.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_horde.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_horde_ai.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_horde_ai_rules.h" />
@@ -344,6 +346,7 @@
     <ClCompile Include="..\..\src\sgame\muffmode\mm_freezetag.cpp" />
     <ClCompile Include="..\..\src\sgame\muffmode\mm_gametype.cpp" />
     <ClCompile Include="..\..\src\sgame\muffmode\mm_ghost.cpp" />
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_gibs.cpp" />
     <ClCompile Include="..\..\src\sgame\muffmode\mm_horde_ai.cpp" />
     <ClCompile Include="..\..\src\sgame\muffmode\mm_horde.cpp" />
     <ClCompile Include="..\..\src\sgame\muffmode\mm_horde_tables.cpp" />

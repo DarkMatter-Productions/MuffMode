@@ -3,6 +3,7 @@
 // Shared gib, debris and simple explosion helpers.
 #include "g_local.h"
 #include "muffmode/mm_arena.h"
+#include "muffmode/mm_gibs.h"
 
 namespace {
 
@@ -106,9 +107,18 @@ gentity_t *ThrowGib(gentity_t *self, const char *gibname, int damage, gib_type_t
 			break;
 	}
 
-	if (i == 3 && gib != self) {
-		G_FreeEntity(gib);
-		return nullptr;
+	if (i == 3) {
+		// only free us if we're not being turned into the gib
+		if (gib != self) {
+			G_FreeEntity(gib);
+			return nullptr;
+		}
+
+		// [MuffMode] A head gib is the corpse itself and cannot be dropped, but
+		// leaving it wherever the last rejected probe landed buries it in the
+		// geometry that probe hit. Fall back to the unjittered centre, which is
+		// the position the body already occupied.
+		gib->s.origin = origin;
 	}
 
 	gib->s.modelindex = gi.modelindex(gibname);
@@ -157,7 +167,9 @@ gentity_t *ThrowGib(gentity_t *self, const char *gibname, int damage, gib_type_t
 		VelocityForDamage(damage, velocity_delta);
 		const float velocity_scale = (type & GIB_METALLIC) ? 1.0f : ((type & GIB_ACID) ? 3.0f : 0.5f);
 		gib->velocity = self->velocity + (velocity_delta * velocity_scale);
-		ClipGibVelocity(gib);
+		// [MuffMode] Bound the launch without squaring off its direction; see
+		// MM_Gibs_ClipVelocity. Falls back to ClipGibVelocity when disabled.
+		MM_Gibs_ClipVelocity(gib);
 	}
 
 	if (type & GIB_UPRIGHT) {
@@ -173,14 +185,27 @@ gentity_t *ThrowGib(gentity_t *self, const char *gibname, int damage, gib_type_t
 	gib->s.angles[YAW] = frandom(359);
 	gib->s.angles[ROLL] = frandom(359);
 
-	gib->think = GibSink;
-	gib->nextthink = level.time + GibLifetime();
-	gib->timestamp = gib->nextthink + 1.5_sec;
-
 	gi.linkentity(gib);
 
 	gib->watertype = gi.pointcontents(gib->s.origin);
 	gib->waterlevel = (gib->watertype & MASK_WATER) ? WATER_FEET : WATER_NONE;
+
+	// [MuffMode] The enhanced presentation owns the whole gib lifetime: flight
+	// orientation, water motion, impact effects and a fade-out. Vanilla's plain
+	// sink stays intact so g_gib_enhanced 0 is a true fallback rather than a
+	// half-applied state.
+	if (MM_Gibs_Enhanced()) {
+		gib->timestamp = level.time + GibLifetime();
+		MM_Gibs_Finalize(gib, !(type & GIB_DEBRIS), (type & GIB_UPRIGHT) != 0);
+
+		// A head gib is the corpse entity, which the budget must never recycle.
+		if (gib != self)
+			MM_Gibs_Track(gib);
+	} else {
+		gib->think = GibSink;
+		gib->nextthink = level.time + GibLifetime();
+		gib->timestamp = gib->nextthink + 1.5_sec;
+	}
 
 	return gib;
 }
@@ -223,11 +248,21 @@ void ThrowClientHead(gentity_t *self, int damage) {
 		self->nextthink = 0_ms;
 	}
 
-	self->think = GibSink;
-	self->nextthink = level.time + ClientHeadLifetime();
-	self->timestamp = self->nextthink + 1.5_sec;
-
 	gi.linkentity(self);
+
+	self->watertype = gi.pointcontents(self->s.origin);
+	self->waterlevel = (self->watertype & MASK_WATER) ? WATER_FEET : WATER_NONE;
+
+	// [MuffMode] Same lifetime split as ThrowGib. The head keeps its own slot, so
+	// MM_Gibs_Finalize skips the effects that outlive a recycled entity.
+	if (MM_Gibs_Enhanced()) {
+		self->timestamp = level.time + ClientHeadLifetime();
+		MM_Gibs_Finalize(self, true, false);
+	} else {
+		self->think = GibSink;
+		self->nextthink = level.time + ClientHeadLifetime();
+		self->timestamp = self->nextthink + 1.5_sec;
+	}
 }
 
 void BecomeExplosion1(gentity_t *self) {

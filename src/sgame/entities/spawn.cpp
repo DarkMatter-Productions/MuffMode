@@ -22,6 +22,7 @@
 #include "muffmode/mm_combat_heatmap.h"
 #include "muffmode/mm_ent_respawn.h"
 #include "muffmode/mm_gametype.h"
+#include "muffmode/mm_gibs.h"
 #include "muffmode/mm_map_pick.h"
 #include "muffmode/mm_ghost.h"
 #include "muffmode/mm_parse.h"
@@ -987,6 +988,10 @@ static void PrecacheAssets() {
 	gi.modelindex("models/objects/gibs/skull/tris.md2");
 	gi.modelindex("models/objects/gibs/head2/tris.md2");
 	gi.modelindex("models/objects/gibs/sm_metal/tris.md2");
+	// [MuffMode] Registers the stock leg model and the unused player/gibimp*
+	// impact sounds up front, so the enhanced gib paths never trigger a late
+	// runtime configstring update mid-match.
+	MM_Gibs_Precache();
 
 	ii_highlight = gi.imageindex("i_ctfj");
 
@@ -1571,6 +1576,9 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
 	// [MuffMode] Prop respawn records borrow TAG_LEVEL strings; retire them while
 	// those pointers are still valid.
 	MM_EntRespawn_ClearAll();
+	// [MuffMode] The live-gib budget holds raw slot references; drop them before
+	// the entity array is reused so it cannot free a recycled slot.
+	MM_Gibs_ClearAll();
 	// [MuffMode] The next-map pick and the post-match awards reel keep their
 	// state module-side, so neither comes back cleared with level_locals_t.
 	MM_MapPick_Reset();
@@ -2367,6 +2375,9 @@ world_entity_reload_result_t G_ResetWorldEntitiesFromSavedString()
 	// [MuffMode] The lump is about to recreate every prop, so any queued rebuild is
 	// now a duplicate. Drop the records before their TAG_LEVEL strings go away.
 	MM_EntRespawn_ClearAll();
+	// [MuffMode] The live-gib budget holds raw slot references; drop them before
+	// the entity array is reused so it cannot free a recycled slot.
+	MM_Gibs_ClearAll();
 	// [MuffMode] The next-map pick and the post-match awards reel keep their
 	// state module-side, so neither comes back cleared with level_locals_t.
 	MM_MapPick_Reset();

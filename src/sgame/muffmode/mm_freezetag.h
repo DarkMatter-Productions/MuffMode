@@ -37,4 +37,10 @@ bool MM_FreezeTag_BuildRoundHudStatus(int display_round, std::string &out);
 bool MM_FreezeTag_BuildHudStatus(gentity_t *viewer, std::string &out);
 bool MM_FreezeTag_BuildCompactAliveHudStatus(gentity_t *viewer, std::string &out);
 
-void MM_FreezeTag_OnFrozenDamage(gentity_t *target, gentity_t *attacker);
+void MM_FreezeTag_OnFrozenDamage(gentity_t *target, gentity_t *attacker, const mod_t &mod);
+
+// Frozen bodies are shovable. G_Physics_Toss ignores a grounded entity, so
+// anything that pushes a body has to route through the impulse helper, and the
+// toss integrator asks the module for the body's slide friction.
+void MM_FreezeTag_ApplyBodyImpulse(gentity_t *ent);
+float MM_FreezeTag_TossFriction(const gentity_t *ent);

@@ -193,6 +193,10 @@ void Weapon_Grapple_Pull(gentity_t *self) {
 			hookdir.normalize();
 			self->enemy->velocity = hookdir * g_grapple_pull_speed->value;
 			G_AddGravity(self->enemy);
+			// [MuffMode] Freeze Tag: the pull writes velocity onto a grounded
+			// MOVETYPE_TOSS body, which G_Physics_Toss never integrates. Route it
+			// through the same unstick-and-clamp path gunfire uses.
+			MM_FreezeTag_ApplyBodyImpulse(self->enemy);
 			gi.linkentity(self->enemy);
 		} else {
 			self->enemy->velocity = {};
