@@ -1,11 +1,22 @@
 // Copyright (c) ZeniMax Media Inc.
 // Licensed under the GNU General Public License 2.0.
 
+// [MuffMode] This header had no include guard, so any translation unit that reached it twice
+// (directly and again through g_local.h) failed to compile with redefinition errors. Every other
+// header in the tree already uses #pragma once.
+#pragma once
+
+#include <cstddef>
+#include <string_view>
+
 enum {
 	MENU_ALIGN_LEFT,
 	MENU_ALIGN_CENTER,
 	MENU_ALIGN_RIGHT
 };
+
+constexpr int MENU_MAX_ROWS = 18;
+constexpr std::size_t MENU_MAX_LINE_CHARS = 28;
 
 struct menu_t;
 
@@ -16,13 +27,14 @@ struct menu_hnd_t {
 	int		cur;
 	int		num;
 	void	*arg;
+	bool	arg_owned;
 	UpdateFunc_t UpdateFunc;
 };
 
 using SelectFunc_t = void (*)(gentity_t *ent, menu_hnd_t *hnd);
 
 struct menu_t {
-	char		 text[256];	// 26];	// [64];
+	char		 text[256];	// Stored text; rendering is capped at 28 visible characters.
 	int			 align;
 	SelectFunc_t SelectFunc;
 	char         text_arg1[64];
@@ -31,6 +43,7 @@ struct menu_t {
 void		P_Menu_Dirty();
 menu_hnd_t	*P_Menu_Open(gentity_t *ent, const menu_t *entries, int cur, int num, void *arg, UpdateFunc_t UpdateFunc);
 void		P_Menu_Close(gentity_t *ent);
+void		P_Menu_SetText(menu_t *entry, std::string_view text);
 void		P_Menu_UpdateEntry(menu_t *entry, const char *text, int align, SelectFunc_t SelectFunc);
 void		P_Menu_Do_Update(gentity_t *ent);
 void		P_Menu_Update(gentity_t *ent);

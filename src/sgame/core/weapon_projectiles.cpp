@@ -1,14 +1,196 @@
 // Copyright (c) ZeniMax Media Inc.
 // Licensed under the GNU General Public License 2.0.
 #include "g_local.h"
+#include "muffmode/mm_arena.h"
+#include "muffmode/mm_ordnance_identity.h"
 #include "muffmode/mm_ruleset_weapons.h"
+
+// Delayed ordnance reserves count for its owner's entity generation and sounds
+// for the room where it was fired. Its arena field is the matching spatial
+// room. Instrumented families below must not reuse count/sounds; disruptor
+// projectiles/daemons additionally reserve style for target generation.
+static void WeaponCaptureOrdnanceOwner(gentity_t *ordnance, gentity_t *owner) {
+	ordnance->owner = owner;
+	ordnance->count = owner ? owner->spawn_count : 0;
+	ordnance->sounds = MM_Arena_Id(owner);
+	ordnance->arena = ordnance->sounds;
+}
+
+static gentity_t *WeaponResolveOrdnanceOwner(const gentity_t *ordnance,
+	gentity_t *owner) {
+	if (!ordnance || !owner)
+		return nullptr;
+
+	const bool connected = !owner->client || owner->client->pers.connected;
+	return MM_OrdnanceIdentityMatches(ordnance->count, ordnance->sounds,
+		owner->inuse, connected, owner->spawn_count, MM_Arena_Active(),
+		MM_Arena_Id(owner))
+		? owner : nullptr;
+}
+
+static gentity_t *WeaponResolveOrdnanceOwner(const gentity_t *ordnance) {
+	return WeaponResolveOrdnanceOwner(ordnance,
+		ordnance ? ordnance->owner : nullptr);
+}
+
+static bool WeaponDiscardOrphan(gentity_t *ordnance, gentity_t *owner) {
+	if (WeaponResolveOrdnanceOwner(ordnance, owner))
+		return false;
+	G_FreeEntity(ordnance);
+	return true;
+}
+
+static bool WeaponDiscardOrphan(gentity_t *ordnance) {
+	return WeaponDiscardOrphan(ordnance,
+		ordnance ? ordnance->owner : nullptr);
+}
+
+static void WeaponCaptureOrdnanceTarget(gentity_t *ordnance,
+	gentity_t *target) {
+	ordnance->enemy = target;
+	ordnance->style = target ? target->spawn_count : 0;
+}
+
+static gentity_t *WeaponResolveOrdnanceTarget(const gentity_t *ordnance) {
+	if (!ordnance || !ordnance->enemy)
+		return nullptr;
+
+	gentity_t *target = ordnance->enemy;
+	const bool connected = !target->client || target->client->pers.connected;
+	return MM_OrdnanceIdentityMatches(ordnance->style, ordnance->sounds,
+		target->inuse, connected, target->spawn_count, MM_Arena_Active(),
+		MM_Arena_Id(target))
+		? target : nullptr;
+}
+
+static gentity_t *WeaponResolveOrdnanceTargetGeneration(
+	const gentity_t *ordnance) {
+	if (!ordnance || !ordnance->enemy)
+		return nullptr;
+
+	gentity_t *target = ordnance->enemy;
+	return target->inuse && target->spawn_count == ordnance->style
+		? target : nullptr;
+}
+
+static void WeaponClearDisruptorTrail(const gentity_t *ordnance) {
+	gentity_t *target = WeaponResolveOrdnanceTargetGeneration(ordnance);
+	if (target && !target->client)
+		target->s.effects &= ~EF_TRACKERTRAIL;
+}
+
+static bool WeaponEntityIdentityMatches(const gentity_t *entity,
+	int32_t generation, int arena_id) {
+	if (!entity)
+		return false;
+	const bool connected = !entity->client || entity->client->pers.connected;
+	return MM_OrdnanceIdentityMatches(generation, arena_id, entity->inuse,
+		connected, entity->spawn_count, MM_Arena_Active(),
+		MM_Arena_Id(entity));
+}
+
+static bool WeaponEntityGenerationMatches(const gentity_t *entity,
+	int32_t generation) {
+	return entity && MM_OrdnanceGenerationMatches(generation, entity->inuse,
+		entity->spawn_count);
+}
+
+void MM_CaptureOrdnanceOwner(gentity_t *ordnance, gentity_t *owner) {
+	WeaponCaptureOrdnanceOwner(ordnance, owner);
+}
+
+gentity_t *MM_ResolveOrdnanceOwner(const gentity_t *ordnance,
+	gentity_t *owner) {
+	return WeaponResolveOrdnanceOwner(ordnance, owner);
+}
+
+gentity_t *MM_ResolveOrdnanceOwner(const gentity_t *ordnance) {
+	return WeaponResolveOrdnanceOwner(ordnance);
+}
+
+bool MM_DiscardOrphan(gentity_t *ordnance, gentity_t *owner) {
+	return WeaponDiscardOrphan(ordnance, owner);
+}
+
+bool MM_DiscardOrphan(gentity_t *ordnance) {
+	return WeaponDiscardOrphan(ordnance);
+}
+
+bool MM_OrdnanceEntityIdentityMatches(const gentity_t *entity,
+	int32_t generation, int arena_id) {
+	return WeaponEntityIdentityMatches(entity, generation, arena_id);
+}
 
 static size_t WeaponEntityCount() {
 	return min(static_cast<size_t>(globals.num_entities), static_cast<size_t>(game.maxentities));
 }
 
-static size_t WeaponClientEntityCount() {
-	return min(WeaponEntityCount(), static_cast<size_t>(game.maxclients) + 1);
+static bool WeaponArenaClientRecipient(const gentity_t *source, const gentity_t *recipient) {
+	if (notGT(GT_ARENA))
+		return true;
+
+	const int arena_id = MM_Arena_Id(source);
+	return arena_id <= 0 || MM_Arena_Id(recipient) == arena_id;
+}
+
+// Dynamic entities in another arena must not shorten an immediate weapon
+// trace. Temporarily unlink only those foreign blockers, then restore them
+// before returning the final trace.
+static trace_t WeaponArenaTraceline(const vec3_t &start, const vec3_t &end,
+	gentity_t *passent, contents_t mask, const gentity_t *source) {
+	if (notGT(GT_ARENA))
+		return gi.traceline(start, end, passent, mask);
+
+	struct ignored_entity_t {
+		gentity_t *entity;
+		int32_t generation;
+	};
+
+	// Immediate game traces are synchronous. A fixed scratch buffer avoids both
+	// per-shot heap churn and allocation failure after entities are unlinked.
+	static std::array<ignored_entity_t, MAX_ENTITIES> ignored;
+	size_t ignored_count = 0;
+	struct restore_ignored_t {
+		std::array<ignored_entity_t, MAX_ENTITIES> &ignored;
+		size_t &count;
+
+		void restore_now() noexcept {
+			while (count > 0) {
+				const ignored_entity_t entry = ignored[--count];
+				if (WeaponEntityGenerationMatches(entry.entity,
+					entry.generation))
+					gi.linkentity(entry.entity);
+			}
+		}
+
+		~restore_ignored_t() noexcept {
+			restore_now();
+		}
+	} restore { ignored, ignored_count };
+
+	for (;;) {
+		trace_t tr = gi.traceline(start, end, passent, mask);
+		if (!tr.ent || tr.ent == world || tr.fraction == 1.0f ||
+			MM_Arena_CanInteract(source, tr.ent))
+			return tr;
+
+		if (ignored_count == ignored.size()) {
+			// MAX_ENTITIES is the engine-wide entity bound, so this requires a
+			// broken trace contract. Restore explicitly and fail closed rather
+			// than ever returning the foreign hit.
+			restore.restore_now();
+			trace_t blocked {};
+			blocked.allsolid = true;
+			blocked.startsolid = true;
+			blocked.endpos = start;
+			blocked.ent = world;
+			return blocked;
+		}
+
+		gentity_t *foreign = tr.ent;
+		ignored[ignored_count++] = { foreign, foreign->spawn_count };
+		gi.unlinkentity(foreign);
+	}
 }
 
 /*
@@ -28,23 +210,26 @@ bool fire_hit(gentity_t *self, vec3_t aim, int damage, int kick) {
 
 	// enemy can be cleared (killed/removed/disconnected) after the melee swing
 	// began but before this impact frame runs; bail out rather than deref null
-	if (!self->enemy)
+	if (!self->enemy || !self->enemy->inuse)
 		return false;
+	gentity_t *enemy = self->enemy;
+	const int32_t enemy_generation = enemy->spawn_count;
+	const int enemy_arena = MM_Arena_Id(enemy);
 
 	// see if enemy is in range
-	range = distance_between_boxes(self->enemy->absmin, self->enemy->absmax, self->absmin, self->absmax);
+	range = distance_between_boxes(enemy->absmin, enemy->absmax, self->absmin, self->absmax);
 	if (range > aim[0])
 		return false;
 
 	if (!(aim[1] > self->mins[0] && aim[1] < self->maxs[0])) {
 		// this is a side hit so adjust the "right" value out to the edge of their bbox
 		if (aim[1] < 0)
-			aim[1] = self->enemy->mins[0];
+			aim[1] = enemy->mins[0];
 		else
-			aim[1] = self->enemy->maxs[0];
+			aim[1] = enemy->maxs[0];
 	}
 
-	point = closest_point_to_box(self->s.origin, self->enemy->absmin, self->enemy->absmax);
+	point = closest_point_to_box(self->s.origin, enemy->absmin, enemy->absmax);
 
 	// check that we can hit the point on the bbox
 	tr = gi.traceline(self->s.origin, point, self, MASK_PROJECTILE);
@@ -54,28 +239,35 @@ bool fire_hit(gentity_t *self, vec3_t aim, int damage, int kick) {
 			return false;
 		// if it will hit any client/monster then hit the one we wanted to hit
 		if ((tr.ent->svflags & SVF_MONSTER) || (tr.ent->client))
-			tr.ent = self->enemy;
+			tr.ent = enemy;
 	}
 
 	// check that we can hit the player from the point
-	tr = gi.traceline(point, self->enemy->s.origin, self, MASK_PROJECTILE);
+	tr = gi.traceline(point, enemy->s.origin, self, MASK_PROJECTILE);
 
 	if (tr.fraction < 1) {
 		if (!tr.ent->takedamage)
 			return false;
 		// if it will hit any client/monster then hit the one we wanted to hit
 		if ((tr.ent->svflags & SVF_MONSTER) || (tr.ent->client))
-			tr.ent = self->enemy;
+			tr.ent = enemy;
 	}
 
 	AngleVectors(self->s.angles, forward, right, up);
 	point = self->s.origin + (forward * range);
 	point += (right * aim[1]);
 	point += (up * aim[2]);
-	dir = point - self->enemy->s.origin;
+	dir = point - enemy->s.origin;
 
 	// do the damage
+	const int32_t attacker_generation = self->spawn_count;
+	const int32_t hit_generation = tr.ent->spawn_count;
+	const int hit_arena = MM_Arena_Id(tr.ent);
 	T_Damage(tr.ent, self, self, dir, point, vec3_origin, damage, kick / 2, DAMAGE_NO_KNOCKBACK, MOD_HIT);
+	if (!WeaponEntityGenerationMatches(self, attacker_generation) ||
+		!WeaponEntityIdentityMatches(tr.ent, hit_generation, hit_arena) ||
+		!WeaponEntityIdentityMatches(enemy, enemy_generation, enemy_arena))
+		return false;
 
 	if (!(tr.ent->svflags & SVF_MONSTER) && (!tr.ent->client))
 		return false;
@@ -83,12 +275,12 @@ bool fire_hit(gentity_t *self, vec3_t aim, int damage, int kick) {
 	//MS_Adjust(self->owner->client, MSTAT_HITS, 1);
 
 	// do our special form of knockback here
-	v = (self->enemy->absmin + self->enemy->absmax) * 0.5f;
+	v = (enemy->absmin + enemy->absmax) * 0.5f;
 	v -= point;
 	v.normalize();
-	self->enemy->velocity += v * kick;
-	if (self->enemy->velocity[2] > 0)
-		self->enemy->groundentity = nullptr;
+	enemy->velocity += v * kick;
+	if (enemy->velocity[2] > 0)
+		enemy->groundentity = nullptr;
 	return true;
 }
 
@@ -151,6 +343,9 @@ struct fire_lead_pierce_t : pierce_args_t {
 	// we hit an entity; return false to stop the piercing.
 	// you can adjust the mask for the re-trace (for water, etc).
 	bool hit(contents_t &mask, vec3_t &end) override {
+		if (GT(GT_ARENA) && !MM_Arena_CanInteract(self, tr.ent))
+			return mark(tr.ent);
+
 		// see if we hit water
 		if (tr.contents & MASK_WATER) {
 			int color;
@@ -202,7 +397,14 @@ struct fire_lead_pierce_t : pierce_args_t {
 
 		// did we hit an hurtable entity?
 		if (tr.ent->takedamage) {
+			const int32_t attacker_generation = self->spawn_count;
+			const int32_t target_generation = tr.ent->spawn_count;
+			const int target_arena = MM_Arena_Id(tr.ent);
 			T_Damage(tr.ent, self, self, aimdir, tr.endpos, tr.plane.normal, damage, kick, mod.id == MOD_TESLA ? DAMAGE_ENERGY : DAMAGE_BULLET, mod);
+			if (!WeaponEntityGenerationMatches(self, attacker_generation) ||
+				!WeaponEntityIdentityMatches(tr.ent, target_generation,
+					target_arena))
+				return false;
 
 			if (self->owner)
 				MS_Adjust(self->owner->client, MSTAT_HITS, 1);
@@ -273,7 +475,10 @@ static void fire_lead(gentity_t *self, const vec3_t &start, const vec3_t &aimdir
 	}
 
 	// check initial firing position
+	const int32_t attacker_generation = self->spawn_count;
 	pierce_trace(self->s.origin, start, self, args, args.mask);
+	if (!WeaponEntityGenerationMatches(self, attacker_generation))
+		return;
 
 	// we're clear, so do the second pierce
 	if (args.tr.fraction == 1.f) {
@@ -296,7 +501,11 @@ static void fire_lead(gentity_t *self, const vec3_t &start, const vec3_t &aimdir
 		end += (right * r);
 		end += (up * u);
 
+		const int32_t second_attacker_generation = self->spawn_count;
 		pierce_trace(args.tr.endpos, end, self, args, args.mask);
+		if (!WeaponEntityGenerationMatches(self,
+			second_attacker_generation))
+			return;
 	}
 
 	// if went through water, determine where the end is and make a bubble trail
@@ -343,8 +552,12 @@ Shoots shotgun pellets.  Used by shotgun and super shotgun.
 =================
 */
 void fire_shotgun(gentity_t *self, const vec3_t &start, const vec3_t &aimdir, int damage, int kick, int hspread, int vspread, int count, mod_t mod) {
-	for (int i = 0; i < count; i++)
+	const int32_t attacker_generation = self->spawn_count;
+	for (int i = 0; i < count; i++) {
 		fire_lead(self, start, aimdir, damage, kick, TE_SHOTGUN, hspread, vspread, mod);
+		if (!WeaponEntityGenerationMatches(self, attacker_generation))
+			return;
+	}
 }
 
 /*
@@ -356,31 +569,56 @@ Fires a single blaster bolt.  Used by the blaster and hyper blaster.
 */
 TOUCH(blaster_touch) (gentity_t *ent, gentity_t *other, const trace_t &tr, bool other_touching_self) -> void {
 	vec3_t origin;
-	if (other == ent->owner)
+	gentity_t *owner = WeaponResolveOrdnanceOwner(ent);
+	if (!owner) {
+		G_FreeEntity(ent);
+		return;
+	}
+	if (other == owner)
 		return;
 
 	if (tr.surface && (tr.surface->flags & SURF_SKY)) {
 		G_FreeEntity(ent);
 		return;
 	}
+	const int32_t target_generation = other->spawn_count;
+	const int target_arena = MM_Arena_Id(other);
+	gentity_t *radius_ignore = other;
 
 	// PMM - crash prevention
-	if (ent->owner && ent->owner->client)
-		PlayerNoise(ent->owner, ent->s.origin, PNOISE_IMPACT);
+	if (owner->client)
+		PlayerNoise(owner, ent->s.origin, PNOISE_IMPACT);
 
 	// calculate position for the explosion entity
 	origin = ent->s.origin + tr.plane.normal;
 
 	if (other->takedamage) {
-		T_Damage(other, ent, ent->owner, ent->velocity, ent->s.origin, tr.plane.normal, ent->dmg, 1, DAMAGE_ENERGY | DAMAGE_STAT_ONCE, static_cast<mod_id_t>(ent->style));
+		const int32_t bolt_generation = ent->spawn_count;
+		T_Damage(other, ent, owner, ent->velocity, ent->s.origin, tr.plane.normal, ent->dmg, 1, DAMAGE_ENERGY | DAMAGE_STAT_ONCE, static_cast<mod_id_t>(ent->style));
+		if (!WeaponEntityGenerationMatches(ent, bolt_generation))
+			return;
+		if (!WeaponEntityIdentityMatches(other, target_generation,
+			target_arena))
+			radius_ignore = nullptr;
 
-		MS_Adjust(ent->owner->client, MSTAT_HITS, 1);
+		if ((owner = WeaponResolveOrdnanceOwner(ent)) && owner->client)
+			MS_Adjust(owner->client, MSTAT_HITS, 1);
 		//MS_Adjust(ent->owner->client, MSTAT_WP_BL_HITS, 1);
 	} else {
 	}
 
-	if (ent->splash_damage)
-		T_RadiusDamage(ent, ent->owner, (float)ent->splash_damage, other, ent->splash_radius, DAMAGE_ENERGY, MOD_HYPERBLASTER);
+	if (ent->splash_damage && (owner = WeaponResolveOrdnanceOwner(ent))) {
+		const int32_t bolt_generation = ent->spawn_count;
+		T_RadiusDamage(ent, owner, (float)ent->splash_damage,
+			radius_ignore, ent->splash_radius, DAMAGE_ENERGY,
+			MOD_HYPERBLASTER);
+		if (!WeaponEntityGenerationMatches(ent, bolt_generation))
+			return;
+	}
+	if (!WeaponResolveOrdnanceOwner(ent)) {
+		G_FreeEntity(ent);
+		return;
+	}
 
 	gi.WriteByte(svc_temp_entity);
 	gi.WriteByte((ent->style != MOD_BLUEBLASTER) ? TE_BLASTER : TE_BLUEHYPERBLASTER);
@@ -411,7 +649,7 @@ void fire_blaster(gentity_t *self, const vec3_t &start, const vec3_t &dir, int d
 	bolt->s.effects |= effect;
 	bolt->s.modelindex = gi.modelindex("models/objects/laser/tris.md2");
 	bolt->s.sound = gi.soundindex("misc/lasfly.wav");
-	bolt->owner = self;
+	WeaponCaptureOrdnanceOwner(bolt, self);
 	bolt->touch = blaster_touch;
 	bolt->style = mod.id;
 	
@@ -426,7 +664,7 @@ void fire_blaster(gentity_t *self, const vec3_t &start, const vec3_t &dir, int d
 	bolt->classname = "bolt";
 	gi.linkentity(bolt);
 
-	tr = gi.traceline(self->s.origin, bolt->s.origin, bolt, bolt->clipmask);
+	tr = WeaponArenaTraceline(self->s.origin, bolt->s.origin, bolt, bolt->clipmask, self);
 	if (tr.fraction < 1.0f) {
 		bolt->s.origin = tr.endpos + (tr.plane.normal * 1.f);
 		bolt->touch(bolt, tr.ent, tr, false);
@@ -442,46 +680,81 @@ Fires a single green blaster bolt. Used by monsters, generally.
 */
 static TOUCH(blaster2_touch) (gentity_t *self, gentity_t *other, const trace_t &tr, bool other_touching_self) -> void {
 	mod_t mod;
-	int	  damagestat;
+	gentity_t *owner = WeaponResolveOrdnanceOwner(self);
+	if (!owner) {
+		G_FreeEntity(self);
+		return;
+	}
 
-	if (other == self->owner)
+	if (other == owner)
 		return;
 
 	if (tr.surface && (tr.surface->flags & SURF_SKY)) {
 		G_FreeEntity(self);
 		return;
 	}
+	const int32_t target_generation = other->spawn_count;
+	const int target_arena = MM_Arena_Id(other);
 
-	if (self->owner && self->owner->client)
-		PlayerNoise(self->owner, self->s.origin, PNOISE_IMPACT);
+	if (owner->client)
+		PlayerNoise(owner, self->s.origin, PNOISE_IMPACT);
 
 	if (other->takedamage) {
+		bool target_current = true;
 		// the only time players will be firing blaster2 bolts will be from the
 		// defender sphere.
-		if (self->owner && self->owner->client)
+		if (owner->client)
 			mod = MOD_DEFENDER_SPHERE;
 		else
 			mod = MOD_BLASTER2;
 
-		if (self->owner) {
-			damagestat = self->owner->takedamage;
-			self->owner->takedamage = false;
-			if (self->dmg >= 5)
-				T_RadiusDamage(self, self->owner, (float)(self->dmg * 2), other, self->splash_radius, DAMAGE_ENERGY, MOD_UNKNOWN);
-			T_Damage(other, self, self->owner, self->velocity, self->s.origin, tr.plane.normal, self->dmg, 1, DAMAGE_ENERGY | DAMAGE_STAT_ONCE, mod);
-			self->owner->takedamage = damagestat;
-
-			MS_Adjust(self->owner->client, MSTAT_HITS, 1);
-			//MS_Adjust(self->owner->client, MSTAT_WP_BL_HITS, 1);
-		} else {
-			if (self->dmg >= 5)
-				T_RadiusDamage(self, self->owner, (float)(self->dmg * 2), other, self->splash_radius, DAMAGE_ENERGY, MOD_UNKNOWN);
-			T_Damage(other, self, self->owner, self->velocity, self->s.origin, tr.plane.normal, self->dmg, 1, DAMAGE_ENERGY | DAMAGE_STAT_ONCE, mod);
+		if (self->dmg >= 5) {
+			const bool owner_takedamage = owner->takedamage;
+			const int32_t owner_generation = self->count;
+			const int owner_arena = self->sounds;
+			const int32_t bolt_generation = self->spawn_count;
+			owner->takedamage = false;
+			T_RadiusDamage(self, owner, (float)(self->dmg * 2), other,
+				self->splash_radius, DAMAGE_ENERGY, MOD_UNKNOWN);
+			// Radius damage may reset the room and free/reuse the bolt. Restore
+			// the independently captured owner before consulting bolt state.
+			if (WeaponEntityIdentityMatches(
+				owner, owner_generation, owner_arena))
+				owner->takedamage = owner_takedamage;
+			if (!WeaponEntityGenerationMatches(self, bolt_generation))
+				return;
+			target_current = WeaponEntityIdentityMatches(other,
+				target_generation, target_arena);
+			owner = WeaponResolveOrdnanceOwner(self);
+			if (!owner) {
+				G_FreeEntity(self);
+				return;
+			}
 		}
+		if (target_current) {
+			const int32_t bolt_generation = self->spawn_count;
+			T_Damage(other, self, owner, self->velocity, self->s.origin,
+				tr.plane.normal, self->dmg, 1,
+				DAMAGE_ENERGY | DAMAGE_STAT_ONCE, mod);
+			if (!WeaponEntityGenerationMatches(self, bolt_generation))
+				return;
+			owner = WeaponResolveOrdnanceOwner(self);
+			if (owner && owner->client)
+				MS_Adjust(owner->client, MSTAT_HITS, 1);
+		}
+		//MS_Adjust(self->owner->client, MSTAT_WP_BL_HITS, 1);
 	} else {
 		// PMM - yeowch this will get expensive
-		if (self->dmg >= 5)
-			T_RadiusDamage(self, self->owner, (float)(self->dmg * 2), self->owner, self->splash_radius, DAMAGE_ENERGY, MOD_UNKNOWN);
+		if (self->dmg >= 5) {
+			const int32_t bolt_generation = self->spawn_count;
+			T_RadiusDamage(self, owner, (float)(self->dmg * 2), owner, self->splash_radius, DAMAGE_ENERGY, MOD_UNKNOWN);
+			if (!WeaponEntityGenerationMatches(self, bolt_generation))
+				return;
+		}
+		if (!WeaponResolveOrdnanceOwner(self)) {
+			G_FreeEntity(self);
+			return;
+		}
 
 		gi.WriteByte(svc_temp_entity);
 		gi.WriteByte(TE_BLASTER2);
@@ -512,7 +785,7 @@ void fire_greenblaster(gentity_t *self, const vec3_t &start, const vec3_t &dir, 
 	bolt->solid = SOLID_BBOX;
 	bolt->s.effects |= effect;
 	bolt->s.modelindex = gi.modelindex("models/objects/laser/tris.md2");
-	bolt->owner = self;
+	WeaponCaptureOrdnanceOwner(bolt, self);
 	bolt->touch = blaster2_touch;
 	if (effect)
 		bolt->s.effects |= EF_TRACKER;
@@ -526,7 +799,7 @@ void fire_greenblaster(gentity_t *self, const vec3_t &start, const vec3_t &dir, 
 	bolt->classname = "bolt";
 	gi.linkentity(bolt);
 
-	tr = gi.traceline(self->s.origin, bolt->s.origin, bolt, bolt->clipmask);
+	tr = WeaponArenaTraceline(self->s.origin, bolt->s.origin, bolt, bolt->clipmask, self);
 	if (tr.fraction < 1.0f) {
 		bolt->s.origin = tr.endpos + (tr.plane.normal * 1.f);
 		bolt->touch(bolt, tr.ent, tr, false);
@@ -559,7 +832,7 @@ void fire_blueblaster(gentity_t *self, const vec3_t &start, const vec3_t &dir, i
 	bolt->s.modelindex = gi.modelindex("models/objects/laser/tris.md2");
 	bolt->s.sound = gi.soundindex("misc/lasfly.wav");
 	bolt->s.skinnum = 1;
-	bolt->owner = self;
+	WeaponCaptureOrdnanceOwner(bolt, self);
 	bolt->touch = blaster_touch;
 	bolt->style = MOD_BLUEBLASTER;
 
@@ -569,7 +842,7 @@ void fire_blueblaster(gentity_t *self, const vec3_t &start, const vec3_t &dir, i
 	bolt->classname = "bolt";
 	gi.linkentity(bolt);
 
-	tr = gi.traceline(self->s.origin, bolt->s.origin, bolt, bolt->clipmask);
+	tr = WeaponArenaTraceline(self->s.origin, bolt->s.origin, bolt, bolt->clipmask, self);
 	if (tr.fraction < 1.0f) {
 		bolt->s.origin = tr.endpos + (tr.plane.normal * 1.f);
 		bolt->touch(bolt, tr.ent, tr, false);
@@ -587,12 +860,20 @@ fire_grenade
 THINK(Grenade_Explode) (gentity_t *ent) -> void {
 	vec3_t origin;
 	mod_t  mod;
+	gentity_t *owner = WeaponResolveOrdnanceOwner(ent);
+	if (!owner) {
+		G_FreeEntity(ent);
+		return;
+	}
 
-	if (ent->owner && ent->owner->client)
-		PlayerNoise(ent->owner, ent->s.origin, PNOISE_IMPACT);
+	if (owner->client)
+		PlayerNoise(owner, ent->s.origin, PNOISE_IMPACT);
 
 	// FIXME: if we are onground then raise our Z just a bit since we are a point?
 	if (ent->enemy && ent->enemy->inuse) {
+		const int32_t grenade_generation = ent->spawn_count;
+		const int32_t target_generation = ent->enemy->spawn_count;
+		const int target_arena = MM_Arena_Id(ent->enemy);
 		float  points;
 		vec3_t v;
 		vec3_t dir;
@@ -606,10 +887,15 @@ THINK(Grenade_Explode) (gentity_t *ent) -> void {
 			mod = MOD_HANDGRENADE;
 		else
 			mod = MOD_GRENADE;
-		T_Damage(ent->enemy, ent, ent->owner, dir, ent->s.origin, vec3_origin, (int)points, (int)points, DAMAGE_RADIUS | DAMAGE_STAT_ONCE, mod);
+		T_Damage(ent->enemy, ent, owner, dir, ent->s.origin, vec3_origin, (int)points, (int)points, DAMAGE_RADIUS | DAMAGE_STAT_ONCE, mod);
+		if (!WeaponEntityGenerationMatches(ent, grenade_generation))
+			return;
+		if (!WeaponEntityIdentityMatches(ent->enemy, target_generation,
+			target_arena))
+			ent->enemy = nullptr;
 
-		if (ent->owner && ent->owner->client)
-			MS_Adjust(ent->owner->client, MSTAT_HITS, 1);
+		if ((owner = WeaponResolveOrdnanceOwner(ent)) && owner->client)
+			MS_Adjust(owner->client, MSTAT_HITS, 1);
 		//MS_Adjust(ent->owner->client, (mod.id == MOD_HANDGRENADE) ? MSTAT_WP_HG_HITS : MSTAT_WP_GL_HITS, 1);
 	}
 
@@ -619,7 +905,18 @@ THINK(Grenade_Explode) (gentity_t *ent) -> void {
 		mod = MOD_HG_SPLASH;
 	else
 		mod = MOD_G_SPLASH;
-	T_RadiusDamage(ent, ent->owner ? ent->owner : ent, (float)ent->dmg, ent->enemy, ent->splash_radius, DAMAGE_NONE | DAMAGE_STAT_ONCE, mod);
+	if (!(owner = WeaponResolveOrdnanceOwner(ent))) {
+		G_FreeEntity(ent);
+		return;
+	}
+	const int32_t grenade_generation = ent->spawn_count;
+	T_RadiusDamage(ent, owner, (float)ent->dmg, ent->enemy, ent->splash_radius, DAMAGE_NONE | DAMAGE_STAT_ONCE, mod);
+	if (!WeaponEntityGenerationMatches(ent, grenade_generation))
+		return;
+	if (!WeaponResolveOrdnanceOwner(ent)) {
+		G_FreeEntity(ent);
+		return;
+	}
 
 	origin = ent->s.origin + (ent->velocity * -0.02f);
 	gi.WriteByte(svc_temp_entity);
@@ -641,7 +938,12 @@ THINK(Grenade_Explode) (gentity_t *ent) -> void {
 }
 
 static TOUCH(Grenade_Touch) (gentity_t *ent, gentity_t *other, const trace_t &tr, bool other_touching_self) -> void {
-	if (other == ent->owner)
+	gentity_t *owner = WeaponResolveOrdnanceOwner(ent);
+	if (!owner) {
+		G_FreeEntity(ent);
+		return;
+	}
+	if (other == owner)
 		return;
 
 	if (tr.surface && (tr.surface->flags & SURF_SKY)) {
@@ -666,6 +968,9 @@ static TOUCH(Grenade_Touch) (gentity_t *ent, gentity_t *other, const trace_t &tr
 }
 
 static THINK(Grenade4_Think) (gentity_t *self) -> void {
+	if (WeaponDiscardOrphan(self))
+		return;
+
 	if (level.time >= self->timestamp) {
 		Grenade_Explode(self);
 		return;
@@ -729,7 +1034,7 @@ void fire_grenade(gentity_t *self, const vec3_t &start, const vec3_t &aimdir, in
 		grenade->think = Grenade4_Think;
 		grenade->s.renderfx |= RF_MINLIGHT;
 	}
-	grenade->owner = self;
+	WeaponCaptureOrdnanceOwner(grenade, self);
 	grenade->touch = Grenade_Touch;
 	grenade->dmg = damage;
 	grenade->splash_radius = damage_radius;
@@ -771,7 +1076,7 @@ void fire_handgrenade(gentity_t *self, const vec3_t &start, const vec3_t &aimdir
 	grenade->s.modelindex = gi.modelindex("models/objects/grenade3/tris.md2");
 	grenade->s.scale = 1.25f;
 
-	grenade->owner = self;
+	WeaponCaptureOrdnanceOwner(grenade, self);
 	grenade->touch = Grenade_Touch;
 	grenade->nextthink = level.time + timer;
 	grenade->think = Grenade_Explode;
@@ -798,24 +1103,39 @@ fire_rocket
 */
 TOUCH(rocket_touch) (gentity_t *ent, gentity_t *other, const trace_t &tr, bool other_touching_self) -> void {
 	vec3_t origin;
-	if (other == ent->owner)
+	gentity_t *owner = WeaponResolveOrdnanceOwner(ent);
+	if (!owner) {
+		G_FreeEntity(ent);
+		return;
+	}
+	if (other == owner)
 		return;
 
 	if (tr.surface && (tr.surface->flags & SURF_SKY)) {
 		G_FreeEntity(ent);
 		return;
 	}
+	const int32_t target_generation = other->spawn_count;
+	const int target_arena = MM_Arena_Id(other);
+	gentity_t *radius_ignore = other;
 
-	if (ent->owner->client)
-		PlayerNoise(ent->owner, ent->s.origin, PNOISE_IMPACT);
+	if (owner->client)
+		PlayerNoise(owner, ent->s.origin, PNOISE_IMPACT);
 
 	// calculate position for the explosion entity
 	origin = ent->s.origin + tr.plane.normal;
 
 	if (other->takedamage) {
-		T_Damage(other, ent, ent->owner, ent->velocity, ent->s.origin, tr.plane.normal, ent->dmg, RS(RS_MM) ? 50 : 0, DAMAGE_NONE | DAMAGE_STAT_ONCE, MOD_ROCKET);
+		const int32_t rocket_generation = ent->spawn_count;
+		T_Damage(other, ent, owner, ent->velocity, ent->s.origin, tr.plane.normal, ent->dmg, RS(RS_MM) ? 50 : 0, DAMAGE_NONE | DAMAGE_STAT_ONCE, MOD_ROCKET);
+		if (!WeaponEntityGenerationMatches(ent, rocket_generation))
+			return;
+		if (!WeaponEntityIdentityMatches(other, target_generation,
+			target_arena))
+			radius_ignore = nullptr;
 
-		MS_Adjust(ent->owner->client, MSTAT_HITS, 1);
+		if ((owner = WeaponResolveOrdnanceOwner(ent)) && owner->client)
+			MS_Adjust(owner->client, MSTAT_HITS, 1);
 		//MS_Adjust(ent->owner->client, MSTAT_WP_RL_HITS, 1);
 	} else {
 		// don't throw any debris in net games
@@ -828,7 +1148,21 @@ TOUCH(rocket_touch) (gentity_t *ent, gentity_t *other, const trace_t &tr, bool o
 		}
 	}
 
-	T_RadiusDamage(ent, ent->owner, (float)ent->splash_damage, other, ent->splash_radius, DAMAGE_NONE, MOD_R_SPLASH);
+	if (!(owner = WeaponResolveOrdnanceOwner(ent))) {
+		G_FreeEntity(ent);
+		return;
+	}
+	const int32_t rocket_generation = ent->spawn_count;
+	if (!WeaponEntityIdentityMatches(other, target_generation, target_arena))
+		radius_ignore = nullptr;
+	T_RadiusDamage(ent, owner, (float)ent->splash_damage, radius_ignore,
+		ent->splash_radius, DAMAGE_NONE, MOD_R_SPLASH);
+	if (!WeaponEntityGenerationMatches(ent, rocket_generation))
+		return;
+	if (!WeaponResolveOrdnanceOwner(ent)) {
+		G_FreeEntity(ent);
+		return;
+	}
 
 	gi.WriteByte(svc_temp_entity);
 	if (ent->waterlevel)
@@ -858,7 +1192,7 @@ gentity_t *fire_rocket(gentity_t *self, const vec3_t &start, const vec3_t &dir, 
 	rocket->solid = SOLID_BBOX;
 	rocket->s.effects |= EF_ROCKET;
 	rocket->s.modelindex = gi.modelindex("models/objects/rocket/tris.md2");
-	rocket->owner = self;
+	WeaponCaptureOrdnanceOwner(rocket, self);
 	rocket->touch = rocket_touch;
 	rocket->nextthink = level.time + (RS(RS_Q3A) ? 15_sec : gtime_t::from_sec(8000.f / speed));
 	rocket->think = G_FreeEntity;
@@ -919,14 +1253,32 @@ struct fire_rail_pierce_t : pierce_args_t {
 	// we hit an entity; return false to stop the piercing.
 	// you can adjust the mask for the re-trace (for water, etc).
 	bool hit(contents_t &mask, vec3_t &end) override {
+		if (GT(GT_ARENA) && !MM_Arena_CanInteract(self, tr.ent))
+			return mark(tr.ent);
+
 		if (tr.contents & (CONTENTS_SLIME | CONTENTS_LAVA)) {
 			mask &= ~(CONTENTS_SLIME | CONTENTS_LAVA);
 			water = true;
 			return true;
 		} else {
 			// try to kill it first
-			if ((tr.ent != self) && (tr.ent->takedamage))
+			if ((tr.ent != self) && (tr.ent->takedamage)) {
+				const int32_t attacker_generation = self->spawn_count;
+				const int32_t target_generation = tr.ent->spawn_count;
+				const int target_arena = MM_Arena_Id(tr.ent);
+				// A piercing rail hit is a distinct target impact even though the
+				// player entity is reused as its inflictor.
+				self->skip = false;
 				T_Damage(tr.ent, self, self, aimdir, tr.endpos, tr.plane.normal, damage, kick, DAMAGE_NONE | DAMAGE_STAT_ONCE, MOD_RAILGUN);
+				if (!WeaponEntityGenerationMatches(self,
+					attacker_generation))
+					return false;
+				if (!tr.ent->inuse)
+					return true;
+				if (!WeaponEntityIdentityMatches(tr.ent,
+					target_generation, target_arena))
+					return false;
+			}
 
 			// dead, so we don't need to care about checking pierce
 			if (!tr.ent->inuse || (!tr.ent->solid || tr.ent->solid == SOLID_TRIGGER))
@@ -976,7 +1328,10 @@ void fire_rail(gentity_t *self, const vec3_t &start, const vec3_t &aimdir, int d
 
 	vec3_t end = start + (aimdir * 8192);
 
+	const int32_t attacker_generation = self->spawn_count;
 	pierce_trace(start, end, self, args, mask);
+	if (!WeaponEntityGenerationMatches(self, attacker_generation))
+		return;
 
 	uint32_t unicast_key = GetUnicastKey();
 
@@ -984,18 +1339,25 @@ void fire_rail(gentity_t *self, const vec3_t &start, const vec3_t &aimdir, int d
 	// [Paril-KEX] this often makes double noise, so trying
 	// a slightly different approach...
 	for (auto player : active_clients()) {
+		if (!WeaponArenaClientRecipient(self, player))
+			continue;
+
 		vec3_t org = player->s.origin + player->client->ps.viewoffset + vec3_t{ 0, 0, (float)player->client->ps.pmove.viewheight };
 
 		if (binary_positional_search(org, start, args.tr.endpos, gi.inPHS, 3)) {
 			gi.WriteByte(svc_temp_entity);
-			gi.WriteByte((deathmatch->integer && (g_instagib->integer || GT(GT_INSTAGIB))) ? TE_RAILTRAIL2 : TE_RAILTRAIL);
+			gi.WriteByte((notGT(GT_ARENA) && deathmatch->integer &&
+				(g_instagib->integer || GT(GT_INSTAGIB)))
+					? TE_RAILTRAIL2 : TE_RAILTRAIL);
 			gi.WritePosition(start);
 			gi.WritePosition(args.tr.endpos);
 			gi.unicast(player, false, unicast_key);
 		}
 	}
 
-	if ((g_instagib->integer || GT(GT_INSTAGIB)) && g_instagib_splash->integer) {
+	if (notGT(GT_ARENA) &&
+		(g_instagib->integer || GT(GT_INSTAGIB)) &&
+		g_instagib_splash->integer) {
 		gentity_t *exp;
 
 		exp = G_Spawn();
@@ -1010,7 +1372,14 @@ void fire_rail(gentity_t *self, const vec3_t &start, const vec3_t &aimdir, int d
 
 		gi.linkentity(exp);
 
+		const int32_t explosion_generation = exp->spawn_count;
 		T_RadiusDamage(exp, exp->owner, exp->dmg, nullptr, exp->splash_radius, DAMAGE_NONE, MOD_RAILGUN_SPLASH);
+		if (!WeaponEntityGenerationMatches(exp, explosion_generation))
+			return;
+		if (!WeaponEntityGenerationMatches(self, attacker_generation)) {
+			G_FreeEntity(exp);
+			return;
+		}
 
 		gi.WriteByte(svc_temp_entity);
 		if (exp->waterlevel)
@@ -1042,12 +1411,14 @@ static vec3_t bfg_laser_pos(vec3_t p, float dist) {
 }
 
 static THINK(bfg_laser_update) (gentity_t *self) -> void {
-	if (level.time > self->timestamp || !self->owner->inuse) {
+	gentity_t *bfg = WeaponResolveOrdnanceOwner(self);
+	if (!bfg || !WeaponResolveOrdnanceOwner(bfg) ||
+		level.time > self->timestamp) {
 		G_FreeEntity(self);
 		return;
 	}
 
-	self->s.origin = self->owner->s.origin;
+	self->s.origin = bfg->s.origin;
 	self->nextthink = level.time + 1_ms;
 	gi.linkentity(self);
 }
@@ -1071,7 +1442,7 @@ static void bfg_spawn_laser(gentity_t *self) {
 	laser->think = bfg_laser_update;
 	laser->nextthink = level.time + 1_ms;
 	laser->timestamp = level.time + 300_ms;
-	laser->owner = self;
+	WeaponCaptureOrdnanceOwner(laser, self);
 	gi.linkentity(laser);
 }
 
@@ -1085,6 +1456,11 @@ static THINK(bfg_explode) (gentity_t *self) -> void {
 	float	 points;
 	vec3_t	 v;
 	float	 dist;
+	gentity_t *owner = WeaponResolveOrdnanceOwner(self);
+	if (!owner) {
+		G_FreeEntity(self);
+		return;
+	}
 
 	bfg_spawn_laser(self);
 
@@ -1094,19 +1470,19 @@ static THINK(bfg_explode) (gentity_t *self) -> void {
 		while ((ent = findradius(ent, self->s.origin, self->splash_radius)) != nullptr) {
 			if (!ent->takedamage)
 				continue;
-			if (ent == self->owner)
+			if (ent == owner)
 				continue;
 			if (ent->client && ent->client->eliminated)
 				continue;
 			if (!CanDamage(ent, self))
 				continue;
-			if (!CanDamage(ent, self->owner))
+			if (!CanDamage(ent, owner))
 				continue;
 			// make tesla hurt by bfg
 			if (!(ent->svflags & SVF_MONSTER) && !(ent->flags & FL_DAMAGEABLE) && (!ent->client) && (strcmp(ent->classname, "misc_explobox") != 0))
 				continue;
 			// don't target team mates during teamplay if we can't damage them
-			if (CheckTeamDamage(ent, self->owner))
+			if (CheckTeamDamage(ent, owner))
 				continue;
 
 			v = ent->mins + ent->maxs;
@@ -1116,7 +1492,19 @@ static THINK(bfg_explode) (gentity_t *self) -> void {
 			dist = v.length();
 			points = self->splash_damage * (1.0f - sqrtf(dist / self->splash_radius));
 
-			T_Damage(ent, self, self->owner, self->velocity, centroid, vec3_origin, (int)points, 0, DAMAGE_ENERGY | DAMAGE_STAT_ONCE, MOD_BFG_EFFECT);
+			const int32_t bfg_generation = self->spawn_count;
+			const int32_t target_generation = ent->spawn_count;
+			const int target_arena = MM_Arena_Id(ent);
+			T_Damage(ent, self, owner, self->velocity, centroid, vec3_origin, (int)points, 0, DAMAGE_ENERGY | DAMAGE_STAT_ONCE, MOD_BFG_EFFECT);
+			if (!WeaponEntityGenerationMatches(self, bfg_generation))
+				return;
+			if (!(owner = WeaponResolveOrdnanceOwner(self))) {
+				G_FreeEntity(self);
+				return;
+			}
+			if (!WeaponEntityIdentityMatches(ent, target_generation,
+				target_arena))
+				continue;
 
 			// Paril: draw BFG lightning laser to enemies
 			gi.WriteByte(svc_temp_entity);
@@ -1134,7 +1522,12 @@ static THINK(bfg_explode) (gentity_t *self) -> void {
 }
 
 static TOUCH(bfg_touch) (gentity_t *self, gentity_t *other, const trace_t &tr, bool other_touching_self) -> void {
-	if (other == self->owner)
+	gentity_t *owner = WeaponResolveOrdnanceOwner(self);
+	if (!owner) {
+		G_FreeEntity(self);
+		return;
+	}
+	if (other == owner)
 		return;
 
 	if (tr.surface && (tr.surface->flags & SURF_SKY)) {
@@ -1142,18 +1535,40 @@ static TOUCH(bfg_touch) (gentity_t *self, gentity_t *other, const trace_t &tr, b
 		return;
 	}
 
-	if (self->owner->client)
-		PlayerNoise(self->owner, self->s.origin, PNOISE_IMPACT);
+	if (owner->client)
+		PlayerNoise(owner, self->s.origin, PNOISE_IMPACT);
+	const int32_t target_generation = other->spawn_count;
+	const int target_arena = MM_Arena_Id(other);
+	gentity_t *radius_ignore = other;
 
 	if (MM_Ruleset_BFGUsesQ3Style()) {
 		if (other->takedamage) {
-			T_Damage(other, self, self->owner, self->velocity, self->s.origin, tr.plane.normal, self->dmg, 0, DAMAGE_ENERGY | DAMAGE_STAT_ONCE, MOD_BFG_BLAST);
+			const int32_t bfg_generation = self->spawn_count;
+			T_Damage(other, self, owner, self->velocity, self->s.origin, tr.plane.normal, self->dmg, 0, DAMAGE_ENERGY | DAMAGE_STAT_ONCE, MOD_BFG_BLAST);
+			if (!WeaponEntityGenerationMatches(self, bfg_generation))
+				return;
+			if (!WeaponEntityIdentityMatches(other, target_generation,
+				target_arena))
+				radius_ignore = nullptr;
 
-			if (self->owner && self->owner->client)
-				MS_Adjust(self->owner->client, MSTAT_HITS, 1);
+			if ((owner = WeaponResolveOrdnanceOwner(self)) && owner->client)
+				MS_Adjust(owner->client, MSTAT_HITS, 1);
 		}
 
-		T_RadiusDamage(self, self->owner, (float)self->splash_damage, other, self->splash_radius, DAMAGE_ENERGY | DAMAGE_STAT_ONCE, MOD_BFG_BLAST);
+		if (!(owner = WeaponResolveOrdnanceOwner(self))) {
+			G_FreeEntity(self);
+			return;
+		}
+		const int32_t bfg_generation = self->spawn_count;
+		T_RadiusDamage(self, owner, (float)self->splash_damage,
+			radius_ignore, self->splash_radius,
+			DAMAGE_ENERGY | DAMAGE_STAT_ONCE, MOD_BFG_BLAST);
+		if (!WeaponEntityGenerationMatches(self, bfg_generation))
+			return;
+		if (!WeaponResolveOrdnanceOwner(self)) {
+			G_FreeEntity(self);
+			return;
+		}
 
 		gi.sound(self, CHAN_VOICE, gi.soundindex("weapons/bfg__x1b.wav"), 1, ATTN_NORM, 0);
 		gi.WriteByte(svc_temp_entity);
@@ -1166,9 +1581,28 @@ static TOUCH(bfg_touch) (gentity_t *self, gentity_t *other, const trace_t &tr, b
 	}
 
 	// core explosion - prevents firing it into the wall/floor
-	if (other->takedamage)
-		T_Damage(other, self, self->owner, self->velocity, self->s.origin, tr.plane.normal, 200, 0, DAMAGE_ENERGY, MOD_BFG_BLAST);
-	T_RadiusDamage(self, self->owner, 200, other, 100, DAMAGE_ENERGY | DAMAGE_STAT_ONCE, MOD_BFG_BLAST);
+	if (other->takedamage) {
+		const int32_t bfg_generation = self->spawn_count;
+		T_Damage(other, self, owner, self->velocity, self->s.origin, tr.plane.normal, 200, 0, DAMAGE_ENERGY, MOD_BFG_BLAST);
+		if (!WeaponEntityGenerationMatches(self, bfg_generation))
+			return;
+		if (!WeaponEntityIdentityMatches(other, target_generation,
+			target_arena))
+			radius_ignore = nullptr;
+	}
+	if (!(owner = WeaponResolveOrdnanceOwner(self))) {
+		G_FreeEntity(self);
+		return;
+	}
+	const int32_t bfg_generation = self->spawn_count;
+	T_RadiusDamage(self, owner, 200, radius_ignore, 100,
+		DAMAGE_ENERGY | DAMAGE_STAT_ONCE, MOD_BFG_BLAST);
+	if (!WeaponEntityGenerationMatches(self, bfg_generation))
+		return;
+	if (!WeaponResolveOrdnanceOwner(self)) {
+		G_FreeEntity(self);
+		return;
+	}
 
 	gi.sound(self, CHAN_VOICE, gi.soundindex("weapons/bfg__x1b.wav"), 1, ATTN_NORM, 0);
 	self->solid = SOLID_NOT;
@@ -1181,7 +1615,8 @@ static TOUCH(bfg_touch) (gentity_t *self, gentity_t *other, const trace_t &tr, b
 	self->s.effects &= ~EF_ANIM_ALLFAST;
 	self->think = bfg_explode;
 	self->nextthink = level.time + 10_hz;
-	self->enemy = other;
+	self->enemy = WeaponEntityIdentityMatches(other, target_generation,
+		target_arena) ? other : nullptr;
 
 	gi.WriteByte(svc_temp_entity);
 	gi.WriteByte(TE_BFG_BIGEXPLOSION);
@@ -1204,9 +1639,24 @@ struct bfg_laser_pierce_t : pierce_args_t {
 	// we hit an entity; return false to stop the piercing.
 	// you can adjust the mask for the re-trace (for water, etc).
 	bool hit(contents_t &mask, vec3_t &end) override {
+		gentity_t *owner = WeaponResolveOrdnanceOwner(self);
+		if (!owner)
+			return false;
+
+		if (GT(GT_ARENA) && !MM_Arena_CanInteract(self, tr.ent))
+			return mark(tr.ent);
+
 		// hurt it if we can
-		if ((tr.ent->takedamage) && !(tr.ent->flags & FL_IMMUNE_LASER) && (tr.ent != self->owner))
-			T_Damage(tr.ent, self, self->owner, dir, tr.endpos, vec3_origin, damage, 1, DAMAGE_ENERGY, MOD_BFG_LASER);
+		if ((tr.ent->takedamage) && !(tr.ent->flags & FL_IMMUNE_LASER) && (tr.ent != owner)) {
+			const int32_t bfg_generation = self->spawn_count;
+			const int32_t target_generation = tr.ent->spawn_count;
+			const int target_arena = MM_Arena_Id(tr.ent);
+			T_Damage(tr.ent, self, owner, dir, tr.endpos, vec3_origin, damage, 1, DAMAGE_ENERGY, MOD_BFG_LASER);
+			if (!WeaponEntityGenerationMatches(self, bfg_generation) ||
+				!WeaponEntityIdentityMatches(tr.ent, target_generation,
+					target_arena))
+				return false;
+		}
 
 		// if we hit something that's not a monster or player we're done
 		if (!(tr.ent->svflags & SVF_MONSTER) && !(tr.ent->flags & FL_DAMAGEABLE) && (!tr.ent->client)) {
@@ -1235,6 +1685,11 @@ static THINK(bfg_think) (gentity_t *self) -> void {
 	vec3_t	 end;
 	int		 dmg;
 	trace_t	 tr;
+	gentity_t *owner = WeaponResolveOrdnanceOwner(self);
+	if (!owner) {
+		G_FreeEntity(self);
+		return;
+	}
 
 	dmg = deathmatch->integer ? 5 : 10;
 
@@ -1244,7 +1699,9 @@ static THINK(bfg_think) (gentity_t *self) -> void {
 	while ((ent = findradius(ent, self->s.origin, 256)) != nullptr) {
 		if (ent == self)
 			continue;
-		if (ent == self->owner)
+		if (ent == owner)
+			continue;
+		if (GT(GT_ARENA) && !MM_Arena_CanInteract(self, ent))
 			continue;
 		if (ent->client && ent->client->eliminated)
 			continue;
@@ -1255,7 +1712,7 @@ static THINK(bfg_think) (gentity_t *self) -> void {
 		if (!(ent->svflags & SVF_MONSTER) && !(ent->flags & FL_DAMAGEABLE) && (!ent->client) && (strcmp(ent->classname, "misc_explobox") != 0))
 			continue;
 		// don't target team mates during teamplay if we can't damage them
-		if (CheckTeamDamage(ent, self->owner))
+		if (CheckTeamDamage(ent, owner))
 			continue;
 
 		point = (ent->absmin + ent->absmax) * 0.5f;
@@ -1278,7 +1735,14 @@ static THINK(bfg_think) (gentity_t *self) -> void {
 			dmg
 		};
 
+		const int32_t bfg_generation = self->spawn_count;
 		pierce_trace(start, end, self, args, CONTENTS_SOLID | CONTENTS_MONSTER | CONTENTS_PLAYER | CONTENTS_DEADMONSTER);
+		if (!WeaponEntityGenerationMatches(self, bfg_generation))
+			return;
+		if (!(owner = WeaponResolveOrdnanceOwner(self))) {
+			G_FreeEntity(self);
+			return;
+		}
 
 		gi.WriteByte(svc_temp_entity);
 		gi.WriteByte(TE_BFG_LASER);
@@ -1306,7 +1770,7 @@ void fire_bfg(gentity_t *self, const vec3_t &start, const vec3_t &dir, int damag
 	bfg->solid = SOLID_BBOX;
 	bfg->s.effects |= EF_BFG | EF_ANIM_ALLFAST;
 	bfg->s.modelindex = gi.modelindex("sprites/s_bfg1.sp2");
-	bfg->owner = self;
+	WeaponCaptureOrdnanceOwner(bfg, self);
 	bfg->touch = bfg_touch;
 	bfg->nextthink = level.time + (MM_Ruleset_BFGUsesQ3Style() ? 10_sec : gtime_t::from_sec(8000.f / speed));
 	bfg->think = G_FreeEntity;
@@ -1327,6 +1791,12 @@ void fire_bfg(gentity_t *self, const vec3_t &start, const vec3_t &dir, int damag
 }
 
 static TOUCH(disintegrator_touch) (gentity_t *self, gentity_t *other, const trace_t &tr, bool other_touching_self) -> void {
+	gentity_t *owner = WeaponResolveOrdnanceOwner(self);
+	if (!owner) {
+		G_FreeEntity(self);
+		return;
+	}
+
 	gi.WriteByte(svc_temp_entity);
 	gi.WriteByte(TE_WIDOWSPLASH);
 	gi.WritePosition(self->s.origin - (self->velocity * 0.01f));
@@ -1336,7 +1806,9 @@ static TOUCH(disintegrator_touch) (gentity_t *self, gentity_t *other, const trac
 
 	if (other->svflags & (SVF_MONSTER | SVF_PLAYER)) {
 		other->disintegrator_time += 50_sec;
-		other->disintegrator = self->owner;
+		// G_FreeEntity historically cleared self->owner before this assignment;
+		// keep the timed effect owner-independent rather than retain a raw slot.
+		other->disintegrator = nullptr;
 	}
 }
 
@@ -1358,7 +1830,7 @@ void fire_disintegrator(gentity_t *self, const vec3_t &start, const vec3_t &forw
 	bfg->svflags |= SVF_PROJECTILE;
 	bfg->flags |= FL_DODGE;
 	bfg->s.modelindex = gi.modelindex("sprites/s_bfg1.sp2");
-	bfg->owner = self;
+	WeaponCaptureOrdnanceOwner(bfg, self);
 	bfg->touch = disintegrator_touch;
 	bfg->nextthink = level.time + gtime_t::from_sec(8000.f / speed);
 	bfg->think = G_FreeEntity;
@@ -1397,7 +1869,7 @@ static void fire_beams(gentity_t *self, const vec3_t &start, const vec3_t &aimdi
 		content_mask &= ~MASK_WATER;
 	}
 
-	tr = gi.traceline(start, end, self, content_mask);
+	tr = WeaponArenaTraceline(start, end, self, content_mask, self);
 
 	// see if we hit water
 	if (tr.contents & MASK_WATER) {
@@ -1412,7 +1884,7 @@ static void fire_beams(gentity_t *self, const vec3_t &start, const vec3_t &aimdi
 			gi.multicast(tr.endpos, MULTICAST_PVS, false);
 		}
 		// re-trace ignoring water this time
-		tr = gi.traceline(water_start, end, self, content_mask & ~MASK_WATER);
+		tr = WeaponArenaTraceline(water_start, end, self, content_mask & ~MASK_WATER, self);
 	}
 	endpoint = tr.endpos;
 
@@ -1424,7 +1896,16 @@ static void fire_beams(gentity_t *self, const vec3_t &start, const vec3_t &aimdi
 	if (!((tr.surface) && (tr.surface->flags & SURF_SKY))) {
 		if (tr.fraction < 1.0f) {
 			if (tr.ent->takedamage) {
+				const int32_t attacker_generation = self->spawn_count;
+				const int32_t target_generation = tr.ent->spawn_count;
+				const int target_arena = MM_Arena_Id(tr.ent);
 				T_Damage(tr.ent, self, self, aimdir, tr.endpos, tr.plane.normal, damage, kick, DAMAGE_ENERGY, mod);
+				if (!WeaponEntityGenerationMatches(self,
+					attacker_generation))
+					return;
+				if (!WeaponEntityIdentityMatches(tr.ent, target_generation,
+					target_arena))
+					tr.ent = nullptr;
 			} else {
 				if ((!water) && !(tr.surface && (tr.surface->flags & SURF_SKY))) {
 					// This is the truncated steam entry - uses 1+1+2 extra bytes of data
@@ -1463,12 +1944,27 @@ static void fire_beams(gentity_t *self, const vec3_t &start, const vec3_t &aimdi
 		gi.multicast(pos, MULTICAST_PVS, false);
 	}
 
-	gi.WriteByte(svc_temp_entity);
-	gi.WriteByte(te_beam);
-	gi.WriteEntity(self);
-	gi.WritePosition(start);
-	gi.WritePosition(!underwater && !water ? tr.endpos : endpoint);
-	gi.multicast(self->s.origin, MULTICAST_ALL, false);
+	const vec3_t beam_end = !underwater && !water ? tr.endpos : endpoint;
+	if (notGT(GT_ARENA)) {
+		gi.WriteByte(svc_temp_entity);
+		gi.WriteByte(te_beam);
+		gi.WriteEntity(self);
+		gi.WritePosition(start);
+		gi.WritePosition(beam_end);
+		gi.multicast(self->s.origin, MULTICAST_ALL, false);
+	} else {
+		const uint32_t unicast_key = GetUnicastKey();
+		for (gentity_t *player : active_clients()) {
+			if (!WeaponArenaClientRecipient(self, player))
+				continue;
+			gi.WriteByte(svc_temp_entity);
+			gi.WriteByte(te_beam);
+			gi.WriteEntity(self);
+			gi.WritePosition(start);
+			gi.WritePosition(beam_end);
+			gi.unicast(player, false, unicast_key);
+		}
+	}
 }
 
 /*
@@ -1500,41 +1996,72 @@ static THINK(disruptor_pain_daemon_think) (gentity_t *self) -> void {
 
 	if (!self->inuse)
 		return;
+	gentity_t *owner = WeaponResolveOrdnanceOwner(self);
+	gentity_t *enemy = WeaponResolveOrdnanceTarget(self);
+	if (!owner || !enemy) {
+		// Only touch a target whose generation and room still match. A valid
+		// monster must not retain the daemon-owned trail when its attacker
+		// disconnects, moves rooms, or has its slot recycled.
+		WeaponClearDisruptorTrail(self);
+		G_FreeEntity(self);
+		return;
+	}
 
 	if ((level.time - self->timestamp) > DISRUPTOR_DAMAGE_TIME) {
-		if (!self->enemy->client)
-			self->enemy->s.effects &= ~EF_TRACKERTRAIL;
+		if (!enemy->client)
+			enemy->s.effects &= ~EF_TRACKERTRAIL;
 		G_FreeEntity(self);
 	} else {
-		if (self->enemy->health > 0) {
-			vec3_t center = (self->enemy->absmax + self->enemy->absmin) * 0.5f;
+		if (enemy->health > 0) {
+			vec3_t center = (enemy->absmax + enemy->absmin) * 0.5f;
 
-			T_Damage(self->enemy, self, self->owner, vec3_origin, center, pain_normal,
+			const int32_t daemon_generation = self->spawn_count;
+			T_Damage(enemy, self, owner, vec3_origin, center, pain_normal,
 				self->dmg, 0, DISRUPTOR_DAMAGE_FLAGS | DAMAGE_STAT_ONCE, MOD_TRACKER);
+			if (!WeaponEntityGenerationMatches(self, daemon_generation))
+				return;
+			owner = WeaponResolveOrdnanceOwner(self);
+			enemy = WeaponResolveOrdnanceTarget(self);
+			if (!owner || !enemy) {
+				WeaponClearDisruptorTrail(self);
+				G_FreeEntity(self);
+				return;
+			}
 
 			// if we kill the player, we'll be removed.
 			if (self->inuse) {
 				// if we killed a monster, gib them.
-				if (self->enemy->health < 1) {
-					if (self->enemy->gib_health)
-						hurt = -self->enemy->gib_health;
+				if (enemy->health < 1) {
+					if (enemy->gib_health)
+						hurt = -enemy->gib_health;
 					else
 						hurt = 500;
 
-					T_Damage(self->enemy, self, self->owner, vec3_origin, center,
+					const int32_t gib_daemon_generation = self->spawn_count;
+					T_Damage(enemy, self, owner, vec3_origin, center,
 						pain_normal, hurt, 0, DISRUPTOR_DAMAGE_FLAGS | DAMAGE_STAT_ONCE, MOD_TRACKER);
+					if (!WeaponEntityGenerationMatches(self,
+						gib_daemon_generation))
+						return;
+					owner = WeaponResolveOrdnanceOwner(self);
+					enemy = WeaponResolveOrdnanceTarget(self);
+					if (!owner || !enemy) {
+						WeaponClearDisruptorTrail(self);
+						G_FreeEntity(self);
+						return;
+					}
 				}
 
 				self->nextthink = level.time + 10_hz;
 
-				if (self->enemy->client)
-					self->enemy->client->tracker_pain_time = self->nextthink;
+				if (enemy->client)
+					enemy->client->tracker_pain_time = self->nextthink;
 				else
-					self->enemy->s.effects |= EF_TRACKERTRAIL;
+					enemy->s.effects |= EF_TRACKERTRAIL;
 			}
 		} else {
-			if (!self->enemy->client)
-				self->enemy->s.effects &= ~EF_TRACKERTRAIL;
+			if (!enemy->client)
+				enemy->s.effects &= ~EF_TRACKERTRAIL;
 			G_FreeEntity(self);
 		}
 	}
@@ -1551,8 +2078,8 @@ static void disruptor_pain_daemon_spawn(gentity_t *owner, gentity_t *enemy, int 
 	daemon->think = disruptor_pain_daemon_think;
 	daemon->nextthink = level.time;
 	daemon->timestamp = level.time;
-	daemon->owner = owner;
-	daemon->enemy = enemy;
+	WeaponCaptureOrdnanceOwner(daemon, owner);
+	WeaponCaptureOrdnanceTarget(daemon, enemy);
 	daemon->dmg = damage;
 }
 
@@ -1567,8 +2094,13 @@ static void tracker_explode(gentity_t *self) {
 
 static TOUCH(disruptor_touch) (gentity_t *self, gentity_t *other, const trace_t &tr, bool other_touching_self) -> void {
 	float damagetime;
+	gentity_t *owner = WeaponResolveOrdnanceOwner(self);
+	if (!owner) {
+		G_FreeEntity(self);
+		return;
+	}
 
-	if (other == self->owner)
+	if (other == owner)
 		return;
 
 	if (tr.surface && (tr.surface->flags & SURF_SKY)) {
@@ -1576,17 +2108,28 @@ static TOUCH(disruptor_touch) (gentity_t *self, gentity_t *other, const trace_t 
 		return;
 	}
 
-	if (self->client)
-		PlayerNoise(self->owner, self->s.origin, PNOISE_IMPACT);
+	if (owner->client)
+		PlayerNoise(owner, self->s.origin, PNOISE_IMPACT);
 
 	if (other->takedamage) {
 		if ((other->svflags & SVF_MONSTER) || other->client) {
 			if (other->health > 0) // knockback only for living creatures
 			{
+				const int32_t tracker_generation = self->spawn_count;
+				const int32_t target_generation = other->spawn_count;
+				const int target_arena = MM_Arena_Id(other);
 				// PMM - kickback was times 4 .. reduced to 3
 				// now this does no damage, just knockback
-				T_Damage(other, self, self->owner, self->velocity, self->s.origin, tr.plane.normal,
+				T_Damage(other, self, owner, self->velocity, self->s.origin, tr.plane.normal,
 					/* self->dmg */ 0, (self->dmg * 3), DISRUPTOR_IMPACT_FLAGS | DAMAGE_STAT_ONCE, MOD_TRACKER);
+				if (!WeaponEntityGenerationMatches(self, tracker_generation))
+					return;
+				owner = WeaponResolveOrdnanceOwner(self);
+				if (!owner || !WeaponEntityIdentityMatches(other,
+					target_generation, target_arena)) {
+					G_FreeEntity(self);
+					return;
+				}
 
 				if (!(other->flags & (FL_FLY | FL_SWIM)))
 					other->velocity[2] += 140;
@@ -1594,19 +2137,27 @@ static TOUCH(disruptor_touch) (gentity_t *self, gentity_t *other, const trace_t 
 				damagetime = ((float)self->dmg) * 0.1f;
 				damagetime = damagetime / DISRUPTOR_DAMAGE_TIME.seconds();
 
-				disruptor_pain_daemon_spawn(self->owner, other, (int)damagetime);
+				disruptor_pain_daemon_spawn(owner, other, (int)damagetime);
 			} else // lots of damage (almost autogib) for dead bodies
 			{
-				T_Damage(other, self, self->owner, self->velocity, self->s.origin, tr.plane.normal,
+				const int32_t tracker_generation = self->spawn_count;
+				T_Damage(other, self, owner, self->velocity, self->s.origin, tr.plane.normal,
 					self->dmg * 4, (self->dmg * 3), DISRUPTOR_IMPACT_FLAGS | DAMAGE_STAT_ONCE, MOD_TRACKER);
+				if (!WeaponEntityGenerationMatches(self, tracker_generation))
+					return;
 			}
 		} else // full damage in one shot for inanimate objects
 		{
-			T_Damage(other, self, self->owner, self->velocity, self->s.origin, tr.plane.normal,
+			const int32_t tracker_generation = self->spawn_count;
+			T_Damage(other, self, owner, self->velocity, self->s.origin, tr.plane.normal,
 				self->dmg, (self->dmg * 3), DISRUPTOR_IMPACT_FLAGS | DAMAGE_STAT_ONCE, MOD_TRACKER);
+			if (!WeaponEntityGenerationMatches(self, tracker_generation))
+				return;
 		}
 	}
 
+	if (WeaponDiscardOrphan(self))
+		return;
 	tracker_explode(self);
 	return;
 }
@@ -1616,21 +2167,28 @@ static THINK(disruptor_fly) (gentity_t *self) -> void {
 	vec3_t dir;
 	vec3_t center;
 
-	if ((!self->enemy) || (!self->enemy->inuse) || (self->enemy->health < 1)) {
+	if (WeaponDiscardOrphan(self))
+		return;
+	gentity_t *enemy = WeaponResolveOrdnanceTarget(self);
+	if (!enemy) {
+		G_FreeEntity(self);
+		return;
+	}
+	if (enemy->health < 1) {
 		tracker_explode(self);
 		return;
 	}
 
 	// PMM - try to hunt for center of enemy, if possible and not client
-	if (self->enemy->client) {
-		dest = self->enemy->s.origin;
-		dest[2] += self->enemy->viewheight;
+	if (enemy->client) {
+		dest = enemy->s.origin;
+		dest[2] += enemy->viewheight;
 	}
 	// paranoia
-	else if (!self->enemy->absmin || !self->enemy->absmax) {
-		dest = self->enemy->s.origin;
+	else if (!enemy->absmin || !enemy->absmax) {
+		dest = enemy->s.origin;
 	} else {
-		center = (self->enemy->absmin + self->enemy->absmax) * 0.5f;
+		center = (enemy->absmin + enemy->absmax) * 0.5f;
 		dest = center;
 	}
 
@@ -1666,8 +2224,8 @@ void fire_disruptor(gentity_t *self, const vec3_t &start, const vec3_t &dir, int
 	bolt->s.sound = gi.soundindex("weapons/disrupt.wav");
 	bolt->s.modelindex = gi.modelindex("models/proj/disintegrator/tris.md2");
 	bolt->touch = disruptor_touch;
-	bolt->enemy = enemy;
-	bolt->owner = self;
+	WeaponCaptureOrdnanceOwner(bolt, self);
+	WeaponCaptureOrdnanceTarget(bolt, enemy);
 	bolt->dmg = damage;
 	bolt->classname = "tracker";
 	gi.linkentity(bolt);
@@ -1680,7 +2238,7 @@ void fire_disruptor(gentity_t *self, const vec3_t &start, const vec3_t &dir, int
 		bolt->think = G_FreeEntity;
 	}
 
-	tr = gi.traceline(self->s.origin, bolt->s.origin, bolt, bolt->clipmask);
+	tr = WeaponArenaTraceline(self->s.origin, bolt->s.origin, bolt, bolt->clipmask, self);
 	if (tr.fraction < 1.0f) {
 		bolt->s.origin = tr.endpos + (tr.plane.normal * 1.f);
 		bolt->touch(bolt, tr.ent, tr, false);
@@ -1693,7 +2251,12 @@ fire_flechette
 ========================
 */
 static TOUCH(flechette_touch) (gentity_t *self, gentity_t *other, const trace_t &tr, bool other_touching_self) -> void {
-	if (other == self->owner)
+	gentity_t *owner = WeaponResolveOrdnanceOwner(self);
+	if (!owner) {
+		G_FreeEntity(self);
+		return;
+	}
+	if (other == owner)
 		return;
 
 	if (tr.surface && (tr.surface->flags & SURF_SKY)) {
@@ -1701,12 +2264,15 @@ static TOUCH(flechette_touch) (gentity_t *self, gentity_t *other, const trace_t 
 		return;
 	}
 
-	if (self->client)
-		PlayerNoise(self->owner, self->s.origin, PNOISE_IMPACT);
+	if (owner->client)
+		PlayerNoise(owner, self->s.origin, PNOISE_IMPACT);
 
 	if (other->takedamage) {
-		T_Damage(other, self, self->owner, self->velocity, self->s.origin, tr.plane.normal,
+		const int32_t flechette_generation = self->spawn_count;
+		T_Damage(other, self, owner, self->velocity, self->s.origin, tr.plane.normal,
 			self->dmg, (int)self->splash_radius, DAMAGE_NO_REG_ARMOR | DAMAGE_STAT_ONCE, MOD_ETF_RIFLE);
+		if (!WeaponEntityGenerationMatches(self, flechette_generation))
+			return;
 	} else {
 		gi.WriteByte(svc_temp_entity);
 		gi.WriteByte(TE_FLECHETTE);
@@ -1739,7 +2305,7 @@ void fire_flechette(gentity_t *self, const vec3_t &start, const vec3_t &dir, int
 	flechette->s.renderfx = RF_FULLBRIGHT;
 	flechette->s.modelindex = gi.modelindex("models/proj/flechette/tris.md2");
 
-	flechette->owner = self;
+	WeaponCaptureOrdnanceOwner(flechette, self);
 	flechette->touch = flechette_touch;
 	flechette->nextthink = level.time + gtime_t::from_sec(8000.f / speed);
 	flechette->think = G_FreeEntity;
@@ -1748,7 +2314,8 @@ void fire_flechette(gentity_t *self, const vec3_t &start, const vec3_t &dir, int
 
 	gi.linkentity(flechette);
 
-	trace_t tr = gi.traceline(self->s.origin, flechette->s.origin, flechette, flechette->clipmask);
+	trace_t tr = WeaponArenaTraceline(self->s.origin, flechette->s.origin,
+		flechette, flechette->clipmask, self);
 	if (tr.fraction < 1.0f) {
 		flechette->s.origin = tr.endpos + (tr.plane.normal * 1.f);
 		flechette->touch(flechette, tr.ent, tr, false);
@@ -1772,6 +2339,9 @@ static BoxEntitiesResult_t fire_player_melee_BoxFilter(gentity_t *check, void *d
 	const player_melee_data_t *data = (const player_melee_data_t *)data_v;
 
 	if (!check->inuse || !check->takedamage || check == data->self)
+		return BoxEntitiesResult_t::Skip;
+
+	if (GT(GT_ARENA) && !MM_Arena_CanInteract(data->self, check))
 		return BoxEntitiesResult_t::Skip;
 
 	// check distance
@@ -1801,6 +2371,8 @@ bool fire_player_melee(gentity_t *self, const vec3_t &start, const vec3_t &aim, 
 
 	vec3_t reach_vec{ float(reach - 1), float(reach - 1), float(reach - 1) };
 	gentity_t *targets[MAX_HIT];
+	int32_t target_generations[MAX_HIT];
+	int target_arenas[MAX_HIT];
 
 	player_melee_data_t data{
 		self,
@@ -1811,6 +2383,10 @@ bool fire_player_melee(gentity_t *self, const vec3_t &start, const vec3_t &aim, 
 
 	// find all the things we could maybe hit
 	size_t num = gi.BoxEntities(self->absmin - reach_vec, self->absmax + reach_vec, targets, q_countof(targets), AREA_SOLID, fire_player_melee_BoxFilter, &data);
+	for (size_t i = 0; i < num; i++) {
+		target_generations[i] = targets[i]->spawn_count;
+		target_arenas[i] = MM_Arena_Id(targets[i]);
+	}
 
 	if (!num)
 		return false;
@@ -1820,7 +2396,8 @@ bool fire_player_melee(gentity_t *self, const vec3_t &start, const vec3_t &aim, 
 	for (size_t i = 0; i < num; i++) {
 		gentity_t *hit = targets[i];
 
-		if (!hit->inuse || !hit->takedamage)
+		if (!WeaponEntityIdentityMatches(hit, target_generations[i],
+			target_arenas[i]) || !hit->takedamage)
 			continue;
 		else if (!CanDamage(self, hit))
 			continue;
@@ -1835,9 +2412,11 @@ bool fire_player_melee(gentity_t *self, const vec3_t &start, const vec3_t &aim, 
 		if (!(RS(RS_Q3A) && mod.id == MOD_CHAINFIST))
 			dflags |= DAMAGE_NO_KNOCKBACK;
 
-		T_Damage(hit, self, self, aim, closest_point_to_check, -aim, damage, kick / 2, dflags, mod);
-
 		was_hit = true;
+		const int32_t attacker_generation = self->spawn_count;
+		T_Damage(hit, self, self, aim, closest_point_to_check, -aim, damage, kick / 2, dflags, mod);
+		if (!WeaponEntityGenerationMatches(self, attacker_generation))
+			return was_hit;
 	}
 
 	return was_hit;
@@ -1854,28 +2433,80 @@ constexpr int32_t NUKE_DAMAGE = 400;
 constexpr gtime_t NUKE_QUAKE_TIME = 3_sec;
 constexpr float	  NUKE_QUAKE_STRENGTH = 100;
 
-static THINK(Nuke_Quake) (gentity_t *self) -> void {
-	size_t i;
-	gentity_t *e;
+static void NukeSound(gentity_t *source, soundchan_t channel, int sound_index,
+	float volume, float attenuation, bool positioned) {
+	if (notGT(GT_ARENA)) {
+		if (positioned)
+			gi.positioned_sound(source->s.origin, source, channel, sound_index,
+				volume, attenuation, 0);
+		else
+			gi.sound(source, channel, sound_index, volume, attenuation, 0);
+		return;
+	}
 
+	for (gentity_t *player : active_clients()) {
+		if (WeaponArenaClientRecipient(source, player))
+			gi.local_sound(player, source->s.origin, source, channel, sound_index,
+				volume, attenuation, 0);
+	}
+}
+
+static void NukeEffect(gentity_t *source, int effect, multicast_t destination) {
+	if (notGT(GT_ARENA)) {
+		gi.WriteByte(svc_temp_entity);
+		gi.WriteByte(effect);
+		gi.WritePosition(source->s.origin);
+		gi.multicast(source->s.origin, destination, false);
+		return;
+	}
+
+	const uint32_t unicast_key = GetUnicastKey();
+	for (gentity_t *player : active_clients()) {
+		if (!WeaponArenaClientRecipient(source, player))
+			continue;
+		gi.WriteByte(svc_temp_entity);
+		gi.WriteByte(effect);
+		gi.WritePosition(source->s.origin);
+		gi.unicast(player, false, unicast_key);
+	}
+}
+
+static void NukeMuzzleFlash(gentity_t *source, player_muzzle_t muzzleflash) {
+	if (notGT(GT_ARENA)) {
+		gi.WriteByte(svc_muzzleflash);
+		gi.WriteEntity(source);
+		gi.WriteByte(muzzleflash);
+		gi.multicast(source->s.origin, MULTICAST_PHS, false);
+		return;
+	}
+
+	const uint32_t unicast_key = GetUnicastKey();
+	for (gentity_t *player : active_clients()) {
+		if (!WeaponArenaClientRecipient(source, player))
+			continue;
+		gi.WriteByte(svc_muzzleflash);
+		gi.WriteEntity(source);
+		gi.WriteByte(muzzleflash);
+		gi.unicast(player, false, unicast_key);
+	}
+}
+
+static THINK(Nuke_Quake) (gentity_t *self) -> void {
 	if (self->last_move_time < level.time) {
-		gi.positioned_sound(self->s.origin, self, CHAN_AUTO, self->noise_index, 0.75, ATTN_NONE, 0);
+		NukeSound(self, CHAN_AUTO, self->noise_index, 0.75f, ATTN_NONE, true);
 		self->last_move_time = level.time + 500_ms;
 	}
 
-	const size_t client_entity_limit = WeaponClientEntityCount();
-	for (i = 1, e = g_entities + i; i < client_entity_limit; i++, e++) {
-		if (!e->inuse)
+	for (gentity_t *player : active_clients()) {
+		if (!WeaponArenaClientRecipient(self, player))
 			continue;
-		if (!e->client)
-			continue;
-		if (!e->groundentity)
+		if (!player->groundentity)
 			continue;
 
-		e->groundentity = nullptr;
-		e->velocity[0] += crandom() * 150;
-		e->velocity[1] += crandom() * 150;
-		e->velocity[2] = self->speed * (100.0f / e->mass);
+		player->groundentity = nullptr;
+		player->velocity[0] += crandom() * 150;
+		player->velocity[1] += crandom() * 150;
+		player->velocity[2] = self->speed * (100.0f / player->mass);
 	}
 
 	if (level.time < self->timestamp)
@@ -1885,6 +2516,12 @@ static THINK(Nuke_Quake) (gentity_t *self) -> void {
 }
 
 void Nuke_Explode(gentity_t *ent) {
+	gentity_t *owner = WeaponResolveOrdnanceOwner(ent, ent->teammaster);
+	if (!owner) {
+		G_FreeEntity(ent);
+		return;
+	}
+
 	float dmg = ent->dmg;
 	float splash_radius = ent->splash_radius;
 
@@ -1894,27 +2531,32 @@ void Nuke_Explode(gentity_t *ent) {
 	if (!splash_radius)
 		dmg = 512;
 
-	if (ent->teammaster->client)
-		PlayerNoise(ent->teammaster, ent->s.origin, PNOISE_IMPACT);
+	if (owner->client)
+		PlayerNoise(owner, ent->s.origin, PNOISE_IMPACT);
 
-	T_RadiusNukeDamage(ent, ent->teammaster, dmg, ent, splash_radius, MOD_NUKE);
+	const int32_t nuke_generation = ent->spawn_count;
+	T_RadiusNukeDamage(ent, owner, dmg, ent, splash_radius, MOD_NUKE);
+	if (!WeaponEntityGenerationMatches(ent, nuke_generation))
+		return;
+	if (!WeaponResolveOrdnanceOwner(ent, ent->teammaster)) {
+		G_FreeEntity(ent);
+		return;
+	}
 
 	if (ent->dmg > NUKE_DAMAGE)
-		gi.sound(ent, CHAN_ITEM, gi.soundindex("items/damage3.wav"), 1, ATTN_NORM, 0);
+		NukeSound(ent, CHAN_ITEM, gi.soundindex("items/damage3.wav"), 1.0f, ATTN_NORM, false);
 
-	gi.sound(ent, CHAN_NO_PHS_ADD | CHAN_VOICE, gi.soundindex("weapons/grenlx1a.wav"), 1, ATTN_NONE, 0);
+	NukeSound(ent, CHAN_NO_PHS_ADD | CHAN_VOICE,
+		gi.soundindex("weapons/grenlx1a.wav"), 1.0f, ATTN_NONE, false);
 
-	gi.WriteByte(svc_temp_entity);
-	gi.WriteByte(TE_EXPLOSION1_BIG);
-	gi.WritePosition(ent->s.origin);
-	gi.multicast(ent->s.origin, MULTICAST_PHS, false);
-
-	gi.WriteByte(svc_temp_entity);
-	gi.WriteByte(TE_NUKEBLAST);
-	gi.WritePosition(ent->s.origin);
-	gi.multicast(ent->s.origin, MULTICAST_ALL, false);
+	NukeEffect(ent, TE_EXPLOSION1_BIG, MULTICAST_PHS);
+	NukeEffect(ent, TE_NUKEBLAST, MULTICAST_ALL);
 
 	// become a quake
+	// Attribution is complete. Keep the captured arena on the quake, but do
+	// not retain a live player pointer for this owner-independent effect.
+	ent->owner = nullptr;
+	ent->teammaster = nullptr;
 	ent->svflags |= SVF_NOCLIENT;
 	ent->noise_index = gi.soundindex("world/rumble.wav");
 	ent->think = Nuke_Quake;
@@ -1925,6 +2567,8 @@ void Nuke_Explode(gentity_t *ent) {
 }
 
 static DIE(nuke_die) (gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int damage, const vec3_t &point, const mod_t &mod) -> void {
+	if (WeaponDiscardOrphan(self, self->teammaster))
+		return;
 	self->takedamage = false;
 	if ((attacker) && !(strcmp(attacker->classname, "nuke"))) {
 		G_FreeEntity(self);
@@ -1934,6 +2578,9 @@ static DIE(nuke_die) (gentity_t *self, gentity_t *inflictor, gentity_t *attacker
 }
 
 static THINK(Nuke_Think) (gentity_t *ent) -> void {
+	if (WeaponDiscardOrphan(ent, ent->teammaster))
+		return;
+
 	float			attenuation, default_atten = 1.8f;
 	int				nuke_damage_multiplier;
 	player_muzzle_t muzzleflash;
@@ -1980,23 +2627,23 @@ static THINK(Nuke_Think) (gentity_t *ent) -> void {
 		ent->health = 1;
 		ent->owner = nullptr;
 
-		gi.WriteByte(svc_muzzleflash);
-		gi.WriteEntity(ent);
-		gi.WriteByte(muzzleflash);
-		gi.multicast(ent->s.origin, MULTICAST_PHS, false);
+		NukeMuzzleFlash(ent, muzzleflash);
 
 		if (ent->timestamp <= level.time) {
 			if ((gtime_t::from_sec(ent->wait) - level.time) <= (NUKE_TIME_TO_LIVE / 2.0f)) {
-				gi.sound(ent, CHAN_NO_PHS_ADD | CHAN_VOICE, gi.soundindex("weapons/nukewarn2.wav"), 1, attenuation, 0);
+				NukeSound(ent, CHAN_NO_PHS_ADD | CHAN_VOICE,
+					gi.soundindex("weapons/nukewarn2.wav"), 1.0f, attenuation, false);
 				ent->timestamp = level.time + 300_ms;
 			} else {
-				gi.sound(ent, CHAN_NO_PHS_ADD | CHAN_VOICE, gi.soundindex("weapons/nukewarn2.wav"), 1, attenuation, 0);
+				NukeSound(ent, CHAN_NO_PHS_ADD | CHAN_VOICE,
+					gi.soundindex("weapons/nukewarn2.wav"), 1.0f, attenuation, false);
 				ent->timestamp = level.time + 500_ms;
 			}
 		}
 	} else {
 		if (ent->timestamp <= level.time) {
-			gi.sound(ent, CHAN_NO_PHS_ADD | CHAN_VOICE, gi.soundindex("weapons/nukewarn2.wav"), 1, attenuation, 0);
+			NukeSound(ent, CHAN_NO_PHS_ADD | CHAN_VOICE,
+				gi.soundindex("weapons/nukewarn2.wav"), 1.0f, attenuation, false);
 			ent->timestamp = level.time + 1_sec;
 		}
 		ent->nextthink = level.time + FRAME_TIME_S;
@@ -2004,11 +2651,13 @@ static THINK(Nuke_Think) (gentity_t *ent) -> void {
 }
 
 static TOUCH(nuke_bounce) (gentity_t *ent, gentity_t *other, const trace_t &tr, bool other_touching_self) -> void {
+	if (WeaponDiscardOrphan(ent, ent->teammaster))
+		return;
 	if (tr.surface && tr.surface->id) {
 		if (frandom() > 0.5f)
-			gi.sound(ent, CHAN_BODY, gi.soundindex("weapons/hgrenb1a.wav"), 1, ATTN_NORM, 0);
+			NukeSound(ent, CHAN_BODY, gi.soundindex("weapons/hgrenb1a.wav"), 1.0f, ATTN_NORM, false);
 		else
-			gi.sound(ent, CHAN_BODY, gi.soundindex("weapons/hgrenb2a.wav"), 1, ATTN_NORM, 0);
+			NukeSound(ent, CHAN_BODY, gi.soundindex("weapons/hgrenb2a.wav"), 1.0f, ATTN_NORM, false);
 	}
 }
 
@@ -2034,7 +2683,7 @@ void fire_nuke(gentity_t *self, const vec3_t &start, const vec3_t &aimdir, int s
 	nuke->mins = { -8, -8, 0 };
 	nuke->maxs = { 8, 8, 16 };
 	nuke->s.modelindex = gi.modelindex("models/weapons/g_nuke/tris.md2");
-	nuke->owner = self;
+	WeaponCaptureOrdnanceOwner(nuke, self);
 	nuke->teammaster = self;
 	nuke->nextthink = level.time + FRAME_TIME_S;
 	nuke->wait = (level.time + NUKE_DELAY + NUKE_TIME_TO_LIVE).seconds();
@@ -2065,6 +2714,9 @@ fire_ionripper
 =================
 */
 static THINK(ionripper_sparks) (gentity_t *self) -> void {
+	if (WeaponDiscardOrphan(self))
+		return;
+
 	gi.WriteByte(svc_temp_entity);
 	gi.WriteByte(TE_WELDING_SPARKS);
 	gi.WriteByte(0);
@@ -2077,7 +2729,12 @@ static THINK(ionripper_sparks) (gentity_t *self) -> void {
 }
 
 static TOUCH(ionripper_touch) (gentity_t *self, gentity_t *other, const trace_t &tr, bool other_touching_self) -> void {
-	if (other == self->owner)
+	gentity_t *owner = WeaponResolveOrdnanceOwner(self);
+	if (!owner) {
+		G_FreeEntity(self);
+		return;
+	}
+	if (other == owner)
 		return;
 
 	if (tr.surface && (tr.surface->flags & SURF_SKY)) {
@@ -2085,11 +2742,14 @@ static TOUCH(ionripper_touch) (gentity_t *self, gentity_t *other, const trace_t 
 		return;
 	}
 
-	if (self->owner->client)
-		PlayerNoise(self->owner, self->s.origin, PNOISE_IMPACT);
+	if (owner->client)
+		PlayerNoise(owner, self->s.origin, PNOISE_IMPACT);
 
 	if (other->takedamage) {
-		T_Damage(other, self, self->owner, self->velocity, self->s.origin, tr.plane.normal, self->dmg, 1, DAMAGE_ENERGY | DAMAGE_STAT_ONCE, MOD_RIPPER);
+		const int32_t ripper_generation = self->spawn_count;
+		T_Damage(other, self, owner, self->velocity, self->s.origin, tr.plane.normal, self->dmg, 1, DAMAGE_ENERGY | DAMAGE_STAT_ONCE, MOD_RIPPER);
+		if (!WeaponEntityGenerationMatches(self, ripper_generation))
+			return;
 	} else {
 		return;
 	}
@@ -2120,7 +2780,7 @@ void fire_ionripper(gentity_t *self, const vec3_t &start, const vec3_t &dir, int
 	ion->s.renderfx |= RF_FULLBRIGHT;
 	ion->s.modelindex = gi.modelindex("models/objects/boomrang/tris.md2");
 	ion->s.sound = gi.soundindex("misc/lasfly.wav");
-	ion->owner = self;
+	WeaponCaptureOrdnanceOwner(ion, self);
 	ion->touch = ionripper_touch;
 	ion->nextthink = level.time + (RS(RS_Q3A) ? 10_sec : 3_sec);
 	ion->think = RS(RS_Q3A) ? G_FreeEntity : ionripper_sparks;
@@ -2128,7 +2788,7 @@ void fire_ionripper(gentity_t *self, const vec3_t &start, const vec3_t &dir, int
 	ion->splash_radius = RS(RS_Q3A) ? 0 : 100;
 	gi.linkentity(ion);
 
-	tr = gi.traceline(self->s.origin, ion->s.origin, ion, ion->clipmask);
+	tr = WeaponArenaTraceline(self->s.origin, ion->s.origin, ion, ion->clipmask, self);
 	if (tr.fraction < 1.0f) {
 		ion->s.origin = tr.endpos + (tr.plane.normal * 1.f);
 		ion->touch(ion, tr.ent, tr, false);
@@ -2142,6 +2802,12 @@ fire_heat
 =================
 */
 static THINK(heat_think) (gentity_t *self) -> void {
+	gentity_t *owner = WeaponResolveOrdnanceOwner(self);
+	if (!owner) {
+		G_FreeEntity(self);
+		return;
+	}
+
 	gentity_t *target = nullptr;
 	gentity_t *acquire = nullptr;
 	vec3_t	 vec;
@@ -2154,7 +2820,9 @@ static THINK(heat_think) (gentity_t *self) -> void {
 
 	// acquire new target
 	while ((target = findradius(target, self->s.origin, 1024)) != nullptr) {
-		if (self->owner == target)
+		if (owner == target)
+			continue;
+		if (GT(GT_ARENA) && !MM_Arena_CanInteract(self, target))
 			continue;
 		if (!target->client)
 			continue;
@@ -2220,7 +2888,7 @@ void fire_heat(gentity_t *self, const vec3_t &start, const vec3_t &dir, int dama
 	heat->solid = SOLID_BBOX;
 	heat->s.effects |= EF_ROCKET;
 	heat->s.modelindex = gi.modelindex("models/objects/rocket/tris.md2");
-	heat->owner = self;
+	WeaponCaptureOrdnanceOwner(heat, self);
 	heat->touch = rocket_touch;
 	heat->speed = speed;
 	heat->accel = turn_fraction;
@@ -2244,25 +2912,54 @@ fire_phalanx
 */
 static TOUCH(phalanx_touch) (gentity_t *ent, gentity_t *other, const trace_t &tr, bool other_touching_self) -> void {
 	vec3_t origin;
+	gentity_t *owner = WeaponResolveOrdnanceOwner(ent);
+	if (!owner) {
+		G_FreeEntity(ent);
+		return;
+	}
 
-	if (other == ent->owner)
+	if (other == owner)
 		return;
 
 	if (tr.surface && (tr.surface->flags & SURF_SKY)) {
 		G_FreeEntity(ent);
 		return;
 	}
+	const int32_t target_generation = other->spawn_count;
+	const int target_arena = MM_Arena_Id(other);
+	gentity_t *radius_ignore = other;
 
-	if (ent->owner->client)
-		PlayerNoise(ent->owner, ent->s.origin, PNOISE_IMPACT);
+	if (owner->client)
+		PlayerNoise(owner, ent->s.origin, PNOISE_IMPACT);
 
 	// calculate position for the explosion entity
 	origin = ent->s.origin + (ent->velocity * -0.02f);
 
-	if (other->takedamage)
-		T_Damage(other, ent, ent->owner, ent->velocity, ent->s.origin, tr.plane.normal, ent->dmg, 0, DAMAGE_ENERGY, MOD_PHALANX);
+	if (other->takedamage) {
+		const int32_t phalanx_generation = ent->spawn_count;
+		T_Damage(other, ent, owner, ent->velocity, ent->s.origin, tr.plane.normal, ent->dmg, 0, DAMAGE_ENERGY, MOD_PHALANX);
+		if (!WeaponEntityGenerationMatches(ent, phalanx_generation))
+			return;
+		if (!WeaponEntityIdentityMatches(other, target_generation,
+			target_arena))
+			radius_ignore = nullptr;
+	}
 
-	T_RadiusDamage(ent, ent->owner, (float)ent->splash_damage, other, ent->splash_radius, DAMAGE_ENERGY, MOD_PHALANX);
+	if (!(owner = WeaponResolveOrdnanceOwner(ent))) {
+		G_FreeEntity(ent);
+		return;
+	}
+	const int32_t phalanx_generation = ent->spawn_count;
+	if (!WeaponEntityIdentityMatches(other, target_generation, target_arena))
+		radius_ignore = nullptr;
+	T_RadiusDamage(ent, owner, (float)ent->splash_damage, radius_ignore,
+		ent->splash_radius, DAMAGE_ENERGY, MOD_PHALANX);
+	if (!WeaponEntityGenerationMatches(ent, phalanx_generation))
+		return;
+	if (!WeaponResolveOrdnanceOwner(ent)) {
+		G_FreeEntity(ent);
+		return;
+	}
 
 	gi.WriteByte(svc_temp_entity);
 	gi.WriteByte(TE_PLASMA_EXPLOSION);
@@ -2290,7 +2987,7 @@ void fire_phalanx(gentity_t *self, const vec3_t &start, const vec3_t &dir, int d
 	phalanx->solid = SOLID_BBOX;
 	phalanx->svflags |= SVF_PROJECTILE;
 	phalanx->flags |= FL_DODGE;
-	phalanx->owner = self;
+	WeaponCaptureOrdnanceOwner(phalanx, self);
 	phalanx->touch = phalanx_touch;
 	phalanx->nextthink = level.time + gtime_t::from_sec(8000.f / speed);
 	phalanx->think = G_FreeEntity;
@@ -2313,7 +3010,9 @@ fire_trap
 =================
 */
 static THINK(Trap_Gib_Think) (gentity_t *ent) -> void {
-	if (ent->owner->s.frame != 5) {
+	gentity_t *trap = WeaponResolveOrdnanceOwner(ent);
+	if (!trap || !WeaponResolveOrdnanceOwner(trap, trap->teammaster) ||
+		trap->s.frame != 5) {
 		G_FreeEntity(ent);
 		return;
 	}
@@ -2321,14 +3020,14 @@ static THINK(Trap_Gib_Think) (gentity_t *ent) -> void {
 	vec3_t forward, right, up;
 	vec3_t vec;
 
-	AngleVectors(ent->owner->s.angles, forward, right, up);
+	AngleVectors(trap->s.angles, forward, right, up);
 
 	// rotate us around the center
-	float degrees = (150.f * gi.frame_time_s) + ent->owner->delay;
-	vec3_t diff = ent->owner->s.origin - ent->s.origin;
+	float degrees = (150.f * gi.frame_time_s) + trap->delay;
+	vec3_t diff = trap->s.origin - ent->s.origin;
 	vec = RotatePointAroundVector(up, diff, degrees);
 	ent->s.angles[YAW] += degrees;
-	vec3_t new_origin = ent->owner->s.origin - vec;
+	vec3_t new_origin = trap->s.origin - vec;
 
 	trace_t tr = gi.traceline(ent->s.origin, new_origin, ent, MASK_SOLID);
 	ent->s.origin = tr.endpos;
@@ -2346,17 +3045,21 @@ static THINK(Trap_Gib_Think) (gentity_t *ent) -> void {
 }
 
 static DIE(trap_die) (gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int damage, const vec3_t &point, const mod_t &mod) -> void {
+	if (WeaponDiscardOrphan(self, self->teammaster))
+		return;
 	BecomeExplosion1(self);
 }
 
-static void SP_item_foodcube(gentity_t *self) {
+static bool SP_item_foodcube(gentity_t *self) {
 	if (deathmatch->integer && g_no_health->integer) {
 		G_FreeEntity(self);
-		return;
+		return false;
 	}
 
-	SpawnItem(self, GetItemByIndex(IT_FOODCUBE));
+	if (!SpawnItem(self, GetItemByIndex(IT_FOODCUBE)))
+		return false;
 	self->spawnflags |= SPAWNFLAG_ITEM_DROPPED;
+	return true;
 }
 
 void SpawnDamage(int type, const vec3_t &origin, const vec3_t &normal, int damage);
@@ -2367,6 +3070,11 @@ static THINK(Trap_Think) (gentity_t *ent) -> void {
 	vec3_t	 vec;
 	float	 len;
 	float	 oldlen = 8000;
+	gentity_t *owner = WeaponResolveOrdnanceOwner(ent, ent->teammaster);
+	if (!owner) {
+		G_FreeEntity(ent);
+		return;
+	}
 
 	if (ent->timestamp < level.time) {
 		BecomeExplosion1(ent);
@@ -2404,15 +3112,32 @@ static THINK(Trap_Think) (gentity_t *ent) -> void {
 			ent->s.effects &= ~EF_TRAP;
 
 			best = G_Spawn();
+			const int32_t foodcube_generation = best->spawn_count;
+			best->arena = ent->arena;
 			best->count = ent->mass;
 			best->s.scale = 1.f + ((ent->accel - 100.f) / 300.f) * 1.0f;
-			SP_item_foodcube(best);
+			if (!SP_item_foodcube(best))
+				return;
 			best->s.origin = ent->s.origin;
 			best->s.origin[2] += 24 * best->s.scale;
 			best->s.old_origin = best->s.origin;
 			best->s.angles[YAW] = frandom() * 360;
 			best->velocity[2] = 400;
+			if (!best->think) {
+				G_FreeEntity(best);
+				return;
+			}
+			const int32_t trap_generation = ent->spawn_count;
 			best->think(best);
+			if (!WeaponEntityGenerationMatches(ent, trap_generation))
+				return;
+			if (!WeaponEntityGenerationMatches(best, foodcube_generation))
+				return;
+			if (!WeaponResolveOrdnanceOwner(ent, ent->teammaster)) {
+				G_FreeEntity(best);
+				G_FreeEntity(ent);
+				return;
+			}
 			best->nextthink = 0_ms;
 			gi.linkentity(best);
 
@@ -2436,11 +3161,13 @@ static THINK(Trap_Think) (gentity_t *ent) -> void {
 		return;
 	}
 
-	if (deathmatch->integer && IsCombatDisabled())
+	if (deathmatch->integer && notGT(GT_ARENA) && IsCombatDisabled())
 		return;
 
 	while ((target = findradius(target, ent->s.origin, 256)) != nullptr) {
 		if (target == ent)
+			continue;
+		if (GT(GT_ARENA) && !MM_Arena_CanInteract(ent, target))
 			continue;
 
 		// [Paril-KEX] don't allow traps to be placed near flags or teleporters
@@ -2459,7 +3186,7 @@ static THINK(Trap_Think) (gentity_t *ent) -> void {
 
 		if (!(target->svflags & SVF_MONSTER) && !target->client)
 			continue;
-		if (target != ent->teammaster && CheckTeamDamage(target, ent->teammaster))
+		if (target != owner && CheckTeamDamage(target, owner))
 			continue;
 		// [Paril-KEX]
 		if (!deathmatch->integer && target->client)
@@ -2498,14 +3225,36 @@ static THINK(Trap_Think) (gentity_t *ent) -> void {
 
 		if (len < 48) {
 			if (best->mass < 400) {
+				const int32_t trap_generation = ent->spawn_count;
+				const int32_t target_generation = best->spawn_count;
+				const int target_arena = MM_Arena_Id(best);
 				ent->takedamage = false;
 				ent->solid = SOLID_NOT;
 				ent->die = nullptr;
 
-				T_Damage(best, ent, ent->teammaster, vec3_origin, best->s.origin, vec3_origin, 100000, 1, DAMAGE_NONE | DAMAGE_STAT_ONCE, MOD_TRAP);
+				T_Damage(best, ent, owner, vec3_origin, best->s.origin, vec3_origin, 100000, 1, DAMAGE_NONE | DAMAGE_STAT_ONCE, MOD_TRAP);
+				if (!WeaponEntityGenerationMatches(ent, trap_generation))
+					return;
+				if (!WeaponResolveOrdnanceOwner(ent, ent->teammaster) ||
+					!WeaponEntityIdentityMatches(best, target_generation,
+						target_arena)) {
+					G_FreeEntity(ent);
+					return;
+				}
 
-				if (best->svflags & SVF_MONSTER)
+				if (best->svflags & SVF_MONSTER) {
+					const int32_t pain_trap_generation = ent->spawn_count;
 					M_ProcessPain(best);
+					if (!WeaponEntityGenerationMatches(ent,
+						pain_trap_generation))
+						return;
+				}
+				if (!WeaponResolveOrdnanceOwner(ent, ent->teammaster) ||
+					!WeaponEntityIdentityMatches(best, target_generation,
+						target_arena)) {
+					G_FreeEntity(ent);
+					return;
+				}
 
 				ent->enemy = best;
 				ent->wait = 64;
@@ -2532,7 +3281,7 @@ static THINK(Trap_Think) (gentity_t *ent) -> void {
 					e->movetype = MOVETYPE_NONE;
 					e->nextthink = level.time + FRAME_TIME_S;
 					e->think = Trap_Gib_Think;
-					e->owner = ent;
+					WeaponCaptureOrdnanceOwner(e, ent);
 					Trap_Gib_Think(e);
 				}
 			} else {
@@ -2572,7 +3321,8 @@ void fire_trap(gentity_t *self, const vec3_t &start, const vec3_t &aimdir, int s
 	trap->die = trap_die;
 	trap->health = 20;
 	trap->s.modelindex = gi.modelindex("models/weapons/z_trap/tris.md2");
-	trap->owner = trap->teammaster = self;
+	WeaponCaptureOrdnanceOwner(trap, self);
+	trap->teammaster = self;
 	trap->nextthink = level.time + 1_sec;
 	trap->think = Trap_Think;
 	trap->classname = "food_cube_trap";
@@ -2588,4 +3338,71 @@ void fire_trap(gentity_t *self, const vec3_t &start, const vec3_t &aimdir, int s
 	gi.linkentity(trap);
 
 	trap->timestamp = level.time + 30_sec;
+}
+
+void G_MigrateLegacyOrdnanceIdentities()
+{
+	const size_t entity_count = WeaponEntityCount();
+	for (size_t index = 0; index < entity_count; ++index) {
+		gentity_t *const entity = &g_entities[index];
+		if (!entity->inuse)
+			continue;
+
+		const bool named_persistent_ordnance = entity->classname &&
+			(strcmp(entity->classname, "nuke") == 0 ||
+			 strcmp(entity->classname, "food_cube_trap") == 0 ||
+			 strcmp(entity->classname, "pain daemon") == 0 ||
+			 strcmp(entity->classname, "prox_mine") == 0 ||
+			 strcmp(entity->classname, "prox_field") == 0 ||
+			 strcmp(entity->classname, "tesla_mine") == 0 ||
+			 strcmp(entity->classname, "tesla trigger") == 0);
+		const bool live_grapple = entity->owner && entity->owner->client &&
+			entity->owner->client->grapple_ent == entity;
+		const bool captured_owner = named_persistent_ordnance || live_grapple ||
+			entity->touch == blaster_touch ||
+			entity->touch == blaster2_touch ||
+			entity->touch == Grenade_Touch ||
+			entity->touch == rocket_touch ||
+			entity->touch == bfg_touch ||
+			entity->touch == disintegrator_touch ||
+			entity->touch == disruptor_touch ||
+			entity->touch == flechette_touch ||
+			entity->touch == nuke_bounce ||
+			entity->touch == ionripper_touch ||
+			entity->touch == phalanx_touch ||
+			entity->think == bfg_laser_update ||
+			entity->think == bfg_explode ||
+			entity->think == disruptor_pain_daemon_think ||
+			entity->think == Trap_Gib_Think;
+		if (captured_owner) {
+			const bool owner_is_teammaster = entity->classname &&
+				(strcmp(entity->classname, "nuke") == 0 ||
+				 strcmp(entity->classname, "food_cube_trap") == 0 ||
+				 strcmp(entity->classname, "prox_mine") == 0 ||
+				 strcmp(entity->classname, "tesla_mine") == 0);
+			gentity_t *const owner = owner_is_teammaster
+				? entity->teammaster : entity->owner;
+			if (owner && owner->inuse) {
+				entity->count = owner->spawn_count;
+				entity->sounds = MM_Arena_Id(owner);
+				entity->arena = entity->sounds;
+			} else {
+				entity->count = 0;
+				entity->sounds = 0;
+			}
+		}
+
+		const bool captured_target = entity->touch == disruptor_touch ||
+			entity->think == disruptor_pain_daemon_think;
+		if (captured_target)
+			entity->style = entity->enemy && entity->enemy->inuse
+				? entity->enemy->spawn_count : 0;
+
+		if (entity->classname &&
+			(strcmp(entity->classname, "prox_mine") == 0 ||
+			 strcmp(entity->classname, "tesla_mine") == 0)) {
+			entity->style = entity->teamchain && entity->teamchain->inuse
+				? entity->teamchain->spawn_count : 0;
+		}
+	}
 }

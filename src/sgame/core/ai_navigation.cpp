@@ -1349,7 +1349,7 @@ void TargetTesla(gentity_t *self, gentity_t *tesla) {
 // returns nullptr if bad
 
 gentity_t *PickCoopTarget(gentity_t *self) {
-	gentity_t *targets[MAX_CLIENTS_KEX] = {};
+	gentity_t *targets[MAX_LOBBY_PLAYERS] = {};
 	int		 num_targets = 0, targetID;
 
 	// if we're not in coop, this is a noop
@@ -1381,8 +1381,10 @@ int CountPlayers() {
 		return 1;
 
 	int count = 0;
-	for (auto ac : active_clients())
-		count++;
+	for (auto ac : active_clients()) {
+		if (ac)
+			count++;
+	}
 
 	return count;
 }

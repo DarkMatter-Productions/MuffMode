@@ -4,8 +4,12 @@
 #include "g_local.h"
 #include "core/debug_log.h"
 #include "muffmode/mm_announcer.h"
+#include "muffmode/mm_arena.h"
+#include "muffmode/mm_awards.h"
 #include "muffmode/mm_captain.h"
 #include "muffmode/mm_gametype.h"
+#include "muffmode/mm_map_pick.h"
+#include "muffmode/mm_map_pool.h"
 #include "muffmode/mm_maps.h"
 #include "muffmode/mm_match.h"
 #include "muffmode/mm_parse.h"
@@ -200,11 +204,13 @@ void MM_UpdateActiveVote()
 
 bool MM_IsMapValidImpl(const char *mapname)
 {
+	MM_HandleMapPoolCvarChanges();
 	return muffmode::maps::ContainsConfiguredMap(mapname);
 }
 
 void MM_PrintAvailableMaps(gentity_t *ent)
 {
+	MM_HandleMapPoolCvarChanges();
 	std::vector<std::string> all_maps = muffmode::maps::CollectConfiguredMaps();
 
 	if (all_maps.empty())
@@ -222,6 +228,18 @@ void MM_PrintAvailableMaps(gentity_t *ent)
 } // namespace muffmode::vote
 
 namespace vote = muffmode::vote;
+
+bool MM_ParseVoteChoice(const char *arg, int &vote)
+{
+	return vote::MM_ParseVoteChoice(arg, vote);
+}
+
+bool MM_VoteClientEligible(const gentity_t *ent)
+{
+	return ent && ent->inuse && ent->client && ent->client->pers.connected &&
+		!(ent->svflags & SVF_BOT) && !ent->client->sess.is_a_bot &&
+		ClientCanVote(ent->client);
+}
 
 void MM_TransitionVoteState(VoteState new_state)
 {
@@ -584,14 +602,18 @@ void MM_VotePassMap()
 		level.vote_state.arg.c_str(), (int)level.vote_state.arg.length(),
 		(void *)level.vote_state.arg.c_str());
 
-	if (!MM_IsSafeMapToken(level.vote_state.arg.c_str()) || level.vote_state.arg.length() >= sizeof(level.nextmap))
+	MM_HandleMapPoolCvarChanges();
+	std::string resolved_map;
+	if (!muffmode::maps::ResolveConfiguredMap(
+			level.vote_state.arg.c_str(), resolved_map) ||
+		resolved_map.size() >= sizeof(level.nextmap))
 	{
-		gi.LocBroadcast_Print(PRINT_HIGH, "Map vote failed: invalid map name.\n");
+		gi.LocBroadcast_Print(PRINT_HIGH, "Map vote failed: map is no longer available.\n");
 		vote::MM_MarkExecutingVoteFailed();
 		return;
 	}
 
-	muffmode::CopyString(level.nextmap, level.vote_state.arg);
+	muffmode::CopyString(level.nextmap, resolved_map);
 	MuffModeLog("DEBUG", "Vote_Pass_Map: queuing gamemap for '%s'", level.nextmap);
 	gi.AddCommandString(G_Fmt("gamemap \"{}\"\n", level.nextmap).data());
 }
@@ -627,6 +649,12 @@ void MM_VotePassRestartMatch()
 void MM_VotePassNextMap()
 {
 	Match_End();
+	// [MuffMode] A passed nextmap vote outranks whatever screen the intermission
+	// is currently showing. Both post-scoreboard stages own the exit while they
+	// are open, so they are retired here rather than being left to swallow the
+	// result and, in the pick's case, choose a different map.
+	MM_Awards_Reset();
+	MM_MapPick_Reset();
 	level.intermission_exit = true;
 }
 
@@ -938,7 +966,7 @@ bool MM_VoteValBalanceTeams(gentity_t *ent)
 
 void MM_VotePassReadyAll()
 {
-	if (!g_dm_do_readyup->integer || level.match_state != matchst_t::MATCH_WARMUP_READYUP)
+	if (!g_dm_do_readyup->integer || level.match_state != match_state_t::MATCH_WARMUP_READYUP)
 	{
 		gi.LocBroadcast_Print(PRINT_HIGH, "Ready all vote failed: not in ready-up warmup.\n");
 		return;
@@ -949,7 +977,7 @@ void MM_VotePassReadyAll()
 
 bool MM_VoteValReadyAll(gentity_t *ent)
 {
-	if (!g_dm_do_readyup->integer || level.match_state != matchst_t::MATCH_WARMUP_READYUP)
+	if (!g_dm_do_readyup->integer || level.match_state != match_state_t::MATCH_WARMUP_READYUP)
 	{
 		gi.LocClient_Print(ent, PRINT_HIGH, "Ready all is only available during ready-up warmup.\n");
 		return false;
@@ -1070,7 +1098,9 @@ void MM_VoteCommandStore(gentity_t *ent)
 		return;
 	}
 
-	if (!g_allow_vote_midgame->integer && level.match_state >= matchst_t::MATCH_COUNTDOWN)
+	if (!g_allow_vote_midgame->integer &&
+		(level.match_state >= match_state_t::MATCH_COUNTDOWN ||
+		 MM_Arena_GlobalVoteBlocked(ent)))
 	{
 		gi.LocClient_Print(ent, PRINT_HIGH, "Voting is only allowed during the warm up period.\n");
 		clear_idle_staged_vote();
@@ -1129,22 +1159,33 @@ void MM_VoteCommandStore(gentity_t *ent)
 	// Open vote menu for eligible non-caller clients.
 	for (auto ec : active_clients())
 	{
-		if (ec->svflags & SVF_BOT || ec->client->sess.is_a_bot)
+		if (!ec || !ec->client)
 			continue;
-		if (ec->client == level.vote_state.caller)
+		gclient_t *const client = ec->client;
+		if (ec->svflags & SVF_BOT || client->sess.is_a_bot)
 			continue;
-		if (!ClientCanVote(ec->client))
+		if (client == level.vote_state.caller)
+			continue;
+		if (!ClientCanVote(client))
 			continue;
 
-		int ci = (int)(ec->client - game.clients);
+		int ci = (int)(client - game.clients);
 		MuffModeLog("DEBUG", "VoteCommandStore: opening vote menu for client %d (%s), menu=%p, inmenu=%d",
-			ci, ec->client->resp.netname, (void *)ec->client->menu, (int)ec->client->inmenu);
+			ci, client->resp.netname, (void *)client->menu, (int)client->inmenu);
 
-		ec->client->showinventory = false;
-		ec->client->showhelp = false;
-		ec->client->showscores = false;
-		gentity_t *e = ec->client->follow_target ? ec->client->follow_target : ec;
-		ec->client->ps.stats[STAT_SHOW_STATUSBAR] = (e && e->client && ClientIsPlaying(e->client)) ? 1 : 0;
+		client->showinventory = false;
+		client->showhelp = false;
+		client->showscores = false;
+		int show_statusbar = 0;
+		if (client->follow_target) {
+			gclient_t *const followed_client = client->follow_target->client;
+			if (followed_client && ClientIsPlaying(followed_client))
+				show_statusbar = 1;
+		}
+		else if (ClientIsPlaying(client)) {
+			show_statusbar = 1;
+		}
+		client->ps.stats[STAT_SHOW_STATUSBAR] = show_statusbar;
 		P_Menu_Close(ec);
 		G_Menu_Vote_Open(ec);
 
@@ -1238,6 +1279,9 @@ void MM_CmdVote(gentity_t *ent)
 	if (!ent || !ent->client)
 		return;
 
+	if (MM_Arena_CastVote(ent, gi.argc() == 2 ? gi.argv(1) : nullptr))
+		return;
+
 	if (!ClientCanVote(ent->client))
 	{
 		gi.LocClient_Print(ent, PRINT_HIGH, "Not allowed to vote as spectator.\n");
@@ -1263,7 +1307,7 @@ void MM_CmdVote(gentity_t *ent)
 	}
 
 	int vote = 0;
-	if (!vote::MM_ParseVoteChoice(gi.argv(1), vote))
+	if (!MM_ParseVoteChoice(gi.argv(1), vote))
 	{
 		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid vote. Use yes or no.\n");
 		return;
@@ -1320,7 +1364,7 @@ vcmds_t vote_cmds[] = {
 	{"timelimit",			MM_VoteValTimelimit,		MM_VotePassTimelimit,		16,		2,	"<0..$>",							"alters the match time limit, 0 for no time limit"},
 	{"scorelimit",			MM_VoteValScorelimit,		MM_VotePassScorelimit,		32,		2,	"<0..$>",							"alters the match score limit, 0 for no score limit"},
 	{"fraglimit",			MM_VoteValScorelimit,		MM_VotePassScorelimit,		32,		2,	"<0..$>",							"alters the match score limit, 0 for no score limit (alias for scorelimit)"},
-	{"shuffle",				MM_VoteValShuffleTeams,		MM_VotePassShuffleTeams,	64,		1,	"",									"shuffles teams"},
+	{"shuffle",				MM_VoteValShuffleTeams,		MM_VotePassShuffleTeams,	64,		1,	"",									"shuffles teams based on skill"},
 	{"unlagged",			MM_VoteValUnlagged,			MM_VotePassUnlagged,		128,	2,	"<0/1>",							"enables or disables lag compensation"},
 	{"cointoss",			vote::MM_VoteValNone,		MM_VotePassCointoss,		256,	1,	"",									"invokes a HEADS or TAILS cointoss"},
 	{"random",				MM_VoteValRandom,			MM_VotePassRandom,			512,	2,	"<2-100>",							"randomly selects a number from 2 to specified value"},

@@ -53,7 +53,7 @@ void MM_Strike_AwardTouchBonus()
 	level.strike_flag_touch = true;
 	G_AdjustTeamScore(MM_Strike_AttackingTeam(), STRIKE_TOUCH_POINTS);
 	MM_Strike_CheckMatchEnd();
-	if (level.match_state != matchst_t::MATCH_IN_PROGRESS)
+	if (level.match_state != match_state_t::MATCH_IN_PROGRESS)
 		return;
 	gi.LocBroadcast_Print(PRINT_CENTER, "Bonus point!\n{} reached the flag!\n",
 		Teams_TeamName(MM_Strike_AttackingTeam()));

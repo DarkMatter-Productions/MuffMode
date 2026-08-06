@@ -2,6 +2,7 @@
 // Licensed under the GNU General Public License 2.0.
 
 #include "g_local.h"
+#include "muffmode/mm_horde.h"
 
 //
 // Monster spawning code
@@ -37,6 +38,18 @@ gentity_t *CreateMonster(const vec3_t &origin, const vec3_t &angles, const char 
 
 	newEnt->gravityVector = { 0, 0, -1 };
 	ED_CallSpawn(newEnt);
+
+	// [MuffMode] Dynamic medic/carrier/widow summons bypass the Horde director.
+	// Reject them immediately if their final monster hull is outside or
+	// disconnected from the live play space; the continuous guard handles
+	// subsequent movement escapes.
+	if (!newEnt->inuse || !(newEnt->svflags & SVF_MONSTER) ||
+		!MM_Horde_ValidateMonsterPlacement(newEnt)) {
+		if (newEnt->inuse)
+			G_FreeEntity(newEnt);
+		return nullptr;
+	}
+
 	newEnt->s.renderfx |= RF_IR_VISIBLE;
 
 	return newEnt;
@@ -154,9 +167,22 @@ constexpr gtime_t SPAWNGROW_LIFESPAN = 1000_ms;
 
 static THINK(spawngrow_think) (gentity_t *self) -> void
 {
+	gentity_t *const beam = self->target_ent;
+	const bool live_beam = beam && beam->inuse && beam->classname &&
+		strcmp(beam->classname, "spawngro_beam") == 0 &&
+		(!self->target_ent_generation ||
+			beam->spawn_count == self->target_ent_generation) &&
+		beam->owner == self;
+	if (live_beam && !self->target_ent_generation)
+		self->target_ent_generation = beam->spawn_count;
+	else if (!live_beam) {
+		self->target_ent = nullptr;
+		self->target_ent_generation = 0;
+	}
 	if (level.time >= self->timestamp)
 	{
-		G_FreeEntity(self->target_ent);
+		if (live_beam)
+			G_FreeEntity(beam);
 		G_FreeEntity(self);
 		return;
 	}
@@ -232,6 +258,7 @@ void SpawnGrow_Spawn(const vec3_t &startpos, float start_size, float end_size)
 
 	// [Paril-KEX]
 	gentity_t *beam = ent->target_ent = G_Spawn();
+	ent->target_ent_generation = beam->spawn_count;
 	beam->s.modelindex = MODELINDEX_WORLD;
 	beam->s.renderfx = RF_BEAM_LIGHTNING | RF_NO_ORIGIN_LERP;
 	beam->s.frame = 1;

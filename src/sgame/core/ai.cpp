@@ -32,7 +32,7 @@ gentity_t *AI_GetSightClient(gentity_t *self) {
 	if (level.intermission_time)
 		return nullptr;
 
-	gentity_t *visible_players[MAX_CLIENTS_KEX] = {};
+	gentity_t *visible_players[MAX_LOBBY_PLAYERS] = {};
 	int32_t num_visible = 0;
 
 	for (auto player : active_clients()) {
@@ -1084,7 +1084,9 @@ bool ai_checkattack(gentity_t *self, float dist) {
 		}
 
 		if (self->monsterinfo.aiflags & AI_SOUND_TARGET) {
-			if ((level.time - self->enemy->teleport_time) > 5_sec) {
+			if (!self->enemy) {
+				self->monsterinfo.aiflags &= ~AI_SOUND_TARGET;
+			} else if ((level.time - self->enemy->teleport_time) > 5_sec) {
 				if (self->goalentity == self->enemy) {
 					if (self->movetarget)
 						self->goalentity = self->movetarget;
@@ -1356,6 +1358,11 @@ void ai_run(gentity_t *self, float dist) {
 		if (!FindTarget(self))
 			return;
 	}
+
+	// [MuffMode] Horde periodically redistributes pressure when another fighter is
+	// materially less burdened; close engagements and special AI goals stay sticky.
+	if (GT(GT_HORDE) && g_horde_enhanced_ai->integer)
+		MM_Horde_MaybeRetarget(self);
 
 	// if we're dodging, make sure to keep the attack_state AS_SLIDING
 	retval = ai_checkattack(self, dist);

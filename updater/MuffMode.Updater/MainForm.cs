@@ -600,7 +600,21 @@ internal sealed class MainForm : Form
         {
             var progress = new Progress<UpdaterProgress>(ReportProgress);
             downloadedZip = await _releaseClient.DownloadReleaseAssetAsync(_latestRelease, downloadDirectory, progress, cancellationToken);
-            await InstallationManager.SyncReleaseToInstallAsync(_latestRelease, downloadedZip, installPath, progress, cancellationToken);
+            var installResult = await InstallationManager.SyncReleaseToInstallAsync(
+                _latestRelease,
+                downloadedZip,
+                installPath,
+                progress,
+                cancellationToken);
+
+            if (installResult.SelfUpdateHandoffStarted)
+            {
+                SetStatus("Restarting the updated Muff Mode Updater...");
+                UpdaterLog.WriteInfo(
+                    $"Installed Muff Mode {_latestRelease.Version}; exiting for verified updater self-replacement.");
+                _closeAfterOperation = true;
+                return;
+            }
 
             UpdateLocalInstallState();
             UpdateVersionLabels();

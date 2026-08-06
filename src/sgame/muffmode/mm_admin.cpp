@@ -3,8 +3,12 @@
 
 #include "g_local.h"
 #include "muffmode/mm_admin.h"
+#include "muffmode/mm_arena.h"
+#include "muffmode/mm_awards.h"
 #include "muffmode/mm_command_contracts.h"
 #include "muffmode/mm_gametype.h"
+#include "muffmode/mm_map_pick.h"
+#include "muffmode/mm_map_pool.h"
 #include "muffmode/mm_maps.h"
 #include "muffmode/mm_match.h"
 #include "muffmode/mm_util.h"
@@ -368,18 +372,21 @@ void MM_CmdSetMap(gentity_t *ent)
 		return;
 	}
 
-	if (!MM_IsMapValid(gi.argv(1)))
+	MM_HandleMapPoolCvarChanges();
+	std::string resolved_map;
+	if (!muffmode::maps::ResolveConfiguredMap(gi.argv(1), resolved_map))
 	{
 		gi.Client_Print(ent, PRINT_HIGH, "Map name is not valid.\n");
 		return;
 	}
 
-	if (!admin::MM_AdminQueueGamemap(gi.argv(1))) {
+	if (!admin::MM_AdminQueueGamemap(resolved_map.c_str())) {
 		gi.Client_Print(ent, PRINT_HIGH, "Map name is not safe to queue.\n");
 		return;
 	}
 
-	gi.LocBroadcast_Print(PRINT_HIGH, "[ADMIN]: Changing map to {}\n", gi.argv(1));
+	gi.LocBroadcast_Print(
+		PRINT_HIGH, "[ADMIN]: Changing map to {}\n", resolved_map.c_str());
 }
 
 // [MuffMode] Admin match-control and session command bodies (moved from sgame/core/commands.cpp).
@@ -395,7 +402,10 @@ void MM_CmdStartMatch(gentity_t *ent) {
 	if (!admin::MM_RequireNoCommandArgs(ent))
 		return;
 
-	if (level.match_state > matchst_t::MATCH_WARMUP_READYUP) {
+	if (MM_Arena_AdminStart(ent))
+		return;
+
+	if (level.match_state > match_state_t::MATCH_WARMUP_READYUP) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "Match has already started.\n");
 		return;
 	}
@@ -416,7 +426,10 @@ void MM_CmdEndMatch(gentity_t *ent) {
 	if (!admin::MM_RequireNoCommandArgs(ent))
 		return;
 
-	if (level.match_state < matchst_t::MATCH_IN_PROGRESS) {
+	if (MM_Arena_AdminEnd(ent))
+		return;
+
+	if (level.match_state < match_state_t::MATCH_IN_PROGRESS) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "Match has not yet begun.\n");
 		return;
 	}
@@ -439,7 +452,10 @@ void MM_CmdResetMatch(gentity_t *ent) {
 	if (!admin::MM_RequireNoCommandArgs(ent))
 		return;
 
-	if (level.match_state < matchst_t::MATCH_IN_PROGRESS) {
+	if (MM_Arena_AdminReset(ent))
+		return;
+
+	if (level.match_state < match_state_t::MATCH_IN_PROGRESS) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "Match has not yet begun.\n");
 		return;
 	}
@@ -518,6 +534,12 @@ void MM_CmdNextMap(gentity_t *ent) {
 
 	gi.Broadcast_Print(PRINT_HIGH, "[ADMIN]: Changing to next map.\n");
 	Match_End();
+	// [MuffMode] An admin asking for the next map outranks whatever screen the
+	// intermission is currently showing. Both post-scoreboard stages own the exit
+	// while they are open, so they are retired here rather than being left to
+	// swallow the request and, in the pick's case, choose a different map.
+	MM_Awards_Reset();
+	MM_MapPick_Reset();
 	level.intermission_exit = true;
 }
 
@@ -544,7 +566,14 @@ void MM_CmdAdmin(gentity_t *ent) {
 	if (!admin::MM_RequireExactCommandArgc(ent, 2, G_Fmt("{} <password>", gi.argv(0)).data()))
 		return;
 
-	if (!muffmode::CStringEqualsI(password, gi.argv(1))) {
+	// Apply the same configured guess rate used by ghost-code authentication
+	// before evaluating this full-administrator secret.
+	const admin::mm_admin_attempt_result_t attempt = admin::MM_EvaluateAdminAttempt(
+		CheckFlood(ent), password, gi.argv(1));
+	if (attempt == admin::mm_admin_attempt_result_t::Throttled)
+		return;
+
+	if (attempt == admin::mm_admin_attempt_result_t::InvalidCredentials) {
 		gi.Client_Print(ent, PRINT_HIGH, "Invalid administration password.\n");
 		return;
 	}

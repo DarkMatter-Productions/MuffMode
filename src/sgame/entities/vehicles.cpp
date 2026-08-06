@@ -2,6 +2,7 @@
 // Licensed under the GNU General Public License 2.0.
 // Scripted ship, flyby, missile and nuke misc entities.
 #include "g_local.h"
+#include "muffmode/mm_ordnance_identity.h"
 
 namespace {
 
@@ -86,10 +87,20 @@ void SP_misc_bigviper(gentity_t *ent) {
 "dmg"	how much boom should the bomb make?
 */
 TOUCH(misc_viper_bomb_touch) (gentity_t *self, gentity_t *other, const trace_t &tr, bool other_touching_self) -> void {
-	G_UseTargets(self, self->activator);
+	const int32_t self_generation = self->spawn_count;
+	gentity_t *activator = self->activator;
+	if (!activator || !activator->inuse ||
+		activator->spawn_count != self->count ||
+		(activator->client && !activator->client->pers.connected))
+		activator = nullptr;
+	if (!G_UseTargets(self, activator) || !self->inuse ||
+		self->spawn_count != self_generation)
+		return;
 
 	self->s.origin[2] = self->absmin[2] + 1;
 	T_RadiusDamage(self, self, static_cast<float>(self->dmg), nullptr, static_cast<float>(self->dmg + 40), DAMAGE_NONE, MOD_BOMB);
+	if (!self->inuse || self->spawn_count != self_generation)
+		return;
 	BecomeExplosion2(self);
 }
 
@@ -124,6 +135,8 @@ USE(misc_viper_bomb_use) (gentity_t *self, gentity_t *other, gentity_t *activato
 	self->prethink = misc_viper_bomb_prethink;
 	self->touch = misc_viper_bomb_touch;
 	self->activator = activator;
+	self->count = activator && activator->inuse
+		? activator->spawn_count : 0;
 
 	self->velocity = viper->moveinfo.dir * viper->moveinfo.speed;
 
@@ -279,8 +292,9 @@ static USE(misc_nuke_use) (gentity_t *self, gentity_t *other, gentity_t *activat
 	nuke->solid = SOLID_NOT;
 	nuke->mins = { -1, -1, 1 };
 	nuke->maxs = { 1, 1, 1 };
-	nuke->owner = self;
+	MM_CaptureOrdnanceOwner(nuke, self);
 	nuke->teammaster = self;
+	nuke->classname = "nuke";
 	nuke->nextthink = level.time + FRAME_TIME_S;
 	nuke->dmg = 800;
 	nuke->splash_radius = 8192;
@@ -289,6 +303,23 @@ static USE(misc_nuke_use) (gentity_t *self, gentity_t *other, gentity_t *activat
 
 void SP_misc_nuke(gentity_t *ent) {
 	ent->use = misc_nuke_use;
+}
+
+void G_MigrateLegacyVehicleOrdnanceIdentities()
+{
+	const size_t entity_count = std::min(
+		static_cast<size_t>(globals.num_entities),
+		static_cast<size_t>(game.maxentities));
+	for (size_t index = 0; index < entity_count; ++index) {
+		gentity_t *const entity = &g_entities[index];
+		if (!entity->inuse)
+			continue;
+		if (entity->think == misc_nuke_think)
+			MM_CaptureOrdnanceOwner(entity, entity->teammaster);
+		else if (entity->touch == misc_viper_bomb_touch)
+			entity->count = entity->activator && entity->activator->inuse
+				? entity->activator->spawn_count : 0;
+	}
 }
 
 /*QUAKED misc_nuke_core (1 0 0) (-16 -16 -16) (16 16 16) x x x x x x x x NOT_EASY NOT_MEDIUM NOT_HARD NOT_DM NOT_COOP

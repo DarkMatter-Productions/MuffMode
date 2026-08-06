@@ -9,6 +9,7 @@ MEDIC
 */
 
 #include "../g_local.h"
+#include "muffmode/mm_horde.h"
 #include "muffmode/mm_parse.h"
 #include "m_medic.h"
 #include "m_flash.h"
@@ -152,31 +153,40 @@ void M_SetupReinforcements(const char *reinforcements, reinforcement_list_t &lis
 		return;
 
 	std::vector<reinforcement_t> parsed;
-	const char *p = reinforcements;
+	std::string_view remaining = reinforcements;
 
 	st = {};
 
-	while (true) {
-		const char *classname = COM_ParseEx(&p, "; ");
+	while (!remaining.empty()) {
+		const size_t delimiter = remaining.find(';');
+		const std::string_view entry = remaining.substr(0, delimiter);
+		remaining = delimiter == std::string_view::npos
+			? std::string_view {}
+			: remaining.substr(delimiter + 1);
 
-		if (!*classname)
-			break;
-
-		const char *strength_token = COM_ParseEx(&p, "; ");
-		const auto strength = MM_ParseNonNegativeIntArg(strength_token);
-		if (!strength || *strength <= 0) {
-			gi.Com_PrintFmt("{}: skipping reinforcement '{}' with invalid strength '{}'\n", __FUNCTION__, classname, strength_token ? strength_token : "");
+		const auto spec = MM_ParseReinforcementSpec(entry);
+		if (!spec) {
+			if (!MM_TrimAsciiWhitespace(entry).empty())
+				gi.Com_PrintFmt("{}: skipping malformed reinforcement '{}'\n", __FUNCTION__, entry);
 			continue;
 		}
+		// [MuffMode] uint8_t index 255 is reserved as the empty-selection marker.
+		if (parsed.size() >= UINT8_MAX) {
+			gi.Com_PrintFmt(
+				"{}: reinforcement list exceeds representable index range; ignoring remaining entries\n",
+				__FUNCTION__);
+			break;
+		}
 
+		const std::string classname(spec->classname);
 		reinforcement_t reinforcement{};
-		if (!M_LoadReinforcementBounds(classname, reinforcement.mins, reinforcement.maxs)) {
+		if (!M_LoadReinforcementBounds(classname.c_str(), reinforcement.mins, reinforcement.maxs)) {
 			gi.Com_PrintFmt("{}: skipping reinforcement '{}' with no monster spawn\n", __FUNCTION__, classname);
 			continue;
 		}
 
-		reinforcement.classname = G_CopyString(classname, TAG_LEVEL);
-		reinforcement.strength = *strength;
+		reinforcement.classname = G_CopyString(classname.c_str(), TAG_LEVEL);
+		reinforcement.strength = spec->strength;
 		parsed.push_back(reinforcement);
 	}
 
@@ -938,6 +948,19 @@ static void medic_cable_attack(gentity_t *self) {
 			}
 			self->enemy->monsterinfo.aiflags &= ~AI_RESURRECTING;
 			self->enemy->monsterinfo.aiflags |= AI_IGNORE_SHOTS | AI_DO_NOT_COUNT;
+			// [MuffMode] A successful Horde revival must be killed again to clear the wave.
+			if (!MM_Horde_CountAuxiliaryMonster(self->enemy)) {
+				// The revived hull no longer belongs to the reachable combat space. Fail
+				// closed instead of leaving a live, uncounted monster for a later frame.
+				gentity_t *rejected = self->enemy;
+				self->enemy = nullptr;
+				rejected->monsterinfo.healer = nullptr;
+				G_FreeEntity(rejected);
+				cleanupHeal(self, true);
+				self->monsterinfo.aiflags &= ~AI_MEDIC;
+				self->monsterinfo.medicTries = 0;
+				return;
+			}
 			// turn off flies
 			self->enemy->s.effects &= ~EF_FLIES;
 			self->enemy->monsterinfo.healer = nullptr;

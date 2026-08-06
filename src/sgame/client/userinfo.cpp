@@ -150,7 +150,9 @@ float ParseUserinfoFov(const char *value)
 	return clamp(*parsed, 1.0f, 160.0f);
 }
 
-void ApplyUserinfoChanged(gentity_t *ent, const char *userinfo)
+void ApplyUserinfoChanged(
+	gentity_t *ent, const char *userinfo,
+	bool publish_configstrings, bool refresh_skin_overrides)
 {
 	char val[MAX_INFO_VALUE] = {};
 
@@ -170,13 +172,15 @@ void ApplyUserinfoChanged(gentity_t *ent, const char *userinfo)
 
 	const int playernum = static_cast<int>(ent - g_entities - 1);
 
-	if (Teams()) {
-		G_AssignPlayerSkin(ent, ent->client->pers.skin);
-	} else {
-		gi.configstring(CS_PLAYERSKINS + playernum, G_Fmt("{}\\{}", ent->client->pers.netname, ent->client->pers.skin).data());
-	}
+	if (publish_configstrings) {
+		if (Teams() || GT(GT_ARENA)) {
+			G_AssignPlayerSkin(ent, ent->client->pers.skin, refresh_skin_overrides);
+		} else {
+			gi.configstring(CS_PLAYERSKINS + playernum, G_Fmt("{}\\{}", ent->client->pers.netname, ent->client->pers.skin).data());
+		}
 
-	gi.configstring(CONFIG_FOLLOW_PLAYER_NAME + playernum, ent->client->pers.netname);
+		gi.configstring(CONFIG_FOLLOW_PLAYER_NAME + playernum, ent->client->pers.netname);
+	}
 
 	if (!(ent->svflags & SVF_BOT)) {
 		const auto encoded_name = EncodedPlayerName(ent);
@@ -234,5 +238,15 @@ void ClientUserinfoChanged(gentity_t *ent, const char *userinfo)
 	// Null-ent guard; same engine teardown class as ClientThink/ClientDisconnect.
 	if (!ent)
 		return;
-	muffmode::player::ApplyUserinfoChanged(ent, userinfo);
+	muffmode::player::ApplyUserinfoChanged(ent, userinfo, true, true);
+}
+
+// [MuffMode] Ghost restore has already passed through the ordinary connection
+// userinfo path, which published its name and provisional skin. Parse the live
+// connection's identity and preferences here without another reliable
+// broadcast; the bounded post-restore lane publishes the canonical team skin
+// before applying per-viewer corrections.
+void ClientUserinfoChangedForRestore(gentity_t *ent, const char *userinfo)
+{
+	muffmode::player::ApplyUserinfoChanged(ent, userinfo, false, false);
 }

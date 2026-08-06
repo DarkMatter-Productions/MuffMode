@@ -34,6 +34,24 @@ static bool turret_has_live_enemy(const gentity_t *self) {
 	return self && self->enemy && self->enemy->inuse && self->enemy != world;
 }
 
+static gentity_t *turret_resolve_lasersight(gentity_t *self) {
+	if (!self || !self->target_ent)
+		return nullptr;
+	gentity_t *const sight = self->target_ent;
+	const bool expected_class = sight->classname &&
+		strcmp(sight->classname, "turret_lasersight") == 0;
+	if (!sight->inuse || !expected_class ||
+		(self->target_ent_generation &&
+			sight->spawn_count != self->target_ent_generation)) {
+		self->target_ent = nullptr;
+		self->target_ent_generation = 0;
+		return nullptr;
+	}
+	if (!self->target_ent_generation)
+		self->target_ent_generation = sight->spawn_count;
+	return sight;
+}
+
 void TurretAim(gentity_t *self) {
 	vec3_t end, dir;
 	vec3_t ang;
@@ -227,8 +245,10 @@ void TurretAim(gentity_t *self) {
 		return;
 
 	// Paril: improved turrets; draw lasersight
-	if (!self->target_ent) {
+	if (!turret_resolve_lasersight(self)) {
 		self->target_ent = G_Spawn();
+		self->target_ent_generation =
+			self->target_ent->spawn_count;
 		self->target_ent->s.modelindex = MODELINDEX_WORLD;
 		self->target_ent->s.renderfx = RF_BEAM;
 		self->target_ent->s.frame = 1;
@@ -273,9 +293,10 @@ MMOVE_T(turret_move_stand) = { FRAME_stand01, FRAME_stand02, turret_frames_stand
 
 MONSTERINFO_STAND(turret_stand) (gentity_t *self) -> void {
 	M_SetAnimation(self, &turret_move_stand);
-	if (self->target_ent) {
-		G_FreeEntity(self->target_ent);
+	if (gentity_t *const sight = turret_resolve_lasersight(self)) {
+		G_FreeEntity(sight);
 		self->target_ent = nullptr;
+		self->target_ent_generation = 0;
 	}
 }
 
@@ -364,7 +385,8 @@ static void TurretFire(gentity_t *self) {
 	if (chance < 0.98f)
 		return;
 
-	chance = frandom();
+	// Preserve the upstream gameplay RNG sequence before predictive aiming.
+	(void) frandom();
 
 	if (self->spawnflags.has(SPAWNFLAG_TURRET_ROCKET))
 		rocketSpeed = 650;
@@ -543,6 +565,9 @@ static PAIN(turret_pain) (gentity_t *self, gentity_t *other, float kick, int dam
 static DIE(turret_die) (gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int damage, const vec3_t &point, const mod_t &mod) -> void {
 	vec3_t	 forward;
 	gentity_t *base;
+	gentity_t *const target_ent = turret_resolve_lasersight(self);
+	const int32_t target_ent_generation = target_ent
+		? target_ent->spawn_count : 0;
 
 	AngleVectors(self->s.angles, forward, nullptr, nullptr);
 	self->s.origin += (forward * 1);
@@ -575,14 +600,16 @@ static DIE(turret_die) (gentity_t *self, gentity_t *inflictor, gentity_t *attack
 	}
 
 	if (self->target) {
-		if (turret_has_live_enemy(self))
-			G_UseTargets(self, self->enemy);
-		else
-			G_UseTargets(self, self);
+		const bool source_survived = turret_has_live_enemy(self)
+			? G_UseTargets(self, self->enemy)
+			: G_UseTargets(self, self);
+		if (!source_survived)
+			return;
 	}
 
-	if (self->target_ent) {
-		G_FreeEntity(self->target_ent);
+	if (target_ent && self->target_ent == target_ent && target_ent->inuse &&
+		target_ent->spawn_count == target_ent_generation) {
+		G_FreeEntity(target_ent);
 		self->target_ent = nullptr;
 	}
 
@@ -741,25 +768,28 @@ MONSTERINFO_CHECKATTACK(turret_checkattack) (gentity_t *self) -> bool {
 
 	if (!turret_has_live_enemy(self))
 		return false;
+	gentity_t *const enemy = self->enemy;
+	if (!enemy)
+		return false;
 
-	if (self->enemy->health > 0) {
+	if (enemy->health > 0) {
 		// see if any entities are in the way of the shot
 		spot1 = self->s.origin;
 		spot1[2] += self->viewheight;
-		spot2 = self->enemy->s.origin;
-		spot2[2] += self->enemy->viewheight;
+		spot2 = enemy->s.origin;
+		spot2[2] += enemy->viewheight;
 
 		tr = gi.traceline(spot1, spot2, self, CONTENTS_SOLID | CONTENTS_PLAYER | CONTENTS_MONSTER | CONTENTS_SLIME | CONTENTS_LAVA | CONTENTS_WINDOW);
 
 		// do we have a clear shot?
 		const bool direct_hit_player = tr.ent && (tr.ent->svflags & SVF_PLAYER);
-		if (tr.ent != self->enemy && !direct_hit_player) {
+		if (tr.ent != enemy && !direct_hit_player) {
 			// we want them to go ahead and shoot at info_notnulls if they can.
-			if (self->enemy->solid != SOLID_NOT || tr.fraction < 1.0f) // PGM
+			if (enemy->solid != SOLID_NOT || tr.fraction < 1.0f) // PGM
 			{
 				// if we can't see our target, and we're not blocked by a monster, go into blind fire if available
 				const bool blocked_by_monster = tr.ent && (tr.ent->svflags & SVF_MONSTER);
-				if (!blocked_by_monster && !visible(self, self->enemy)) {
+				if (!blocked_by_monster && !visible(self, enemy)) {
 					if ((self->monsterinfo.blindfire) && (self->monsterinfo.blind_fire_delay <= 10_sec)) {
 						if (level.time < self->monsterinfo.attack_finished) {
 							return false;
@@ -771,7 +801,7 @@ MONSTERINFO_CHECKATTACK(turret_checkattack) (gentity_t *self) -> bool {
 							// make sure we're not going to shoot something we don't want to shoot
 							tr = gi.traceline(spot1, self->monsterinfo.blind_fire_target, self, CONTENTS_MONSTER | CONTENTS_PLAYER);
 							const bool blind_hit_player = tr.ent && (tr.ent->svflags & SVF_PLAYER);
-							if (tr.allsolid || tr.startsolid || ((tr.fraction < 1.0f) && (tr.ent != self->enemy && !blind_hit_player))) {
+							if (tr.allsolid || tr.startsolid || ((tr.fraction < 1.0f) && (tr.ent != enemy && !blind_hit_player))) {
 								return false;
 							}
 
@@ -809,7 +839,7 @@ MONSTERINFO_CHECKATTACK(turret_checkattack) (gentity_t *self) -> bool {
 
 	// go ahead and shoot every time if it's a info_notnull
 	// added visibility check
-	if (((frandom() < chance) && (visible(self, self->enemy))) || (self->enemy->solid == SOLID_NOT)) {
+	if (((frandom() < chance) && visible(self, enemy)) || enemy->solid == SOLID_NOT) {
 		self->monsterinfo.attack_state = AS_MISSILE;
 		self->monsterinfo.attack_finished = level.time + nexttime;
 		return true;
@@ -932,9 +962,17 @@ void SP_monster_turret(gentity_t *self) {
 		self->use = turret_activate;
 		turret_wall_spawn(self);
 		if (!(self->monsterinfo.aiflags & AI_DO_NOT_COUNT)) {
-			if (g_debug_monster_kills->integer)
-				level.monsters_registered[level.total_monsters] = self;
-			level.total_monsters++;
+			const int monster_index = max(0, level.total_monsters);
+			if (g_debug_monster_kills->integer) {
+				if (static_cast<size_t>(monster_index) <
+					level.monsters_registered.size())
+					level.monsters_registered[monster_index] = self;
+				else if (static_cast<size_t>(monster_index) ==
+					level.monsters_registered.size())
+					gi.Com_Print("monster_turret: debug monster registry full; later monsters will not be tracked.\n");
+			}
+			if (level.total_monsters < std::numeric_limits<int>::max())
+				level.total_monsters = monster_index + 1;
 		}
 	} else {
 		stationarymonster_start(self);

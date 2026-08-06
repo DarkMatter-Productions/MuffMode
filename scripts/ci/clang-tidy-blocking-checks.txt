@@ -1,0 +1,13 @@
+# Full clang-tidy output remains visible. These high-confidence safety checks
+# are the initial blocking ratchet; add broader families as their baseline is
+# triaged.
+clang-analyzer-core.*
+clang-analyzer-cplusplus.NewDelete*
+clang-analyzer-deadcode.*
+clang-analyzer-nullability.*
+clang-analyzer-security.*
+clang-analyzer-unix.*
+bugprone-dangling-handle
+bugprone-infinite-loop
+bugprone-undefined-memory-manipulation
+bugprone-use-after-move

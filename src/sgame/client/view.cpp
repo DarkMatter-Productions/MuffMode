@@ -5,9 +5,12 @@
 #include "monsters/m_player.h"
 #include "bots/bot_includes.h"
 // [MuffMode] AutoDoc regen lives in muffmode/mm_items_rules
+#include "muffmode/mm_arena.h"
+#include "muffmode/mm_awards.h"
 #include "muffmode/mm_freezetag.h"
 #include "muffmode/mm_ghost.h"
 #include "muffmode/mm_items_rules.h"
+#include "muffmode/mm_map_pick.h"
 #include "muffmode/mm_parse.h"
 
 static gentity_t *current_player;
@@ -835,7 +838,8 @@ static void G_SetClientEffects(gentity_t *ent) {
 	if (ent->client->pu_time_double > level.time)
 		if (G_PowerUpExpiring(ent->client->pu_time_double))
 			ent->s.effects |= EF_DOUBLE;
-	if ((ent->client->owned_sphere) && (ent->client->owned_sphere->spawnflags == SF_SPHERE_DEFENDER))
+	if (gentity_t *sphere = G_ResolveOwnedSphere(ent->client);
+		sphere && sphere->spawnflags == SF_SPHERE_DEFENDER)
 		ent->s.effects |= EF_HALF_DAMAGE;
 	if (ent->client->tracker_pain_time > level.time)
 		ent->s.effects |= EF_TRACKERTRAIL;
@@ -1291,6 +1295,9 @@ static bool G_LagCompensateLegacy(gentity_t *from_player, const vec3_t &start, c
 		if (player == from_player)
 			continue;
 
+		if (GT(GT_ARENA) && !MM_Arena_SameArena(from_player, player))
+			continue;
+
 		if (!G_IsLagCompensationTarget(player))
 			continue;
 
@@ -1337,6 +1344,9 @@ bool G_LagCompensate(gentity_t *from_player, const vec3_t &start, const vec3_t &
 	for (auto player : active_clients()) {
 		// we aren't gonna hit ourselves
 		if (player == from_player)
+			continue;
+
+		if (GT(GT_ARENA) && !MM_Arena_SameArena(from_player, player))
 			continue;
 
 		if (!G_IsLagCompensationTarget(player))
@@ -1477,10 +1487,15 @@ static void G_SaveLagCompensation(gentity_t *ent) {
 void Frenzy_ApplyAmmoRegen(gentity_t *ent) {
 	gclient_t *client;
 
-	if (!g_frenzy->integer)
+	const bool excessive = GT(GT_ARENA)
+		? MM_Arena_ExcessiveEnabled(ent)
+		: g_frenzy->integer != 0;
+	if (!excessive)
 		return;
 
-	if (InfiniteAmmoOn(nullptr))
+	if (GT(GT_ARENA)
+			? MM_Arena_InfiniteAmmoEnabled(ent)
+			: InfiniteAmmoOn(nullptr))
 		return;
 
 	client = ent->client;
@@ -1587,7 +1602,7 @@ void ClientEndServerFrame(gentity_t *ent) {
 	// still live: if the round has since ended, a round-result centerprint is showing and
 	// an instant empty centerprint would wipe it.
 	if (ent->client->last_standing_clear_time && level.time >= ent->client->last_standing_clear_time) {
-		if (level.round_state == roundst_t::ROUND_IN_PROGRESS)
+		if (level.round_state == round_state_t::ROUND_IN_PROGRESS)
 			gi.LocClient_Print(ent, PRINT_CENTER, "");
 		ent->client->last_standing_clear_time = 0_ms;
 	}
@@ -1599,9 +1614,11 @@ void ClientEndServerFrame(gentity_t *ent) {
 	current_client = e->client;
 
 	if (deathmatch->integer) {
-		const int raw_limit = level.match_state >= MATCH_IN_PROGRESS ? GT_ScoreLimit() : 0;
+		const int raw_limit = level.match_state == MATCH_IN_PROGRESS ? GT_ScoreLimit() : 0;
 		const int limit = raw_limit > 0 ? raw_limit : 0;
-		ent->client->ps.stats[STAT_SCORELIMIT] = limit;
+		// Small white text under the miniscore: the stat carries the configstring index, not the
+		// number itself (stat_string, not num).
+		ent->client->ps.stats[STAT_SCORELIMIT] = limit > 0 ? CONFIG_STORY_SCORELIMIT : 0;
 		const char *scorelimit_text = gi.get_configstring(CONFIG_STORY_SCORELIMIT);
 		const auto configured_limit = MM_ParseUInt32Arg(scorelimit_text);
 		const bool matches_configstring = limit > 0
@@ -1623,7 +1640,9 @@ void ClientEndServerFrame(gentity_t *ent) {
 
 	// vampiric damage expiration
 	// don't expire if only 1 player in the match
-	if (g_vampiric_damage->integer && ClientIsPlaying(ent->client) && !IsCombatDisabled() && (ent->health > g_vampiric_exp_min->integer)) {
+	if (notGT(GT_ARENA) && g_vampiric_damage->integer &&
+		ClientIsPlaying(ent->client) && !IsCombatDisabled() &&
+		(ent->health > g_vampiric_exp_min->integer)) {
 		if (level.num_playing_clients > 1 && level.time > ent->client->vampire_expiretime) {
 			int quantity = floor((ent->health - 1) / ent->max_health) + 1;
 			ent->health -= quantity;
@@ -1662,11 +1681,19 @@ void ClientEndServerFrame(gentity_t *ent) {
 		G_SetStats(ent);
 		G_SetCoopStats(ent);
 
-		// if the scoreboard is up, update it if a client leaves
-		if (deathmatch->integer && ent->client->showscores && ent->client->menutime) {
-			DeathmatchScoreboardMessage(e, e->enemy);
-			gi.unicast(ent, false);
-			ent->client->menutime = 0_ms;
+		// [MuffMode] The post-scoreboard next-map pick and then the post-match
+		// awards reel keep the intermission camera but draw where the scoreboard
+		// was. Only one of the three can own the layout in a given frame.
+		if (!MM_MapPick_DrawIntermissionMenu(ent) &&
+			!MM_Awards_DrawIntermissionLayout(ent)) {
+			// if the scoreboard is up, update it if a client leaves
+			if (deathmatch->integer && ent->client->showscores && ent->client->menutime) {
+				// [MuffMode] Arena boards are scoped to the viewer's selected
+				// arena, even while that viewer is using a follow camera.
+				DeathmatchScoreboardMessage(GT(GT_ARENA) ? ent : e, e->enemy);
+				gi.unicast(ent, false);
+				ent->client->menutime = 0_ms;
+			}
 		}
 
 		return;
@@ -1687,7 +1714,9 @@ void ClientEndServerFrame(gentity_t *ent) {
 	AngleVectors(ent->client->v_angle, forward, right, up);
 
 	// burn from lava, etc
-	P_WorldEffects();
+	if (notGT(GT_ARENA) || !MM_Arena_IsFighter(ent->client) ||
+		!MM_Arena_IsPaused(MM_Arena_Id(ent)))
+		P_WorldEffects();
 
 	//
 	// set model angles from view angles so other things in
@@ -1773,22 +1802,30 @@ void ClientEndServerFrame(gentity_t *ent) {
 
 	if (ent->client->menudirty && ent->client->menutime <= level.time) {
 		if (ent->client->menu) {
+			menu_hnd_t *menu = ent->client->menu;
 			P_Menu_Do_Update(ent);
-			gi.unicast(ent, true);
+			if (ent->client->menu == menu)
+				gi.unicast(ent, true);
 		}
-		ent->client->menutime = level.time;
+		// The dirty refresh already sent the current layout; schedule the next
+		// periodic refresh instead of sending it again below in the same frame.
+		ent->client->menutime = level.time + 3_sec;
 		ent->client->menudirty = false;
 	}
 
 	// if the scoreboard is up, update it
 	if (ent->client->showscores && ent->client->menutime <= level.time) {
 		if (ent->client->menu) {
+			menu_hnd_t *menu = ent->client->menu;
 			P_Menu_Do_Update(ent);
-			ent->client->menudirty = false;
+			if (ent->client->menu == menu) {
+				ent->client->menudirty = false;
+				gi.unicast(ent, false);
+			}
 		} else {
-			DeathmatchScoreboardMessage(e, e->enemy);
+			DeathmatchScoreboardMessage(GT(GT_ARENA) ? ent : e, e->enemy);
+			gi.unicast(ent, false);
 		}
-		gi.unicast(ent, false);
 		ent->client->menutime = level.time + 3_sec;
 	}
 
@@ -1806,11 +1843,14 @@ void ClientEndServerFrame(gentity_t *ent) {
 	// [Paril-KEX] in coop, if player collision is enabled and
 	// we are currently in no-player-collision mode, check if
 	// it's safe.
-	if (InCoopStyle() && G_ShouldPlayersCollide(false) && !(ent->clipmask & CONTENTS_PLAYER) && ent->takedamage) {
+	if ((InCoopStyle() || GT(GT_ARENA)) && G_ShouldPlayersCollide(false) &&
+		!(ent->clipmask & CONTENTS_PLAYER) && ent->takedamage) {
 		bool clipped_player = false;
 
 		for (auto player : active_clients()) {
 			if (player == ent)
+				continue;
+			if (GT(GT_ARENA) && !MM_Arena_CanInteract(ent, player))
 				continue;
 
 			trace_t clip = gi.clip(player, ent->s.origin, ent->mins, ent->maxs, ent->s.origin, CONTENTS_MONSTER | CONTENTS_PLAYER);

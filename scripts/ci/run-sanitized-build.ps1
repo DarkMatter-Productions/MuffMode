@@ -23,6 +23,15 @@ if ($Sanitizer -eq "Undefined") {
         }
         throw $message
     }
+
+    # clang ships its sanitizer runtimes built against the release CRT, so a debug
+    # build cannot link one: libcpmtd.lib carries _ITERATOR_DEBUG_LEVEL 2 and
+    # clang_rt.ubsan_standalone_cxx carries 0, and lld-link refuses the pair. Build
+    # this sanitizer against the release CRT unless the caller asked for a specific
+    # configuration. ASAN is unaffected; it uses the MSVC runtime.
+    if (-not $PSBoundParameters.ContainsKey("Configuration")) {
+        $Configuration = "Release"
+    }
 }
 
 $arguments = @{
@@ -39,14 +48,7 @@ if ($Sanitizer -eq "Address") {
 }
 else {
     $arguments["EnableUBSAN"] = $true
-    try {
-        & "$PSScriptRoot\build-msbuild.ps1" @arguments
-    }
-    catch {
-        if ($AllowUnsupported) {
-            Write-Warning "UndefinedBehaviorSanitizer build is not supported by this toolchain yet: $($_.Exception.Message)"
-            exit 0
-        }
-        throw
-    }
+    # A present compiler makes source, project, and linker failures actionable.
+    # AllowUnsupported is only for machines where clang-cl is absent.
+    & "$PSScriptRoot\build-msbuild.ps1" @arguments
 }

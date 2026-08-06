@@ -13,27 +13,42 @@ jobs:
     name: libFuzzer Smoke
     runs-on: windows-2025-vs2026
     timeout-minutes: 45
-    continue-on-error: true
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Install LLVM if needed
         shell: pwsh
         run: |
-          if (-not (Get-Command clang-cl -ErrorAction SilentlyContinue)) {
-            choco install llvm --yes --no-progress
+          $llvmVersion = "22.1.7"
+          $llvmBin = "C:\Program Files\LLVM\bin"
+          $clangCl = Get-Command clang-cl -ErrorAction SilentlyContinue
+          $versionText = if ($clangCl) { (& $clangCl.Source --version) -join "`n" } else { "" }
+          if ($versionText -notmatch "clang version\s+$([regex]::Escape($llvmVersion))(?:\s|$)") {
+            choco install llvm --version=$llvmVersion --yes --no-progress --allow-downgrade --force
+            if ($LASTEXITCODE -ne 0) {
+              throw "Could not install LLVM $llvmVersion."
+            }
           }
-          $env:Path = "C:\Program Files\LLVM\bin;$env:Path"
-          clang-cl --version
+          $env:Path = "$llvmBin;$env:Path"
+          $versionText = (& "$llvmBin\clang-cl.exe" --version) -join "`n"
+          if ($versionText -notmatch "clang version\s+$([regex]::Escape($llvmVersion))(?:\s|$)") {
+            throw "Installed clang-cl does not match LLVM $llvmVersion."
+          }
+          $llvmBin >> $env:GITHUB_PATH
+          Write-Host $versionText
 
       - name: Build libFuzzer targets
         shell: pwsh
-        run: ./scripts/ci/build-fuzz-targets.ps1 -AllowUnsupported
+        run: ./scripts/ci/build-fuzz-targets.ps1
+
+      - name: Run libFuzzer smoke corpus
+        shell: pwsh
+        run: ./scripts/ci/run-fuzz-smoke.ps1 -Runs 1000
 
       - name: Upload fuzz build outputs
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: always()
         with:
           name: fuzz-targets

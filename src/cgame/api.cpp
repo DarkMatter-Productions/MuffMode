@@ -2,6 +2,7 @@
 // Licensed under the GNU General Public License 2.0.
 
 #include "cgame_local.h"
+#include "hud_text.h"
 #include "messages.h"
 #include "screen.h"
 #include "muffmode/mm_parse.h"
@@ -41,7 +42,12 @@ static uint32_t CG_GetOwnedWeaponWheelWeapons(const player_state_t *ps) {
 }
 
 static int16_t CG_GetWeaponWheelAmmoCount(const player_state_t *ps, int32_t ammo_id) {
-	uint16_t ammo = G_GetAmmoStat((uint16_t *)&ps->stats[STAT_AMMO_INFO_START], ammo_id);
+	uint8_t packed_ammo_id = 0;
+	if (!CG_TryPackedStatId(ammo_id, AMMO_MAX, packed_ammo_id))
+		return 0;
+
+	uint16_t ammo = G_GetAmmoStat(
+		(const uint16_t *)&ps->stats[STAT_AMMO_INFO_START], packed_ammo_id);
 
 	if (ammo == AMMO_VALUE_INFINITE)
 		return -1;
@@ -50,7 +56,14 @@ static int16_t CG_GetWeaponWheelAmmoCount(const player_state_t *ps, int32_t ammo
 }
 
 static int16_t CG_GetPowerupWheelCount(const player_state_t *ps, int32_t powerup_id) {
-	return G_GetPowerupStat((uint16_t *)&ps->stats[STAT_POWERUP_INFO_START], powerup_id);
+	uint8_t packed_powerup_id = 0;
+	if (!CG_TryPackedStatId(powerup_id, POWERUP_MAX, packed_powerup_id))
+		return 0;
+
+	return G_GetPowerupStat(
+		(const uint16_t *)&ps->stats[STAT_AMMO_INFO_START],
+		(const uint16_t *)&ps->stats[STAT_POWERUP_INFO_START],
+		packed_powerup_id);
 }
 
 static int16_t CG_GetHitMarkerDamage(const player_state_t *ps) {
@@ -65,10 +78,14 @@ static void CG_ParseConfigString(int32_t i, const char *s) {
 }
 
 static void CG_GetMonsterFlashOffset(monster_muzzleflash_id_t id, gvec3_ref_t offset) {
-	if (id >= q_countof(monster_flash_offset))
+	const auto index = static_cast<size_t>(id);
+	if (index >= q_countof(monster_flash_offset)) {
 		cgi.Com_Error("Bad muzzle flash offset");
+		offset = vec3_origin;
+		return;
+	}
 
-	offset = monster_flash_offset[id];
+	offset = monster_flash_offset[index];
 }
 
 /*

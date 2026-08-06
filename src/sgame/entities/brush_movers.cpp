@@ -179,29 +179,44 @@ void Move_Calc(gentity_t *ent, const vec3_t &dest, void(*endfunc)(gentity_t *sel
 THINK(Think_AccelMove_New) (gentity_t *ent) -> void {
 	float t = 0.f;
 	float target_dist;
+	const auto &positions = ent->moveinfo.curve_positions;
+	if (!positions.ptr || positions.count == 0) {
+		Move_Final(ent);
+		return;
+	}
 
 	if (ent->moveinfo.num_subframes) {
+		if (ent->moveinfo.subframe > ent->moveinfo.num_subframes + 1) {
+			Move_Final(ent);
+			return;
+		}
 		if (ent->moveinfo.subframe == ent->moveinfo.num_subframes + 1) {
 			ent->moveinfo.subframe = 0;
 			ent->moveinfo.curve_frame++;
 
-			if (ent->moveinfo.curve_frame == ent->moveinfo.curve_positions.count) {
+			if (ent->moveinfo.curve_frame >= positions.count) {
 				Move_Final(ent);
 				return;
 			}
 		}
-
-		t = (ent->moveinfo.subframe + 1) / ((float)ent->moveinfo.num_subframes + 1);
-
-		target_dist = lerp(ent->moveinfo.curve_positions[ent->moveinfo.curve_frame - 1], ent->moveinfo.curve_positions[ent->moveinfo.curve_frame], t);
-		ent->moveinfo.subframe++;
-	} else {
-		if (ent->moveinfo.curve_frame == ent->moveinfo.curve_positions.count) {
+		if (ent->moveinfo.curve_frame == 0 ||
+			ent->moveinfo.curve_frame >= positions.count) {
 			Move_Final(ent);
 			return;
 		}
 
-		target_dist = ent->moveinfo.curve_positions[ent->moveinfo.curve_frame++];
+		t = (ent->moveinfo.subframe + 1) / ((float)ent->moveinfo.num_subframes + 1);
+
+		target_dist = lerp(positions[ent->moveinfo.curve_frame - 1],
+			positions[ent->moveinfo.curve_frame], t);
+		ent->moveinfo.subframe++;
+	} else {
+		if (ent->moveinfo.curve_frame >= positions.count) {
+			Move_Final(ent);
+			return;
+		}
+
+		target_dist = positions[ent->moveinfo.curve_frame++];
 	}
 
 	ent->moveinfo.num_frames_done++;
@@ -558,7 +573,20 @@ static TOUCH(Touch_Plat_Center) (gentity_t *ent, gentity_t *other, const trace_t
 	if (other->health <= 0)
 		return;
 
-	ent = ent->enemy; // now point at the plat, not the trigger
+	gentity_t *const trigger = ent;
+	ent = trigger->enemy; // now point at the plat, not the trigger
+	const bool known_platform = ent && ent->classname &&
+		(!strcmp(ent->classname, "func_plat") ||
+		 !strcmp(ent->classname, "func_plat2"));
+	if (!ent || !ent->inuse || !known_platform ||
+		(trigger->count && ent->spawn_count != trigger->count)) {
+		G_FreeEntity(trigger);
+		return;
+	}
+	// V1 saves predate the helper stamp. A live structurally valid platform is
+	// safe to adopt because G_FreeEntity clears reverse enemy aliases on removal.
+	if (!trigger->count)
+		trigger->count = ent->spawn_count;
 	if (ent->moveinfo.state == STATE_BOTTOM)
 		plat_go_up(ent);
 	else if (ent->moveinfo.state == STATE_TOP)
@@ -581,6 +609,7 @@ gentity_t *plat_spawn_inside_trigger(gentity_t *ent) {
 	trigger->movetype = MOVETYPE_NONE;
 	trigger->solid = SOLID_TRIGGER;
 	trigger->enemy = ent;
+	trigger->count = ent->spawn_count;
 
 	tmin[0] = ent->mins[0] + 25;
 	tmin[1] = ent->mins[1] + 25;
@@ -777,7 +806,8 @@ MOVEINFO_ENDFUNC(plat2_hit_top) (gentity_t *ent) -> void {
 		ent->last_move_time = level.time;
 	}
 
-	G_UseTargets(ent, ent);
+	if (!G_UseTargets(ent, ent))
+		return;
 }
 
 MOVEINFO_ENDFUNC(plat2_hit_bottom) (gentity_t *ent) -> void {
@@ -809,7 +839,8 @@ MOVEINFO_ENDFUNC(plat2_hit_bottom) (gentity_t *ent) -> void {
 	}
 
 	plat2_kill_danger_area(ent);
-	G_UseTargets(ent, ent);
+	if (!G_UseTargets(ent, ent))
+		return;
 }
 
 THINK(plat2_go_down) (gentity_t *ent) -> void {
@@ -850,6 +881,16 @@ static void plat2_operate(gentity_t *ent, gentity_t *other) {
 
 	trigger = ent;
 	ent = ent->enemy; // now point at the plat, not the trigger
+	const bool known_platform = ent && ent->classname &&
+		(!strcmp(ent->classname, "func_plat") ||
+		 !strcmp(ent->classname, "func_plat2"));
+	if (!ent || !ent->inuse || !known_platform ||
+		(trigger->count && ent->spawn_count != trigger->count)) {
+		G_FreeEntity(trigger);
+		return;
+	}
+	if (!trigger->count)
+		trigger->count = ent->spawn_count;
 
 	if (ent->plat2flags & PLAT2_MOVING)
 		return;
@@ -1115,7 +1156,8 @@ static THINK(rotating_accel) (gentity_t *self) -> void {
 	float current_speed = self->avelocity.length();
 	if (current_speed >= (self->speed - self->accel)) { // done
 		self->avelocity = self->movedir * self->speed;
-		G_UseTargets(self, self);
+		if (!G_UseTargets(self, self))
+			return;
 	} else {
 		current_speed += self->accel;
 		self->avelocity = self->movedir * current_speed;
@@ -1128,7 +1170,8 @@ static THINK(rotating_decel) (gentity_t *self) -> void {
 	float current_speed = self->avelocity.length();
 	if (current_speed <= self->decel) { // done
 		self->avelocity = {};
-		G_UseTargets(self, self);
+		if (!G_UseTargets(self, self))
+			return;
 		self->touch = nullptr;
 	} else {
 		current_speed -= self->decel;
@@ -1170,17 +1213,22 @@ static USE(rotating_use) (gentity_t *self, gentity_t *other, gentity_t *activato
 			rotating_decel(self);
 		else {
 			self->avelocity = {};
-			G_UseTargets(self, self);
+			if (!G_UseTargets(self, self))
+				return;
 			self->touch = nullptr;
 		}
 	} else {
 		self->s.sound = self->moveinfo.sound_middle;
 
-		if (self->spawnflags.has(SPAWNFLAG_ROTATING_ACCEL)) // accelerate
+		if (self->spawnflags.has(SPAWNFLAG_ROTATING_ACCEL)) { // accelerate
+			const int32_t self_generation = self->spawn_count;
 			rotating_accel(self);
-		else {
+			if (!self->inuse || self->spawn_count != self_generation)
+				return;
+		} else {
 			self->avelocity = self->movedir * self->speed;
-			G_UseTargets(self, self);
+			if (!G_UseTargets(self, self))
+				return;
 		}
 		if (self->spawnflags.has(SPAWNFLAG_ROTATING_TOUCH_PAIN))
 			self->touch = rotating_touch;
@@ -1371,7 +1419,8 @@ MOVEINFO_ENDFUNC(button_wait) (gentity_t *self) -> void {
 	} else
 		self->bmodel_anim.alternate = true;
 
-	G_UseTargets(self, self->activator);
+	if (!G_UseTargets(self, self->activator))
+		return;
 
 	if (self->moveinfo.wait >= 0) {
 		self->nextthink = level.time + gtime_t::from_sec(self->moveinfo.wait);
@@ -1607,14 +1656,14 @@ THINK(door_go_down) (gentity_t *self) -> void {
 		door_use_areaportals(self, true);
 }
 
-static void door_go_up(gentity_t *self, gentity_t *activator) {
+[[nodiscard]] static bool door_go_up(gentity_t *self, gentity_t *activator) {
 	if (self->moveinfo.state == STATE_UP)
-		return; // already going up
+		return true; // already going up
 
 	if (self->moveinfo.state == STATE_TOP) { // reset top wait time
 		if (self->moveinfo.wait >= 0)
 			self->nextthink = level.time + gtime_t::from_sec(self->moveinfo.wait);
-		return;
+		return true;
 	}
 
 	if (!(self->flags & FL_TEAMSLAVE)) {
@@ -1632,10 +1681,12 @@ static void door_go_up(gentity_t *self, gentity_t *activator) {
 	else if (strcmp(self->classname, "func_door_rotating") == 0)
 		AngleMove_Calc(self, door_hit_top);
 
-	G_UseTargets(self, activator);
+	if (!G_UseTargets(self, activator))
+		return false;
 
 	if (!(self->spawnflags & SPAWNFLAG_DOOR_START_OPEN))
 		door_use_areaportals(self, true);
+	return true;
 }
 
 static THINK(smart_water_go_up) (gentity_t *self) -> void {
@@ -1702,7 +1753,8 @@ static THINK(smart_water_go_up) (gentity_t *self) -> void {
 	self->moveinfo.remaining_distance = distance;
 
 	if (self->moveinfo.state != STATE_UP) {
-		G_UseTargets(self, lowestPlayer);
+		if (!G_UseTargets(self, lowestPlayer))
+			return;
 		door_use_areaportals(self, true);
 		self->moveinfo.state = STATE_UP;
 	}
@@ -1753,7 +1805,8 @@ static USE(door_use) (gentity_t *self, gentity_t *other, gentity_t *activator) -
 	for (ent = self; ent; ent = ent->teamchain) {
 		ent->message = nullptr;
 		ent->touch = nullptr;
-		door_go_up(ent, activator);
+		if (!door_go_up(ent, activator))
+			return;
 	}
 };
 
@@ -1764,14 +1817,28 @@ static TOUCH(Touch_DoorTrigger) (gentity_t *self, gentity_t *other, const trace_
 	if (!(other->svflags & SVF_MONSTER) && (!other->client))
 		return;
 
-	if (self->owner->spawnflags.has(SPAWNFLAG_DOOR_NOMONSTER) && (other->svflags & SVF_MONSTER))
+	gentity_t *const door = self->owner;
+	const bool known_door = door && door->classname &&
+		(!strcmp(door->classname, "func_door") ||
+		 !strcmp(door->classname, "func_door_rotating") ||
+		 !strcmp(door->classname, "func_door_secret") ||
+		 !strcmp(door->classname, "func_water"));
+	if (!door || !door->inuse || !known_door ||
+		(self->count && door->spawn_count != self->count)) {
+		G_FreeEntity(self);
+		return;
+	}
+	if (!self->count)
+		self->count = door->spawn_count;
+
+	if (door->spawnflags.has(SPAWNFLAG_DOOR_NOMONSTER) && (other->svflags & SVF_MONSTER))
 		return;
 
 	if (level.time < self->touch_debounce_time)
 		return;
 	self->touch_debounce_time = level.time + 1_sec;
 
-	door_use(self->owner, other, other);
+	door_use(door, other, other);
 }
 
 static THINK(Think_CalcMoveSpeed) (gentity_t *self) -> void {
@@ -1836,6 +1903,7 @@ static THINK(Think_SpawnDoorTrigger) (gentity_t *ent) -> void {
 	other->mins = mins;
 	other->maxs = maxs;
 	other->owner = ent;
+	other->count = ent->spawn_count;
 	other->solid = SOLID_TRIGGER;
 	other->movetype = MOVETYPE_NONE;
 	other->touch = Touch_DoorTrigger;
@@ -1869,8 +1937,10 @@ MOVEINFO_BLOCKED(door_blocked) (gentity_t *self, gentity_t *other) -> void {
 	// so let it just squash the object to death real fast
 	if (self->moveinfo.wait >= 0) {
 		if (self->moveinfo.state == STATE_DOWN) {
-			for (ent = self->teammaster; ent; ent = ent->teamchain)
-				door_go_up(ent, ent->activator);
+			for (ent = self->teammaster; ent; ent = ent->teamchain) {
+				if (!door_go_up(ent, ent->activator))
+					return;
+			}
 		} else {
 			for (ent = self->teammaster; ent; ent = ent->teamchain)
 				door_go_down(ent);
@@ -1880,12 +1950,13 @@ MOVEINFO_BLOCKED(door_blocked) (gentity_t *self, gentity_t *other) -> void {
 
 DIE(door_killed) (gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int damage, const vec3_t &point, const mod_t &mod) -> void {
 	gentity_t *ent;
+	gentity_t *master = self->teammaster ? self->teammaster : self;
 
-	for (ent = self->teammaster; ent; ent = ent->teamchain) {
+	for (ent = master; ent; ent = ent->teamchain) {
 		ent->health = ent->max_health;
 		ent->takedamage = false;
 	}
-	door_use(self->teammaster, attacker, attacker);
+	door_use(master, attacker, attacker);
 }
 
 TOUCH(door_touch) (gentity_t *self, gentity_t *other, const trace_t &tr, bool other_touching_self) -> void {

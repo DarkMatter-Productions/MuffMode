@@ -145,7 +145,7 @@ Sets a delay before firing its targets.
 "random" delay variance, total delay = delay +/- random seconds
 */
 static THINK(target_delay_think) (gentity_t *ent) -> void {
-	G_UseTargets(ent, ent->activator);
+	(void) G_UseTargets(ent, ent->activator);
 }
 
 static USE(target_delay_use) (gentity_t *ent, gentity_t *other, gentity_t *activator) -> void {
@@ -183,14 +183,24 @@ If no target set, it will find a player spawn point instead.
 static USE(target_teleporter_use) (gentity_t *ent, gentity_t *other, gentity_t *activator) -> void {
 	if (!activator || !activator->client)
 		return;
+	gentity_t *destination = ent->target_ent;
+	if (destination && (!destination->inuse ||
+		(ent->target_ent_generation &&
+			destination->spawn_count != ent->target_ent_generation))) {
+		ent->target_ent = nullptr;
+		ent->target_ent_generation = 0;
+		destination = nullptr;
+	}
+	if (destination && !ent->target_ent_generation)
+		ent->target_ent_generation = destination->spawn_count;
 
 	// no target point to teleport to, teleport to a spawn point
-	if (!ent->target_ent) {
+	if (!destination) {
 		TeleportPlayerToRandomSpawnPoint(activator, true);
 		return;
 	}
 
-	TeleportPlayer(activator, ent->target_ent->s.origin, ent->target_ent->s.angles);
+	TeleportPlayer(activator, destination->s.origin, destination->s.angles);
 }
 
 /*QUAKED target_kill (.5 .5 .5) (-8 -8 -8) (8 8 8) x x x x x x x x NOT_EASY NOT_MEDIUM NOT_HARD NOT_DM NOT_COOP
@@ -304,6 +314,7 @@ void SP_target_teleporter(gentity_t *ent) {
 			G_FreeEntity(ent);
 			return;
 		}
+		ent->target_ent_generation = ent->target_ent->spawn_count;
 	}
 
 	ent->use = target_teleporter_use;

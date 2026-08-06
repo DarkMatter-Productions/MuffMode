@@ -4,6 +4,7 @@
 #include "g_local.h"
 #include "core/debug_log.h"
 #include "muffmode/mm_gametype.h"
+#include "muffmode/mm_map_pool.h"
 #include "muffmode/mm_maps.h"
 #include "muffmode/mm_menu.h"
 #include "muffmode/mm_parse.h"
@@ -16,6 +17,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace muffmode::vote_menu {
@@ -52,7 +54,7 @@ void MenuVote_Initiate(gentity_t *ent, const char *cmd_name, const char *arg);
 
 void MenuVote_SetText(menu_t &entry, std::string_view text)
 {
-	CopyString(entry.text, text);
+	P_Menu_SetText(&entry, text);
 }
 
 void MenuVote_SetArg(menu_t &entry, std::string_view arg)
@@ -98,7 +100,7 @@ const menu_t kMapMenuTemplate[] = {
 	{ "", MENU_ALIGN_LEFT, SelectMap },
 	{ "", MENU_ALIGN_LEFT, SelectMap },
 	{ "", MENU_ALIGN_LEFT, SelectMap },
-	{ "", MENU_ALIGN_LEFT, SelectMap },
+	{ "", MENU_ALIGN_LEFT, nullptr },
 	{ "$g_pc_return", MENU_ALIGN_LEFT, G_Menu_ReturnToCallVote }
 };
 
@@ -119,7 +121,7 @@ const menu_t kGameTypeMenuTemplate[] = {
 	{ "", MENU_ALIGN_LEFT, SelectGameType },
 	{ "", MENU_ALIGN_LEFT, SelectGameType },
 	{ "", MENU_ALIGN_LEFT, SelectGameType },
-	{ "", MENU_ALIGN_LEFT, SelectGameType },
+	{ "", MENU_ALIGN_LEFT, nullptr },
 	{ "$g_pc_return", MENU_ALIGN_LEFT, G_Menu_ReturnToCallVote }
 };
 
@@ -140,7 +142,7 @@ const menu_t kRulesetMenuTemplate[] = {
 	{ "", MENU_ALIGN_LEFT, SelectRuleset },
 	{ "", MENU_ALIGN_LEFT, SelectRuleset },
 	{ "", MENU_ALIGN_LEFT, SelectRuleset },
-	{ "", MENU_ALIGN_LEFT, SelectRuleset },
+	{ "", MENU_ALIGN_LEFT, nullptr },
 	{ "$g_pc_return", MENU_ALIGN_LEFT, G_Menu_ReturnToCallVote }
 };
 
@@ -249,6 +251,16 @@ const menu_t kScoreLimitMenuTemplate[] = {
 	{ "$g_pc_return", MENU_ALIGN_LEFT, G_Menu_ReturnToCallVote }
 };
 
+static_assert(std::size(kCallVoteMenuTemplate) == MENU_MAX_ROWS);
+static_assert(std::size(kMapMenuTemplate) == MENU_MAX_ROWS);
+static_assert(std::size(kGameTypeMenuTemplate) == MENU_MAX_ROWS);
+static_assert(std::size(kRulesetMenuTemplate) == MENU_MAX_ROWS);
+static_assert(std::size(kPowerupsMenuTemplate) == MENU_MAX_ROWS);
+static_assert(std::size(kTechsMenuTemplate) == MENU_MAX_ROWS);
+static_assert(std::size(kFriendlyFireMenuTemplate) == MENU_MAX_ROWS);
+static_assert(std::size(kTimeLimitMenuTemplate) == MENU_MAX_ROWS);
+static_assert(std::size(kScoreLimitMenuTemplate) == MENU_MAX_ROWS);
+
 std::optional<std::string> MenuVote_ReadSelection(gentity_t *ent, menu_hnd_t *p)
 {
 	if (!ent || !ent->client)
@@ -259,7 +271,12 @@ std::optional<std::string> MenuVote_ReadSelection(gentity_t *ent, menu_hnd_t *p)
 
 	UpdateFunc_t saved = p->UpdateFunc;
 	p->UpdateFunc = nullptr;
-	std::string value = p->entries[p->cur].text_arg1;
+	const menu_t &selection = p->entries[p->cur];
+	size_t value_length = 0;
+	while (value_length < sizeof(selection.text_arg1) &&
+		selection.text_arg1[value_length])
+		value_length++;
+	std::string value(selection.text_arg1, value_length);
 	p->UpdateFunc = saved;
 
 	if (value.empty())
@@ -471,7 +488,7 @@ menu_hnd_t *MenuVote_OpenMenu(gentity_t *ent, const menu_t *entries, int num, vo
 
 const char *CurrentRulesetName()
 {
-	const int ruleset = clamp((int)game.ruleset, (int)RS_NONE + 1, (int)RS_NUM_RULESETS - 1);
+	const int ruleset = ClampPlayableRulesetIndex(static_cast<int>(game.ruleset));
 	return rs_long_name[ruleset];
 }
 
@@ -511,8 +528,50 @@ struct MapMenuPage {
 	int offset = 0;
 };
 
+struct MapMenuSnapshot {
+	bool initialized = false;
+	MapMenuSourceRevision revision;
+	std::vector<std::string> values;
+};
+
+// Every menu copies these owned strings into its rows. Sharing the source
+// snapshot avoids repeating map parsing, case-folded deduplication and sorting.
+static MapMenuSnapshot s_map_menu_snapshot;
+
 constexpr int kMapsPerPage = 12;
 constexpr int kMapMenuFirstItem = 2;
+
+static MapMenuSourceRevision CurrentMapMenuSourceRevision()
+{
+	MM_HandleMapPoolCvarChanges();
+	return {
+		g_map_list,
+		g_map_list ? g_map_list->modified_count : 0,
+		g_map_pool,
+		g_map_pool ? g_map_pool->modified_count : 0,
+		MM_MapPoolRevision()
+	};
+}
+
+static const std::vector<std::string> &MapMenuValues()
+{
+	const MapMenuSourceRevision current = CurrentMapMenuSourceRevision();
+	if (!MapMenuSnapshotNeedsRefresh(
+			s_map_menu_snapshot.initialized,
+			s_map_menu_snapshot.revision,
+			current)) {
+		return s_map_menu_snapshot.values;
+	}
+
+	std::vector<std::string> values = muffmode::maps::CollectConfiguredMaps();
+	if (values.size() > 1)
+		std::sort(values.begin(), values.end(), muffmode::CStringLessI);
+
+	s_map_menu_snapshot.values = std::move(values);
+	s_map_menu_snapshot.revision = current;
+	s_map_menu_snapshot.initialized = true;
+	return s_map_menu_snapshot.values;
+}
 
 int MapPageSize(int menu_entries)
 {
@@ -604,10 +663,7 @@ void UpdateMap(gentity_t *ent)
 
 	MenuVote_ClearEntry(entries[1]);
 
-	std::vector<std::string> values = muffmode::maps::CollectConfiguredMaps();
-
-	if (values.size() > 1)
-		std::sort(values.begin(), values.end(), muffmode::CStringLessI);
+	const std::vector<std::string> &values = MapMenuValues();
 
 	MapMenuPage *page = static_cast<MapMenuPage *>(ent->client->menu->arg);
 	int offset = page ? page->offset : 0;
@@ -661,7 +717,9 @@ void OpenMap(gentity_t *ent, menu_hnd_t *)
 		return;
 
 	*page = {};
-	MenuVote_OpenMenu(ent, kMapMenuTemplate, muffmode::CountAsInt(kMapMenuTemplate), page, UpdateMap);
+	if (!MenuVote_OpenMenu(ent, kMapMenuTemplate,
+		muffmode::CountAsInt(kMapMenuTemplate), page, UpdateMap))
+		gi.TagFree(page);
 }
 
 void UpdateGameType(gentity_t *ent)
@@ -920,7 +978,7 @@ void UpdateCallVote(gentity_t *ent)
 		MenuVote_SetText(entries[shuffle_index], "Shuffle Teams: N/A");
 	}
 
-	if (g_dm_do_readyup->integer && level.match_state == matchst_t::MATCH_WARMUP_READYUP)
+	if (g_dm_do_readyup->integer && level.match_state == match_state_t::MATCH_WARMUP_READYUP)
 	{
 		entries[readyall_index].SelectFunc = StartReadyAllVote;
 		MenuVote_SetText(entries[readyall_index], "Ready All");
@@ -1042,9 +1100,12 @@ const menu_t votemenu[] = {
 	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_CENTER, nullptr },
-	{ "30", MENU_ALIGN_CENTER, nullptr },
-	{ "", MENU_ALIGN_CENTER, nullptr }
+	{ "", MENU_ALIGN_CENTER, nullptr },
+	{ "30", MENU_ALIGN_CENTER, nullptr }
 };
+
+static_assert(std::size(votemenu) == MENU_MAX_ROWS);
+constexpr int kVoteTimeoutRow = MENU_MAX_ROWS - 1;
 
 void G_Menu_Vote_Update(gentity_t *ent)
 {
@@ -1069,7 +1130,7 @@ void G_Menu_Vote_Update(gentity_t *ent)
 
 	int num_entries = 0;
 	menu_t *entries = MenuVote_Entries(ent, &num_entries);
-	if (!entries || num_entries <= 16)
+	if (!entries || num_entries <= kVoteTimeoutRow)
 		return;
 
 	MuffModeLog("DEBUG", "G_Menu_Vote_Update: entries=%p, caller=%p, command=%p",
@@ -1114,7 +1175,7 @@ void G_Menu_Vote_Update(gentity_t *ent)
 	MenuVote_SetText(entries[i], "[ NO ]");
 	entries[i].SelectFunc = G_Menu_Vote_No;
 
-	i = 16;
+	i = kVoteTimeoutRow;
 	MenuVote_SetText(entries[i], G_Fmt("{}", timeout).data());
 }
 } // namespace muffmode::vote_menu

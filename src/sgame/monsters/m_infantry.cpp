@@ -293,7 +293,16 @@ void InfantryMachineGun(gentity_t *self) {
 		AngleVectors(self->s.angles, forward, right, nullptr);
 		start = M_ProjectFlashSource(self, monster_flash_offset[flash_number], forward, right);
 
-		vec = self->s.angles - aimangles[flash_number - MZ2_INFANTRY_MACHINEGUN_2];
+		// [MuffMode] This branch takes every frame the attack cases above did not, so
+		// the aim table is indexed by an animation frame nothing here constrains.
+		// Hold the index inside the table rather than reading past its end.
+		int aim_index = flash_number - MZ2_INFANTRY_MACHINEGUN_2;
+		if (aim_index < 0)
+			aim_index = 0;
+		else if (aim_index >= static_cast<int>(q_countof(aimangles)))
+			aim_index = static_cast<int>(q_countof(aimangles)) - 1;
+
+		vec = self->s.angles - aimangles[aim_index];
 		AngleVectors(vec, forward, nullptr, nullptr);
 	}
 

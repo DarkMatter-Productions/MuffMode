@@ -1,6 +1,7 @@
 // Copyright (c) ZeniMax Media Inc.
 // Licensed under the GNU General Public License 2.0.
 #include "g_local.h"
+#include "muffmode/mm_arena.h"
 #include "muffmode/mm_parse.h"
 
 constexpr spawnflags_t SPAWNFLAG_TRIGGER_MONSTER = 0x01_spawnflag;
@@ -44,7 +45,8 @@ static void multi_trigger(gentity_t *ent) {
 	if (ent->nextthink)
 		return; // already been triggered
 
-	G_UseTargets(ent, ent->activator);
+	if (!G_UseTargets(ent, ent->activator))
+		return;
 
 	if (ent->wait > 0) {
 		ent->think = multi_wait;
@@ -82,7 +84,10 @@ static TOUCH(Touch_Multi) (gentity_t *self, gentity_t *other, const trace_t &tr,
 	} else
 		return;
 
-	if (IsCombatDisabled())
+	if (GT(GT_ARENA) && !MM_Arena_CanUseEntity(other, self))
+		return;
+
+	if (notGT(GT_ARENA) && IsCombatDisabled())
 		return;
 
 	if (self->spawnflags.has(SPAWNFLAG_TRIGGER_CLIP)) {
@@ -136,6 +141,9 @@ static BoxEntitiesResult_t latched_trigger_filter(gentity_t *other, void *data) 
 	} else
 		return BoxEntitiesResult_t::Skip;
 
+	if (GT(GT_ARENA) && !MM_Arena_CanUseEntity(other, self))
+		return BoxEntitiesResult_t::Skip;
+
 	if (self->movedir) {
 		vec3_t forward;
 
@@ -154,7 +162,8 @@ static THINK(latched_trigger_think) (gentity_t *self) -> void {
 	bool any_inside = !!gi.BoxEntities(self->absmin, self->absmax, nullptr, 0, AREA_SOLID, latched_trigger_filter, self);
 
 	if (!!self->count != any_inside) {
-		G_UseTargets(self, self->activator);
+		if (!G_UseTargets(self, self->activator))
+			return;
 		self->count = any_inside ? 1 : 0;
 	}
 }
@@ -234,7 +243,7 @@ static USE(trigger_relay_use) (gentity_t *self, gentity_t *other, gentity_t *act
 	if (self->crosslevel_flags && !(self->crosslevel_flags == (game.cross_level_flags & SFL_CROSS_TRIGGER_MASK & self->crosslevel_flags)))
 		return;
 
-	G_UseTargets(self, activator);
+	(void) G_UseTargets(self, activator);
 }
 
 void SP_trigger_relay(gentity_t *self) {
@@ -314,7 +323,8 @@ static USE(trigger_key_use) (gentity_t *self, gentity_t *other, gentity_t *activ
 			activator->client->pers.inventory[index]--;
 	}
 
-	G_UseTargets(self, activator);
+	if (!G_UseTargets(self, activator))
+		return;
 
 	// allow multi use
 	if (deathmatch->integer || !self->spawnflags.has(1_spawnflag))
@@ -407,7 +417,7 @@ void SP_trigger_always(gentity_t *ent) {
 	// we must have some delay to make sure our use targets are present
 	if (!ent->delay)
 		ent->delay = 0.2f;
-	G_UseTargets(ent, ent);
+	(void) G_UseTargets(ent, ent);
 }
 
 //==========================================================
@@ -433,13 +443,13 @@ void SP_trigger_deathcount(gentity_t *ent) {
 
 	if (ent->spawnflags.has(1_spawnflag)) {	// only once
 		if (kills == ent->count) {
-			G_UseTargets(ent, ent);
-			G_FreeEntity(ent);
+			if (G_UseTargets(ent, ent))
+				G_FreeEntity(ent);
 			return;
 		}
 	} else {	// every 'count' deaths
 		if (!(kills % ent->count)) {
-			G_UseTargets(ent, ent);
+			(void) G_UseTargets(ent, ent);
 		}
 	}
 }
@@ -461,7 +471,8 @@ void SP_trigger_no_monsters(gentity_t *ent) {
 	if (level.killed_monsters < level.total_monsters)
 		return;
 	
-	G_UseTargets(ent, ent);
+	if (!G_UseTargets(ent, ent))
+		return;
 
 	if (ent->spawnflags.has(1_spawnflag))
 		G_FreeEntity(ent);
@@ -484,7 +495,8 @@ void SP_trigger_monsters(gentity_t *ent) {
 	if (level.killed_monsters >= level.total_monsters)
 		return;
 	
-	G_UseTargets(ent, ent);
+	if (!G_UseTargets(ent, ent))
+		return;
 
 	if (ent->spawnflags.has(1_spawnflag))
 		G_FreeEntity(ent);
@@ -1249,7 +1261,8 @@ static USE(trigger_coop_relay_use) (gentity_t *self, gentity_t *other, gentity_t
 
 	const char *msg = self->message;
 	self->message = nullptr;
-	G_UseTargets(self, activator);
+	if (!G_UseTargets(self, activator))
+		return;
 	self->message = msg;
 }
 
@@ -1275,7 +1288,8 @@ static THINK(trigger_coop_relay_think) (gentity_t *self) -> void {
 	if (n == num_active) {
 		const char *msg = self->message;
 		self->message = nullptr;
-		G_UseTargets(self, &globals.gentities[1]);
+		if (!G_UseTargets(self, &globals.gentities[1]))
+			return;
 		self->message = msg;
 
 		G_FreeEntity(self);
@@ -1351,7 +1365,23 @@ static TOUCH(trigger_teleport_touch) (gentity_t *self, gentity_t *other, const t
 	if (!other->client)
 		return;
 
+	// START_ON and targetname-controlled triggers must remain disabled even
+	// when their arena key would otherwise make them selectors.
 	if (self->delay)
+		return;
+
+	// [MuffMode] RA3-style positive arena trigger_teleports select an arena
+	// and enter its observer flow. Untagged/lobby/shared triggers retain
+	// vanilla spatial teleport behavior for RA2 map compatibility.
+	if (GT(GT_ARENA) && MM_Arena_UsesTaggedMap() && self->arena > 0 &&
+		MM_Arena_ValidId(self->arena)) {
+		MM_Arena_MoveTo(other, self->arena, true);
+		return;
+	}
+
+	// A targetless selector can outlive an arena gametype change. It no longer
+	// has a selector role and cannot be used as a spatial teleporter.
+	if (!self->target)
 		return;
 
 	dest = G_PickTarget(self->target);
@@ -1359,6 +1389,10 @@ static TOUCH(trigger_teleport_touch) (gentity_t *self, gentity_t *other, const t
 		gi.Com_Print("Teleport Destination not found!\n");
 		return;
 	}
+
+	// Match TeleportPlayer: a hook anchored in the source area must not keep
+	// pulling the client after the trigger moves them elsewhere.
+	Weapon_Grapple_DoReset(other->client);
 
 	if (other->movetype != MOVETYPE_FREECAM) {
 		gi.WriteByte(svc_temp_entity);
@@ -1390,15 +1424,18 @@ static TOUCH(trigger_teleport_touch) (gentity_t *self, gentity_t *other, const t
 	gi.linkentity(other);
 
 	// kill anything at the destination
-	KillBox(other, !!other->client);
+	if (!KillBox(other, !!other->client))
+		return;
 
 	// [Paril-KEX] move sphere, if we own it
-	if (other->client && other->client->owned_sphere) {
-		gentity_t *sphere = other->client->owned_sphere;
-		sphere->s.origin = other->s.origin;
-		sphere->s.origin[2] = other->absmax[2];
-		sphere->s.angles[YAW] = other->s.angles[YAW];
-		gi.linkentity(sphere);
+	if (other->client) {
+		gentity_t *sphere = G_ResolveOwnedSphere(other->client);
+		if (sphere) {
+			sphere->s.origin = other->s.origin;
+			sphere->s.origin[2] = other->absmax[2];
+			sphere->s.angles[YAW] = other->s.angles[YAW];
+			gi.linkentity(sphere);
+		}
 	}
 }
 
@@ -1481,12 +1518,11 @@ static TOUCH(old_teleporter_touch) (gentity_t *self, gentity_t *other, const tra
 	gi.linkentity(other);
 
 	// kill anything at the destination
-	if (!KillBox(other, true)) {
-	}
+	if (!KillBox(other, true))
+		return;
 
 	// [Paril-KEX] move sphere, if we own it
-	if (other->client->owned_sphere) {
-		gentity_t *sphere = other->client->owned_sphere;
+	if (gentity_t *sphere = G_ResolveOwnedSphere(other->client)) {
 		sphere->s.origin = other->s.origin;
 		sphere->s.origin[2] = other->absmax[2];
 		sphere->s.angles[YAW] = other->s.angles[YAW];

@@ -1,7 +1,9 @@
 // Copyright (c) ZeniMax Media Inc.
 // Licensed under the GNU General Public License 2.0.
 #include "g_local.h"
+#include "muffmode/mm_arena.h"
 #include "muffmode/mm_captain.h"
+#include "muffmode/mm_duel.h"
 #include "muffmode/mm_match.h"
 #include "muffmode/mm_menu.h"
 #include "muffmode/mm_pconfig.h"
@@ -43,7 +45,7 @@ int ContentLimit(int num_entries)
 
 void SetText(menu_t &entry, std::string_view text)
 {
-	muffmode::CopyString(entry.text, text);
+	P_Menu_SetText(&entry, text);
 }
 
 void SetText(menu_t *entry, std::string_view text)
@@ -58,6 +60,8 @@ bool CopyHostPlayerName(char *value, size_t value_size)
 		return false;
 
 	value[0] = '\0';
+	if (muffmode::CvarEnabled(g_dedicated))
+		return false;
 	if (!g_entities || game.maxclients <= 0 || !g_entities[1].client)
 		return false;
 
@@ -94,17 +98,14 @@ void SetGametypeName(menu_t *p)
 
 void SetLevelName(menu_t *p)
 {
-	static char levelname[33];
-
 	std::string value = "*";
 	value += g_entities[0].message ? g_entities[0].message : level.mapname;
-	muffmode::CopyString(levelname, value);
-	SetText(p, levelname);
+	SetText(p, value);
 }
 
 const char *CurrentRulesetName()
 {
-	const int ruleset = clamp(static_cast<int>(game.ruleset), static_cast<int>(RS_NONE) + 1, static_cast<int>(RS_NUM_RULESETS) - 1);
+	const int ruleset = ClampPlayableRulesetIndex(static_cast<int>(game.ruleset));
 	return rs_long_name[ruleset];
 }
 
@@ -121,7 +122,6 @@ void Open(gentity_t *ent);
 
 namespace muffmode::menu::info {
 void ReturnToMain(gentity_t *ent, menu_hnd_t *p);
-void OpenFollowCamera(gentity_t *ent, menu_hnd_t *p);
 void OpenHost(gentity_t *ent, menu_hnd_t *p);
 void OpenServer(gentity_t *ent, menu_hnd_t *p);
 }
@@ -330,6 +330,7 @@ const menu_t settings_menu_template[] = {
 	{ "", MENU_ALIGN_LEFT, nullptr },
 	{ "$g_pc_return", MENU_ALIGN_LEFT, menu::info::ReturnToMain }
 };
+static_assert(std::size(settings_menu_template) == MENU_MAX_ROWS);
 
 void OpenSettings(gentity_t *ent, menu_hnd_t *p)
 {
@@ -364,10 +365,18 @@ void ApplyMatchAction(gentity_t *ent, menu_hnd_t *p)
 
 	P_Menu_Close(ent);
 
-	if (level.match_state <= matchst_t::MATCH_COUNTDOWN) {
+	if (MM_Arena_Active()) {
+		if (MM_Arena_SeriesActive(ent))
+			MM_Arena_AdminEnd(ent);
+		else
+			MM_Arena_AdminStart(ent);
+		return;
+	}
+
+	if (level.match_state <= match_state_t::MATCH_COUNTDOWN) {
 		gi.LocBroadcast_Print(PRINT_CHAT, "Match has been forced to start.\n");
 		Match_Start();
-	} else if (level.match_state == matchst_t::MATCH_IN_PROGRESS) {
+	} else if (level.match_state == match_state_t::MATCH_IN_PROGRESS) {
 		gi.LocBroadcast_Print(PRINT_CHAT, "Match has been forced to terminate.\n");
 		Match_Reset();
 	}
@@ -401,6 +410,7 @@ menu_t admin_menu[] = {
 	{ "", MENU_ALIGN_LEFT, nullptr },
 	{ "$g_pc_return", MENU_ALIGN_LEFT, menu::info::ReturnToMain }
 };
+static_assert(std::size(admin_menu) == MENU_MAX_ROWS);
 
 void Open(gentity_t *ent, menu_hnd_t *p)
 {
@@ -412,11 +422,11 @@ void Open(gentity_t *ent, menu_hnd_t *p)
 	menu::SetText(admin_menu[4], "");
 	admin_menu[4].SelectFunc = nullptr;
 
-	if (level.match_state <= matchst_t::MATCH_COUNTDOWN) {
+	if (level.match_state <= match_state_t::MATCH_COUNTDOWN) {
 		menu::SetText(admin_menu[3], "Force start match");
 		admin_menu[3].SelectFunc = ApplyMatchAction;
 
-	} else if (level.match_state == matchst_t::MATCH_IN_PROGRESS) {
+	} else if (level.match_state == match_state_t::MATCH_IN_PROGRESS) {
 		menu::SetText(admin_menu[3], "Reset match");
 		admin_menu[3].SelectFunc = ApplyMatchAction;
 	}
@@ -464,6 +474,7 @@ const menu_t match_stats_menu[] = {
 	{ "", MENU_ALIGN_LEFT, nullptr },
 	{ "$g_pc_return", MENU_ALIGN_LEFT, menu::info::ReturnToMain }
 };
+static_assert(std::size(match_stats_menu) == MENU_MAX_ROWS);
 
 void Update(gentity_t *ent)
 {
@@ -475,61 +486,65 @@ void Update(gentity_t *ent)
 	if (!menu::GetEntries(ent, &entries, &num_entries))
 		return;
 
-	// ent->client->mstats (client_match_stats_t) has no writers anywhere in the
-	// tree, so this screen always rendered zeros. Source the live per-match
-	// counters from resp.mstats[] via MS_Value. Field order matches the struct.
-	const client_match_stats_t stats = {
-		static_cast<uint32_t>(MS_Value(ent->client, MSTAT_DMG_DEALT)),
-		static_cast<uint32_t>(MS_Value(ent->client, MSTAT_DMG_RECEIVED)),
-		static_cast<uint32_t>(MS_Value(ent->client, MSTAT_SHOTS)),
-		static_cast<uint32_t>(MS_Value(ent->client, MSTAT_HITS)),
-		static_cast<uint32_t>(MS_Value(ent->client, MSTAT_KILLS_TOTAL)),
-		static_cast<uint32_t>(MS_Value(ent->client, MSTAT_DEATHS_TOTAL)),
-	};
+	const mm_match_player_stats_t &stats = ent->client->pers.match;
+	// GT_ARENA owns simultaneous room-local series and deliberately does not use
+	// the singleton match exporter. Its established resp.mstats counters remain
+	// the authoritative live-menu source.
+	const uint64_t kills = GT(GT_ARENA)
+		? static_cast<uint64_t>(std::max(0, MS_Value(ent->client, MSTAT_KILLS_TOTAL)))
+		: stats.total_kills;
+	const uint64_t deaths = GT(GT_ARENA)
+		? static_cast<uint64_t>(std::max(0, MS_Value(ent->client, MSTAT_DEATHS_TOTAL)))
+		: stats.total_deaths;
+	const uint64_t damage_dealt = GT(GT_ARENA)
+		? static_cast<uint64_t>(std::max(0, MS_Value(ent->client, MSTAT_DMG_DEALT)))
+		: stats.total_dmg_dealt;
+	const uint64_t damage_received = GT(GT_ARENA)
+		? static_cast<uint64_t>(std::max(0, MS_Value(ent->client, MSTAT_DMG_RECEIVED)))
+		: stats.total_dmg_received;
+	const uint64_t shots = GT(GT_ARENA)
+		? static_cast<uint64_t>(std::max(0, MS_Value(ent->client, MSTAT_SHOTS)))
+		: stats.total_shots;
+	const uint64_t hits = GT(GT_ARENA)
+		? static_cast<uint64_t>(std::max(0, MS_Value(ent->client, MSTAT_HITS)))
+		: stats.total_hits;
 	MenuWriter writer{ entries, num_entries };
-	std::array<char, MAX_INFO_VALUE> value = {};
-	menu::CopyHostPlayerName(value);
 
 	writer.Add("Player Stats for Match");
+	writer.Add("");
 
-	if (value[0])
-		writer.Add(G_Fmt("{}", value.data()).data());
+	if (ent->client->resp.netname[0])
+		writer.Add(ent->client->resp.netname);
 
 	writer.Add(menu::kBreaker);
 
-	writer.Add(G_Fmt("kills: {}", stats.total_kills).data());
-	writer.Add(G_Fmt("deaths: {}", stats.total_deaths).data());
-	if (stats.total_kills) {
-		if (stats.total_deaths > 0) {
-			const float ratio = static_cast<float>(stats.total_kills) / static_cast<float>(stats.total_deaths);
-			writer.Add(G_Fmt("k/d ratio: {:2}", ratio).data());
-		} else {
-			writer.Add("k/d ratio: N/A");
-		}
+	writer.Add(G_Fmt("kills: {}", kills).data());
+	writer.Add(G_Fmt("deaths: {}", deaths).data());
+	if (deaths > 0) {
+		const double ratio = static_cast<double>(kills) / static_cast<double>(deaths);
+		writer.Add(G_Fmt("k/d ratio: {:.2f}", ratio).data());
+	} else {
+		writer.Add("");
 	}
 
 	writer.Add("");
-	writer.Add(G_Fmt("dmg dealt: {}", stats.total_dmg_dealt).data());
-	writer.Add(G_Fmt("dmg received: {}", stats.total_dmg_received).data());
-	if (stats.total_dmg_dealt) {
-		if (stats.total_dmg_received > 0) {
-			const float ratio = static_cast<float>(stats.total_dmg_dealt) / static_cast<float>(stats.total_dmg_received);
-			writer.Add(G_Fmt("dmg ratio: {:02}", ratio).data());
-		} else {
-			writer.Add("dmg ratio: N/A");
-		}
+	writer.Add(G_Fmt("dmg dealt: {}", damage_dealt).data());
+	writer.Add(G_Fmt("dmg received: {}", damage_received).data());
+	if (damage_received > 0) {
+		const double ratio = static_cast<double>(damage_dealt) / static_cast<double>(damage_received);
+		writer.Add(G_Fmt("dmg ratio: {:.2f}", ratio).data());
+	} else {
+		writer.Add("");
 	}
 
 	writer.Add("");
-	writer.Add(G_Fmt("shots fired: {}", stats.total_shots).data());
-	writer.Add(G_Fmt("shots on target: {}", stats.total_hits).data());
-	if (stats.total_hits) {
-		if (stats.total_shots > 0) {
-			const int accuracy = static_cast<int>((static_cast<float>(stats.total_hits) / static_cast<float>(stats.total_shots)) * 100.f);
-			writer.Add(G_Fmt("total accuracy: {}%", accuracy).data());
-		} else {
-			writer.Add("total accuracy: N/A");
-		}
+	writer.Add(G_Fmt("shots fired: {}", shots).data());
+	writer.Add(G_Fmt("shots on target: {}", hits).data());
+	if (shots > 0) {
+		const int accuracy = static_cast<int>((static_cast<double>(hits) / static_cast<double>(shots)) * 100.0);
+		writer.Add(G_Fmt("total accuracy: {}%", accuracy).data());
+	} else {
+		writer.Add("");
 	}
 }
 
@@ -548,9 +563,13 @@ void Open(gentity_t *ent, menu_hnd_t *p)
 
 namespace muffmode::menu::player_settings {
 
-void Update(gentity_t *ent);
+void OpenDisplay(gentity_t *ent, menu_hnd_t *p);
+void OpenSpectator(gentity_t *ent, menu_hnd_t *p);
+void OpenSkins(gentity_t *ent, menu_hnd_t *p);
+void ReturnToPlayerConfig(gentity_t *ent, menu_hnd_t *p);
 void ToggleShowId(gentity_t *ent, menu_hnd_t *p);
 void ToggleTimer(gentity_t *ent, menu_hnd_t *p);
+void ToggleMatchInfo(gentity_t *ent, menu_hnd_t *p);
 void ToggleFragMessages(gentity_t *ent, menu_hnd_t *p);
 void ToggleAnnouncer(gentity_t *ent, menu_hnd_t *p);
 void CycleKillBeep(gentity_t *ent, menu_hnd_t *p);
@@ -568,26 +587,81 @@ constexpr std::array<const char *, 4> kSkinChoices = {
 	"cyborg/oni911"
 };
 
-const menu_t kPlayerSettingsMenuTemplate[] = {
-	{ "*Player Settings", MENU_ALIGN_CENTER, nullptr },
+constexpr gtime_t kPreferenceMenuChangeInterval = gtime_t::from_ms(250);
+std::array<gtime_t, MAX_CLIENTS> s_preference_menu_change_deadlines{};
+
+bool BeginPreferenceMenuChange(gentity_t *ent)
+{
+	if (!menu::HasClient(ent))
+		return false;
+	const int32_t slot = ent->s.number - 1;
+	if (slot < 0 || slot >= static_cast<int32_t>(
+			s_preference_menu_change_deadlines.size())) {
+		return false;
+	}
+
+	gtime_t &deadline = s_preference_menu_change_deadlines[
+		static_cast<size_t>(slot)];
+	if (deadline && level.time < deadline &&
+		deadline - level.time <= kPreferenceMenuChangeInterval) {
+		return false;
+	}
+	deadline = level.time + kPreferenceMenuChangeInterval;
+	return true;
+}
+
+const menu_t kPlayerConfigMenuTemplate[] = {
+	{ "*Player Config", MENU_ALIGN_CENTER, nullptr },
+	{ "", MENU_ALIGN_CENTER, nullptr },
+	{ "*Choose a section", MENU_ALIGN_LEFT, nullptr },
+	{ "Display & Audio", MENU_ALIGN_LEFT, OpenDisplay },
+	{ "Spectator & Follow", MENU_ALIGN_LEFT, OpenSpectator },
+	{ "Skin Overrides", MENU_ALIGN_LEFT, OpenSkins },
 	{ "", MENU_ALIGN_LEFT, nullptr },
-	{ "*Display", MENU_ALIGN_LEFT, nullptr },
+	{ "*Changes save automatically", MENU_ALIGN_CENTER, nullptr },
+	{ "$g_pc_return", MENU_ALIGN_LEFT, menu::info::ReturnToMain }
+};
+
+const menu_t kDisplayMenuTemplate[] = {
+	{ "*Display & Audio", MENU_ALIGN_CENTER, nullptr },
+	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_LEFT, ToggleShowId },
 	{ "", MENU_ALIGN_LEFT, ToggleTimer },
+	{ "", MENU_ALIGN_LEFT, ToggleMatchInfo },
 	{ "", MENU_ALIGN_LEFT, ToggleFragMessages },
 	{ "", MENU_ALIGN_LEFT, ToggleAnnouncer },
 	{ "", MENU_ALIGN_LEFT, CycleKillBeep },
 	{ "", MENU_ALIGN_LEFT, nullptr },
-	{ "*Spectator", MENU_ALIGN_LEFT, nullptr },
+	{ "*Voice pack is opt-in", MENU_ALIGN_CENTER, nullptr },
+	{ "Changes save automatically", MENU_ALIGN_CENTER, nullptr },
+	{ "", MENU_ALIGN_LEFT, nullptr },
+	{ "$g_pc_return", MENU_ALIGN_LEFT, ReturnToPlayerConfig }
+};
+
+const menu_t kSpectatorMenuTemplate[] = {
+	{ "*Spectator & Follow", MENU_ALIGN_CENTER, nullptr },
+	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_LEFT, ToggleFollowView },
 	{ "", MENU_ALIGN_LEFT, ToggleFollowKiller },
 	{ "", MENU_ALIGN_LEFT, ToggleFollowLeader },
 	{ "", MENU_ALIGN_LEFT, ToggleFollowPowerup },
 	{ "", MENU_ALIGN_LEFT, nullptr },
-	{ "*Skin Overrides", MENU_ALIGN_LEFT, nullptr },
+	{ "*Used while spectating", MENU_ALIGN_CENTER, nullptr },
+	{ "Changes save automatically", MENU_ALIGN_CENTER, nullptr },
+	{ "", MENU_ALIGN_LEFT, nullptr },
+	{ "$g_pc_return", MENU_ALIGN_LEFT, ReturnToPlayerConfig }
+};
+
+const menu_t kSkinMenuTemplate[] = {
+	{ "*Skin Overrides", MENU_ALIGN_CENTER, nullptr },
+	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_LEFT, CycleEnemySkin },
 	{ "", MENU_ALIGN_LEFT, CycleTeamSkin },
-	{ "$g_pc_return", MENU_ALIGN_LEFT, menu::info::ReturnToMain }
+	{ "", MENU_ALIGN_LEFT, nullptr },
+	{ "*Custom paths: eskin / tskin", MENU_ALIGN_CENTER, nullptr },
+	{ "Changes save automatically", MENU_ALIGN_CENTER, nullptr },
+	{ "", MENU_ALIGN_LEFT, nullptr },
+	{ "$g_pc_return", MENU_ALIGN_LEFT, ReturnToPlayerConfig }
 };
 
 int SkinChoiceIndex(std::string_view skin)
@@ -622,7 +696,7 @@ std::string SkinValueText(const char *skin)
 
 void ToggleBool(gentity_t *ent, menu_hnd_t *, mm_pconfig_bool_setting_t setting)
 {
-	if (!menu::HasClient(ent))
+	if (!BeginPreferenceMenuChange(ent))
 		return;
 
 	if (MM_PConfigToggleBool(ent, setting))
@@ -639,6 +713,11 @@ void ToggleTimer(gentity_t *ent, menu_hnd_t *p)
 	ToggleBool(ent, p, mm_pconfig_bool_setting_t::show_timer);
 }
 
+void ToggleMatchInfo(gentity_t *ent, menu_hnd_t *p)
+{
+	ToggleBool(ent, p, mm_pconfig_bool_setting_t::show_match_info);
+}
+
 void ToggleFragMessages(gentity_t *ent, menu_hnd_t *p)
 {
 	ToggleBool(ent, p, mm_pconfig_bool_setting_t::show_fragmessages);
@@ -646,12 +725,12 @@ void ToggleFragMessages(gentity_t *ent, menu_hnd_t *p)
 
 void ToggleAnnouncer(gentity_t *ent, menu_hnd_t *p)
 {
-	ToggleBool(ent, p, mm_pconfig_bool_setting_t::use_expanded);
+	ToggleBool(ent, p, mm_pconfig_bool_setting_t::announcer_enabled);
 }
 
 void CycleKillBeep(gentity_t *ent, menu_hnd_t *)
 {
-	if (!menu::HasClient(ent))
+	if (!BeginPreferenceMenuChange(ent))
 		return;
 
 	if (MM_PConfigCycleKillBeep(ent))
@@ -680,7 +759,7 @@ void ToggleFollowPowerup(gentity_t *ent, menu_hnd_t *p)
 
 void SetSkinChoice(gentity_t *ent, bool enemy, const char *skin)
 {
-	if (!menu::HasClient(ent))
+	if (!BeginPreferenceMenuChange(ent))
 		return;
 
 	char *store = enemy ? ent->client->sess.pc.enemy_skin : ent->client->sess.pc.team_skin;
@@ -689,7 +768,9 @@ void SetSkinChoice(gentity_t *ent, bool enemy, const char *skin)
 	else
 		store[0] = 0;
 
-	MM_ClientSavePConfigOrWarn(ent);
+	MM_ClientSavePConfigOrWarn(ent,
+		enemy ? MM_CLIENT_PROFILE_PREFERENCE_ENEMY_SKIN :
+			MM_CLIENT_PROFILE_PREFERENCE_TEAM_SKIN);
 	MM_RefreshSkinOverridesForViewer(ent);
 	P_Menu_Update(ent);
 }
@@ -715,46 +796,90 @@ void SetBoolRow(menu_t *entry, const char *label, mm_pconfig_bool_setting_t sett
 	P_Menu_UpdateEntry(entry, G_Fmt("{}: {}", label, MM_PConfigBoolText(MM_PConfigGetBool(ent, setting))).data(), MENU_ALIGN_LEFT, select);
 }
 
-void Update(gentity_t *ent)
+void UpdateDisplay(gentity_t *ent)
 {
 	menu_t *entries = nullptr;
 	int num_entries = 0;
-	if (!menu::GetEntries(ent, &entries, &num_entries) || num_entries < muffmode::CountAsInt(kPlayerSettingsMenuTemplate))
+	if (!menu::GetEntries(ent, &entries, &num_entries) || num_entries < muffmode::CountAsInt(kDisplayMenuTemplate))
 		return;
 
-	SetBoolRow(entries + 3, "ID display", mm_pconfig_bool_setting_t::show_id, ToggleShowId, ent);
-	SetBoolRow(entries + 4, "Match timer", mm_pconfig_bool_setting_t::show_timer, ToggleTimer, ent);
+	SetBoolRow(entries + 2, "ID display", mm_pconfig_bool_setting_t::show_id, ToggleShowId, ent);
+	SetBoolRow(entries + 3, "Match timer", mm_pconfig_bool_setting_t::show_timer, ToggleTimer, ent);
+	SetBoolRow(entries + 4, "Match info HUD", mm_pconfig_bool_setting_t::show_match_info, ToggleMatchInfo, ent);
 	SetBoolRow(entries + 5, "Frag messages", mm_pconfig_bool_setting_t::show_fragmessages, ToggleFragMessages, ent);
-	SetBoolRow(entries + 6, "Announcer", mm_pconfig_bool_setting_t::use_expanded, ToggleAnnouncer, ent);
+	SetBoolRow(entries + 6, "Voice announcer", mm_pconfig_bool_setting_t::announcer_enabled, ToggleAnnouncer, ent);
 	P_Menu_UpdateEntry(entries + 7, G_Fmt("Kill beep: {}", MM_PConfigKillBeepName(ent->client->sess.pc.killbeep_num)).data(), MENU_ALIGN_LEFT, CycleKillBeep);
+}
 
-	P_Menu_UpdateEntry(entries + 10,
+void UpdateSpectator(gentity_t *ent)
+{
+	menu_t *entries = nullptr;
+	int num_entries = 0;
+	if (!menu::GetEntries(ent, &entries, &num_entries) || num_entries < muffmode::CountAsInt(kSpectatorMenuTemplate))
+		return;
+
+	P_Menu_UpdateEntry(entries + 2,
 		G_Fmt("Follow view: {}", MM_PConfigFollowViewName(ent->client->sess.pc.follow_first_person)).data(),
 		MENU_ALIGN_LEFT,
 		ToggleFollowView);
-	SetBoolRow(entries + 11, "Follow killer", mm_pconfig_bool_setting_t::follow_killer, ToggleFollowKiller, ent);
-	SetBoolRow(entries + 12, "Follow leader", mm_pconfig_bool_setting_t::follow_leader, ToggleFollowLeader, ent);
-	SetBoolRow(entries + 13, "Follow powerup", mm_pconfig_bool_setting_t::follow_powerup, ToggleFollowPowerup, ent);
+	SetBoolRow(entries + 3, "Follow killer", mm_pconfig_bool_setting_t::follow_killer, ToggleFollowKiller, ent);
+	SetBoolRow(entries + 4, "Follow leader", mm_pconfig_bool_setting_t::follow_leader, ToggleFollowLeader, ent);
+	SetBoolRow(entries + 5, "Follow powerup", mm_pconfig_bool_setting_t::follow_powerup, ToggleFollowPowerup, ent);
+}
+
+void UpdateSkins(gentity_t *ent)
+{
+	menu_t *entries = nullptr;
+	int num_entries = 0;
+	if (!menu::GetEntries(ent, &entries, &num_entries) || num_entries < muffmode::CountAsInt(kSkinMenuTemplate))
+		return;
 
 	if (!muffmode::CvarEnabled(g_allow_skin_overrides)) {
-		P_Menu_UpdateEntry(entries + 16, "Skin overrides: disabled", MENU_ALIGN_LEFT, nullptr);
-		P_Menu_UpdateEntry(entries + 17, "", MENU_ALIGN_LEFT, nullptr);
+		P_Menu_UpdateEntry(entries + 2, "Skin overrides: disabled", MENU_ALIGN_LEFT, nullptr);
+		P_Menu_UpdateEntry(entries + 3, "", MENU_ALIGN_LEFT, nullptr);
 		return;
 	}
 
-	P_Menu_UpdateEntry(entries + 16,
+	P_Menu_UpdateEntry(entries + 2,
 		G_Fmt("{} skin: {}", GT(GT_DUEL) ? "Opp" : "Enemy", SkinValueText(ent->client->sess.pc.enemy_skin)).data(),
 		MENU_ALIGN_LEFT,
 		CycleEnemySkin);
 
 	if (GT(GT_DUEL)) {
-		P_Menu_UpdateEntry(entries + 17, "Team skin: unavailable", MENU_ALIGN_LEFT, nullptr);
+		P_Menu_UpdateEntry(entries + 3, "Team skin: unavailable", MENU_ALIGN_LEFT, nullptr);
 	} else {
-		P_Menu_UpdateEntry(entries + 17,
+		P_Menu_UpdateEntry(entries + 3,
 			G_Fmt("Team skin: {}", SkinValueText(ent->client->sess.pc.team_skin)).data(),
 			MENU_ALIGN_LEFT,
 			CycleTeamSkin);
 	}
+}
+
+void OpenDisplay(gentity_t *ent, menu_hnd_t *)
+{
+	if (!menu::HasClient(ent))
+		return;
+
+	P_Menu_Close(ent);
+	P_Menu_Open(ent, kDisplayMenuTemplate, -1, muffmode::CountAsInt(kDisplayMenuTemplate), nullptr, UpdateDisplay);
+}
+
+void OpenSpectator(gentity_t *ent, menu_hnd_t *)
+{
+	if (!menu::HasClient(ent))
+		return;
+
+	P_Menu_Close(ent);
+	P_Menu_Open(ent, kSpectatorMenuTemplate, -1, muffmode::CountAsInt(kSpectatorMenuTemplate), nullptr, UpdateSpectator);
+}
+
+void OpenSkins(gentity_t *ent, menu_hnd_t *)
+{
+	if (!menu::HasClient(ent))
+		return;
+
+	P_Menu_Close(ent);
+	P_Menu_Open(ent, kSkinMenuTemplate, -1, muffmode::CountAsInt(kSkinMenuTemplate), nullptr, UpdateSkins);
 }
 
 void Open(gentity_t *ent, menu_hnd_t *)
@@ -763,7 +888,13 @@ void Open(gentity_t *ent, menu_hnd_t *)
 		return;
 
 	P_Menu_Close(ent);
-	P_Menu_Open(ent, kPlayerSettingsMenuTemplate, -1, muffmode::CountAsInt(kPlayerSettingsMenuTemplate), nullptr, Update);
+	P_Menu_Open(ent, kPlayerConfigMenuTemplate, -1, muffmode::CountAsInt(kPlayerConfigMenuTemplate), nullptr, nullptr);
+}
+
+void ReturnToPlayerConfig(gentity_t *ent, menu_hnd_t *)
+{
+	Open(ent, nullptr);
+	gi.local_sound(ent, CHAN_AUTO, gi.soundindex("misc/menu3.wav"), 1, ATTN_NONE, 0);
 }
 
 } // namespace muffmode::menu::player_settings
@@ -774,16 +905,28 @@ namespace muffmode::menu::join {
 
 void JoinFree(gentity_t *ent, menu_hnd_t *)
 {
+	if (MM_Arena_Active()) {
+		MM_Arena_OpenRoomMenu(ent, nullptr);
+		return;
+	}
 	SetTeam(ent, TEAM_FREE, false, false, false);
 }
 
 void JoinRed(gentity_t *ent, menu_hnd_t *)
 {
+	if (MM_Arena_Active()) {
+		MM_Arena_OpenJoinMenu(ent, nullptr);
+		return;
+	}
 	SetTeam(ent, !muffmode::CvarEnabled(g_teamplay_allow_team_pick) ? PickTeam(-1) : TEAM_RED, false, false, false);
 }
 
 void JoinBlue(gentity_t *ent, menu_hnd_t *)
 {
+	if (MM_Arena_Active()) {
+		MM_Arena_OpenJoinMenu(ent, nullptr);
+		return;
+	}
 	if (!muffmode::CvarEnabled(g_teamplay_allow_team_pick))
 		return;
 
@@ -795,31 +938,55 @@ void JoinSpectator(gentity_t *ent, menu_hnd_t *)
 	SetTeam(ent, TEAM_SPECTATOR, false, false, false);
 }
 
+void ReturnArenaLobby(gentity_t *ent, menu_hnd_t *)
+{
+	if (!menu::HasClient(ent))
+		return;
+	P_Menu_Close(ent);
+	SetTeam(ent, TEAM_SPECTATOR, false, false, false);
+	muffmode::menu::join::Open(ent);
+}
+
+void OpenArenaRooms(gentity_t *ent, menu_hnd_t *)
+{
+	MM_Arena_OpenRoomMenu(ent, nullptr);
+}
+
+void OpenArenaTeams(gentity_t *ent, menu_hnd_t *)
+{
+	MM_Arena_OpenJoinMenu(ent, nullptr);
+}
+
 void ToggleReady(gentity_t *ent, menu_hnd_t *)
 {
+	if (MM_Arena_Active()) {
+		MM_Arena_ToggleReady(ent);
+		P_Menu_Dirty();
+		return;
+	}
 	MM_ToggleReadyUp(ent);
 }
 
-constexpr int kHostName = 0;
-constexpr int kGametype = 1;
+constexpr int kHostname = 0;
+constexpr int kGametypeName = 1;
 constexpr int kLevel = 2;
 constexpr int kMatch = 3;
 
-constexpr int kTeamsJoinRed = 4;
-constexpr int kTeamsJoinBlue = 5;
-constexpr int kTeamsFollow = 7;
+constexpr int kTeamsJoinRed = 5;
+constexpr int kTeamsJoinBlue = 6;
 constexpr int kTeamsReadyUp = 8;
+constexpr int kTeamsPlayerSettings = 9;
+constexpr int kTeamsCallVote = 10;
 constexpr int kTeamsPlayerStats = 11;
-constexpr int kTeamsCallVote = 12;
-constexpr int kTeamsPlayerSettings = 13;
 constexpr int kTeamsAdmin = 14;
 
-constexpr int kFreeJoin = 4;
-constexpr int kFreeFollow = 7;
+constexpr int kFreeJoin = 5;
+constexpr int kFreeArenaLobby = 6;
+constexpr int kFreeSpectate = 7;
 constexpr int kFreeReadyUp = 8;
+constexpr int kFreePlayerSettings = 9;
+constexpr int kFreeCallVote = 10;
 constexpr int kFreePlayerStats = 11;
-constexpr int kFreeCallVote = 12;
-constexpr int kFreePlayerSettings = 13;
 constexpr int kFreeAdmin = 14;
 
 constexpr int kGameMod = 16;
@@ -830,18 +997,18 @@ const menu_t kTeamsMenuTemplate[] = {
 	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_CENTER, nullptr },
+	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "$g_pc_join_red_team", MENU_ALIGN_LEFT, JoinRed },
 	{ "$g_pc_join_blue_team", MENU_ALIGN_LEFT, JoinBlue },
 	{ "Spectate", MENU_ALIGN_LEFT, JoinSpectator },
-	{ "Follow Player", MENU_ALIGN_LEFT, menu::info::OpenFollowCamera },
 	{ "", MENU_ALIGN_LEFT, nullptr },  // Ready Up (set dynamically)
-	{ "Host Info", MENU_ALIGN_LEFT, menu::info::OpenHost },
-	{ "Match Info", MENU_ALIGN_LEFT, menu::info::OpenServer },
-	{ "Player Stats", MENU_ALIGN_LEFT, menu::stats::Open },
+	{ "Player Config", MENU_ALIGN_LEFT, menu::player_settings::Open },
 	{ "Call a Vote", MENU_ALIGN_LEFT, ::G_Menu_CallVote },
-	{ "Player Settings", MENU_ALIGN_LEFT, menu::player_settings::Open },
+	{ "Player Stats", MENU_ALIGN_LEFT, menu::stats::Open },
+	{ "Server Info", MENU_ALIGN_LEFT, menu::info::OpenHost },
+	{ "Match Info", MENU_ALIGN_LEFT, menu::info::OpenServer },
 	{ "", MENU_ALIGN_LEFT, nullptr },
-	{ "", MENU_ALIGN_LEFT, nullptr },
+	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_CENTER, nullptr }
 };
@@ -851,35 +1018,28 @@ const menu_t kFreeMenuTemplate[] = {
 	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_CENTER, nullptr },
+	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "Join Game", MENU_ALIGN_LEFT, JoinFree },
 	{ "", MENU_ALIGN_LEFT, nullptr },
 	{ "Spectate", MENU_ALIGN_LEFT, JoinSpectator },
-	{ "Follow Player", MENU_ALIGN_LEFT, menu::info::OpenFollowCamera },
 	{ "", MENU_ALIGN_LEFT, nullptr },  // Ready Up (set dynamically)
-	{ "Host Info", MENU_ALIGN_LEFT, menu::info::OpenHost },
-	{ "Match Info", MENU_ALIGN_LEFT, menu::info::OpenServer },
-	{ "Player Stats", MENU_ALIGN_LEFT, menu::stats::Open },
+	{ "Player Config", MENU_ALIGN_LEFT, menu::player_settings::Open },
 	{ "Call a Vote", MENU_ALIGN_LEFT, ::G_Menu_CallVote },
-	{ "Player Settings", MENU_ALIGN_LEFT, menu::player_settings::Open },
+	{ "Player Stats", MENU_ALIGN_LEFT, menu::stats::Open },
+	{ "Server Info", MENU_ALIGN_LEFT, menu::info::OpenHost },
+	{ "Match Info", MENU_ALIGN_LEFT, menu::info::OpenServer },
 	{ "", MENU_ALIGN_LEFT, nullptr },
-	{ "", MENU_ALIGN_LEFT, nullptr },
+	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_CENTER, nullptr }
 };
 
+static_assert(std::size(kTeamsMenuTemplate) == MENU_MAX_ROWS);
+static_assert(std::size(kFreeMenuTemplate) == MENU_MAX_ROWS);
+
 } // namespace muffmode::menu::join
 
 namespace muffmode::menu::info {
-
-const menu_t kNoFollowMenuTemplate[] = {
-	{ "", MENU_ALIGN_CENTER, nullptr },
-	{ "", MENU_ALIGN_CENTER, nullptr },
-	{ "", MENU_ALIGN_CENTER, nullptr },
-	{ "", MENU_ALIGN_CENTER, nullptr },
-	{ "No players to follow", MENU_ALIGN_LEFT, nullptr },
-	{ "", MENU_ALIGN_CENTER, nullptr },
-	{ "$g_pc_return", MENU_ALIGN_LEFT, ReturnToMain }
-};
 
 const menu_t kHostMenuTemplate[] = {
 	{ "", MENU_ALIGN_CENTER, nullptr },
@@ -923,39 +1083,8 @@ const menu_t kServerMenuTemplate[] = {
 	{ "$g_pc_return", MENU_ALIGN_LEFT, ReturnToMain }
 };
 
-void UpdateNoFollow(gentity_t *ent)
-{
-	menu_t *entries = nullptr;
-	int num_entries = 0;
-	if (!menu::GetEntries(ent, &entries, &num_entries) || menu::ContentLimit(num_entries) < 3)
-		return;
-
-	menu::SetGamemodName(&entries[0]);
-	menu::SetGametypeName(&entries[1]);
-	menu::SetLevelName(&entries[2]);
-}
-
-void OpenFollowCamera(gentity_t *ent, menu_hnd_t *)
-{
-	if (!menu::HasClient(ent))
-		return;
-
-	SetTeam(ent, TEAM_SPECTATOR, false, false, false);
-
-	if (ent->client->follow_target) {
-		FreeFollower(ent);
-		P_Menu_Close(ent);
-		return;
-	}
-
-	GetFollowTarget(ent);
-
-	P_Menu_Close(ent);
-	if (ent->client->follow_target)
-		return;
-
-	P_Menu_Open(ent, kNoFollowMenuTemplate, -1, muffmode::CountAsInt(kNoFollowMenuTemplate), nullptr, UpdateNoFollow);
-}
+static_assert(std::size(kHostMenuTemplate) == MENU_MAX_ROWS);
+static_assert(std::size(kServerMenuTemplate) == MENU_MAX_ROWS);
 
 void ReturnToMain(gentity_t *ent, menu_hnd_t *)
 {
@@ -975,38 +1104,30 @@ void UpdateHost(gentity_t *ent)
 		return;
 	const int content_limit = menu::ContentLimit(num_entries);
 
-	int		i = 0;
+	for (int row = 0; row < content_limit; row++)
+		menu::SetText(entries[row], "");
 
+	menu::SetText(entries[0], "*Server Info");
+	int i = 2;
 	const char *server_name = muffmode::CvarString(hostname);
-	if (server_name[0] && i + 2 < content_limit) {
-		menu::SetText(entries[i], "Server Name:");
-		i++;
-		menu::SetText(entries[i], server_name);
-		i++;
+	if (server_name[0] && i < content_limit) {
+		menu::SetText(entries[i], G_Fmt("Server: {}", server_name).data());
 		i++;
 	}
 
-	if (i + 2 < content_limit) {
+	if (i < content_limit) {
 		std::array<char, MAX_INFO_VALUE> value = {};
-
 		if (menu::CopyHostPlayerName(value)) {
-			menu::SetText(entries[i], "Host:");
-			i++;
-			menu::SetText(entries[i], value.data());
-			i++;
+			menu::SetText(entries[i], G_Fmt("Host: {}", value.data()).data());
 			i++;
 		}
 	}
 
-	if (game.motd.size() && i < content_limit) {
-		menu::SetText(entries[i], "Message of the Day:");
+	if (game.motd.size() && i + 2 < content_limit) {
 		i++;
-		// 26 char line width
-		// 9 lines
-		// = 234
-
-		if (i < content_limit)
-			menu::SetText(entries[i], G_Fmt("{}", game.motd.c_str()).data());
+		menu::SetText(entries[i], "*Message of the Day");
+		i++;
+		menu::SetText(entries[i], game.motd.c_str());
 	}
 }
 
@@ -1029,17 +1150,18 @@ void UpdateServer(gentity_t *ent)
 	if (content_limit < 3)
 		return;
 
+	for (int row = 0; row < content_limit; row++)
+		menu::SetText(entries[row], "");
+
 	int		i = 0;
 	bool	limits = false;
-	bool	infiniteammo = InfiniteAmmoOn(nullptr);
+	const bool global_modifiers = notGT(GT_ARENA);
+	bool	infiniteammo = InfiniteAmmoOn(nullptr) || MM_Arena_InfiniteAmmoEnabled(ent);
 	bool	items = ItemSpawnsEnabled();
 	int		scorelimit = GT_ScoreLimit();
 	
-	menu::SetText(entries[i], "Match Info");
-	i++;
-
-	menu::SetText(entries[i], menu::kBreaker);
-	i++;
+	menu::SetText(entries[i], "*Match Info");
+	i += 2;
 
 	menu::SetText(entries[i], level.gametype_name);
 	i++;
@@ -1084,7 +1206,7 @@ void UpdateServer(gentity_t *ent)
 		i++;
 	}
 
-	if (g_instagib->integer || GT(GT_INSTAGIB)) {
+	if (global_modifiers && (g_instagib->integer || GT(GT_INSTAGIB))) {
 		if (i >= content_limit) return;
 		if (g_instagib_splash->integer) {
 			menu::SetText(entries[i], "InstaGib + Rail Splash");
@@ -1093,22 +1215,22 @@ void UpdateServer(gentity_t *ent)
 		}
 		i++;
 	}
-	if (g_vampiric_damage->integer) {
+	if (global_modifiers && g_vampiric_damage->integer) {
 		if (i >= content_limit) return;
 		menu::SetText(entries[i], "Vampiric Damage");
 		i++;
 	}
-	if (g_frenzy->integer) {
+	if (global_modifiers && g_frenzy->integer) {
 		if (i >= content_limit) return;
 		menu::SetText(entries[i], "Weapons Frenzy");
 		i++;
 	}
-	if (g_nadefest->integer || GT(GT_NADEFEST)) {
+	if (global_modifiers && (g_nadefest->integer || GT(GT_NADEFEST))) {
 		if (i >= content_limit) return;
 		menu::SetText(entries[i], "Nade Fest");
 		i++;
 	}
-	if (g_quadhog->integer) {
+	if (global_modifiers && g_quadhog->integer) {
 		if (i >= content_limit) return;
 		menu::SetText(entries[i], "Quad Hog");
 		i++;
@@ -1132,7 +1254,15 @@ void UpdateServer(gentity_t *ent)
 		}
 	}
 
-	if (g_infinite_ammo->integer && !infiniteammo) {
+	if (GT(GT_ARENA) && MM_Arena_ExcessiveEnabled(ent)) {
+		if (i >= content_limit) return;
+		menu::SetText(entries[i], "Arena excessive");
+		i++;
+	} else if (GT(GT_ARENA) && infiniteammo) {
+		if (i >= content_limit) return;
+		menu::SetText(entries[i], "infinite ammo");
+		i++;
+	} else if (global_modifiers && g_infinite_ammo->integer) {
 		if (i >= content_limit) return;
 		menu::SetText(entries[i], "infinite ammo");
 		i++;
@@ -1143,9 +1273,12 @@ void UpdateServer(gentity_t *ent)
 		i++;
 	}
 
-	if (g_allow_grapple->integer) {
+	if ((GT(GT_ARENA) && MM_Arena_GrappleEnabled(ent)) ||
+		(global_modifiers && g_allow_grapple->integer)) {
 		if (i >= content_limit) return;
-		menu::SetText(entries[i], G_Fmt("{}grapple enabled", g_grapple_offhand->integer ? "off-hand " : "").data());
+		menu::SetText(entries[i], G_Fmt("{}grapple enabled",
+			notGT(GT_ARENA) && g_grapple_offhand->integer ?
+				"off-hand " : "").data());
 		i++;
 	}
 
@@ -1191,13 +1324,14 @@ void UpdateServer(gentity_t *ent)
 		i++;
 	}
 
-	if (g_dm_no_self_damage->integer) {
+	if (global_modifiers && g_dm_no_self_damage->integer) {
 		if (i >= content_limit) return;
 		menu::SetText(entries[i], "no self-damage");
 		i++;
 	}
 
-	if (g_dm_no_fall_damage->integer) {
+	if ((GT(GT_ARENA) && !MM_Arena_FallingDamageEnabled(ent)) ||
+		(global_modifiers && g_dm_no_fall_damage->integer)) {
 		if (i >= content_limit) return;
 		menu::SetText(entries[i], "no falling damage");
 		i++;
@@ -1267,8 +1401,10 @@ void UpdateGameRules(gentity_t *ent)
 
 	int		i = 0;
 
-	menu::SetText(entries[i], "Game Rules"); i++;
-	menu::SetText(entries[i], menu::kBreaker); i++;
+	for (int row = 0; row < menu::ContentLimit(num_entries); row++)
+		menu::SetText(entries[row], "");
+
+	menu::SetText(entries[i], "*Game Rules"); i += 2;
 	menu::SetText(entries[i], G_Fmt("{}", level.gametype_name).data()); i++;
 }
 
@@ -1318,8 +1454,43 @@ void Update(gentity_t *ent)
 		}
 	}
 
-	const bool teams = Teams();
-	if (teams) {
+	const bool arena_active = MM_Arena_Active();
+	const bool teams = !arena_active && Teams();
+	if (arena_active) {
+		const int arena_id = MM_Arena_Id(ent);
+		if (arena_id > 0 && MM_Arena_ValidId(arena_id)) {
+			const bool roster_locked = MM_Arena_RosterLocked(ent);
+			const std::string room_label = muffmode::TruncateWithEllipsis(
+				G_Fmt("Room {}: {}", arena_id, MM_Arena_Name(arena_id)),
+				MENU_MAX_LINE_CHARS);
+			menu::SetText(entries[kMatch], room_label);
+
+			menu::SetText(entries[kFreeJoin], roster_locked
+				? "Change Room (locked)" : "Change Room");
+			entries[kFreeJoin].SelectFunc =
+				roster_locked ? nullptr : OpenArenaRooms;
+			if (MM_Arena_UsesTeams(ent)) {
+				menu::SetText(entries[kFreeArenaLobby], "Teams & Queue");
+				entries[kFreeArenaLobby].SelectFunc = OpenArenaTeams;
+			} else {
+				menu::SetText(entries[kFreeArenaLobby], "");
+				entries[kFreeArenaLobby].SelectFunc = nullptr;
+			}
+			menu::SetText(entries[kFreeSpectate], roster_locked
+				? "Arena Rooms (locked)" : "Return to Arena Rooms");
+			entries[kFreeSpectate].SelectFunc =
+				roster_locked ? nullptr : ReturnArenaLobby;
+		} else {
+			menu::SetText(entries[kMatch], "Arena Rooms");
+			menu::SetText(entries[kFreeJoin],
+				G_Fmt("Choose Room ({})", MM_Arena_Count()));
+			entries[kFreeJoin].SelectFunc = OpenArenaRooms;
+			menu::SetText(entries[kFreeArenaLobby], "");
+			entries[kFreeArenaLobby].SelectFunc = nullptr;
+			menu::SetText(entries[kFreeSpectate], "");
+			entries[kFreeSpectate].SelectFunc = nullptr;
+		}
+	} else if (teams) {
 		if (!muffmode::CvarEnabled(g_teamplay_allow_team_pick) && !level.locked[TEAM_RED] && !level.locked[TEAM_BLUE]) {
 			menu::SetText(entries[kTeamsJoinRed], G_Fmt("Join a Team ({}/{})", num_red + num_blue, max_players).data());
 			menu::SetText(entries[kTeamsJoinBlue], "");
@@ -1345,17 +1516,22 @@ void Update(gentity_t *ent)
 		}
 	} else {
 		// Allow duel queue joining even during match lock (queue joining doesn't affect active match)
-		const bool is_duel_queue_join = GT(GT_DUEL) && level.num_playing_clients == 2;
+		const bool is_duel_queue_join = GT(GT_DUEL) &&
+			MM_Duel_OccupiedSlots() >= 2;
 		if (level.locked[TEAM_FREE] && !is_duel_queue_join) {
 			menu::SetText(entries[kFreeJoin], "Match LOCKED");
 			entries[kFreeJoin].SelectFunc = nullptr;
-		} else if (GT(GT_DUEL) && level.num_playing_clients == 2) {
+		} else if (GT(GT_DUEL) && MM_Duel_OccupiedSlots() >= 2) {
 			menu::SetText(entries[kFreeJoin], G_Fmt("Join Queue to Play ({}/{})", num_queue, max(0, max_players - 2)).data());
 			entries[kFreeJoin].SelectFunc = JoinFree;
 		} else {
 			menu::SetText(entries[kFreeJoin], G_Fmt("Join Match ({}/{})", num_free, GT(GT_DUEL) ? 2 : max_players).data());
 			entries[kFreeJoin].SelectFunc = JoinFree;
 		}
+		menu::SetText(entries[kFreeArenaLobby], "");
+		entries[kFreeArenaLobby].SelectFunc = nullptr;
+		menu::SetText(entries[kFreeSpectate], "Spectate");
+		entries[kFreeSpectate].SelectFunc = JoinSpectator;
 	}
 
 	if (!muffmode::CvarEnabled(g_matchstats)) {
@@ -1379,7 +1555,7 @@ void Update(gentity_t *ent)
 	}
 
 	const char *force_join = muffmode::CvarString(g_dm_force_join);
-	if (force_join[0]) {
+	if (force_join[0] && !arena_active) {
 		if (teams) {
 			if (muffmode::CStringEqualsI(force_join, "red")) {
 				menu::SetText(entries[kTeamsJoinBlue], "");
@@ -1391,14 +1567,13 @@ void Update(gentity_t *ent)
 		}
 	}
 
-	int index = teams ? kTeamsFollow : kFreeFollow;
-	if (ent->client->follow_target)
-		menu::SetText(entries[index], "Stop Following");
-	else
-		menu::SetText(entries[index], "Follow Player");
-
-	index = teams ? kTeamsReadyUp : kFreeReadyUp;
-	if (muffmode::CvarEnabled(g_dm_do_readyup) && level.match_state == matchst_t::MATCH_WARMUP_READYUP) {
+	int index = teams ? kTeamsReadyUp : kFreeReadyUp;
+	if (arena_active && MM_Arena_CanToggleReady(ent)) {
+		menu::SetText(entries[index],
+			ent->client->resp.ready ? "Not Ready" : "Ready Up");
+		entries[index].SelectFunc = ToggleReady;
+	} else if (!arena_active && muffmode::CvarEnabled(g_dm_do_readyup) &&
+		level.match_state == match_state_t::MATCH_WARMUP_READYUP) {
 		menu::SetText(entries[index], ent->client->resp.ready ? "Not Ready" : "Ready Up");
 		entries[index].SelectFunc = ToggleReady;
 	} else {
@@ -1406,17 +1581,19 @@ void Update(gentity_t *ent)
 		entries[index].SelectFunc = nullptr;
 	}
 
-	menu::SetGametypeName(entries + kHostName);
-	menu::SetText(entries + kGametype, "");
+	menu::SetHostName(entries + kHostname);
+	menu::SetGametypeName(entries + kGametypeName);
 	menu::SetLevelName(entries + kLevel);
 
-	// Match status text removed from this menu -- crowded the join options below it.
-	menu::SetText(entries[kMatch], "");
+	// Match status text is normally omitted because it crowds the join options.
+	// Arena uses this otherwise empty row for the current room/lobby context.
+	if (!arena_active)
+		menu::SetText(entries[kMatch], "");
 
 	menu::SetGamemodName(entries + kGameMod);
 
 	int player_settings_index = teams ? kTeamsPlayerSettings : kFreePlayerSettings;
-	menu::SetText(entries[player_settings_index], "Player Settings");
+	menu::SetText(entries[player_settings_index], "Player Config");
 	entries[player_settings_index].align = MENU_ALIGN_LEFT;
 	entries[player_settings_index].SelectFunc = menu::player_settings::Open;
 
@@ -1441,7 +1618,8 @@ void Open(gentity_t *ent)
 	if (Vote_Menu_Active(ent))
 		return;
 
-	if (Teams()) {
+	const bool arena_active = MM_Arena_Active();
+	if (!arena_active && Teams()) {
 		team_t team = TEAM_SPECTATOR;
 		int num_red = 0, num_blue = 0;
 
@@ -1463,9 +1641,13 @@ void Open(gentity_t *ent)
 		else
 			team = brandom() ? TEAM_RED : TEAM_BLUE;
 
-		P_Menu_Open(ent, kTeamsMenuTemplate, team, muffmode::CountAsInt(kTeamsMenuTemplate), nullptr, Update);
+		const int initial_row =
+			team == TEAM_BLUE ? kTeamsJoinBlue : kTeamsJoinRed;
+		P_Menu_Open(ent, kTeamsMenuTemplate, initial_row,
+			muffmode::CountAsInt(kTeamsMenuTemplate), nullptr, Update);
 	} else {
-		P_Menu_Open(ent, kFreeMenuTemplate, TEAM_FREE, muffmode::CountAsInt(kFreeMenuTemplate), nullptr, Update);
+		P_Menu_Open(ent, kFreeMenuTemplate, kFreeJoin,
+			muffmode::CountAsInt(kFreeMenuTemplate), nullptr, Update);
 	}
 }
 

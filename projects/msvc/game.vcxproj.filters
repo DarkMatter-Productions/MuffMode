@@ -181,10 +181,25 @@
     <ClInclude Include="..\..\src\sgame\muffmode\mm_announcer_rules.h">
       <Filter>sgame\muffmode</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_arena.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_arena_rules.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\src\sgame\muffmode\mm_debug.h">
       <Filter>sgame\muffmode</Filter>
     </ClInclude>
     <ClInclude Include="..\..\src\sgame\muffmode\mm_gametype.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_gametype_cfg_rules.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_ent_respawn.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_ent_respawn_rules.h">
       <Filter>sgame\muffmode</Filter>
     </ClInclude>
     <ClInclude Include="..\..\src\sgame\muffmode\mm_freezetag.h">
@@ -194,6 +209,21 @@
       <Filter>sgame\muffmode</Filter>
     </ClInclude>
     <ClInclude Include="..\..\src\sgame\muffmode\mm_captain.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_centerprint.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_chat.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_client_profile.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_client_refs.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_scoring.h">
       <Filter>sgame\muffmode</Filter>
     </ClInclude>
     <ClInclude Include="..\..\src\sgame\muffmode\mm_ghost.h">
@@ -235,10 +265,37 @@
     <ClInclude Include="..\..\src\sgame\muffmode\mm_loc_parse.h">
       <Filter>sgame\muffmode</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_awards.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_awards_rules.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_map_pick.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_map_pick_rules.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_map_pool.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\src\sgame\muffmode\mm_maps.h">
       <Filter>sgame\muffmode</Filter>
     </ClInclude>
     <ClInclude Include="..\..\src\sgame\muffmode\mm_match.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_match_stats.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_match_stats_types.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_message_budget.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_reliable_text.h">
       <Filter>sgame\muffmode</Filter>
     </ClInclude>
     <ClInclude Include="..\..\src\sgame\muffmode\mm_menu.h">
@@ -250,13 +307,22 @@
     <ClInclude Include="..\..\src\sgame\muffmode\mm_pconfig_rules.h">
       <Filter>sgame\muffmode</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_player_stats.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\src\sgame\muffmode\mm_skin.h">
       <Filter>sgame\muffmode</Filter>
     </ClInclude>
     <ClInclude Include="..\..\src\sgame\muffmode\mm_motd.h">
       <Filter>sgame\muffmode</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_ordnance_identity.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\src\sgame\muffmode\mm_parse.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_spawn_rules.h">
       <Filter>sgame\muffmode</Filter>
     </ClInclude>
     <ClInclude Include="..\..\src\sgame\muffmode\mm_time_format.h">
@@ -284,6 +350,27 @@
       <Filter>sgame\muffmode</Filter>
     </ClInclude>
     <ClInclude Include="..\..\src\sgame\muffmode\mm_util.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_duel.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_items_rules.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_ruleset.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_ruleset_weapons.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_spawn_filter.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_spawn_loadout.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_statusbar.h">
       <Filter>sgame\muffmode</Filter>
     </ClInclude>
     <ClInclude Include="..\..\src\sgame\muffmode\mm_vote_types.h">
@@ -567,10 +654,28 @@
     <ClCompile Include="..\..\src\sgame\client\menu.cpp">
       <Filter>sgame\client</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_alloc_guard.cpp">
+      <Filter>sgame\muffmode</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\src\sgame\muffmode\mm_debug.cpp">
       <Filter>sgame\muffmode</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\sgame\muffmode\mm_captain.cpp">
+      <Filter>sgame\muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_centerprint.cpp">
+      <Filter>sgame\muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_chat.cpp">
+      <Filter>sgame\muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_client_profile.cpp">
+      <Filter>sgame\muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_client_refs.cpp">
+      <Filter>sgame\muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_scoring.cpp">
       <Filter>sgame\muffmode</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\sgame\muffmode\mm_combat_heatmap.cpp">
@@ -582,6 +687,15 @@
     <ClCompile Include="..\..\src\sgame\muffmode\mm_loc.cpp">
       <Filter>sgame\muffmode</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_awards.cpp">
+      <Filter>sgame\muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_map_pick.cpp">
+      <Filter>sgame\muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_map_pool.cpp">
+      <Filter>sgame\muffmode</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\src\sgame\muffmode\mm_maps.cpp">
       <Filter>sgame\muffmode</Filter>
     </ClCompile>
@@ -591,6 +705,12 @@
     <ClCompile Include="..\..\src\sgame\muffmode\mm_match.cpp">
       <Filter>sgame\muffmode</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_match_stats.cpp">
+      <Filter>sgame\muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_message_budget.cpp">
+      <Filter>sgame\muffmode</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\src\sgame\muffmode\mm_nav_bake.cpp">
       <Filter>sgame\muffmode</Filter>
     </ClCompile>
@@ -598,6 +718,9 @@
       <Filter>sgame\muffmode</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\sgame\muffmode\mm_pconfig.cpp">
+      <Filter>sgame\muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_player_stats.cpp">
       <Filter>sgame\muffmode</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\sgame\muffmode\mm_skin.cpp">
@@ -624,6 +747,9 @@
     <ClCompile Include="..\..\src\sgame\muffmode\mm_announcer.cpp">
       <Filter>sgame\muffmode</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_arena.cpp">
+      <Filter>sgame\muffmode</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\src\sgame\muffmode\mm_gametype.cpp">
       <Filter>sgame\muffmode</Filter>
     </ClCompile>
@@ -634,6 +760,33 @@
       <Filter>sgame\muffmode</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\sgame\muffmode\mm_horde_tables.cpp">
+      <Filter>sgame\muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_duel.cpp">
+      <Filter>sgame\muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_ent_respawn.cpp">
+      <Filter>sgame\muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_horde.cpp">
+      <Filter>sgame\muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_items_rules.cpp">
+      <Filter>sgame\muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_ruleset.cpp">
+      <Filter>sgame\muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_ruleset_weapons.cpp">
+      <Filter>sgame\muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_spawn_filter.cpp">
+      <Filter>sgame\muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_spawn_loadout.cpp">
+      <Filter>sgame\muffmode</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_statusbar.cpp">
       <Filter>sgame\muffmode</Filter>
     </ClCompile>
   </ItemGroup>

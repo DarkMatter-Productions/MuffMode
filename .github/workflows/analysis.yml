@@ -25,16 +25,16 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Cache vcpkg
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: |
             vcpkg/downloads
             vcpkg/buildtrees
             vcpkg/packages
-          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'scripts/ci/setup-vcpkg.ps1') }}
           restore-keys: vcpkg-${{ runner.os }}-
 
       - name: Setup vcpkg
@@ -42,14 +42,14 @@ jobs:
         run: ./scripts/ci/setup-vcpkg.ps1 -Install
 
       - name: Setup MSBuild
-        uses: microsoft/setup-msbuild@v3
+        uses: microsoft/setup-msbuild@30375c66a4eea26614e0d39710365f22f8b0af57 # v3
 
       - name: Run MSVC /analyze
         shell: pwsh
         run: ./scripts/ci/run-msvc-analyze.ps1 -Configuration Release -Platform x64
 
       - name: Upload MSVC analysis logs
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: always()
         with:
           name: msvc-analysis
@@ -58,38 +58,71 @@ jobs:
   static-analysis:
     name: clang-tidy and Cppcheck
     runs-on: windows-2025-vs2026
-    timeout-minutes: 60
+    timeout-minutes: 120
 
     env:
       VCPKG_ROOT: ${{ github.workspace }}/vcpkg
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
 
       - name: Install analyzer tools
         shell: pwsh
         run: |
-          if (-not (Get-Command clang-tidy -ErrorAction SilentlyContinue)) {
-            choco install llvm --yes --no-progress
+          $llvmVersion = "22.1.7"
+          $cppcheckVersion = "2.19.0"
+          $llvmFallback = "C:\Program Files\LLVM\bin"
+          $cppcheckFallback = "C:\Program Files\Cppcheck"
+          $clangTidy = Get-Command clang-tidy -ErrorAction SilentlyContinue
+          $clangVersionText = if ($clangTidy) { (& $clangTidy.Source --version) -join "`n" } else { "" }
+          if ($clangVersionText -notmatch "LLVM version\s+$([regex]::Escape($llvmVersion))(?:\s|$)") {
+            choco install llvm --version=$llvmVersion --yes --no-progress --allow-downgrade --force
+            if ($LASTEXITCODE -ne 0) {
+              throw "Could not install LLVM $llvmVersion."
+            }
+            $env:Path = "$llvmFallback;$env:Path"
           }
-          if (-not (Get-Command cppcheck -ErrorAction SilentlyContinue)) {
-            choco install cppcheck --yes --no-progress
+          $cppcheck = Get-Command cppcheck -ErrorAction SilentlyContinue
+          $cppcheckVersionText = if ($cppcheck) { (& $cppcheck.Source --version) -join "`n" } else { "" }
+          if ($cppcheckVersionText -notmatch "Cppcheck\s+$([regex]::Escape($cppcheckVersion))(?:\s|$)") {
+            choco install cppcheck --version=$cppcheckVersion --yes --no-progress --allow-downgrade --force
+            if ($LASTEXITCODE -ne 0) {
+              throw "Could not install Cppcheck $cppcheckVersion."
+            }
+            $env:Path = "$cppcheckFallback;$env:Path"
           }
-          $env:Path = "C:\Program Files\LLVM\bin;C:\Program Files\Cppcheck;$env:Path"
-          clang-tidy --version
-          cppcheck --version
+          $clangTidy = Get-Command clang-tidy -ErrorAction Stop
+          $cppcheck = Get-Command cppcheck -ErrorAction Stop
+          $clangVersionText = (& $clangTidy.Source --version) -join "`n"
+          $cppcheckVersionText = (& $cppcheck.Source --version) -join "`n"
+          if ($clangVersionText -notmatch "LLVM version\s+$([regex]::Escape($llvmVersion))(?:\s|$)" -or
+              $cppcheckVersionText -notmatch "Cppcheck\s+$([regex]::Escape($cppcheckVersion))(?:\s|$)") {
+            throw "Installed analyzer versions do not match the pinned policy."
+          }
+          $toolDirectories = @(
+            Split-Path -Parent $clangTidy.Source
+            Split-Path -Parent $cppcheck.Source
+          ) | Sort-Object -Unique
+          foreach ($toolDirectory in $toolDirectories) {
+            if (-not (Test-Path -LiteralPath $toolDirectory -PathType Container)) {
+              throw "Analyzer tool directory was not found: $toolDirectory"
+            }
+            $toolDirectory >> $env:GITHUB_PATH
+          }
+          Write-Host $clangVersionText
+          Write-Host $cppcheckVersionText
 
       - name: Cache vcpkg
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: |
             vcpkg/downloads
             vcpkg/buildtrees
             vcpkg/packages
-          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'scripts/ci/setup-vcpkg.ps1') }}
           restore-keys: vcpkg-${{ runner.os }}-
 
       - name: Setup vcpkg
@@ -105,17 +138,23 @@ jobs:
         run: |
           $changedSince = "${{ github.event.pull_request.base.sha || github.event.before }}"
           if ([string]::IsNullOrWhiteSpace($changedSince) -or $changedSince -match "^0+$") {
-            $changedSince = "HEAD~1"
+            ./scripts/ci/run-clang-tidy.ps1
           }
-          ./scripts/ci/run-clang-tidy.ps1 -ChangedSince $changedSince -AllowEmpty
+          else {
+            ./scripts/ci/run-clang-tidy.ps1 -ChangedSince $changedSince -AllowEmpty
+          }
 
+      # Cppcheck reports a large untriaged baseline over the vanilla and upstream
+      # tree, so it stays informational in CI until that baseline is triaged, the
+      # same way the clang-tidy ratchet widens only as families are reviewed. The
+      # local push verifier still treats its findings as blocking.
       - name: Run Cppcheck
         shell: pwsh
         continue-on-error: true
         run: ./scripts/ci/run-cppcheck.ps1
 
       - name: Upload static analysis output
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: always()
         with:
           name: static-analysis
@@ -141,16 +180,16 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Cache vcpkg
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: |
             vcpkg/downloads
             vcpkg/buildtrees
             vcpkg/packages
-          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'scripts/ci/setup-vcpkg.ps1') }}
           restore-keys: vcpkg-${{ runner.os }}-
 
       - name: Setup vcpkg
@@ -158,20 +197,14 @@ jobs:
         run: ./scripts/ci/setup-vcpkg.ps1 -Install
 
       - name: Setup MSBuild
-        uses: microsoft/setup-msbuild@v3
+        uses: microsoft/setup-msbuild@30375c66a4eea26614e0d39710365f22f8b0af57 # v3
 
       - name: Run sanitizer build
         shell: pwsh
-        run: |
-          if ("${{ matrix.experimental }}" -eq "true") {
-            ./scripts/ci/run-sanitized-build.ps1 -Sanitizer "${{ matrix.sanitizer }}" -AllowUnsupported
-          }
-          else {
-            ./scripts/ci/run-sanitized-build.ps1 -Sanitizer "${{ matrix.sanitizer }}"
-          }
+        run: ./scripts/ci/run-sanitized-build.ps1 -Sanitizer "${{ matrix.sanitizer }}"
 
       - name: Upload sanitizer build logs
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: always()
         with:
           name: sanitizer-${{ matrix.sanitizer }}

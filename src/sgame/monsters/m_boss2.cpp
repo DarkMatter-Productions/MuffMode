@@ -46,27 +46,30 @@ static void Boss2PredictiveRocket(gentity_t *self) {
 
 	if (!Boss2HasLiveEnemy(self))
 		return;
+	gentity_t *const enemy = self->enemy;
+	if (!enemy)
+		return;
 
 	AngleVectors(self->s.angles, forward, right, nullptr);
 
 	// 1
 	start = M_ProjectFlashSource(self, monster_flash_offset[MZ2_BOSS2_ROCKET_1], forward, right);
-	PredictAim(self, self->enemy, start, BOSS2_ROCKET_SPEED, false, -0.10f, &dir, nullptr);
+	PredictAim(self, enemy, start, BOSS2_ROCKET_SPEED, false, -0.10f, &dir, nullptr);
 	monster_fire_rocket(self, start, dir, 50, BOSS2_ROCKET_SPEED, MZ2_BOSS2_ROCKET_1);
 
 	// 2
 	start = M_ProjectFlashSource(self, monster_flash_offset[MZ2_BOSS2_ROCKET_2], forward, right);
-	PredictAim(self, self->enemy, start, BOSS2_ROCKET_SPEED, false, -0.05f, &dir, nullptr);
+	PredictAim(self, enemy, start, BOSS2_ROCKET_SPEED, false, -0.05f, &dir, nullptr);
 	monster_fire_rocket(self, start, dir, 50, BOSS2_ROCKET_SPEED, MZ2_BOSS2_ROCKET_2);
 
 	// 3
 	start = M_ProjectFlashSource(self, monster_flash_offset[MZ2_BOSS2_ROCKET_3], forward, right);
-	PredictAim(self, self->enemy, start, BOSS2_ROCKET_SPEED, false, 0.05f, &dir, nullptr);
+	PredictAim(self, enemy, start, BOSS2_ROCKET_SPEED, false, 0.05f, &dir, nullptr);
 	monster_fire_rocket(self, start, dir, 50, BOSS2_ROCKET_SPEED, MZ2_BOSS2_ROCKET_3);
 
 	// 4
 	start = M_ProjectFlashSource(self, monster_flash_offset[MZ2_BOSS2_ROCKET_4], forward, right);
-	PredictAim(self, self->enemy, start, BOSS2_ROCKET_SPEED, false, 0.10f, &dir, nullptr);
+	PredictAim(self, enemy, start, BOSS2_ROCKET_SPEED, false, 0.10f, &dir, nullptr);
 	monster_fire_rocket(self, start, dir, 50, BOSS2_ROCKET_SPEED, MZ2_BOSS2_ROCKET_4);
 }
 
@@ -134,6 +137,9 @@ static void Boss2Rocket64(gentity_t *self) {
 
 	if (!Boss2HasLiveEnemy(self))
 		return;
+	gentity_t *const enemy = self->enemy;
+	if (!enemy)
+		return;
 
 	AngleVectors(self->s.angles, forward, right, nullptr);
 	start = M_ProjectFlashSource(self, monster_flash_offset[MZ2_BOSS2_ROCKET_1], forward, right);
@@ -144,15 +150,15 @@ static void Boss2Rocket64(gentity_t *self) {
 	start -= right * 2.f * scale;
 	start -= right * ((self->count++ % 4) * 8.f * scale);
 
-	if (self->enemy && self->enemy->client && frandom() < 0.9f) {
+	if (enemy->client && frandom() < 0.9f) {
 		// 1
-		dir = self->enemy->s.origin - start;
+		dir = enemy->s.origin - start;
 		dist = dir.length();
 		time = dist / BOSS2_ROCKET_SPEED;
-		vec = self->enemy->s.origin + (self->enemy->velocity * (time - 0.3f));
+		vec = enemy->s.origin + (enemy->velocity * (time - 0.3f));
 	} else {
 		// 1
-		vec = self->enemy->s.origin;
+		vec = enemy->s.origin;
 		vec[2] -= 15;
 	}
 

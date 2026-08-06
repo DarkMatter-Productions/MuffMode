@@ -1,3 +1,5 @@
+#requires -Version 7.0
+
 [CmdletBinding()]
 param(
     [ValidateSet("Debug", "Release")]
@@ -18,14 +20,16 @@ param(
     [switch]$SkipLocalGates,
     [switch]$SkipVcpkgSetup,
     [switch]$SkipHostTests,
+    [switch]$SkipUpdaterTests,
     [switch]$SkipBuild,
     [switch]$IncludeAnalysis,
     [switch]$IncludeSanitizers,
+    # Retained for command-line compatibility; analysis findings are always blocking.
     [switch]$TreatOptionalAnalysisAsErrors,
     [switch]$WaitForGitHub,
 
     [ValidateRange(1, 240)]
-    [int]$GitHubTimeoutMinutes = 45,
+    [int]$GitHubTimeoutMinutes = 150,
 
     [ValidateRange(5, 300)]
     [int]$GitHubPollSeconds = 20
@@ -305,6 +309,61 @@ function Test-RemoteBranchExists {
     return $exists
 }
 
+function Resolve-NewBranchComparisonRef {
+    $defaultBranch = ""
+    $symbolicHead = Invoke-Git -Arguments @(
+        "symbolic-ref", "--quiet", "--short", "refs/remotes/$Remote/HEAD"
+    ) -AllowFailure
+    if ($symbolicHead.ExitCode -eq 0) {
+        $headName = ($symbolicHead.Output -join "`n").Trim()
+        $remotePrefix = "$Remote/"
+        if ($headName.StartsWith($remotePrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+            $defaultBranch = $headName.Substring($remotePrefix.Length)
+        }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($defaultBranch)) {
+        if ($SkipFetch) {
+            throw "The remote default branch is not cached. Rerun without -SkipFetch before verifying a new branch."
+        }
+
+        $remoteHead = Invoke-Git -Arguments @("ls-remote", "--symref", $Remote, "HEAD")
+        foreach ($line in $remoteHead.Output) {
+            if ($line -match '^ref:\s+refs/heads/(?<branch>\S+)\s+HEAD$') {
+                $defaultBranch = $Matches["branch"]
+                break
+            }
+        }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($defaultBranch)) {
+        throw "Could not resolve the default branch for remote '$Remote'."
+    }
+
+    $defaultRef = "refs/remotes/$Remote/$defaultBranch"
+    $cachedDefault = Invoke-Git -Arguments @(
+        "show-ref", "--verify", "--quiet", $defaultRef
+    ) -AllowFailure
+    if ($cachedDefault.ExitCode -ne 0) {
+        if ($SkipFetch) {
+            throw "The comparison ref '$defaultRef' is not cached. Rerun without -SkipFetch before verifying a new branch."
+        }
+        Invoke-Git -Arguments @(
+            "fetch", "--no-tags", $Remote,
+            "+refs/heads/$defaultBranch`:$defaultRef"
+        ) | Out-Null
+    }
+
+    $mergeBase = Invoke-Git -Arguments @("merge-base", "HEAD", $defaultRef) -AllowFailure
+    $comparisonRef = ($mergeBase.Output -join "`n").Trim()
+    if ($mergeBase.ExitCode -ne 0 -or $comparisonRef -notmatch '^[0-9a-fA-F]{40}$') {
+        throw "Could not resolve a merge base between HEAD and '$defaultRef'."
+    }
+
+    Write-Host "New branch comparison base: $comparisonRef ($defaultRef)."
+    return $comparisonRef
+}
+
 function Assert-PushTarget {
     param([string]$Branch)
 
@@ -375,19 +434,6 @@ function Assert-GitHubWorkflowCoverage {
     return $matching
 }
 
-function Invoke-OptionalCppcheck {
-    try {
-        & (Join-Path $repoRoot "scripts\ci\run-cppcheck.ps1")
-    }
-    catch {
-        if ($TreatOptionalAnalysisAsErrors) {
-            throw
-        }
-
-        Write-Warning "Cppcheck reported an issue, matching the non-blocking GitHub analysis job: $($_.Exception.Message)"
-    }
-}
-
 function Invoke-GitHubWait {
     param(
         [Parameter(Mandatory = $true)]
@@ -425,6 +471,7 @@ function Invoke-GitHubWait {
                 --workflow $workflow.FileName `
                 --branch $Branch `
                 --commit $HeadSha `
+                --event push `
                 --limit 1 `
                 --json databaseId,headSha,status,conclusion,url,workflowName,createdAt 2>&1)
 
@@ -498,17 +545,32 @@ $pushTarget = Invoke-Step -Name "Check push target" -Action {
     Write-Host "Local branch '$localBranch' will be verified against '$Remote/$targetBranch'."
     Assert-PushTarget -Branch $targetBranch
 }
+$changedSince = if ($pushTarget.RemoteBranchExists) {
+    "refs/remotes/$Remote/$targetBranch"
+}
+else {
+    Resolve-NewBranchComparisonRef
+}
 
 $matchingPushWorkflows = @(Invoke-Step -Name "Check GitHub workflow trigger coverage" -Action {
     Assert-GitHubWorkflowCoverage -Branch $targetBranch
 })
 
 if (-not $SkipLocalGates) {
+    Invoke-RepoScript -Name "Check release workflow provenance contract" -Action {
+        & (Join-Path $repoRoot "scripts\ci\check-release-workflow.ps1")
+    }
+    Invoke-RepoScript -Name "Check analysis and fuzz tooling contracts" -Action {
+        & (Join-Path $repoRoot "scripts\ci\check-tooling-contracts.ps1")
+    }
     Invoke-RepoScript -Name "Check generated artifacts" -Action {
         & (Join-Path $repoRoot "scripts\ci\check-generated-artifacts.ps1")
     }
+    Invoke-RepoScript -Name "Check map-pool examples" -Action {
+        & (Join-Path $repoRoot "scripts\ci\check-map-pool-examples.ps1")
+    }
     Invoke-RepoScript -Name "Check changelog ledger" -Action {
-        & (Join-Path $repoRoot "scripts\ci\check-changelog.ps1")
+        & (Join-Path $repoRoot "scripts\ci\check-changelog.ps1") -ChangedSince $changedSince
     }
     Invoke-RepoScript -Name "Check phase-zero asset seeds" -Action {
         & (Join-Path $repoRoot "scripts\ci\check-test-assets.ps1") -RepoOnly
@@ -524,6 +586,15 @@ if (-not $SkipLocalGates) {
     }
     else {
         Write-Warning "Skipping host tests by request."
+    }
+
+    if (-not $SkipUpdaterTests) {
+        Invoke-RepoScript -Name "Run updater cleanup tests" -Action {
+            & (Join-Path $repoRoot "scripts\ci\run-updater-tests.ps1") -Configuration $Configuration
+        }
+    }
+    else {
+        Write-Warning "Skipping updater tests by request."
     }
 
     if (-not $SkipVcpkgSetup) {
@@ -556,13 +627,12 @@ if (-not $SkipLocalGates) {
             & (Join-Path $repoRoot "scripts\ci\export-compile-commands.ps1")
         }
 
-        $changedSince = if ($pushTarget.RemoteBranchExists) { "refs/remotes/$Remote/$targetBranch" } else { "HEAD~1" }
         Invoke-RepoScript -Name "Run clang-tidy on touched files" -Action {
             & (Join-Path $repoRoot "scripts\ci\run-clang-tidy.ps1") -ChangedSince $changedSince -AllowEmpty
         }
 
-        Invoke-Step -Name "Run Cppcheck" -Action {
-            Invoke-OptionalCppcheck
+        Invoke-RepoScript -Name "Run Cppcheck" -Action {
+            & (Join-Path $repoRoot "scripts\ci\run-cppcheck.ps1")
         }
     }
 

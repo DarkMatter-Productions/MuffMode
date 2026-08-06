@@ -54,7 +54,7 @@ g_map_list_shuffle 1
 g_allow_voting 1
 g_allow_vote_midgame 0
 g_allow_spec_vote 0
-g_votable_gametypes "ffa duel tdm ctf ca ft strike rr horde instagib nadefest"
+g_votable_gametypes "ffa duel tdm ctf ca ft strike rr lms horde instagib nadefest"
 g_votable_rulesets "q2re mm q2reb"
 
 g_dm_do_warmup 1
@@ -64,7 +64,52 @@ g_warmup_countdown 10
 map q2dm1
 ```
 
+This deliberately small example does not create a KEX lobby. If you raise
+`maxclients` for a lobby-hosted server, set `kexmultiplayer maxplayers` to the
+same requested capacity before creating the lobby. MuffMode supports up to 128
+connected slots, while the active lobby provider may enforce a lower limit.
+
 Run `doctor` after changing server settings. It checks common misconfigurations and reports suggested fixes.
+
+## Optional Structured Map Pool
+
+For a large catalog, searchable map listings, mode/player-count eligibility,
+and repeat-aware rotation, start from the two packaged example files:
+
+1. Copy `muffmode-map-pool.example.json` to
+   `rerelease/baseq2/muffmode-map-pool.json`.
+2. Copy `muffmode-map-cycle.example.txt` to
+   `rerelease/baseq2/muffmode-map-cycle.txt`.
+3. Edit the copies, leaving the `.example` files as upgrade-safe references.
+4. Add the following to your shared server config:
+
+```text
+set g_maps_pool_file "muffmode-map-pool.json"
+set g_maps_cycle_file "muffmode-map-cycle.txt"
+set g_maps_random "1"
+set g_maps_repeat_delay "1800"
+```
+
+The pool controls map voting and MyMap choices. The cycle is the eligible set
+for automatic transitions: random mode gives entries marked `popular` twice
+the normal weight, while `g_maps_random 0` follows file order. Use
+`mappool [filter]`, `mapcycle [filter]`, and `maplist` to inspect the live
+state. After editing, an authenticated in-game admin can run `load_mappool`
+(pool and configured cycle) or `load_mapcycle` (cycle only). From a dedicated
+console, use `sv load_mappool` or `sv load_mapcycle`.
+
+The feature is deliberately optional. With no valid structured pool,
+the safe BSP-stem entries in `g_map_pool` and `g_map_list` remain active as
+the legacy fallback. A valid pool without a valid cycle supplies voting/MyMap
+choices while `g_map_list` still rotates maps.
+Even with an active cycle, an impossible mode selection falls through to
+`g_map_list`. Failed live reloads preserve an existing last-known-good
+snapshot. If the first pool load succeeds but its configured cycle fails, the
+valid pool still supplies voting/MyMap choices and `g_map_list` rotates maps.
+Clearing `g_maps_pool_file` returns immediately to the legacy sources.
+
+See [Structured Map Pools](configuration-reference.md#structured-map-pools-optional)
+for the JSON schema, filters, selection rules, and full fallback matrix.
 
 ## Competitive Match Baseline
 
@@ -98,9 +143,11 @@ Set `g_gametype` by index, or use the admin command `gametype <shortname>`.
 | `6` | `ft` | Freeze Tag |
 | `7` | `strike` | Capture Strike |
 | `8` | `rr` | Red Rover |
+| `9` | `lms` | Last Man Standing |
 | `10` | `horde` | Horde Mode |
 | `12` | `instagib` | Instagib |
 | `13` | `nadefest` | NadeFest |
+| `14` | `arena` | Arena Rooms (Rocket Arena) |
 
 Value `11` (`ball`) is reserved/removed in the current build. See [Gametypes](gameplay-reference.md#gametypes) for descriptions and work-in-progress notes.
 
@@ -151,6 +198,116 @@ Good match flow matters for both audiences: casual players should not get stuck 
 | `g_match_lock` | `0` | Prevents players from joining while a match is active. |
 
 Team captains can lock or unlock their own team and can ready their team. Admins can transfer players, shuffle teams, balance teams, and force ready state.
+
+## Arena Rooms (Rocket Arena)
+
+Arena has two supported map profiles. **Tagged multi-room maps are the native
+MuffMode path:** `worldspawn` declares from 1 through 31 playable rooms with
+an explicit `arena` value, arena 0 is the lobby, and each positive room needs
+at least two tagged deathmatch starts so both active sides can spawn safely.
+Tagged spawns, teleporters, destinations,
+and triggers remain local to their room. A tagged `info_player_intermission`
+can supply a room name and fallback observer view, but is not required for a
+room to activate. Classic RA2 `misc_teleporter_dest` observer positions take
+precedence. Negative legacy tags remain shared/reserved markers.
+
+**Classic RA2 idmaps use the one-room compatibility profile.** An explicit
+`worldspawn` `arena 0` selects it without a cvar; a map with no `arena` key is
+accepted only when the latched `g_arena_legacy_idmap` is set to `1` before the
+next map load. It uses one shared deathmatch-start pool and treats every
+per-entity `arena` tag as shared within its one virtual room. This opt-in keeps
+otherwise untagged idmaps intentional. If either profile does not validate,
+Arena stays inactive and none of its spawn, loadout, combat,
+isolation, HUD, command, or menu hooks run; the selected mode behaves as FFA.
+A disagreement discovered only after entities have spawned rejects the map
+instead of leaving a partially activated Arena session behind.
+
+Every room has an independent state machine, teams, queue, settings, ballot,
+ready state, round clock, pause, timeout allowance, HUD, and scoreboard. The
+four types are `rocket`, `clan`, `rover`, and `practice`. Rocket uses a
+winner-stays challenge queue; Clan Arena uses fixed red/blue elimination; Red
+Rover transfers defeated players; Practice makes player attacks non-lethal
+while retaining knockback and damage progress, keeps unlimited ammunition, and
+immediately respawns environmental deaths.
+
+MuffMode intentionally supports RA2 map compatibility and familiar RA3 play
+terms, but their original game DLLs, protocols, menus, administration models,
+and exact quirks are not replication targets. MuffMode's Q2RE-native teams,
+menus, voting, HUD, administration, and match policies remain authoritative.
+
+| Cvar | Default | Purpose |
+| --- | --- | --- |
+| `g_arena_config` | `arena.cfg` | Global/map/room configuration file under `baseq2`. |
+| `g_arena_legacy_idmap` | `0` | Latched opt-in for an otherwise untagged classic RA2 idmap. Explicit `worldspawn` `arena 0` needs no opt-in; the one-room profile treats all entity `arena` tags as shared. |
+| `g_arena_default_type` | `rocket` | Type inherited when a more specific layer does not set one. |
+| `g_arena_players_per_team` | `1` | Default team size. |
+| `g_arena_rounds` | `1` | Default odd best-of length. |
+| `g_arena_start_health` | `200` (`100` in `gt-ARENA.cfg`) | Shared arena-loadout health; the shipped Arena preset selects the classic value. |
+| `g_arena_start_armor` | `200` (`100` in `gt-ARENA.cfg`) | Shared arena-loadout armor; the preset selects the classic 100-armor value. |
+| `g_arena_health_protect` | `1` | Protect health from self and team damage. |
+| `g_arena_armor_protect` | `2` | Permit self-armor damage, protect against team armor damage. |
+| `g_arena_falling_damage` | `1` | Enables falling damage during MuffMode Arena rounds. |
+| `g_arena_weapon_mask` | `255` | Spawn-weapon bitmask; `255` grants every standard weapon except the BFG. |
+| `g_arena_grapple` | `0` | Grants the room's selectable Grapple and enables the offhand hook command. |
+| `g_arena_competition` | `0` | Enables per-room competition readiness and timeouts. |
+| `g_arena_unbalanced` | `0` | Allows unequal sides. |
+| `g_arena_lock` / `g_arena_max_players` | `0` / `0` | Default entry lock and player cap (`0` means no explicit cap). |
+| `g_arena_timeouts` | `3` | Competition timeouts per side. Duration and time-in countdown reuse `g_dm_timeout_length` and `g_dm_timeout_resume_countdown`; `gt-ARENA.cfg` selects `60` / `5`. |
+
+Load `server-base.cfg` and then `gt-ARENA.cfg` for the shipped MuffMode
+baseline on an Arena-compatible rotation. Arena map assets are not
+redistributed: install maps you are licensed to host. Tagged multi-room maps
+are preferred; the preset leaves `g_arena_legacy_idmap` at `0` so ordinary
+untagged maps fail closed. Set it to `1` only for a known rotation of untagged
+classic RA2 idmaps. The preset uses the MuffMode ruleset, preserves the familiar
+100-health / 100-armor protection model, uses the non-BFG weapon set, and
+leaves individual rooms free to override those values. Add `arena` to
+`g_votable_gametypes` only after that rotation is configured.
+
+For durable per-room rules, put top-level defaults in `baseq2/arena.cfg`, then
+nest map and numeric room blocks:
+
+```text
+type rocket
+
+map mm_arena_hub {
+    room 3 {
+        type clan
+        playersperteam 4
+        rounds 5
+        competitionmode 1
+    }
+}
+```
+
+Built-in defaults resolve first, followed by global cvars/top-level file
+values, the matching map block, and finally the matching room block. Both
+`//` and `#` comments are accepted. `arena <id>` remains an alias for
+`room <id>`; bare RA2 blocks remain accepted for imports. See the
+[configuration reference](configuration-reference.md#arenacfg-layers) for
+every setting and alias.
+
+Players can use room selectors or `arena go <id>`. Existing MuffMode commands
+such as `team`, `captain`, `lockteam`, `readyteam`, `vote`, `time-out`, and
+`time-in` automatically target the current room. Original RA3 aliases including
+`teamlock`, `teamcaptain`, `teamkick`, `specinvite`, `timeout`, and `timein`
+are retained as compatibility conveniences. If Q2RE owns a token locally, notably
+`timeout`, use `arena timeout` or MuffMode's `time-out` spelling. Player
+readiness and captain, naming, kick, mute, spectator-invite, and timeout
+commands are competition-mode controls. Team locking follows the same policy
+but permits an explicit administrator override outside competition mode. The
+`arena` dispatcher owns room selection plus room queue and settings operations;
+`arena line` is the retained historical queue-toggle spelling and `arena queue`
+inspects the queue.
+Administrators can target their selected room with `startmatch`, `endmatch`,
+and `resetmatch`, or an explicit room with
+`arena admin <arena> <setting|reset|start|abort> [value]`.
+`say_arena`, `arena say_team`, and `say_world` provide explicit room,
+logical-team, and map-wide channels. Q2RE/KEX consumes bare `say` and
+`say_team` before the game DLL can scope them, so bare `say` remains map-wide
+and bare `say_team` follows the projected engine red/blue side. Bind
+`say_arena` for room chat and use `arena say_team` for reliable
+room-local logical-team chat.
 
 ## Freeze Tag Controls
 
@@ -204,7 +361,9 @@ Examples:
 | Team Deathmatch | `gt-TDM.cfg` |
 | Capture the Flag | `gt-CTF.cfg` |
 | Clan Arena | `gt-CA.cfg` |
+| Arena Rooms (Rocket Arena) | `gt-ARENA.cfg` |
 | Freeze Tag | `gt-FT.cfg` |
+| Last Man Standing | `gt-LMS.cfg` |
 | Capture Strike | `gt-STRIKE.cfg` |
 | Red Rover | `gt-REDROVER.cfg` |
 | Horde | `gt-HORDE.cfg` |
@@ -212,6 +371,11 @@ Examples:
 | NadeFest | `gt-NADEFEST.cfg` |
 
 Place these files in the active game directory. The system executes them only when the gametype actually changes.
+When the current session is limited to the four local/splitscreen slots,
+MuffMode loads the file through a bounded filter: every executable command
+segment is checked, `kexmultiplayer` is skipped, and supplied `maxclients`
+assignments outside `1` through `4` (including malformed or dynamic values)
+are rejected. Quoted text and comments are not mistaken for assignments.
 
 ## Admin Commands
 
@@ -227,7 +391,7 @@ Place these files in the active game directory. The system executes them only wh
 | `nextmap` | Move to the next map. |
 | `shuffle` | Shuffle and balance teams, then reset the match. |
 | `balance` | Balance teams without a full shuffle. |
-| `setteam <player>` | Force a player team change. |
+| `setteam <player> [auto\|red\|blue\|spectator]` | Inspect or force a player team change. |
 | `lockteam <red|blue>` | Lock a team from joins. |
 | `unlockteam <red|blue>` | Unlock a team. |
 | `readyall` | Mark all players ready during ready-up warmup. |
@@ -248,7 +412,7 @@ Logs are written to `muffmode_debug.log` in the game directory. The default is `
 
 ## Host Checklist
 
-- Set `hostname`, `maxclients`, `maxplayers`, and passwords before going public.
+- Set `hostname`, connected-slot `maxclients`, active-player `maxplayers`, the separate KEX lobby capacity, and passwords before going public.
 - Add a short MOTD so casual players know what kind of server they joined.
 - Set `g_map_list` and optionally `g_map_pool`.
 - Decide whether players can vote during matches with `g_allow_vote_midgame`.

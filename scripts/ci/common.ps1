@@ -53,3 +53,100 @@ function Invoke-NativeCommand {
         Pop-Location
     }
 }
+
+function Read-AnalyzerBlockingList {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+
+        [Parameter(Mandatory = $true)]
+        [string]$EntryPattern
+    )
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw "Analyzer blocking list was not found: $Path"
+    }
+
+    $entries = [System.Collections.Generic.List[string]]::new()
+    $seen = [System.Collections.Generic.HashSet[string]]::new(
+        [System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($line in Get-Content -LiteralPath $Path) {
+        $entry = $line.Trim()
+        if (-not $entry -or $entry.StartsWith('#')) {
+            continue
+        }
+        if ($entry -notmatch $EntryPattern) {
+            throw "Invalid analyzer blocking-list entry '$entry' in $Path."
+        }
+        if (-not $seen.Add($entry)) {
+            throw "Duplicate analyzer blocking-list entry '$entry' in $Path."
+        }
+        $entries.Add($entry)
+    }
+    if ($entries.Count -eq 0) {
+        throw "Analyzer blocking list is empty: $Path"
+    }
+
+    $entries
+}
+
+function Get-ClangTidyDiagnosticChecks {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Line
+    )
+
+    $match = [regex]::Match($Line, '\[(?<checks>[^\]]+)\]\s*$')
+    if (-not $match.Success) {
+        return @()
+    }
+
+    @($match.Groups['checks'].Value -split ',' | ForEach-Object {
+        $_.Trim()
+    } | Where-Object {
+        $_ -and $_ -ne '-warnings-as-errors'
+    })
+}
+
+function Test-ClangTidyBlockingCheck {
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [string[]]$Checks,
+
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [string[]]$Patterns
+    )
+
+    foreach ($check in $Checks) {
+        foreach ($pattern in $Patterns) {
+            if ($check -like $pattern) {
+                return $true
+            }
+        }
+    }
+    return $false
+}
+
+function Get-MsvcAnalyzerFinding {
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
+        [string]$Line
+    )
+
+    $normalized = [regex]::Replace($Line.TrimStart(), '^(?:\d+>)+', '')
+    $match = [regex]::Match(
+        $normalized,
+        '\bwarning\s+(?<code>C\d{4,5}):',
+        [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+    if (-not $match.Success) {
+        return $null
+    }
+
+    [pscustomobject]@{
+        Code = $match.Groups['code'].Value.ToUpperInvariant()
+        Text = $normalized
+    }
+}

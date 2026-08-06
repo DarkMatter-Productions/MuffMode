@@ -32,14 +32,17 @@ char *COM_ParseEx(const char **data_p, const char *seps, char *buffer, size_t bu
 {
 	static char com_token[MAX_TOKEN_CHARS];
 
-	if (!buffer)
+	// [MuffMode] A zero capacity is also the shared-buffer request. Accepting it
+	// as a caller buffer wrote the terminator below out of bounds and underflowed
+	// buffer_size - 1 in the quoted path.
+	if (!buffer || !buffer_size)
 	{
 		buffer = com_token;
 		buffer_size = MAX_TOKEN_CHARS;
 	}
 
 	int			c;
-	int			len;
+	size_t		len; // [MuffMode] matches buffer_size; the bounds tests below were signed/unsigned
 	const char *data;
 
 	data = *data_p;
@@ -83,7 +86,10 @@ skipwhite:
 			{
 				const size_t endpos = std::min<size_t>(len, buffer_size - 1); // [KEX] avoid overflow
 				buffer[endpos] = '\0';
-				*data_p = data;
+				// A closing quote leaves the cursor on the following byte. At EOF,
+				// data has already advanced past the terminator and must not be
+				// exposed to callers that continue parsing while the cursor is set.
+				*data_p = c ? data : nullptr;
 				return buffer;
 			}
 			if (len < buffer_size)

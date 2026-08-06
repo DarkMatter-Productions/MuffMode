@@ -9,6 +9,7 @@
 #include "muffmode/mm_ghost.h"
 #include "muffmode/mm_loc.h"
 #include "muffmode/mm_match.h"
+#include "muffmode/mm_match_stats.h"
 #include "muffmode/mm_spawn_loadout.h"
 #include "monsters/m_player.h"
 
@@ -137,14 +138,14 @@ bool ThawedPlayersRespawnAtThawLocation()
 
 bool IsRoundLive()
 {
-	return level.match_state == matchst_t::MATCH_IN_PROGRESS &&
-		level.round_state == roundst_t::ROUND_IN_PROGRESS;
+	return level.match_state == match_state_t::MATCH_IN_PROGRESS &&
+		level.round_state == round_state_t::ROUND_IN_PROGRESS;
 }
 
 bool RoundKeepsFrozenPlayers()
 {
-	return level.match_state == matchst_t::MATCH_IN_PROGRESS &&
-		level.round_state == roundst_t::ROUND_ENDED;
+	return level.match_state == match_state_t::MATCH_IN_PROGRESS &&
+		level.round_state == round_state_t::ROUND_ENDED;
 }
 
 bool IsFreezeTeam(team_t team)
@@ -714,13 +715,13 @@ void StripFrozenInventory(gentity_t *ent, const mod_t &mod)
 	if (client->tracker_pain_time)
 		RemoveAttackingPainDaemons(ent);
 
-	if (client->owned_sphere) {
-		gentity_t *sphere = client->owned_sphere;
+	if (gentity_t *sphere = G_ResolveOwnedSphere(client)) {
+		const int32_t sphere_generation = sphere->spawn_count;
 		if (sphere->die)
 			sphere->die(sphere, ent, ent, 0, vec3_origin, mod);
-		else
+		else if (sphere->inuse && sphere->spawn_count == sphere_generation)
 			G_FreeEntity(sphere);
-		client->owned_sphere = nullptr;
+		G_ClearOwnedSphere(client);
 	}
 
 	client->pers.inventory.fill(0);
@@ -1202,6 +1203,7 @@ void RestoreFrozenPlayerAt(gentity_t *ent, const freeze_state_t &state, gentity_
 	G_ClearLagCompensationHistory(ent);
 	gi.linkentity(ent);
 	G_PostRespawn(ent);
+	MM_MatchStats_RecordSpawn(ent->client);
 
 	AwardThawCredit(ent, credit);
 	gi.LocClient_Print(ent, PRINT_CENTER, "THAWED!");
@@ -1319,6 +1321,11 @@ mm_freezetag_team_counts_t CountTeam(team_t team)
 	mm_freezetag_team_counts_t counts;
 
 	for (auto ec : active_clients()) {
+		// A same-slot reconnect remains represented by its reservation while the
+		// transactional restore is pending; count it exactly once below using the
+		// saved team/elimination state.
+		if (MM_Ghost_IsPendingRestore(ec))
+			continue;
 		if (!ec->client || ec->client->sess.team != team)
 			continue;
 		if (!MM_FreezeTagClientCountsForRound(
@@ -1336,16 +1343,9 @@ mm_freezetag_team_counts_t CountTeam(team_t team)
 
 	for (uint32_t i = 1; i <= game.maxclients; ++i) {
 		gentity_t *slot = &g_entities[i];
-		if (!slot->inuse || !slot->client || slot->client->pers.connected)
+		if (!slot->inuse || !slot->client)
 			continue;
-		if (!MM_Ghost_IsReservedSlot(slot) || !RawFrozen(slot))
-			continue;
-		if (slot->client->sess.team != team)
-			continue;
-		if (!MM_FreezeTagClientCountsForRound(
-				ClientIsPlaying(slot->client),
-				IsFreezeTeam(slot->client->sess.team),
-				slot->client->eliminated))
+		if (!MM_Ghost_ReservedClientCountsForRound(slot, team) || !RawFrozen(slot))
 			continue;
 
 		counts.participants++;
@@ -1571,6 +1571,20 @@ void MM_FreezeTag_ClearClient(gentity_t *ent)
 	}
 }
 
+void MM_FreezeTag_DetachWorldEntities()
+{
+	if (!MM_FreezeTag_IsActive())
+		return;
+
+	// Preserve the frozen/dead decision until MM_FreezeTag_ResetRoundPlayers
+	// runs against the freshly rebuilt spawn cache, but release proxies before
+	// their entity slots can be reused by map entities.
+	for (auto ec : active_clients()) {
+		if (freeze_state_t *state = StateFor(ec))
+			FreeFrozenViewProxy(ec, *state);
+	}
+}
+
 void MM_FreezeTag_OnRoundReset()
 {
 	if (!MM_FreezeTag_IsActive())
@@ -1594,7 +1608,14 @@ void MM_FreezeTag_ResetRoundPlayers()
 
 		const bool frozen = RawFrozen(ec);
 		const bool waiting_or_dead = ec->client->eliminated || ec->deadflag || ec->health <= 0;
-		const bool respawn = respawn_all || frozen || waiting_or_dead;
+		// A survivor may keep their loadout and position between rounds, but the
+		// restored entity string can put a reset mover or solid brush around that
+		// position. Respawn only those survivors whose player hull is no longer
+		// valid in the rebuilt world.
+		const bool unsafe_survivor_position =
+			!respawn_all && !frozen && !waiting_or_dead &&
+			G_UnsafeSpawnPosition(ec->s.origin, false, ec, false);
+		const bool respawn = respawn_all || frozen || waiting_or_dead || unsafe_survivor_position;
 		if (!respawn)
 			continue;
 
@@ -1608,17 +1629,17 @@ bool MM_FreezeTag_ShouldHoldSpawnForRound()
 {
 	return MM_FreezeTagSpawnShouldWaitForNextRound(
 		MM_FreezeTag_IsActive(),
-		level.match_state == matchst_t::MATCH_IN_PROGRESS,
-		level.round_state == roundst_t::ROUND_IN_PROGRESS,
-		level.round_state == roundst_t::ROUND_ENDED);
+		level.match_state == match_state_t::MATCH_IN_PROGRESS,
+		level.round_state == round_state_t::ROUND_IN_PROGRESS,
+		level.round_state == round_state_t::ROUND_ENDED);
 }
 
 bool MM_FreezeTag_ShouldRespawnForRoundCountdown(gentity_t *ent)
 {
 	return MM_FreezeTagRoundCountdownShouldRespawn(
 		MM_FreezeTag_IsActive(),
-		level.match_state == matchst_t::MATCH_IN_PROGRESS,
-		level.round_state == roundst_t::ROUND_COUNTDOWN,
+		level.match_state == match_state_t::MATCH_IN_PROGRESS,
+		level.round_state == round_state_t::ROUND_COUNTDOWN,
 		ent && ent->client && ClientIsPlaying(ent->client));
 }
 

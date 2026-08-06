@@ -2,11 +2,14 @@
 // Licensed under the GNU General Public License 2.0.
 
 #include "g_local.h"
+#include "muffmode/mm_arena.h"
 #include "muffmode/mm_freezetag_rules.h"
 #include "muffmode/mm_gametype.h"
 #include "muffmode/mm_ruleset_weapons.h"
 #include "muffmode/mm_spawn_loadout.h"
 
+#include <algorithm>
+#include <array>
 #include <initializer_list>
 
 namespace muffmode::spawn_loadout {
@@ -117,6 +120,47 @@ void ApplyQcStartingWeapon(gclient_t *client)
 	}
 }
 
+void ApplyResolvedArenaLoadout(gentity_t *ent, gclient_t *client,
+	const mm_arena_loadout_t &loadout)
+{
+	// RA3's weapon digit 0 is a normal selectable grapple. Keep MuffMode's
+	// off-hand command as a convenience while preserving selectable behavior.
+	client->pers.inventory[IT_WEAPON_GRAPPLE] =
+		MM_Arena_GrappleEnabled(ent) ? 1 : 0;
+	const std::array<item_id_t, 9> weapons = {
+		IT_WEAPON_CHAINFIST, IT_WEAPON_MACHINEGUN, IT_WEAPON_SHOTGUN,
+		IT_WEAPON_GLAUNCHER, IT_WEAPON_RLAUNCHER, IT_WEAPON_PLASMABEAM,
+		IT_WEAPON_RAILGUN, IT_WEAPON_HYPERBLASTER, IT_WEAPON_BFG
+	};
+	bool granted_weapon = false;
+	for (size_t i = 0; i < weapons.size(); i++)
+		if ((client->pers.inventory[weapons[i]] =
+			(loadout.weapon_mask & (uint32_t { 1 } << i)) ? 1 : 0))
+			granted_weapon = true;
+	// Keep a safe no-ammo fallback for an explicitly empty mask.
+	if (!granted_weapon)
+		client->pers.inventory[IT_WEAPON_CHAINFIST] = 1;
+
+	const auto amount = [&loadout](int value) {
+		return loadout.infinite_ammo ? AMMO_INFINITE :
+			std::clamp(value, 0, 999);
+	};
+	const auto grant_ammo = [client, &amount](item_id_t item,
+		int ammo_index, int value) {
+		const int resolved = amount(value);
+		client->pers.inventory[item] = resolved;
+		client->pers.max_ammo[ammo_index] =
+			static_cast<int16_t>(resolved);
+	};
+	client->pers.max_ammo.fill(0);
+	grant_ammo(IT_AMMO_SHELLS, AMMO_SHELLS, loadout.shells);
+	grant_ammo(IT_AMMO_BULLETS, AMMO_BULLETS, loadout.bullets);
+	grant_ammo(IT_AMMO_GRENADES, AMMO_GRENADES, loadout.grenades);
+	grant_ammo(IT_AMMO_ROCKETS, AMMO_ROCKETS, loadout.rockets);
+	grant_ammo(IT_AMMO_CELLS, AMMO_CELLS, loadout.cells);
+	grant_ammo(IT_AMMO_SLUGS, AMMO_SLUGS, loadout.slugs);
+}
+
 bool UsesArenaLoadout()
 {
 	const bool freeze_tag_arena_loadout = g_freezetag_arena_loadout && g_freezetag_arena_loadout->integer != 0;
@@ -142,8 +186,14 @@ void MM_ApplyStartingHealthArmor(gentity_t *ent, gclient_t *client)
 	int health = 0;
 	int armor = 0;
 	const bool arena = muffmode::spawn_loadout::UsesArenaLoadout();
+	mm_arena_loadout_t arena_loadout;
+	const bool resolved_arena =
+		MM_Arena_GetSpawnLoadout(client, arena_loadout);
 
-	if (arena) {
+	if (resolved_arena) {
+		health = arena_loadout.health;
+		armor = arena_loadout.armor;
+	} else if (arena) {
 		health = clamp(g_arena_start_health->integer, 1, 9999);
 		armor = clamp(g_arena_start_armor->integer, 0, 999);
 	} else {
@@ -163,7 +213,11 @@ void MM_ApplyStartingHealthArmor(gentity_t *ent, gclient_t *client)
 		client->time_residual = level.time;
 	}
 
-	client->pers.inventory[muffmode::spawn_loadout::StartingArmorItemForAmount(armor)] = armor;
+	if (resolved_arena)
+		client->pers.inventory[IT_ARMOR_BODY] = armor;
+	else
+		client->pers.inventory[
+			muffmode::spawn_loadout::StartingArmorItemForAmount(armor)] = armor;
 }
 
 void MM_ApplySpawnLoadout(gentity_t *ent, gclient_t *client, bool taken_loadout)
@@ -173,12 +227,18 @@ void MM_ApplySpawnLoadout(gentity_t *ent, gclient_t *client, bool taken_loadout)
 
 	if (!taken_loadout) {
 		const bool arena = muffmode::spawn_loadout::UsesArenaLoadout();
+		mm_arena_loadout_t arena_loadout;
+		const bool resolved_arena =
+			MM_Arena_GetSpawnLoadout(client, arena_loadout);
 
-		if (g_instagib->integer || GT(GT_INSTAGIB)) {
+		if (notGT(GT_ARENA) && (g_instagib->integer || GT(GT_INSTAGIB))) {
 			client->pers.inventory[IT_WEAPON_RAILGUN] = 1;
 			client->pers.inventory[IT_AMMO_SLUGS] = AMMO_INFINITE;
-		} else if (g_nadefest->integer || GT(GT_NADEFEST)) {
+		} else if (notGT(GT_ARENA) && (g_nadefest->integer || GT(GT_NADEFEST))) {
 			client->pers.inventory[IT_AMMO_GRENADES] = AMMO_INFINITE;
+		} else if (resolved_arena) {
+			muffmode::spawn_loadout::ApplyResolvedArenaLoadout(
+				ent, client, arena_loadout);
 		} else if (arena) {
 			muffmode::spawn_loadout::ApplyArenaAmmo(client);
 			muffmode::spawn_loadout::GrantInventory(client, {
@@ -246,7 +306,7 @@ void MM_ApplySpawnLoadout(gentity_t *ent, gclient_t *client, bool taken_loadout)
 			}
 
 			if (deathmatch->integer && game.ruleset != RS_QC) {
-				if (level.match_state < matchst_t::MATCH_IN_PROGRESS) {
+				if (level.match_state < match_state_t::MATCH_IN_PROGRESS) {
 					for (int i = FIRST_WEAPON; i < LAST_WEAPON; i++) {
 						if (!level.weapon_count[i - FIRST_WEAPON])
 							continue;
@@ -259,7 +319,10 @@ void MM_ApplySpawnLoadout(gentity_t *ent, gclient_t *client, bool taken_loadout)
 
 						gitem_t *ammo = GetItemByIndex(ammo_id);
 						if (ammo)
-							Add_Ammo(ent, ammo, InfiniteAmmoOn(ammo) ? AMMO_INFINITE : ammo->quantity * 2);
+							Add_Ammo(ent, ammo,
+								(InfiniteAmmoOn(ammo) || MM_Arena_InfiniteAmmoEnabled(ent))
+									? AMMO_INFINITE
+									: ammo->quantity * 2);
 					}
 				}
 			}

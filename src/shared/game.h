@@ -6,6 +6,8 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
+#include <limits>
 #include <limits.h>
 #include <type_traits>
 
@@ -130,7 +132,24 @@ constexpr size_t MAX_IDEAL_PACKET_SIZE = 1024;
 //
 // per-level limits
 //
-constexpr size_t MAX_CLIENTS = 256; // absolute limit
+constexpr size_t MAX_CLIENTS = 256; // engine/protocol absolute limit
+// [MuffMode] Connected-client ceiling supported by MuffMode. The KEX lobby
+// provider is configured separately and may impose a lower service limit.
+constexpr size_t MAX_LOBBY_PLAYERS = 128;
+static_assert(MAX_LOBBY_PLAYERS <= MAX_CLIENTS);
+static_assert(MAX_LOBBY_PLAYERS - 1 <=
+	static_cast<size_t>(std::numeric_limits<int8_t>::max()),
+	"MuffMode spectator client indices no longer fit their signed byte");
+
+constexpr uint32_t MM_ClampLobbyPlayerCount(int64_t requested) noexcept
+{
+	if (requested < 1)
+		return 1;
+	if (requested > static_cast<int64_t>(MAX_LOBBY_PLAYERS))
+		return static_cast<uint32_t>(MAX_LOBBY_PLAYERS);
+	return static_cast<uint32_t>(requested);
+}
+
 constexpr size_t MAX_ENTITIES = 8192; // upper limit, due to svc_sound encoding as 15 bits
 constexpr size_t MAX_LIGHTSTYLES = 256;
 constexpr size_t MAX_MODELS = 8192; // these are sent over the net as shorts

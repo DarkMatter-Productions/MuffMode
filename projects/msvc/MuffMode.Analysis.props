@@ -13,6 +13,8 @@
   <ItemDefinitionGroup Condition="'$(MMRunCodeAnalysis)'=='true'">
     <ClCompile>
       <EnablePREfast>true</EnablePREfast>
+      <!-- Keep the broad analyzer report advisory; the reviewed CI ratchet owns severity. -->
+      <AdditionalOptions>/analyze:WX- %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
   </ItemDefinitionGroup>
 

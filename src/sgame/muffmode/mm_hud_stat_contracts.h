@@ -15,14 +15,17 @@
 // Vanilla base: layout tokens must be parseable by stock Q2RE cg_screen.cpp (no ifbit).
 // MM client enhancement: optional hook after notify (see mm_hud_enhancements.h). Layout parse is authoritative.
 //
-// STAT_GAMETYPE_HUD       — warmup (through ready-up): "Gametype: …"; in-progress: hidden (limits/rounds moved to miniscore)
-// STAT_RULESET_HUD        — warmup (through ready-up): ruleset; in-progress: hidden
-// STAT_ROUND_NUMBER       — below miniscore: match limit (frag/capture/round/wave cap); 0 = hidden
+// STAT_GAMETYPE_HUD       — "Gametype: …" for 5s after team join / gametype / ruleset change; else hidden
+// STAT_RULESET_HUD        — ruleset, same 5s notice window as STAT_GAMETYPE_HUD
+// STAT_ROUND_NUMBER       — unused in the DM layout (the match limit rides on STAT_SCORELIMIT)
 // STAT_CTF_FLAG_PIC       — CTF/Strike: carried flag blink; RR: current-team badge (top-right row 3)
 // STAT_CENTER_LINE        — duel header pic; LMS/Freeze Tag: primary POV configstring lane
-// STAT_SCORELIMIT         — coop right-stack limit; DM miniscore uses STAT_ROUND_NUMBER instead
+// STAT_SCORELIMIT         — CONFIG_STORY_SCORELIMIT index: match limit as small white right-aligned
+//                           text under the miniscore rows; 0 = hidden, and the layout MUST gate on
+//                           this stat (value 0 would otherwise index configstring 0, the level name)
 // STAT_COUNTDOWN          — layout xv 118 yb -256 num(3); vanilla: centre = xv+50-8*l (118 exact for 1-digit); MM cgame re-centres per digit count
-// STAT_MINISCORE_*        — SetMiniScoreStats; visible MATCH_WARMUP_DELAYED through MATCH_IN_PROGRESS
+// STAT_MINISCORE_*        — SetMiniScoreStats; visible only during MATCH_IN_PROGRESS (hidden through
+//                           every warmup stage, the countdown, and intermission)
 //                           CS_STATUSBAR miniscore rows (team icons or FFA/Duel/RR/Horde player skins).
 // STAT_HORDE_REMAINING    — Horde only: remaining monsters (num)
 // STAT_HORDE_WAVE         — Horde only: current wave number (num); repurposes the formerly-unused
@@ -49,6 +52,9 @@ namespace muffmode::hud {
 inline constexpr int32_t kMiniscorePicXr = -26;
 inline constexpr int32_t kMiniscoreNumXr = -78;
 inline constexpr int32_t kMiniscoreHighlightXr = -28;
+// Match-limit line under the rows: right edge of the small white text, on the right HUD stack
+// column rather than the score-digit edge (num(3) at kMiniscoreNumXr would end at -28).
+inline constexpr int32_t kMiniscoreLimitTextXr = -2;
 inline constexpr int32_t kMiniscoreHighlightYInset = -2;
 inline constexpr int32_t kMiniscoreNumFieldWidth = 3;
 inline constexpr int32_t kMiniscoreRowStep = 27;
@@ -67,6 +73,18 @@ static_assert(CONFIG_LAST <= CS_GENERAL + MAX_GENERAL,
 	"CONFIG_LAST must not exceed general configstring region");
 
 inline constexpr size_t CONFIG_POV_CENTER_POOL_SLOTS = (CS_GENERAL + MAX_GENERAL) - CONFIG_POV_CENTER_POOL;
+inline constexpr int CONFIG_POV_CENTER_SECONDARY_POOL =
+	CONFIG_FOLLOW_PLAYER_NAME + static_cast<int>(MAX_LOBBY_PLAYERS);
+
+static_assert(CONFIG_POV_CENTER_POOL_SLOTS >= MAX_LOBBY_PLAYERS,
+	"primary POV configstring lane must fit every supported lobby client");
+static_assert(CONFIG_POV_CENTER_SECONDARY_POOL >= CONFIG_FOLLOW_PLAYER_NAME);
+static_assert(CONFIG_POV_CENTER_SECONDARY_POOL + static_cast<int>(MAX_LOBBY_PLAYERS) <=
+	CONFIG_FOLLOW_PLAYER_NAME_END,
+	"secondary POV lane must fit in unused follow-name configstrings");
+static_assert(CONFIG_POV_CENTER_SECONDARY_POOL + static_cast<int>(MAX_LOBBY_PLAYERS) <=
+	CONFIG_COOP_RESPAWN_STRING,
+	"secondary POV lane must not overlap later shared configstrings");
 
 enum class mm_pov_configstring_lane_t : size_t {
 	Primary = 0,   // Center/role text.
@@ -76,7 +94,7 @@ enum class mm_pov_configstring_lane_t : size_t {
 inline size_t MM_PovConfigStringLaneWidth(size_t max_clients)
 {
 	const size_t requested = max_clients > 0 ? max_clients : 1;
-	return std::min(requested, CONFIG_POV_CENTER_POOL_SLOTS);
+	return std::min(requested, MAX_LOBBY_PLAYERS);
 }
 
 inline int MM_PovConfigStringForClient(size_t client_index, size_t max_clients, mm_pov_configstring_lane_t lane)
@@ -85,11 +103,19 @@ inline int MM_PovConfigStringForClient(size_t client_index, size_t max_clients, 
 	if (client_index >= lane_width)
 		return 0;
 
-	const size_t slot = static_cast<size_t>(lane) * lane_width + client_index;
-	if (slot >= CONFIG_POV_CENTER_POOL_SLOTS)
+	int lane_base = 0;
+	switch (lane) {
+	case mm_pov_configstring_lane_t::Primary:
+		lane_base = CONFIG_POV_CENTER_POOL;
+		break;
+	case mm_pov_configstring_lane_t::Secondary:
+		lane_base = CONFIG_POV_CENTER_SECONDARY_POOL;
+		break;
+	default:
 		return 0;
+	}
 
-	return static_cast<int>(CONFIG_POV_CENTER_POOL + slot);
+	return lane_base + static_cast<int>(client_index);
 }
 
 // Tokens absent from stock Q2RE cg_screen.cpp — fatal if emitted (orphaned endif from endifstat).

@@ -48,7 +48,7 @@ void MM_LMS_OnPlayerDeath(gentity_t *ent)
 {
 	if (notGT(GT_LMS))
 		return;
-	if (level.round_state != roundst_t::ROUND_IN_PROGRESS)
+	if (level.round_state != round_state_t::ROUND_IN_PROGRESS)
 		return;
 	if (!ent || !ent->client || !ClientIsPlaying(ent->client))
 		return;

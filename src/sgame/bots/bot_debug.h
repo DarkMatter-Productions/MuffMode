@@ -4,3 +4,4 @@
 #pragma once
 
 void Bot_UpdateDebug();
+void Bot_ResetDebug();

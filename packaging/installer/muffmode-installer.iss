@@ -30,20 +30,22 @@
 #if FileExists(PackageRoot + "\README.html") == 0
   #error PackageRoot is missing README.html.
 #endif
-#if FileExists(PackageRoot + "\README.de.html") == 0
-  #error PackageRoot is missing README.de.html.
-#endif
-#if FileExists(PackageRoot + "\README.pl.html") == 0
-  #error PackageRoot is missing README.pl.html.
-#endif
-#if FileExists(PackageRoot + "\README.fr.html") == 0
-  #error PackageRoot is missing README.fr.html.
-#endif
-#if FileExists(PackageRoot + "\README.hu.html") == 0
-  #error PackageRoot is missing README.hu.html.
-#endif
-#if FileExists(PackageRoot + "\README.bg.html") == 0
-  #error PackageRoot is missing README.bg.html.
+#ifdef IncludeLocalizedReadmes
+  #if FileExists(PackageRoot + "\README.de.html") == 0
+    #error PackageRoot is missing README.de.html.
+  #endif
+  #if FileExists(PackageRoot + "\README.pl.html") == 0
+    #error PackageRoot is missing README.pl.html.
+  #endif
+  #if FileExists(PackageRoot + "\README.fr.html") == 0
+    #error PackageRoot is missing README.fr.html.
+  #endif
+  #if FileExists(PackageRoot + "\README.hu.html") == 0
+    #error PackageRoot is missing README.hu.html.
+  #endif
+  #if FileExists(PackageRoot + "\README.bg.html") == 0
+    #error PackageRoot is missing README.bg.html.
+  #endif
 #endif
 #if FileExists(PackageRoot + "\README.md") == 0
   #error PackageRoot is missing README.md.
@@ -102,6 +104,12 @@
 #if FileExists(PackageRoot + "\rerelease\baseq2\CONFIGS_README.md") == 0
   #error PackageRoot is missing rerelease\baseq2\CONFIGS_README.md.
 #endif
+#if FileExists(PackageRoot + "\rerelease\baseq2\muffmode-map-cycle.example.txt") == 0
+  #error PackageRoot is missing rerelease\baseq2\muffmode-map-cycle.example.txt.
+#endif
+#if FileExists(PackageRoot + "\rerelease\baseq2\muffmode-map-pool.example.json") == 0
+  #error PackageRoot is missing rerelease\baseq2\muffmode-map-pool.example.json.
+#endif
 #if FileExists(PackageRoot + "\rerelease\baseq2\server-base.cfg") == 0
   #error PackageRoot is missing rerelease\baseq2\server-base.cfg.
 #endif
@@ -120,8 +128,14 @@
 #if FileExists(PackageRoot + "\rerelease\baseq2\gt-CA.cfg") == 0
   #error PackageRoot is missing rerelease\baseq2\gt-CA.cfg.
 #endif
+#if FileExists(PackageRoot + "\rerelease\baseq2\gt-ARENA.cfg") == 0
+  #error PackageRoot is missing rerelease\baseq2\gt-ARENA.cfg.
+#endif
 #if FileExists(PackageRoot + "\rerelease\baseq2\gt-FT.cfg") == 0
   #error PackageRoot is missing rerelease\baseq2\gt-FT.cfg.
+#endif
+#if FileExists(PackageRoot + "\rerelease\baseq2\gt-LMS.cfg") == 0
+  #error PackageRoot is missing rerelease\baseq2\gt-LMS.cfg.
 #endif
 #if FileExists(PackageRoot + "\rerelease\baseq2\gt-REDROVER.cfg") == 0
   #error PackageRoot is missing rerelease\baseq2\gt-REDROVER.cfg.
@@ -138,8 +152,8 @@
 #if FileExists(PackageRoot + "\rerelease\baseq2\gt-STRIKE.cfg") == 0
   #error PackageRoot is missing rerelease\baseq2\gt-STRIKE.cfg.
 #endif
-#if FileExists(PackageRoot + "\" + MapsRelativePath + "\mm-aerowalk.bsp") == 0
-  #error PackageRoot is missing rerelease\maps\mm-aerowalk.bsp.
+#if FileExists(PackageRoot + "\" + MapsRelativePath + "\mm-aerow.bsp") == 0
+  #error PackageRoot is missing rerelease\maps\mm-aerow.bsp.
 #endif
 #if FileExists(PackageRoot + "\" + MapsRelativePath + "\mm-coldzero.bsp") == 0
   #error PackageRoot is missing rerelease\maps\mm-coldzero.bsp.
@@ -201,11 +215,13 @@
 #define PackageGameDllHash GetSHA256OfFile(PackageRoot + "\" + GameDllRelativePath)
 #define PackageUpdaterHash GetSHA256OfFile(PackageRoot + "\MuffModeUpdater.exe")
 #define PackageReadmeHash GetSHA256OfFile(PackageRoot + "\README.html")
-#define PackageReadmeDeHash GetSHA256OfFile(PackageRoot + "\README.de.html")
-#define PackageReadmePlHash GetSHA256OfFile(PackageRoot + "\README.pl.html")
-#define PackageReadmeFrHash GetSHA256OfFile(PackageRoot + "\README.fr.html")
-#define PackageReadmeHuHash GetSHA256OfFile(PackageRoot + "\README.hu.html")
-#define PackageReadmeBgHash GetSHA256OfFile(PackageRoot + "\README.bg.html")
+#ifdef IncludeLocalizedReadmes
+  #define PackageReadmeDeHash GetSHA256OfFile(PackageRoot + "\README.de.html")
+  #define PackageReadmePlHash GetSHA256OfFile(PackageRoot + "\README.pl.html")
+  #define PackageReadmeFrHash GetSHA256OfFile(PackageRoot + "\README.fr.html")
+  #define PackageReadmeHuHash GetSHA256OfFile(PackageRoot + "\README.hu.html")
+  #define PackageReadmeBgHash GetSHA256OfFile(PackageRoot + "\README.bg.html")
+#endif
 #define PackageAssetReadmeHash GetSHA256OfFile(PackageRoot + "\README.md")
 #define PackageChangelogHash GetSHA256OfFile(PackageRoot + "\CHANGELOG.md")
 #define PackageLicenseHash GetSHA256OfFile(PackageRoot + "\LICENSE")
@@ -222,19 +238,23 @@
 #define PackageOriginalReadmeZtn2dm3Hash GetSHA256OfFile(PackageRoot + "\" + OriginalReadmesRelativePath + "\ztn2dm3-readme.txt")
 #define PackageOriginalReadmeZtn2dm5Hash GetSHA256OfFile(PackageRoot + "\" + OriginalReadmesRelativePath + "\ztn2dm5-readme.txt")
 #define PackageConfigReadmeHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\CONFIGS_README.md")
+#define PackageMapCycleExampleHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\muffmode-map-cycle.example.txt")
+#define PackageMapPoolExampleHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\muffmode-map-pool.example.json")
 #define PackageServerBaseHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\server-base.cfg")
 #define PackageGtFfaHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\gt-FFA.cfg")
 #define PackageGtDuelHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\gt-DUEL.cfg")
 #define PackageGtTdmHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\gt-TDM.cfg")
 #define PackageGtCtfHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\gt-CTF.cfg")
 #define PackageGtCaHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\gt-CA.cfg")
+#define PackageGtArenaHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\gt-ARENA.cfg")
 #define PackageGtFtHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\gt-FT.cfg")
+#define PackageGtLmsHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\gt-LMS.cfg")
 #define PackageGtRedRoverHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\gt-REDROVER.cfg")
 #define PackageGtHordeHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\gt-HORDE.cfg")
 #define PackageGtInstagibHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\gt-INSTAGIB.cfg")
 #define PackageGtNadefestHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\gt-NADEFEST.cfg")
 #define PackageGtStrikeHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\gt-STRIKE.cfg")
-#define PackageMapAerowalkHash GetSHA256OfFile(PackageRoot + "\" + MapsRelativePath + "\mm-aerowalk.bsp")
+#define PackageMapAerowalkHash GetSHA256OfFile(PackageRoot + "\" + MapsRelativePath + "\mm-aerow.bsp")
 #define PackageMapColdzeroHash GetSHA256OfFile(PackageRoot + "\" + MapsRelativePath + "\mm-coldzero.bsp")
 #define PackageMapCrucibleHash GetSHA256OfFile(PackageRoot + "\" + MapsRelativePath + "\mm-crucible.bsp")
 #define PackageMapKmachineHash GetSHA256OfFile(PackageRoot + "\" + MapsRelativePath + "\mm-kmachine.bsp")
@@ -264,7 +284,7 @@ AppPublisherURL=https://github.com/DarkMatter-Productions/MuffMode
 AppSupportURL=https://github.com/DarkMatter-Productions/MuffMode/issues
 AppUpdatesURL=https://github.com/DarkMatter-Productions/MuffMode/releases
 AppContact=https://github.com/DarkMatter-Productions/MuffMode/issues
-AppComments=Installs Muff Mode into Quake II Remastered rerelease\baseq2 and backs up an existing game_x64.dll.
+AppComments=Installs Muff Mode into Quake II Remastered rerelease\baseq2 and backs up existing server configs and game_x64.dll.
 AppReadmeFile={app}\README.html
 DefaultDirName={code:GetDefaultInstallDir}
 AppendDefaultDirName=no
@@ -278,6 +298,7 @@ SetupIconFile={#LauncherIconFile}
 LicenseFile={#PackageRoot}\LICENSE
 Compression=lzma2/ultra64
 SolidCompression=yes
+ExtraDiskSpaceRequired=167772160
 WizardStyle=modern
 MinVersion=10.0
 ArchitecturesAllowed=x64compatible
@@ -302,7 +323,7 @@ VersionInfoProductVersion={#AppVersion}
 VersionInfoVersion={#AppVersion}
 
 [Files]
-Source: "{#PackageRoot}\*"; DestDir: "{app}"; Excludes: "rerelease\baseq2\MuffModeBackups\*,rerelease\baseq2\muffmode-installer-write-test-*.tmp,rerelease\baseq2\muffmode-install-receipt.txt"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#PackageRoot}\*"; DestDir: "{app}"; Excludes: "rerelease\baseq2\MuffModeBackups\*,rerelease\baseq2\muffmode-installer-write-test-*.tmp,rerelease\baseq2\muffmode-install-receipt.txt"; Flags: ignoreversion recursesubdirs createallsubdirs; BeforeInstall: ValidateCurrentPayloadDestination
 
 [Tasks]
 Name: "desktopshortcut"; Description: "Create a desktop shortcut for Muff Mode Updater & Launcher"; GroupDescription: "Shortcuts:"; Flags: unchecked
@@ -329,6 +350,18 @@ WelcomeLabel2=This will install {#ReleaseLabel} for Quake II Remastered. Choose 
 SelectDirDesc=Select the outer Quake II installation folder. It must contain rerelease\baseq2 and a Quake II launcher executable; do not select the rerelease, baseq2, or extracted Muff Mode package folder.
 
 [Code]
+const
+  { Keep explicit checks for Inno/Windows versions without RedirectionGuard. }
+  MAX_INSTALL_TREE_SCAN_DEPTH = 64;
+  MAX_INSTALL_TREE_SCAN_ENTRIES = 100000;
+  MAX_SERVER_CONFIG_BACKUP_FILES = 128;
+  MAX_SERVER_CONFIG_BACKUP_BYTES = 16777216;
+  MAX_GAME_DLL_BACKUP_BYTES = 134217728;
+  MAX_VERSION_MARKER_BACKUP_BYTES = 1048576;
+  MAX_BACKUP_NAME_ATTEMPTS = 1000;
+  OBSOLETE_AEROWALK_MAP_BYTES = 761416;
+  OBSOLETE_AEROWALK_MAP_SHA256 = '8fd4ab55fe63e3ac4f0fa0f117c64a5d4610a386979750a6cb09e361b1d37904';
+
 var
   StorePage: TInputOptionWizardPage;
   SteamInstallDirResolved: Boolean;
@@ -340,6 +373,10 @@ var
   CachedGogInstallDir: String;
   CachedXboxInstallDir: String;
   LastBackupFile: String;
+  LastConfigBackupDir: String;
+
+function GetFileAttributesW(FileName: String): DWORD;
+  external 'GetFileAttributesW@kernel32.dll stdcall';
 
 function InitializeSetup(): Boolean;
 begin
@@ -436,6 +473,384 @@ begin
     Lowercase(RemoveBackslash(NormalizeDetectedPath(SecondPath)));
 end;
 
+function IsExistingReparsePoint(Path: String): Boolean;
+var
+  Attributes: DWORD;
+begin
+  Attributes := GetFileAttributesW(Path);
+  Result :=
+    (Attributes <> $FFFFFFFF) and
+    ((Attributes and FILE_ATTRIBUTE_REPARSE_POINT) <> 0);
+end;
+
+function FindReparsePointOnExistingPath(Path: String): String;
+var
+  CurrentPath: String;
+  ParentPath: String;
+begin
+  Result := '';
+  CurrentPath := NormalizeDetectedPath(Path);
+
+  while CurrentPath <> '' do
+  begin
+    if IsExistingReparsePoint(CurrentPath) then
+    begin
+      Result := CurrentPath;
+      Exit;
+    end;
+
+    ParentPath := ExtractFileDir(CurrentPath);
+    if (ParentPath = '') or SameNormalizedPath(ParentPath, CurrentPath) then
+      Exit;
+
+    CurrentPath := ParentPath;
+  end;
+end;
+
+function ValidateExistingPayloadTree(
+  RootDir: String;
+  Depth: Integer;
+  var EntryCount: Integer): String;
+var
+  FindRec: TFindRec;
+  EntryPath: String;
+  UnsafePath: String;
+begin
+  Result := '';
+  if Depth = 0 then
+  begin
+    UnsafePath := FindReparsePointOnExistingPath(RootDir);
+    if UnsafePath <> '' then
+    begin
+      Result :=
+        'The selected Quake II installation path traverses a reparse point and cannot be modified safely:' +
+        #13#10#13#10 + UnsafePath;
+      Exit;
+    end;
+  end;
+
+  if not DirExists(RootDir) then
+    Exit;
+
+  if Depth > MAX_INSTALL_TREE_SCAN_DEPTH then
+  begin
+    Result :=
+      'The selected Quake II installation contains a payload directory tree deeper than the installer can validate safely:' +
+      #13#10#13#10 + RootDir;
+    Exit;
+  end;
+
+  if IsExistingReparsePoint(RootDir) then
+  begin
+    Result :=
+      'The selected Quake II installation contains a reparse point in a Muff Mode destination path:' +
+      #13#10#13#10 + RootDir;
+    Exit;
+  end;
+
+  if not FindFirst(AddBackslash(RootDir) + '*', FindRec) then
+    Exit;
+
+  try
+    repeat
+      if (FindRec.Name <> '.') and (FindRec.Name <> '..') then
+      begin
+        EntryCount := EntryCount + 1;
+        if EntryCount > MAX_INSTALL_TREE_SCAN_ENTRIES then
+        begin
+          Result :=
+            'The selected Quake II installation contains too many existing payload entries to validate safely.' +
+            #13#10#13#10 +
+            'Close the installer and inspect the rerelease maps, bots, and Muff Mode documentation folders before trying again.';
+          Exit;
+        end;
+
+        EntryPath := AddBackslash(RootDir) + FindRec.Name;
+        if (FindRec.Attributes and FILE_ATTRIBUTE_REPARSE_POINT) <> 0 then
+        begin
+          Result :=
+            'The selected Quake II installation contains a reparse point in a Muff Mode destination path:' +
+            #13#10#13#10 + EntryPath;
+          Exit;
+        end;
+
+        if (FindRec.Attributes and FILE_ATTRIBUTE_DIRECTORY) <> 0 then
+        begin
+          Result := ValidateExistingPayloadTree(EntryPath, Depth + 1, EntryCount);
+          if Result <> '' then
+            Exit;
+        end;
+      end;
+    until not FindNext(FindRec);
+  finally
+    FindClose(FindRec);
+  end;
+end;
+
+function ValidatePayloadFileIsNotReparsePoint(Path: String): String;
+begin
+  Result := '';
+  if IsExistingReparsePoint(Path) then
+    Result :=
+      'The selected Quake II installation contains a reparse-point file that Muff Mode would replace:' +
+      #13#10#13#10 + Path;
+end;
+
+function AddServerConfigToBackupBudget(
+  ConfigPath: String;
+  var ConfigCount: Integer;
+  var TotalBytes: Int64): String;
+var
+  ConfigBytes: Int64;
+begin
+  Result := '';
+  if not FileSize64(ConfigPath, ConfigBytes) then
+  begin
+    Result :=
+      'An existing server config selected for backup could not be measured safely:' +
+      #13#10#13#10 + ConfigPath;
+    Exit;
+  end;
+
+  if ConfigCount >= MAX_SERVER_CONFIG_BACKUP_FILES then
+  begin
+    Result :=
+      'The selected Quake II installation contains more than 128 server configs selected for automatic backup.' +
+      #13#10#13#10 +
+      'Archive old gt-*.cfg files manually, then run this installer again.';
+    Exit;
+  end;
+
+  if (ConfigBytes < 0) or
+    (ConfigBytes > MAX_SERVER_CONFIG_BACKUP_BYTES - TotalBytes) then
+  begin
+    Result :=
+      'The existing server configs selected for automatic backup exceed the safe 16 MiB limit.' +
+      #13#10#13#10 +
+      'Archive large or obsolete gt-*.cfg files manually, then run this installer again.';
+    Exit;
+  end;
+
+  ConfigCount := ConfigCount + 1;
+  TotalBytes := TotalBytes + ConfigBytes;
+end;
+
+function ValidateServerConfigBackupSources(Baseq2Dir: String): String;
+var
+  FindRec: TFindRec;
+  ConfigPath: String;
+  ConfigCount: Integer;
+  TotalBytes: Int64;
+begin
+  Result := '';
+  ConfigCount := 0;
+  TotalBytes := 0;
+
+  ConfigPath := AddBackslash(Baseq2Dir) + 'server-base.cfg';
+  if FileExists(ConfigPath) then
+  begin
+    Result := AddServerConfigToBackupBudget(ConfigPath, ConfigCount, TotalBytes);
+    if Result <> '' then
+      Exit;
+  end;
+
+  if not FindFirst(AddBackslash(Baseq2Dir) + 'gt-*.cfg', FindRec) then
+    Exit;
+
+  try
+    repeat
+      if (FindRec.Attributes and FILE_ATTRIBUTE_DIRECTORY) = 0 then
+      begin
+        ConfigPath := AddBackslash(Baseq2Dir) + FindRec.Name;
+        if (FindRec.Attributes and FILE_ATTRIBUTE_REPARSE_POINT) <> 0 then
+        begin
+          Result :=
+            'An existing gametype config selected for backup is a reparse point and cannot be read safely:' +
+            #13#10#13#10 + ConfigPath;
+          Exit;
+        end;
+
+        Result := AddServerConfigToBackupBudget(ConfigPath, ConfigCount, TotalBytes);
+        if Result <> '' then
+          Exit;
+      end;
+    until not FindNext(FindRec);
+  finally
+    FindClose(FindRec);
+  end;
+end;
+
+function ValidateBackupFileSize(
+  Path: String;
+  Description: String;
+  MaximumBytes: Int64): String;
+var
+  Size: Int64;
+begin
+  Result := '';
+  if not FileExists(Path) then
+    Exit;
+
+  if (not FileSize64(Path, Size)) or (Size < 0) or (Size > MaximumBytes) then
+    Result :=
+      'The existing ' + Description + ' is too large or could not be measured safely for automatic backup:' +
+      #13#10#13#10 + Path;
+end;
+
+function ValidateInstallTreeForReparsePoints(): String;
+var
+  InstallRoot: String;
+  RereleaseDir: String;
+  Baseq2Dir: String;
+  EntryCount: Integer;
+begin
+  Result := '';
+  InstallRoot := NormalizeDetectedPath(WizardDirValue);
+  RereleaseDir := AddBackslash(InstallRoot) + 'rerelease';
+  Baseq2Dir := AddBackslash(RereleaseDir) + 'baseq2';
+
+  Result := FindReparsePointOnExistingPath(InstallRoot);
+  if Result <> '' then
+  begin
+    Result :=
+      'The selected Quake II installation path traverses a reparse point and cannot be modified safely:' +
+      #13#10#13#10 + Result;
+    Exit;
+  end;
+
+  Result := FindReparsePointOnExistingPath(Baseq2Dir);
+  if Result <> '' then
+  begin
+    Result :=
+      'The selected Quake II installation path traverses a reparse point and cannot be modified safely:' +
+      #13#10#13#10 + Result;
+    Exit;
+  end;
+
+  Result := FindReparsePointOnExistingPath(AddBackslash(Baseq2Dir) + 'MuffModeBackups');
+  if Result <> '' then
+  begin
+    Result :=
+      'The Muff Mode backup destination traverses a reparse point and cannot be modified safely:' +
+      #13#10#13#10 + Result;
+    Exit;
+  end;
+
+  Result := ValidatePayloadFileIsNotReparsePoint(AddBackslash(InstallRoot) + 'README.html');
+  if Result <> '' then Exit;
+#ifdef IncludeLocalizedReadmes
+  Result := ValidatePayloadFileIsNotReparsePoint(AddBackslash(InstallRoot) + 'README.de.html');
+  if Result <> '' then Exit;
+  Result := ValidatePayloadFileIsNotReparsePoint(AddBackslash(InstallRoot) + 'README.pl.html');
+  if Result <> '' then Exit;
+  Result := ValidatePayloadFileIsNotReparsePoint(AddBackslash(InstallRoot) + 'README.fr.html');
+  if Result <> '' then Exit;
+  Result := ValidatePayloadFileIsNotReparsePoint(AddBackslash(InstallRoot) + 'README.hu.html');
+  if Result <> '' then Exit;
+  Result := ValidatePayloadFileIsNotReparsePoint(AddBackslash(InstallRoot) + 'README.bg.html');
+  if Result <> '' then Exit;
+#endif
+  Result := ValidatePayloadFileIsNotReparsePoint(AddBackslash(InstallRoot) + 'README.md');
+  if Result <> '' then Exit;
+  Result := ValidatePayloadFileIsNotReparsePoint(AddBackslash(InstallRoot) + 'CHANGELOG.md');
+  if Result <> '' then Exit;
+  Result := ValidatePayloadFileIsNotReparsePoint(AddBackslash(InstallRoot) + 'LICENSE');
+  if Result <> '' then Exit;
+  Result := ValidatePayloadFileIsNotReparsePoint(AddBackslash(InstallRoot) + 'THIRD_PARTY_NOTICES.md');
+  if Result <> '' then Exit;
+  Result := ValidatePayloadFileIsNotReparsePoint(AddBackslash(InstallRoot) + 'MuffModeUpdater.exe');
+  if Result <> '' then Exit;
+  Result := ValidatePayloadFileIsNotReparsePoint(AddBackslash(InstallRoot) + 'MuffMode.version');
+  if Result <> '' then Exit;
+  Result := ValidatePayloadFileIsNotReparsePoint(AddBackslash(InstallRoot) + 'VERSION');
+  if Result <> '' then Exit;
+
+  Result := ValidatePayloadFileIsNotReparsePoint(AddBackslash(Baseq2Dir) + 'game_x64.dll');
+  if Result <> '' then Exit;
+  Result := ValidatePayloadFileIsNotReparsePoint(AddBackslash(Baseq2Dir) + 'muffmode-version.json');
+  if Result <> '' then Exit;
+  Result := ValidatePayloadFileIsNotReparsePoint(AddBackslash(Baseq2Dir) + 'muffmode.version');
+  if Result <> '' then Exit;
+  Result := ValidatePayloadFileIsNotReparsePoint(AddBackslash(Baseq2Dir) + 'muffmode-install-receipt.txt');
+  if Result <> '' then Exit;
+  Result := ValidatePayloadFileIsNotReparsePoint(AddBackslash(Baseq2Dir) + 'CONFIGS_README.md');
+  if Result <> '' then Exit;
+  Result := ValidatePayloadFileIsNotReparsePoint(AddBackslash(Baseq2Dir) + 'muffmode-map-cycle.example.txt');
+  if Result <> '' then Exit;
+  Result := ValidatePayloadFileIsNotReparsePoint(AddBackslash(Baseq2Dir) + 'muffmode-map-pool.example.json');
+  if Result <> '' then Exit;
+  Result := ValidatePayloadFileIsNotReparsePoint(AddBackslash(Baseq2Dir) + 'server-base.cfg');
+  if Result <> '' then Exit;
+  Result := ValidatePayloadFileIsNotReparsePoint(AddBackslash(Baseq2Dir) + 'gt-FFA.cfg');
+  if Result <> '' then Exit;
+  Result := ValidatePayloadFileIsNotReparsePoint(AddBackslash(Baseq2Dir) + 'gt-DUEL.cfg');
+  if Result <> '' then Exit;
+  Result := ValidatePayloadFileIsNotReparsePoint(AddBackslash(Baseq2Dir) + 'gt-TDM.cfg');
+  if Result <> '' then Exit;
+  Result := ValidatePayloadFileIsNotReparsePoint(AddBackslash(Baseq2Dir) + 'gt-CTF.cfg');
+  if Result <> '' then Exit;
+  Result := ValidatePayloadFileIsNotReparsePoint(AddBackslash(Baseq2Dir) + 'gt-CA.cfg');
+  if Result <> '' then Exit;
+  Result := ValidatePayloadFileIsNotReparsePoint(AddBackslash(Baseq2Dir) + 'gt-ARENA.cfg');
+  if Result <> '' then Exit;
+  Result := ValidatePayloadFileIsNotReparsePoint(AddBackslash(Baseq2Dir) + 'gt-FT.cfg');
+  if Result <> '' then Exit;
+  Result := ValidatePayloadFileIsNotReparsePoint(AddBackslash(Baseq2Dir) + 'gt-LMS.cfg');
+  if Result <> '' then Exit;
+  Result := ValidatePayloadFileIsNotReparsePoint(AddBackslash(Baseq2Dir) + 'gt-REDROVER.cfg');
+  if Result <> '' then Exit;
+  Result := ValidatePayloadFileIsNotReparsePoint(AddBackslash(Baseq2Dir) + 'gt-HORDE.cfg');
+  if Result <> '' then Exit;
+  Result := ValidatePayloadFileIsNotReparsePoint(AddBackslash(Baseq2Dir) + 'gt-INSTAGIB.cfg');
+  if Result <> '' then Exit;
+  Result := ValidatePayloadFileIsNotReparsePoint(AddBackslash(Baseq2Dir) + 'gt-NADEFEST.cfg');
+  if Result <> '' then Exit;
+  Result := ValidatePayloadFileIsNotReparsePoint(AddBackslash(Baseq2Dir) + 'gt-STRIKE.cfg');
+  if Result <> '' then Exit;
+
+  Result := ValidateServerConfigBackupSources(Baseq2Dir);
+  if Result <> '' then Exit;
+
+  Result := ValidateBackupFileSize(
+    AddBackslash(Baseq2Dir) + 'game_x64.dll',
+    'game_x64.dll',
+    MAX_GAME_DLL_BACKUP_BYTES);
+  if Result <> '' then Exit;
+  Result := ValidateBackupFileSize(
+    AddBackslash(Baseq2Dir) + 'muffmode.version',
+    'Muff Mode text version marker',
+    MAX_VERSION_MARKER_BACKUP_BYTES);
+  if Result <> '' then Exit;
+  Result := ValidateBackupFileSize(
+    AddBackslash(Baseq2Dir) + 'muffmode-version.json',
+    'Muff Mode JSON version marker',
+    MAX_VERSION_MARKER_BACKUP_BYTES);
+  if Result <> '' then Exit;
+
+  EntryCount := 0;
+  Result := ValidateExistingPayloadTree(AddBackslash(RereleaseDir) + 'maps', 0, EntryCount);
+  if Result <> '' then Exit;
+  Result := ValidateExistingPayloadTree(AddBackslash(RereleaseDir) + 'bots', 0, EntryCount);
+  if Result <> '' then Exit;
+  Result := ValidateExistingPayloadTree(
+    AddBackslash(Baseq2Dir) + 'docs\muffmode\maps\original-readmes',
+    0,
+    EntryCount);
+end;
+
+procedure ValidateCurrentPayloadDestination;
+var
+  DestinationPath: String;
+  UnsafePath: String;
+begin
+  DestinationPath := CurrentFileName;
+  UnsafePath := FindReparsePointOnExistingPath(DestinationPath);
+  if UnsafePath <> '' then
+    RaiseException(
+      'A Muff Mode payload destination became a reparse point before it could be installed safely:' +
+      #13#10#13#10 + UnsafePath);
+end;
+
 function PathIsAtOrUnder(ChildPath: String; ParentPath: String): Boolean;
 var
   Child: String;
@@ -487,6 +902,98 @@ begin
     Result := True;
   except
     Log('Could not calculate SHA256 for: ' + FileName);
+  end;
+end;
+
+procedure CleanupObsoleteAerowalkMap();
+var
+  ObsoleteFile: String;
+  UnsafePath: String;
+  Attributes: DWORD;
+  Size: Int64;
+  ActualHash: String;
+begin
+  ObsoleteFile := AddBackslash(WizardDirValue) + '{#MapsRelativePath}\mm-aerowalk.bsp';
+
+  try
+    Attributes := GetFileAttributesW(ObsoleteFile);
+    if Attributes = $FFFFFFFF then
+    begin
+      Log('Obsolete Aerowalk map is not present or its attributes are unavailable; no cleanup attempted: ' + ObsoleteFile);
+      Exit;
+    end;
+
+    if (Attributes and FILE_ATTRIBUTE_DIRECTORY) <> 0 then
+    begin
+      Log('Preserving obsolete Aerowalk path because it is not a regular file: ' + ObsoleteFile);
+      Exit;
+    end;
+
+    if (Attributes and FILE_ATTRIBUTE_REPARSE_POINT) <> 0 then
+    begin
+      Log('Preserving obsolete Aerowalk map because it is a reparse point: ' + ObsoleteFile);
+      Exit;
+    end;
+
+    UnsafePath := FindReparsePointOnExistingPath(ObsoleteFile);
+    if UnsafePath <> '' then
+    begin
+      Log('Preserving obsolete Aerowalk map because its path traverses a reparse point: ' + UnsafePath);
+      Exit;
+    end;
+
+    if not FileSize64(ObsoleteFile, Size) then
+    begin
+      Log('Preserving obsolete Aerowalk map because its length could not be measured safely: ' + ObsoleteFile);
+      Exit;
+    end;
+
+    if Size <> OBSOLETE_AEROWALK_MAP_BYTES then
+    begin
+      Log('Preserving obsolete Aerowalk map because its length does not match the known invalid payload: ' + ObsoleteFile);
+      Exit;
+    end;
+
+    if not TryGetFileSha256(ObsoleteFile, ActualHash) then
+    begin
+      Log('Preserving obsolete Aerowalk map because its SHA256 could not be calculated: ' + ObsoleteFile);
+      Exit;
+    end;
+
+    if ActualHash <> OBSOLETE_AEROWALK_MAP_SHA256 then
+    begin
+      Log('Preserving obsolete Aerowalk map because its SHA256 does not match the known invalid payload: ' + ObsoleteFile);
+      Exit;
+    end;
+
+    { Recheck the path immediately before deletion so a newly introduced reparse point is never followed. }
+    UnsafePath := FindReparsePointOnExistingPath(ObsoleteFile);
+    Attributes := GetFileAttributesW(ObsoleteFile);
+    if (UnsafePath <> '') or (Attributes = $FFFFFFFF) or
+      ((Attributes and FILE_ATTRIBUTE_DIRECTORY) <> 0) or
+      ((Attributes and FILE_ATTRIBUTE_REPARSE_POINT) <> 0) then
+    begin
+      Log('Preserving obsolete Aerowalk map because its path or file type changed during cleanup: ' + ObsoleteFile);
+      Exit;
+    end;
+
+    if (not FileSize64(ObsoleteFile, Size)) or
+      (Size <> OBSOLETE_AEROWALK_MAP_BYTES) or
+      (not TryGetFileSha256(ObsoleteFile, ActualHash)) or
+      (ActualHash <> OBSOLETE_AEROWALK_MAP_SHA256) then
+    begin
+      Log('Preserving obsolete Aerowalk map because it changed immediately before deletion: ' + ObsoleteFile);
+      Exit;
+    end;
+
+    if DeleteFile(ObsoleteFile) then
+      Log('Removed the exact known invalid obsolete Aerowalk map after validating its replacement: ' + ObsoleteFile)
+    else
+      Log('Could not remove the exact known invalid obsolete Aerowalk map; installation will continue: ' + ObsoleteFile);
+  except
+    Log(
+      'Unexpected error while checking the obsolete Aerowalk map; preserving it and continuing installation (' +
+      GetExceptionMessage + '): ' + ObsoleteFile);
   end;
 end;
 
@@ -1137,9 +1644,189 @@ begin
       Candidate := AddBackslash(BackupDir) + 'game_x64-' + Timestamp + '-' + IntToStr(Counter) + '.dll';
 
     Counter := Counter + 1;
+    if (Counter >= MAX_BACKUP_NAME_ATTEMPTS) and FileExists(Candidate) then
+    begin
+      Result := '';
+      Exit;
+    end;
   until not FileExists(Candidate);
 
   Result := Candidate;
+end;
+
+function GetUniqueConfigBackupDir(BackupRoot: String): String;
+var
+  Counter: Integer;
+  Timestamp: String;
+  Candidate: String;
+begin
+  Counter := 0;
+  Timestamp := GetDateTimeString('yyyy-mm-dd-hhnnss', '-', '-');
+
+  repeat
+    if Counter = 0 then
+      Candidate := AddBackslash(BackupRoot) + 'server-configs-before-muffmode-' + Timestamp
+    else
+      Candidate :=
+        AddBackslash(BackupRoot) + 'server-configs-before-muffmode-' + Timestamp + '-' + IntToStr(Counter);
+
+    Counter := Counter + 1;
+    if (Counter >= MAX_BACKUP_NAME_ATTEMPTS) and
+      (DirExists(Candidate) or FileExists(Candidate)) then
+    begin
+      Result := '';
+      Exit;
+    end;
+  until (not DirExists(Candidate)) and (not FileExists(Candidate));
+
+  Result := Candidate;
+end;
+
+function CopyServerConfigBackup(SourceFile: String; BackupFile: String): Boolean;
+var
+  SourceHash: String;
+  BackupHash: String;
+begin
+  Result :=
+    (not IsExistingReparsePoint(SourceFile)) and
+    (FindReparsePointOnExistingPath(BackupFile) = '') and
+    CopyFile(SourceFile, BackupFile, False) and
+    (not IsExistingReparsePoint(BackupFile)) and
+    TryGetFileSha256(SourceFile, SourceHash) and
+    TryGetFileSha256(BackupFile, BackupHash) and
+    (SourceHash = BackupHash);
+
+  if not Result and FileExists(BackupFile) then
+    DeleteFile(BackupFile);
+end;
+
+function BackupExistingServerConfigs(): String;
+var
+  Baseq2Dir: String;
+  BackupRoot: String;
+  BackupDir: String;
+  SourceFile: String;
+  BackupFile: String;
+  FindRec: TFindRec;
+  HasConfigFiles: Boolean;
+  BackupCount: Integer;
+  BackupBytes: Int64;
+  BudgetError: String;
+begin
+  Result := '';
+  Baseq2Dir := AddBackslash(GetBaseq2Dir(WizardDirValue));
+  HasConfigFiles := FileExists(Baseq2Dir + 'server-base.cfg');
+
+  if not HasConfigFiles then
+  begin
+    if FindFirst(Baseq2Dir + 'gt-*.cfg', FindRec) then
+    begin
+      try
+        repeat
+          if (FindRec.Attributes and FILE_ATTRIBUTE_DIRECTORY) = 0 then
+            HasConfigFiles := True;
+        until not FindNext(FindRec);
+      finally
+        FindClose(FindRec);
+      end;
+    end;
+  end;
+
+  if not HasConfigFiles then
+    Exit;
+
+  BackupRoot := Baseq2Dir + 'MuffModeBackups';
+  if not ForceDirectories(BackupRoot) then
+  begin
+    Result := 'Could not create the Muff Mode backup folder:' + #13#10#13#10 + BackupRoot;
+    Exit;
+  end;
+
+  BackupDir := GetUniqueConfigBackupDir(BackupRoot);
+  if BackupDir = '' then
+  begin
+    Result :=
+      'Could not select a unique server-config backup folder after 1000 attempts:' +
+      #13#10#13#10 + BackupRoot;
+    Exit;
+  end;
+  if not ForceDirectories(BackupDir) then
+  begin
+    Result := 'Could not create the server-config backup folder:' + #13#10#13#10 + BackupDir;
+    Exit;
+  end;
+  if IsExistingReparsePoint(BackupDir) then
+  begin
+    Result := 'The server-config backup folder became a reparse point:' + #13#10#13#10 + BackupDir;
+    Exit;
+  end;
+
+  BackupCount := 0;
+  BackupBytes := 0;
+  SourceFile := Baseq2Dir + 'server-base.cfg';
+  if FileExists(SourceFile) then
+  begin
+    if IsExistingReparsePoint(SourceFile) then
+    begin
+      Result := 'The existing server-base.cfg became a reparse point before backup:' + #13#10#13#10 + SourceFile;
+      Exit;
+    end;
+    BudgetError := AddServerConfigToBackupBudget(SourceFile, BackupCount, BackupBytes);
+    if BudgetError <> '' then
+    begin
+      Result := BudgetError;
+      Exit;
+    end;
+
+    BackupFile := AddBackslash(BackupDir) + 'server-base.cfg';
+    if not CopyServerConfigBackup(SourceFile, BackupFile) then
+    begin
+      Result :=
+        'Could not back up the existing server-base.cfg before installing Muff Mode.' + #13#10#13#10 +
+        'Close any tools using this file, check folder permissions, then run this installer again.' + #13#10#13#10 +
+        'Backup target:' + #13#10 + BackupFile;
+      Exit;
+    end;
+  end;
+
+  if FindFirst(Baseq2Dir + 'gt-*.cfg', FindRec) then
+  begin
+    try
+      repeat
+        if (FindRec.Attributes and FILE_ATTRIBUTE_DIRECTORY) = 0 then
+        begin
+          SourceFile := Baseq2Dir + FindRec.Name;
+          if IsExistingReparsePoint(SourceFile) then
+          begin
+            Result := 'An existing gametype config became a reparse point before backup:' + #13#10#13#10 + SourceFile;
+            Exit;
+          end;
+          BudgetError := AddServerConfigToBackupBudget(SourceFile, BackupCount, BackupBytes);
+          if BudgetError <> '' then
+          begin
+            Result := BudgetError;
+            Exit;
+          end;
+
+          BackupFile := AddBackslash(BackupDir) + FindRec.Name;
+          if not CopyServerConfigBackup(SourceFile, BackupFile) then
+          begin
+            Result :=
+              'Could not back up an existing gametype config before installing Muff Mode.' + #13#10#13#10 +
+              'Close any tools using this file, check folder permissions, then run this installer again.' + #13#10#13#10 +
+              'Source:' + #13#10 + SourceFile + #13#10#13#10 +
+              'Backup target:' + #13#10 + BackupFile;
+            Exit;
+          end;
+        end;
+      until not FindNext(FindRec);
+    finally
+      FindClose(FindRec);
+    end;
+  end;
+
+  LastConfigBackupDir := BackupDir;
+  Log('Backed up ' + IntToStr(BackupCount) + ' existing server config(s) to: ' + BackupDir);
 end;
 
 function BackupExistingGameDll(): String;
@@ -1149,8 +1836,10 @@ var
   BackupFile: String;
   BackupPrefix: String;
   ExistingHash: String;
+  BackupHash: String;
   ExistingVersionFile: String;
   ExistingVersionJson: String;
+  ValidationError: String;
 begin
   Result := '';
   ExistingDll := GetGameDllPath(WizardDirValue);
@@ -1163,16 +1852,66 @@ begin
       Exit;
     end;
 
+    ValidationError := ValidateBackupFileSize(
+      ExistingDll,
+      'game_x64.dll',
+      MAX_GAME_DLL_BACKUP_BYTES);
+    if ValidationError <> '' then
+    begin
+      Result := ValidationError;
+      Exit;
+    end;
+
+    ExistingVersionFile := AddBackslash(GetBaseq2Dir(WizardDirValue)) + 'muffmode.version';
+    ExistingVersionJson := AddBackslash(GetBaseq2Dir(WizardDirValue)) + 'muffmode-version.json';
+    ValidationError := ValidateBackupFileSize(
+      ExistingVersionFile,
+      'Muff Mode text version marker',
+      MAX_VERSION_MARKER_BACKUP_BYTES);
+    if ValidationError <> '' then
+    begin
+      Result := ValidationError;
+      Exit;
+    end;
+    ValidationError := ValidateBackupFileSize(
+      ExistingVersionJson,
+      'Muff Mode JSON version marker',
+      MAX_VERSION_MARKER_BACKUP_BYTES);
+    if ValidationError <> '' then
+    begin
+      Result := ValidationError;
+      Exit;
+    end;
+
     BackupDir := AddBackslash(GetBaseq2Dir(WizardDirValue)) + 'MuffModeBackups';
     if not ForceDirectories(BackupDir) then
     begin
       Result := 'Could not create the Muff Mode backup folder:' + #13#10#13#10 + BackupDir;
       Exit;
     end;
+    if IsExistingReparsePoint(BackupDir) then
+    begin
+      Result := 'The Muff Mode backup folder became a reparse point:' + #13#10#13#10 + BackupDir;
+      Exit;
+    end;
 
     BackupFile := GetUniqueBackupFile(BackupDir);
-    if not CopyFile(ExistingDll, BackupFile, False) then
+    if BackupFile = '' then
     begin
+      Result :=
+        'Could not select a unique game_x64.dll backup name after 1000 attempts:' +
+        #13#10#13#10 + BackupDir;
+      Exit;
+    end;
+    if (FindReparsePointOnExistingPath(BackupFile) <> '') or
+      (not CopyFile(ExistingDll, BackupFile, False)) or
+      IsExistingReparsePoint(BackupFile) or
+      (not TryGetFileSha256(ExistingDll, ExistingHash)) or
+      (not TryGetFileSha256(BackupFile, BackupHash)) or
+      (ExistingHash <> BackupHash) then
+    begin
+      if FileExists(BackupFile) then
+        DeleteFile(BackupFile);
       Result :=
         'Could not back up the existing Quake II game_x64.dll before installing Muff Mode.' + #13#10#13#10 +
         'Close Quake II, check folder permissions, then run this installer again.' + #13#10#13#10 +
@@ -1181,18 +1920,16 @@ begin
     end;
 
     BackupPrefix := Copy(BackupFile, 1, Length(BackupFile) - 4);
-    ExistingVersionFile := AddBackslash(GetBaseq2Dir(WizardDirValue)) + 'muffmode.version';
-    ExistingVersionJson := AddBackslash(GetBaseq2Dir(WizardDirValue)) + 'muffmode-version.json';
     if FileExists(ExistingVersionFile) then
     begin
-      if CopyFile(ExistingVersionFile, BackupPrefix + '.version.txt', False) then
+      if CopyServerConfigBackup(ExistingVersionFile, BackupPrefix + '.version.txt') then
         Log('Backed up existing Muff Mode version marker to: ' + BackupPrefix + '.version.txt')
       else
         Log('Could not back up existing Muff Mode version marker: ' + ExistingVersionFile);
     end;
     if FileExists(ExistingVersionJson) then
     begin
-      if CopyFile(ExistingVersionJson, BackupPrefix + '.version.json', False) then
+      if CopyServerConfigBackup(ExistingVersionJson, BackupPrefix + '.version.json') then
         Log('Backed up existing Muff Mode version manifest to: ' + BackupPrefix + '.version.json')
       else
         Log('Could not back up existing Muff Mode version manifest: ' + ExistingVersionJson);
@@ -1470,6 +2207,20 @@ begin
     Exit;
 
   Result := VerifyInstalledFileHash(
+    Baseq2Dir + 'muffmode-map-cycle.example.txt',
+    '{#PackageMapCycleExampleHash}',
+    'structured map-cycle example');
+  if Result <> '' then
+    Exit;
+
+  Result := VerifyInstalledFileHash(
+    Baseq2Dir + 'muffmode-map-pool.example.json',
+    '{#PackageMapPoolExampleHash}',
+    'structured map-pool example');
+  if Result <> '' then
+    Exit;
+
+  Result := VerifyInstalledFileHash(
     Baseq2Dir + 'server-base.cfg',
     '{#PackageServerBaseHash}',
     'base server config');
@@ -1486,7 +2237,11 @@ begin
   if Result <> '' then Exit;
   Result := VerifyInstalledFileHash(Baseq2Dir + 'gt-CA.cfg', '{#PackageGtCaHash}', 'Clan Arena gametype config');
   if Result <> '' then Exit;
+  Result := VerifyInstalledFileHash(Baseq2Dir + 'gt-ARENA.cfg', '{#PackageGtArenaHash}', 'MuffMode Arena gametype config');
+  if Result <> '' then Exit;
   Result := VerifyInstalledFileHash(Baseq2Dir + 'gt-FT.cfg', '{#PackageGtFtHash}', 'Freeze Tag gametype config');
+  if Result <> '' then Exit;
+  Result := VerifyInstalledFileHash(Baseq2Dir + 'gt-LMS.cfg', '{#PackageGtLmsHash}', 'Last Man Standing gametype config');
   if Result <> '' then Exit;
   Result := VerifyInstalledFileHash(Baseq2Dir + 'gt-REDROVER.cfg', '{#PackageGtRedRoverHash}', 'Red Rover gametype config');
   if Result <> '' then Exit;
@@ -1537,7 +2292,7 @@ var
 begin
   MapsDir := AddBackslash(WizardDirValue) + '{#MapsRelativePath}\';
 
-  Result := VerifyInstalledFileHash(MapsDir + 'mm-aerowalk.bsp', '{#PackageMapAerowalkHash}', 'Aerowalk map BSP');
+  Result := VerifyInstalledFileHash(MapsDir + 'mm-aerow.bsp', '{#PackageMapAerowalkHash}', 'Aerowalk map BSP');
   if Result <> '' then Exit;
   Result := VerifyInstalledFileHash(MapsDir + 'mm-coldzero.bsp', '{#PackageMapColdzeroHash}', 'Cold Zero map BSP');
   if Result <> '' then Exit;
@@ -1664,6 +2419,7 @@ begin
     Exit;
   end;
 
+#ifdef IncludeLocalizedReadmes
   ValidationError := VerifyInstalledFileHash(
     AddBackslash(WizardDirValue) + 'README.de.html',
     '{#PackageReadmeDeHash}',
@@ -1713,6 +2469,7 @@ begin
     Result := ValidationError;
     Exit;
   end;
+#endif
 
   ValidationError := VerifyInstalledFileHash(
     AddBackslash(WizardDirValue) + 'README.md',
@@ -1828,12 +2585,17 @@ begin
     'EntityVenDm2SHA256: {#PackageEntityVenDm2Hash}' + #13#10 +
     'EntityZtn2dm5SHA256: {#PackageEntityZtn2dm5Hash}' + #13#10 +
     'ServerConfigGuideSHA256: {#PackageConfigReadmeHash}' + #13#10 +
+    'MapCycleExampleSHA256: {#PackageMapCycleExampleHash}' + #13#10 +
+    'MapPoolExampleSHA256: {#PackageMapPoolExampleHash}' + #13#10 +
     'ServerBaseConfigSHA256: {#PackageServerBaseHash}' + #13#10 +
     'GtFfaConfigSHA256: {#PackageGtFfaHash}' + #13#10 +
     'GtDuelConfigSHA256: {#PackageGtDuelHash}' + #13#10 +
     'GtTdmConfigSHA256: {#PackageGtTdmHash}' + #13#10 +
     'GtCtfConfigSHA256: {#PackageGtCtfHash}' + #13#10 +
     'GtCaConfigSHA256: {#PackageGtCaHash}' + #13#10 +
+    'GtArenaConfigSHA256: {#PackageGtArenaHash}' + #13#10 +
+    'GtFtConfigSHA256: {#PackageGtFtHash}' + #13#10 +
+    'GtLmsConfigSHA256: {#PackageGtLmsHash}' + #13#10 +
     'GtRedRoverConfigSHA256: {#PackageGtRedRoverHash}' + #13#10 +
     'GtHordeConfigSHA256: {#PackageGtHordeHash}' + #13#10 +
     'GtInstagibConfigSHA256: {#PackageGtInstagibHash}' + #13#10 +
@@ -1844,6 +2606,11 @@ begin
     ReceiptText := ReceiptText + 'PreviousGameDllBackup: ' + LastBackupFile + #13#10
   else
     ReceiptText := ReceiptText + 'PreviousGameDllBackup: none created' + #13#10;
+
+  if LastConfigBackupDir <> '' then
+    ReceiptText := ReceiptText + 'PreviousServerConfigBackup: ' + LastConfigBackupDir + #13#10
+  else
+    ReceiptText := ReceiptText + 'PreviousServerConfigBackup: none created' + #13#10;
 
   if SaveStringToFile(ReceiptFile, ReceiptText, False) then
     Log('Wrote Muff Mode install receipt: ' + ReceiptFile)
@@ -1862,6 +2629,10 @@ begin
   if Result <> '' then
     Exit;
 
+  Result := ValidateInstallTreeForReparsePoints();
+  if Result <> '' then
+    Exit;
+
   Result := ValidateQuake2NotRunning();
   if Result <> '' then
     Exit;
@@ -1873,9 +2644,25 @@ procedure CurStepChanged(CurStep: TSetupStep);
 var
   BackupError: String;
   VerificationError: String;
+  BackupMessage: String;
+  SafetyError: String;
 begin
   if CurStep = ssInstall then
   begin
+    SafetyError := ValidateInstallTreeForReparsePoints();
+    if SafetyError <> '' then
+    begin
+      SuppressibleMsgBox(SafetyError, mbError, MB_OK, IDOK);
+      Abort;
+    end;
+
+    BackupError := BackupExistingServerConfigs();
+    if BackupError <> '' then
+    begin
+      SuppressibleMsgBox(BackupError, mbError, MB_OK, IDOK);
+      Abort;
+    end;
+
     BackupError := BackupExistingGameDll();
     if BackupError <> '' then
     begin
@@ -1892,18 +2679,39 @@ begin
       Abort;
     end;
 
+    CleanupObsoleteAerowalkMap();
     WriteInstallReceipt();
 
-    if LastBackupFile <> '' then
+    if (LastBackupFile <> '') or (LastConfigBackupDir <> '') then
     begin
       if WizardSilent() then
-        Log('Existing game_x64.dll backup created at: ' + LastBackupFile)
+      begin
+        if LastConfigBackupDir <> '' then
+          Log('Existing server config backup created at: ' + LastConfigBackupDir);
+        if LastBackupFile <> '' then
+          Log('Existing game_x64.dll backup created at: ' + LastBackupFile);
+      end
       else
-        MsgBox(
-          'The existing Quake II game_x64.dll was backed up before Muff Mode was installed:' + #13#10#13#10 + LastBackupFile + #13#10#13#10 +
-          'If older Muff Mode version marker files were present, matching .version.txt and .version.json files were saved next to that backup.',
-          mbInformation,
-          MB_OK);
+      begin
+        BackupMessage := '';
+        if LastConfigBackupDir <> '' then
+          BackupMessage :=
+            'Existing server-base.cfg and gt-*.cfg files were backed up before the packaged configs were installed:' +
+            #13#10#13#10 + LastConfigBackupDir;
+
+        if LastBackupFile <> '' then
+        begin
+          if BackupMessage <> '' then
+            BackupMessage := BackupMessage + #13#10#13#10;
+          BackupMessage :=
+            BackupMessage +
+            'The existing Quake II game_x64.dll was backed up before Muff Mode was installed:' +
+            #13#10#13#10 + LastBackupFile + #13#10#13#10 +
+            'If older Muff Mode version marker files were present, matching .version.txt and .version.json files were saved next to that backup.';
+        end;
+
+        MsgBox(BackupMessage, mbInformation, MB_OK);
+      end;
     end;
   end;
 end;

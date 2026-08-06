@@ -3,8 +3,35 @@
 
 #pragma once
 
+#include <cstdint>
+
 struct gentity_t;
 struct menu_hnd_t;
+
+namespace muffmode::vote_menu {
+
+struct MapMenuSourceRevision {
+	const void *map_list_source = nullptr;
+	std::int32_t map_list_modified = 0;
+	const void *map_pool_source = nullptr;
+	std::int32_t map_pool_modified = 0;
+	std::uint64_t structured_pool_revision = 0;
+};
+
+inline constexpr bool MapMenuSnapshotNeedsRefresh(
+	bool initialized,
+	const MapMenuSourceRevision &cached,
+	const MapMenuSourceRevision &current) noexcept
+{
+	return !initialized ||
+		cached.map_list_source != current.map_list_source ||
+		cached.map_list_modified != current.map_list_modified ||
+		cached.map_pool_source != current.map_pool_source ||
+		cached.map_pool_modified != current.map_pool_modified ||
+		cached.structured_pool_revision != current.structured_pool_revision;
+}
+
+} // namespace muffmode::vote_menu
 
 // [MuffMode] Vote menu entry points. Implemented in muffmode/mm_vote_menu.cpp.
 bool Vote_Menu_Active(gentity_t *ent);

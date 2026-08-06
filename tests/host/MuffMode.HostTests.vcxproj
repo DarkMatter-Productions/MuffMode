@@ -77,6 +77,9 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="fake_game_import.h" />
+    <ClCompile Include="..\..\src\shared\q_std.cpp" />
+    <ClCompile Include="client_refs_compile_tests.cpp" />
+    <ClCompile Include="q_std_test_stubs.cpp" />
     <ClCompile Include="test_main.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

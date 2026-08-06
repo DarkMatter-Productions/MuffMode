@@ -7,6 +7,7 @@
 #include <cerrno>
 #include <charconv>
 #include <cmath>
+#include <cstddef>
 #include <cstdlib>
 #include <cstdint>
 #include <optional>
@@ -30,6 +31,49 @@ inline bool MM_EqualsAsciiI(std::string_view lhs, std::string_view rhs) noexcept
 			return false;
 	}
 
+	return true;
+}
+
+inline bool MM_IsWellFormedUtf8(std::string_view value) noexcept {
+	for (size_t i = 0; i < value.size();) {
+		const uint8_t lead = static_cast<uint8_t>(value[i]);
+		if (lead <= 0x7f) {
+			i++;
+			continue;
+		}
+
+		size_t length = 0;
+		uint32_t codepoint = 0;
+		if (lead >= 0xc2 && lead <= 0xdf) {
+			length = 2;
+			codepoint = lead & 0x1f;
+		} else if (lead >= 0xe0 && lead <= 0xef) {
+			length = 3;
+			codepoint = lead & 0x0f;
+		} else if (lead >= 0xf0 && lead <= 0xf4) {
+			length = 4;
+			codepoint = lead & 0x07;
+		} else {
+			return false;
+		}
+
+		if (length > value.size() - i)
+			return false;
+		for (size_t j = 1; j < length; j++) {
+			const uint8_t continuation =
+				static_cast<uint8_t>(value[i + j]);
+			if ((continuation & 0xc0) != 0x80)
+				return false;
+			codepoint = (codepoint << 6) | (continuation & 0x3f);
+		}
+
+		const uint32_t minimum = length == 2 ? 0x80u :
+			length == 3 ? 0x800u : 0x10000u;
+		if (codepoint < minimum || codepoint > 0x10ffffu ||
+			(codepoint >= 0xd800u && codepoint <= 0xdfffu))
+			return false;
+		i += length;
+	}
 	return true;
 }
 
@@ -96,6 +140,18 @@ inline std::optional<uint32_t> MM_ParseUInt32Arg(const char *s) {
 	return MM_ParseUInt32Text(s);
 }
 
+inline std::optional<uint32_t> MM_ParseCanonicalUInt32Text(std::string_view text) {
+	if (text.size() > 1 && text.front() == '0')
+		return std::nullopt;
+	return MM_ParseUInt32Text(text);
+}
+
+inline std::optional<uint32_t> MM_ParseCanonicalUInt32Arg(const char *s) {
+	if (!s)
+		return std::nullopt;
+	return MM_ParseCanonicalUInt32Text(s);
+}
+
 inline std::optional<bool> MM_ParseBoolText(std::string_view text) {
 	if (MM_EqualsAsciiI(text, "1") || MM_EqualsAsciiI(text, "on") || MM_EqualsAsciiI(text, "true") ||
 		MM_EqualsAsciiI(text, "yes") || MM_EqualsAsciiI(text, "enable") || MM_EqualsAsciiI(text, "enabled")) {
@@ -123,6 +179,32 @@ inline std::optional<int32_t> MM_ParseNonNegativeIntArg(const char *s) {
 		return std::nullopt;
 
 	return value;
+}
+
+struct mm_reinforcement_spec_t {
+	std::string_view classname;
+	int32_t          strength;
+};
+
+inline std::optional<mm_reinforcement_spec_t> MM_ParseReinforcementSpec(std::string_view entry) {
+	entry = MM_TrimAsciiWhitespace(entry);
+	if (entry.empty())
+		return std::nullopt;
+
+	size_t split = 0;
+	while (split < entry.size() && !MM_IsAsciiWhitespace(entry[split]))
+		split++;
+
+	if (split == entry.size())
+		return std::nullopt;
+
+	const std::string_view classname = entry.substr(0, split);
+	const std::string_view strength_text = MM_TrimAsciiWhitespace(entry.substr(split));
+	const auto strength = MM_ParseIntText(strength_text);
+	if (!strength || *strength <= 0)
+		return std::nullopt;
+
+	return mm_reinforcement_spec_t { classname, *strength };
 }
 
 inline std::optional<float> MM_ParseFloatArg(const char *s) {

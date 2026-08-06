@@ -5,6 +5,7 @@
 MuffMode uses a **documented dual-path dependency model** for the C++ game DLL:
 
 - `vcpkg.json` at the repository root is the authoritative dependency manifest and baseline for reproducible builds.
+- The setup entrypoint checks out the vcpkg tool repository at that same immutable baseline; an arbitrary existing bootstrap or mutable default branch is not trusted.
 - `third_party/fmt` and `third_party/jsoncpp` are vendored compatibility mirrors kept outside `src/` so the source tree contains project code, not dependency code.
 - Vendored copies must match the versions recorded in [docs-dev/robustness/dependency-inventory.json](../docs-dev/robustness/dependency-inventory.json).
 
@@ -35,7 +36,8 @@ Run:
 The script verifies:
 
 - Root `LICENSE` is GPL-2.0.
-- `vcpkg.json` still declares `fmt` and `jsoncpp` at the recorded baseline.
+- `vcpkg.json` and the inventory declare exactly the same normalized dependency specifications (including features, host/default-feature flags, and platform expressions) at the recorded baseline; unreviewed top-level controls such as overrides, alternate registries, and overlay configuration are rejected.
+- .NET `PackageReference` declarations match the inventory's explicit NuGet list; the current list is empty.
 - Vendored `{fmt}` and JsonCpp header versions match the inventory.
 - `THIRD_PARTY_NOTICES.md` and release packaging include third-party notices.
 

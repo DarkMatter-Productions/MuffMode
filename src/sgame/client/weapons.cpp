@@ -4,7 +4,10 @@
 
 #include "g_local.h"
 #include "monsters/m_player.h"
+#include "muffmode/mm_arena.h"
+#include "muffmode/mm_client_profile.h"
 #include "muffmode/mm_freezetag.h"
+#include "muffmode/mm_match_stats.h"
 // [MuffMode] Per-ruleset weapon tuning hooks (MM_Ruleset_*)
 #include "muffmode/mm_ruleset_weapons.h"
 
@@ -12,6 +15,85 @@ bool is_quad;
 bool is_haste;
 player_muzzle_t is_silenced;
 byte damage_multiplier;
+
+static bool Weapon_ExcessiveEnabled(const gentity_t *ent) {
+	return GT(GT_ARENA)
+		? MM_Arena_ExcessiveEnabled(ent)
+		: g_frenzy->integer != 0;
+}
+
+static bool Weapon_InstantSwitchEnabled(const gentity_t *ent) {
+	// MuffMode Arena owns this setting per room. Do not let the legacy global
+	// cvar flatten differently configured rooms into one switch policy.
+	const bool fast_switch = GT(GT_ARENA) ?
+		MM_Arena_FastSwitchEnabled(ent) : g_instant_weapon_switch->integer != 0;
+	return fast_switch || Weapon_ExcessiveEnabled(ent);
+}
+
+static bool Weapon_QuickSwitchEnabled(const gentity_t *ent) {
+	const bool quick_switch = GT(GT_ARENA) ?
+		MM_Arena_FastSwitchEnabled(ent) : g_quick_weapon_switch->integer != 0;
+	return quick_switch || Weapon_ExcessiveEnabled(ent);
+}
+
+static float Weapon_FireTimeScale(const gentity_t *ent) {
+	return GT(GT_ARENA)
+		? MM_Arena_WeaponFireRateScale(ent)
+		: (g_frenzy->integer ? 0.5f : 1.0f);
+}
+
+static bool Weapon_CombatDisabled(const gentity_t *ent) {
+	return GT(GT_ARENA) ? !MM_Arena_CombatEnabled(ent) : IsCombatDisabled();
+}
+
+static trace_t Weapon_ArenaTrace(const vec3_t &start, const vec3_t *mins,
+	const vec3_t *maxs, const vec3_t &end, gentity_t *passent,
+	contents_t mask, const gentity_t *source) {
+	auto trace = [&]() {
+		return mins && maxs
+			? gi.trace(start, *mins, *maxs, end, passent, mask)
+			: gi.traceline(start, end, passent, mask);
+	};
+
+	trace_t tr = trace();
+	if (notGT(GT_ARENA))
+		return tr;
+
+	struct skipped_entity_t {
+		gentity_t *ent;
+		int32_t spawn_count;
+	};
+	constexpr size_t MAX_ARENA_TRACE_SKIPS = 64;
+	std::array<skipped_entity_t, MAX_ARENA_TRACE_SKIPS> skipped {};
+	size_t skipped_count = 0;
+
+	while (tr.ent && tr.ent != world &&
+		!MM_Arena_CanInteract(source, tr.ent) &&
+		skipped_count < skipped.size()) {
+		skipped[skipped_count++] = { tr.ent, tr.ent->spawn_count };
+		gi.unlinkentity(tr.ent);
+		tr = trace();
+	}
+
+	while (skipped_count > 0) {
+		const skipped_entity_t entry = skipped[--skipped_count];
+		if (entry.ent->inuse && entry.ent->spawn_count == entry.spawn_count)
+			gi.linkentity(entry.ent);
+	}
+
+	return tr;
+}
+
+static trace_t Weapon_ArenaTraceline(const vec3_t &start, const vec3_t &end,
+	gentity_t *passent, contents_t mask, const gentity_t *source) {
+	return Weapon_ArenaTrace(start, nullptr, nullptr, end, passent, mask, source);
+}
+
+static trace_t Weapon_ArenaBoxTrace(const vec3_t &start, const vec3_t &mins,
+	const vec3_t &maxs, const vec3_t &end, gentity_t *passent,
+	contents_t mask, const gentity_t *source) {
+	return Weapon_ArenaTrace(start, &mins, &maxs, end, passent, mask, source);
+}
 
 /*
 ================
@@ -22,6 +104,11 @@ bool InfiniteAmmoOn(gitem_t *item) {
 	if (item && item->flags & IF_NO_INFINITE_AMMO)
 		return false;
 
+	// [MuffMode] GT_ARENA resolves infinite ammo per room (Practice or
+	// excessive). A global modifier must not flatten independent arena rules.
+	if (GT(GT_ARENA))
+		return false;
+
 	return g_infinite_ammo->integer || (deathmatch->integer && ((g_instagib->integer || GT(GT_INSTAGIB)) || (g_nadefest->integer || GT(GT_NADEFEST))));
 }
 
@@ -30,8 +117,17 @@ bool InfiniteAmmoOn(gitem_t *item) {
 Stats_AddShot
 ================
 */
-static void Stats_AddShot(gentity_t *ent) {
+static void Stats_AddShot(gentity_t *ent, uint32_t count = 1) {
+	if (!ent || !ent->client || !count)
+		return;
+	// Preserve the legacy live-stat event count. Hitscan pellets are already
+	// counted individually in fire_lead; the export records projectile count.
 	MS_Adjust(ent->client, MSTAT_SHOTS, 1);
+	const item_id_t weapon = ent->client->pers.weapon
+		? ent->client->pers.weapon->id
+		: IT_NULL;
+	MM_MatchStats_RecordShot(ent->client,
+		MM_MatchStats_WeaponForItem(weapon), count);
 }
 
 /*
@@ -170,7 +266,7 @@ static void P_ProjectSourceInternal(gentity_t *ent, const vec3_t &angles, vec3_t
 	if (lag_compensate_aim && G_LagCompensate(ent, eye_position, forward))
 		aim_lag_compensation.activate();
 
-	trace_t tr = gi.traceline(eye_position, end, ent, mask);
+	trace_t tr = Weapon_ArenaTraceline(eye_position, end, ent, mask, ent);
 	aim_lag_compensation.reset();
 
 	// if the point was a monster & close to us, use raw forward
@@ -328,7 +424,7 @@ bool Pickup_Weapon(gentity_t *ent, gentity_t *other) {
 		item_id_t ammo_id = MM_Ruleset_WeaponAmmoId(ent->item);
 		if (ammo_id) {
 			ammo = GetItemByIndex(ammo_id);
-			if (InfiniteAmmoOn(ammo))
+			if (InfiniteAmmoOn(ammo) || MM_Arena_InfiniteAmmoEnabled(other))
 				Add_Ammo(other, ammo, AMMO_INFINITE);
 			else {
 				int quantity = MM_Ruleset_WeaponPickupAmmoQuantity(ent, other, ammo);
@@ -386,7 +482,7 @@ current
 */
 void Change_Weapon(gentity_t *ent) {
 	// [Paril-KEX]
-	if (ent->health > 0 && !g_instant_weapon_switch->integer && !g_frenzy->integer && ((ent->client->latched_buttons | ent->client->buttons) & BUTTON_HOLSTER))
+	if (ent->health > 0 && !Weapon_InstantSwitchEnabled(ent) && ((ent->client->latched_buttons | ent->client->buttons) & BUTTON_HOLSTER))
 		return;
 
 	if (ent->client->grenade_time) {
@@ -401,7 +497,7 @@ void Change_Weapon(gentity_t *ent) {
 
 		if (ent->client->newweapon && ent->client->newweapon != ent->client->pers.weapon) {
 			//muff: only make the sound if we can switch faster
-			if (g_quick_weapon_switch->integer || g_instant_weapon_switch->integer)
+			if (Weapon_QuickSwitchEnabled(ent) || Weapon_InstantSwitchEnabled(ent))
 				gi.sound(ent, CHAN_WEAPON, gi.soundindex("weapons/change.wav"), 1, ATTN_NORM, 0);
 		}
 	}
@@ -437,7 +533,7 @@ void Change_Weapon(gentity_t *ent) {
 
 	// for instantweap, run think immediately
 	// to set up correct start frame
-	if (g_instant_weapon_switch->integer || g_frenzy->integer)
+	if (Weapon_InstantSwitchEnabled(ent))
 		Weapon_RunThink(ent);
 }
 
@@ -447,6 +543,10 @@ NoAmmoWeaponChange
 =================
 */
 void NoAmmoWeaponChange(gentity_t *ent, bool sound) {
+	// [MuffMode] This helper is also reached from map targets and lifecycle code.
+	if (!ent || !ent->client)
+		return;
+
 	if (sound) {
 		if (level.time >= ent->client->empty_click_sound) {
 			gi.sound(ent, CHAN_WEAPON, gi.soundindex("weapons/noammo.wav"), 1, ATTN_NORM, 0);
@@ -454,32 +554,16 @@ void NoAmmoWeaponChange(gentity_t *ent, bool sound) {
 		}
 	}
 
-	constexpr item_id_t no_ammo_order[] = {
-		IT_WEAPON_DISRUPTOR,
-		IT_WEAPON_BFG,
-		IT_WEAPON_RAILGUN,
-		IT_WEAPON_PLASMABEAM,
-		IT_WEAPON_IONRIPPER,
-		IT_WEAPON_HYPERBLASTER,
-		IT_WEAPON_ETF_RIFLE,
-		IT_WEAPON_CHAINGUN,
-		IT_WEAPON_MACHINEGUN,
-		IT_WEAPON_SSHOTGUN,
-		IT_WEAPON_SHOTGUN,
-		IT_WEAPON_PHALANX,
-		IT_WEAPON_RLAUNCHER,
-		IT_WEAPON_GLAUNCHER,
-		IT_WEAPON_PROXLAUNCHER,
-		IT_AMMO_GRENADES,
-		IT_WEAPON_BLASTER,
-		IT_WEAPON_CHAINFIST
-	};
-
-	for (size_t i = 0; i < q_countof(no_ammo_order); i++) {
+	std::array<item_id_t, IT_TOTAL> no_ammo_order{};
+	const size_t no_ammo_count = MM_ClientProfileBuildWeaponOrder(
+		ent->client, no_ammo_order.data(), no_ammo_order.size());
+	for (size_t i = 0; i < no_ammo_count; i++) {
 		gitem_t *item = GetItemByIndex(no_ammo_order[i]);
 
-		if (!item)
+		if (!item) {
 			gi.Com_ErrorFmt("Invalid no ammo weapon switch weapon {}\n", (int32_t)no_ammo_order[i]);
+			continue;
+		}
 
 		if (RS(RS_Q3A) && item->id == IT_WEAPON_SSHOTGUN)
 			continue;
@@ -505,7 +589,7 @@ RemoveAmmo
 ================
 */
 static void RemoveAmmo(gentity_t *ent, int32_t quantity) {
-	if (InfiniteAmmoOn(ent->client->pers.weapon))
+	if (InfiniteAmmoOn(ent->client->pers.weapon) || MM_Arena_InfiniteAmmoEnabled(ent))
 		return;
 
 	item_id_t ammo_id = MM_Ruleset_WeaponAmmoId(ent->client->pers.weapon);
@@ -533,26 +617,27 @@ Weapon_AnimationTime
 ================
 */
 static inline gtime_t Weapon_AnimationTime(gentity_t *ent) {
-	if ((g_quick_weapon_switch->integer || g_frenzy->integer) && (gi.tick_rate >= 20) &&
+	const gitem_t *weapon = ent->client->pers.weapon;
+
+	if (Weapon_QuickSwitchEnabled(ent) && (gi.tick_rate >= 20) &&
 		(ent->client->weaponstate == WEAPON_ACTIVATING || ent->client->weaponstate == WEAPON_DROPPING))
 		ent->client->ps.gunrate = 20;
 	else
 		ent->client->ps.gunrate = 10;
 
-	if (RS(RS_Q3A) && ent->client->weaponstate == WEAPON_FIRING && ent->client->pers.weapon) {
-		if (ent->client->pers.weapon->id == IT_WEAPON_PLASMABEAM)
+	if (RS(RS_Q3A) && ent->client->weaponstate == WEAPON_FIRING && weapon) {
+		if (weapon->id == IT_WEAPON_PLASMABEAM)
 			ent->client->ps.gunrate = 20;
-		else if (ent->client->pers.weapon->id == IT_WEAPON_CHAINGUN)
+		else if (weapon->id == IT_WEAPON_CHAINGUN)
 			ent->client->ps.gunrate = 30;
 	}
 
-	if (ent->client->ps.gunframe != 0 && (!(ent->client->pers.weapon->flags & IF_NO_HASTE) || ent->client->weaponstate != WEAPON_FIRING)) {
+	if (weapon && ent->client->ps.gunframe != 0 && (!(weapon->flags & IF_NO_HASTE) || ent->client->weaponstate != WEAPON_FIRING)) {
 		if (is_haste)
 			ent->client->ps.gunrate *= 1.5;
 		if (Tech_ApplyTimeAccel(ent))
 			ent->client->ps.gunrate *= 2;
-		if (g_frenzy->integer)
-			ent->client->ps.gunrate *= 2;
+		ent->client->ps.gunrate /= Weapon_FireTimeScale(ent);
 	}
 
 	// network optimization...
@@ -562,6 +647,31 @@ static inline gtime_t Weapon_AnimationTime(gentity_t *ent) {
 	}
 
 	return gtime_t::from_ms((1.f / ent->client->ps.gunrate) * 1000);
+}
+
+void Weapon_CancelFiring(gentity_t *ent) {
+	if (!ent || !ent->client)
+		return;
+
+	gclient_t *client = ent->client;
+	client->latched_buttons &= ~BUTTON_ATTACK;
+	client->weapon_fire_buffered = false;
+
+	if (client->weaponstate != WEAPON_FIRING)
+		return;
+
+	// Re-enter the normal activation path after combat resumes instead of
+	// continuing on a pending fire/throw frame. This also safely abandons a
+	// primed throwable without spawning it or consuming ammunition.
+	client->weaponstate = WEAPON_ACTIVATING;
+	client->ps.gunframe = 0;
+	client->weapon_sound = 0;
+	client->grenade_time = 0_ms;
+	client->grenade_finished_time = 0_ms;
+	client->grenade_blew_up = false;
+	client->weapon_thunk = false;
+	client->weapon_think_time = level.time;
+	client->weapon_fire_finished = level.time;
 }
 
 /*
@@ -699,7 +809,7 @@ void Use_Weapon(gentity_t *ent, gitem_t *item) {
 
 	if (result == weap_switch_t::valid)
 		ent->client->newweapon = wanted; // change to this weapon when down
-	else if ((result = Weapon_AttemptSwitch(ent, wanted, true)) == weap_switch_t::no_weapon && wanted != ent->client->pers.weapon && wanted != ent->client->newweapon)
+	else if (Weapon_AttemptSwitch(ent, wanted, true) == weap_switch_t::no_weapon && wanted != ent->client->pers.weapon && wanted != ent->client->newweapon)
 		gi.LocClient_Print(ent, PRINT_HIGH, "$g_out_of_item", wanted->pickup_name);
 }
 
@@ -835,14 +945,14 @@ Weapon_HandleActivating
 */
 static inline bool Weapon_HandleActivating(gentity_t *ent, int FRAME_ACTIVATE_LAST, int FRAME_IDLE_FIRST) {
 	if (ent->client->weaponstate == WEAPON_ACTIVATING) {
-		if (ent->client->weapon_think_time <= level.time || g_instant_weapon_switch->integer || g_frenzy->integer) {
+		if (ent->client->weapon_think_time <= level.time || Weapon_InstantSwitchEnabled(ent)) {
 			ent->client->weapon_think_time = level.time + Weapon_AnimationTime(ent);
 
-			if (ent->client->ps.gunframe == FRAME_ACTIVATE_LAST || g_instant_weapon_switch->integer || g_frenzy->integer) {
+			if (ent->client->ps.gunframe == FRAME_ACTIVATE_LAST || Weapon_InstantSwitchEnabled(ent)) {
 				ent->client->weaponstate = WEAPON_READY;
 				ent->client->ps.gunframe = FRAME_IDLE_FIRST;
 				ent->client->weapon_fire_buffered = false;
-				if (!g_instant_weapon_switch->integer || g_frenzy->integer)
+				if (!Weapon_InstantSwitchEnabled(ent) || Weapon_ExcessiveEnabled(ent))
 					Weapon_SetFinished(ent);
 				else
 					ent->client->weapon_fire_finished = 0_ms;
@@ -865,17 +975,17 @@ Weapon_HandleNewWeapon
 static inline bool Weapon_HandleNewWeapon(gentity_t *ent, int FRAME_DEACTIVATE_FIRST, int FRAME_DEACTIVATE_LAST) {
 	bool is_holstering = false;
 
-	if (!g_instant_weapon_switch->integer || g_frenzy->integer)
+	if (!Weapon_InstantSwitchEnabled(ent) || Weapon_ExcessiveEnabled(ent))
 		is_holstering = ((ent->client->latched_buttons | ent->client->buttons) & BUTTON_HOLSTER);
 
 	if ((ent->client->newweapon || is_holstering) && (ent->client->weaponstate != WEAPON_FIRING)) {
-		if (g_instant_weapon_switch->integer || g_frenzy->integer || ent->client->weapon_think_time <= level.time) {
+		if (Weapon_InstantSwitchEnabled(ent) || ent->client->weapon_think_time <= level.time) {
 			if (!ent->client->newweapon)
 				ent->client->newweapon = ent->client->pers.weapon;
 
 			ent->client->weaponstate = WEAPON_DROPPING;
 
-			if (g_instant_weapon_switch->integer || g_frenzy->integer) {
+			if (Weapon_InstantSwitchEnabled(ent)) {
 				Change_Weapon(ent);
 				return true;
 			}
@@ -917,9 +1027,10 @@ static inline weapon_ready_state_t Weapon_HandleReady(gentity_t *ent, int FRAME_
 	if (ent->client->weaponstate == WEAPON_READY) {
 		bool request_firing;
 
-		if (IsCombatDisabled()) {
+		if (Weapon_CombatDisabled(ent)) {
 			request_firing = false;
 			ent->client->latched_buttons &= ~BUTTON_ATTACK;
+			ent->client->weapon_fire_buffered = false;
 		} else
 			request_firing = ent->client->weapon_fire_buffered || ((ent->client->latched_buttons | ent->client->buttons) & BUTTON_ATTACK);
 
@@ -970,7 +1081,9 @@ static inline weapon_ready_state_t Weapon_HandleReady(gentity_t *ent, int FRAME_
 Weapon_HandleFiring
 ================
 */
-static inline void Weapon_HandleFiring(gentity_t *ent, int32_t FRAME_IDLE_FIRST, std::function<void()> fire_handler) {
+[[nodiscard]] static inline bool Weapon_HandleFiring(gentity_t *ent,
+	int32_t FRAME_IDLE_FIRST, std::function<void()> fire_handler) {
+	const int32_t ent_generation = ent->spawn_count;
 	Weapon_SetFinished(ent);
 
 	if (ent->client->weapon_fire_buffered) {
@@ -979,6 +1092,8 @@ static inline void Weapon_HandleFiring(gentity_t *ent, int32_t FRAME_IDLE_FIRST,
 	}
 
 	fire_handler();
+	if (!ent->inuse || ent->spawn_count != ent_generation)
+		return false;
 
 	if (ent->client->ps.gunframe == FRAME_IDLE_FIRST) {
 		ent->client->weaponstate = WEAPON_READY;
@@ -986,6 +1101,7 @@ static inline void Weapon_HandleFiring(gentity_t *ent, int32_t FRAME_IDLE_FIRST,
 	}
 
 	ent->client->weapon_think_time = level.time + Weapon_AnimationTime(ent);
+	return true;
 }
 
 /*
@@ -1010,6 +1126,7 @@ void Weapon_Generic(gentity_t *ent, int FRAME_ACTIVATE_LAST, int FRAME_FIRE_LAST
 	else if (const auto state = Weapon_HandleReady(ent, FRAME_FIRE_FIRST, FRAME_IDLE_FIRST, FRAME_IDLE_LAST, pause_frames);
 		state != weapon_ready_state_t::none) {
 		if (state == weapon_ready_state_t::firing) {
+			const int32_t ent_generation = ent->spawn_count;
 			ent->client->ps.gunframe = FRAME_FIRE_FIRST;
 			ent->client->weapon_fire_buffered = false;
 
@@ -1023,6 +1140,8 @@ void Weapon_Generic(gentity_t *ent, int FRAME_ACTIVATE_LAST, int FRAME_FIRE_LAST
 				if (ent->client->ps.gunframe == fire_frames[n]) {
 					Weapon_PowerupSound(ent);
 					fire(ent);
+					if (!ent->inuse || ent->spawn_count != ent_generation)
+						return;
 					break;
 				}
 			}
@@ -1045,7 +1164,7 @@ void Weapon_Generic(gentity_t *ent, int FRAME_ACTIVATE_LAST, int FRAME_FIRE_LAST
 	if (ent->client->weaponstate == WEAPON_FIRING && ent->client->weapon_think_time <= level.time) {
 		ent->client->last_firing_time = level.time + COOP_DAMAGE_FIRING_TIME;
 		ent->client->ps.gunframe++;
-		Weapon_HandleFiring(ent, FRAME_IDLE_FIRST, [&]() {
+		if (!Weapon_HandleFiring(ent, FRAME_IDLE_FIRST, [&]() {
 			for (int n = 0; fire_frames[n]; n++) {
 				if (ent->client->ps.gunframe == fire_frames[n]) {
 					Weapon_PowerupSound(ent);
@@ -1053,7 +1172,8 @@ void Weapon_Generic(gentity_t *ent, int FRAME_ACTIVATE_LAST, int FRAME_FIRE_LAST
 					break;
 				}
 			}
-			});
+			}))
+			return;
 	}
 }
 
@@ -1081,7 +1201,9 @@ void Weapon_Repeating(gentity_t *ent, int FRAME_ACTIVATE_LAST, int FRAME_FIRE_LA
 
 	if (ent->client->weaponstate == WEAPON_FIRING && ent->client->weapon_think_time <= level.time) {
 		ent->client->last_firing_time = level.time + COOP_DAMAGE_FIRING_TIME;
-		Weapon_HandleFiring(ent, FRAME_IDLE_FIRST, [&]() { fire(ent); });
+		if (!Weapon_HandleFiring(
+				ent, FRAME_IDLE_FIRST, [&]() { fire(ent); }))
+			return;
 
 		if (ent->client->weapon_thunk)
 			ent->client->weapon_think_time += FRAME_TIME_S;
@@ -1116,6 +1238,7 @@ static void Weapon_HandGrenade_Fire(gentity_t *ent, bool held) {
 
 	fire_handgrenade(ent, start, dir, damage, speed, timer, radius, held);
 
+	Stats_AddShot(ent);
 	RemoveAmmo(ent, 1);
 }
 
@@ -1127,7 +1250,6 @@ void Throw_Generic(gentity_t *ent, int FRAME_FIRE_LAST, int FRAME_IDLE_LAST, int
 	// when we die, just toss what we had in our hands.
 	if (ent->health <= 0) {
 		fire(ent, true);
-		MS_Adjust(ent->client, MSTAT_SHOTS, 1);
 		return;
 	}
 
@@ -1158,9 +1280,10 @@ void Throw_Generic(gentity_t *ent, int FRAME_FIRE_LAST, int FRAME_IDLE_LAST, int
 	if (ent->client->weaponstate == WEAPON_READY) {
 		bool request_firing;
 
-		if (IsCombatDisabled()) {
+		if (Weapon_CombatDisabled(ent)) {
 			request_firing = false;
 			ent->client->latched_buttons &= ~BUTTON_ATTACK;
+			ent->client->weapon_fire_buffered = false;
 		} else
 			request_firing = ent->client->weapon_fire_buffered || ((ent->client->latched_buttons | ent->client->buttons) & BUTTON_ATTACK);
 
@@ -1211,8 +1334,7 @@ void Throw_Generic(gentity_t *ent, int FRAME_FIRE_LAST, int FRAME_IDLE_LAST, int
 				grenade_wait_time *= 0.5f;
 			if (is_haste)
 				grenade_wait_time *= 0.5f;
-			if (g_frenzy->integer)
-				grenade_wait_time *= 0.5f;
+			grenade_wait_time *= Weapon_FireTimeScale(ent);
 
 			if (ent->client->ps.gunframe == FRAME_THROW_HOLD) {
 				if (!ent->client->grenade_time && !ent->client->grenade_finished_time)
@@ -1226,7 +1348,6 @@ void Throw_Generic(gentity_t *ent, int FRAME_FIRE_LAST, int FRAME_IDLE_LAST, int
 					Weapon_PowerupSound(ent);
 					ent->client->weapon_sound = 0;
 					fire(ent, true);
-					MS_Adjust(ent->client, MSTAT_SHOTS, 1);
 
 					ent->client->grenade_blew_up = true;
 
@@ -1252,7 +1373,6 @@ void Throw_Generic(gentity_t *ent, int FRAME_FIRE_LAST, int FRAME_IDLE_LAST, int
 					Weapon_PowerupSound(ent);
 					ent->client->weapon_sound = 0;
 					fire(ent, false);
-					MS_Adjust(ent->client, MSTAT_SHOTS, 1);
 
 					if (!EXPLODE || !ent->client->grenade_blew_up)
 						ent->client->grenade_finished_time = level.time + grenade_wait_time;
@@ -1356,6 +1476,7 @@ static void Weapon_GrenadeLauncher_Fire(gentity_t *ent) {
 
 	PlayerNoise(ent, start, PNOISE_WEAPON);
 
+	Stats_AddShot(ent);
 	RemoveAmmo(ent, 1);
 }
 
@@ -1397,7 +1518,8 @@ static void Weapon_RocketLauncher_Fire(gentity_t *ent) {
 		speed = g_rocketlauncher_speed->integer;
 	}
 #endif
-	if (g_frenzy->integer)
+	speed = MM_Arena_RocketSpeed(ent, speed);
+	if (Weapon_ExcessiveEnabled(ent))
 		speed *= 1.5;
 
 	if (is_quad) {
@@ -1425,6 +1547,7 @@ static void Weapon_RocketLauncher_Fire(gentity_t *ent) {
 
 	PlayerNoise(ent, start, PNOISE_WEAPON);
 
+	Stats_AddShot(ent);
 	RemoveAmmo(ent, 1);
 }
 
@@ -1667,6 +1790,7 @@ static void Weapon_Machinegun_Fire(gentity_t *ent) {
 
 	PlayerNoise(ent, start, PNOISE_WEAPON);
 
+	Stats_AddShot(ent);
 	RemoveAmmo(ent, 1);
 
 	ent->client->anim_priority = ANIM_ATTACK;
@@ -1748,7 +1872,7 @@ static void Weapon_Chaingun_Fire(gentity_t *ent) {
 
 		PlayerNoise(ent, start, PNOISE_WEAPON);
 
-		Stats_AddShot(ent);
+		Stats_AddShot(ent, static_cast<uint32_t>(shots));
 		RemoveAmmo(ent, shots);
 
 		ent->client->weapon_sound = gi.soundindex("weapons/chngnl1a.wav");
@@ -1877,7 +2001,7 @@ static void Weapon_Chaingun_Fire(gentity_t *ent) {
 
 	PlayerNoise(ent, start, PNOISE_WEAPON);
 
-	Stats_AddShot(ent);
+	Stats_AddShot(ent, static_cast<uint32_t>(shots));
 	RemoveAmmo(ent, shots);
 }
 
@@ -1928,7 +2052,7 @@ static void Weapon_Shotgun_Fire(gentity_t *ent) {
 
 	PlayerNoise(ent, start, PNOISE_WEAPON);
 
-	Stats_AddShot(ent);
+	Stats_AddShot(ent, static_cast<uint32_t>(pellets));
 	RemoveAmmo(ent, 1);
 }
 
@@ -1990,7 +2114,7 @@ static void Weapon_SuperShotgun_Fire(gentity_t *ent) {
 
 	PlayerNoise(ent, start, PNOISE_WEAPON);
 
-	Stats_AddShot(ent);
+	Stats_AddShot(ent, static_cast<uint32_t>(pellets));
 	RemoveAmmo(ent, 2);
 }
 
@@ -2238,9 +2362,12 @@ static void Weapon_ChainFist_Fire(gentity_t *ent) {
 		}
 
 		if (RS(RS_Q3A)) {
-			trace_t tr = gi.traceline(start, start + (dir * CHAINFIST_REACH), ent, MASK_SHOT);
+			trace_t tr = Weapon_ArenaTraceline(start,
+				start + (dir * CHAINFIST_REACH), ent, MASK_SHOT, ent);
 
-			if (!(tr.surface && (tr.surface->flags & SURF_SKY)) && tr.ent && tr.ent->takedamage) {
+			if (!(tr.surface && (tr.surface->flags & SURF_SKY)) &&
+				tr.ent && tr.ent->takedamage &&
+				(notGT(GT_ARENA) || MM_Arena_CanInteract(ent, tr.ent))) {
 				T_Damage(tr.ent, ent, ent, dir, tr.endpos, tr.plane.normal, damage, kick, DAMAGE_NONE, MOD_CHAINFIST);
 				hit = true;
 			}
@@ -2354,9 +2481,10 @@ static void Weapon_Disruptor_Fire(gentity_t *ent) {
 	if (!G_ShouldPlayersCollide(true))
 		mask &= ~CONTENTS_PLAYER;
 
-	tr = gi.traceline(start, end, ent, mask);
+	tr = Weapon_ArenaTraceline(start, end, ent, mask, ent);
 	if (tr.ent != world) {
-		if ((tr.ent->svflags & SVF_MONSTER) || tr.ent->client || (tr.ent->flags & FL_DAMAGEABLE)) {
+		if ((notGT(GT_ARENA) || MM_Arena_CanInteract(ent, tr.ent)) &&
+			((tr.ent->svflags & SVF_MONSTER) || tr.ent->client || (tr.ent->flags & FL_DAMAGEABLE))) {
 			if (tr.ent->health > 0)
 				enemy = tr.ent;
 		}
@@ -2364,9 +2492,10 @@ static void Weapon_Disruptor_Fire(gentity_t *ent) {
 		if (!enhanced_lag_compensation)
 			lag_compensation.reset();
 
-		tr = gi.trace(start, mins, maxs, end, ent, mask);
+		tr = Weapon_ArenaBoxTrace(start, mins, maxs, end, ent, mask, ent);
 		if (tr.ent != world) {
-			if ((tr.ent->svflags & SVF_MONSTER) || tr.ent->client || (tr.ent->flags & FL_DAMAGEABLE)) {
+			if ((notGT(GT_ARENA) || MM_Arena_CanInteract(ent, tr.ent)) &&
+				((tr.ent->svflags & SVF_MONSTER) || tr.ent->client || (tr.ent->flags & FL_DAMAGEABLE))) {
 				if (tr.ent->health > 0)
 					enemy = tr.ent;
 			}
@@ -2506,13 +2635,17 @@ static bool Weapon_Q1PlasmaBeamDischarge(gentity_t *ent, int cells) {
 	Stats_AddShot(ent);
 	RemoveAmmo(ent, cells);
 	NoAmmoWeaponChange(ent, false);
+	const int32_t discharge_generation = ent->spawn_count;
 	T_RadiusDamage(ent, ent, (float)damage, world, (float)(damage + 40), DAMAGE_ENERGY, MOD_PLASMABEAM);
+	if (!ent->inuse || ent->spawn_count != discharge_generation)
+		return true;
 	PlayerNoise(ent, ent->s.origin, PNOISE_WEAPON);
 	return true;
 }
 
 static void Weapon_PlasmaBeam_Fire(gentity_t *ent) {
-	bool firing = (ent->client->buttons & BUTTON_ATTACK) && !IsCombatDisabled();
+	bool firing = (ent->client->buttons & BUTTON_ATTACK) &&
+		!Weapon_CombatDisabled(ent);
 	item_id_t ammo_id = MM_Ruleset_WeaponAmmoId(ent->client->pers.weapon);
 	int ammo_per_shot = MM_Ruleset_PlasmaBeamAmmoPerShot();
 	int ammo_count = ammo_id ? ent->client->pers.inventory[ammo_id] : 0;
@@ -2656,7 +2789,7 @@ static void Weapon_IonRipper_Fire(gentity_t *ent) {
 
 		PlayerNoise(ent, start, PNOISE_WEAPON);
 
-		Stats_AddShot(ent);
+		Stats_AddShot(ent, static_cast<uint32_t>(projectile_count));
 		RemoveAmmo(ent, 1);
 		return;
 	}
@@ -2733,7 +2866,7 @@ static void Weapon_Phalanx_Fire(gentity_t *ent) {
 		gi.WriteByte(MZ_PHALANX2 | is_silenced);
 		gi.multicast(ent->s.origin, MULTICAST_PVS, false);
 
-		Stats_AddShot(ent);
+		Stats_AddShot(ent, 2);
 		RemoveAmmo(ent, 1);
 	} else {
 		v[PITCH] = ent->client->v_angle[PITCH];

@@ -1339,7 +1339,10 @@ void SP_monster_guncmdr(gentity_t *self) {
 	gi.modelindex("models/monsters/gunner/gibs/gun.md2");
 	gi.modelindex("models/monsters/gunner/gibs/head.md2");
 
-	self->s.scale = 1.25f;
+	// [MuffMode] Preserve an explicit authored/director scale; 1.25 remains the
+	// native default when no scale was supplied.
+	if (!self->s.scale)
+		self->s.scale = 1.25f;
 	self->mins = vec3_t{ -16, -16, -24 };
 	self->maxs = vec3_t{ 16, 16, 36 };
 	self->s.skinnum = 2;

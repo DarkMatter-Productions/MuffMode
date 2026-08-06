@@ -9,6 +9,7 @@ BERSERK
 */
 
 #include "../g_local.h"
+#include "../muffmode/mm_arena.h"
 #include "m_berserk.h"
 
 constexpr spawnflags_t SPAWNFLAG_BERSERK_NOJUMPING = 8_spawnflag;
@@ -26,6 +27,79 @@ static cached_soundindex sound_jump;
 
 static bool berserk_has_live_enemy(const gentity_t *self) {
 	return self && self->enemy && self->enemy->inuse;
+}
+
+struct berserk_damage_source_snapshot_t {
+	gentity_t *entity{};
+	int32_t generation{};
+	vec3_t origin{};
+	bool linked{};
+	bool has_client{};
+	bool connected{};
+	bool arena_mode{};
+	bool arena_fighter{};
+	bool arena_running{};
+	bool arena_paused{};
+	int32_t client_team{};
+	uint16_t arena_team{};
+	int arena_id{};
+
+	bool matches() const noexcept
+	{
+		if (!entity || !entity->inuse || entity->spawn_count != generation ||
+			entity->s.origin != origin || entity->linked != linked ||
+			(entity->client != nullptr) != has_client ||
+			GT(GT_ARENA) != arena_mode || MM_Arena_Id(entity) != arena_id)
+			return false;
+
+		if (has_client) {
+			if (entity->client->pers.connected != connected ||
+				MM_Arena_IsFighter(entity->client) != arena_fighter ||
+				static_cast<int32_t>(entity->client->sess.team) != client_team ||
+				entity->client->resp.arena_team_id != arena_team)
+				return false;
+		}
+
+		return arena_id <= 0 ||
+			(MM_Arena_IsRunning(arena_id) == arena_running &&
+			 MM_Arena_IsPaused(arena_id) == arena_paused);
+	}
+};
+
+static berserk_damage_source_snapshot_t berserk_capture_damage_source(
+	gentity_t *entity) noexcept
+{
+	berserk_damage_source_snapshot_t snapshot;
+	snapshot.entity = entity;
+	snapshot.generation = entity ? entity->spawn_count : 0;
+	if (!entity)
+		return snapshot;
+
+	snapshot.origin = entity->s.origin;
+	snapshot.linked = entity->linked;
+	snapshot.has_client = entity->client != nullptr;
+	snapshot.connected = !entity->client || entity->client->pers.connected;
+	snapshot.arena_mode = GT(GT_ARENA);
+	snapshot.arena_fighter = entity->client &&
+		MM_Arena_IsFighter(entity->client);
+	snapshot.client_team = entity->client
+		? static_cast<int32_t>(entity->client->sess.team) : 0;
+	snapshot.arena_team = entity->client
+		? entity->client->resp.arena_team_id : 0;
+	snapshot.arena_id = MM_Arena_Id(entity);
+	snapshot.arena_running = snapshot.arena_id > 0 &&
+		MM_Arena_IsRunning(snapshot.arena_id);
+	snapshot.arena_paused = snapshot.arena_id > 0 &&
+		MM_Arena_IsPaused(snapshot.arena_id);
+	return snapshot;
+}
+
+static bool berserk_damage_sources_match(
+	const berserk_damage_source_snapshot_t &inflictor,
+	const berserk_damage_source_snapshot_t &attacker) noexcept
+{
+	return inflictor.matches() &&
+		(inflictor.entity == attacker.entity || attacker.matches());
 }
 
 MONSTERINFO_SIGHT(berserk_sight) (gentity_t *self, gentity_t *other) -> void {
@@ -185,8 +259,46 @@ void T_SlamRadiusDamage(vec3_t point, gentity_t *inflictor, gentity_t *attacker,
 	gentity_t *ent = nullptr;
 	vec3_t	 v;
 	vec3_t	 dir;
+	if (!inflictor || !inflictor->inuse ||
+		(inflictor->client && !inflictor->client->pers.connected))
+		return;
+	if (!attacker || !attacker->inuse ||
+		(attacker->client && !attacker->client->pers.connected))
+		attacker = world;
+	if (!attacker || !attacker->inuse)
+		return;
+	const berserk_damage_source_snapshot_t inflictor_source =
+		berserk_capture_damage_source(inflictor);
+	const berserk_damage_source_snapshot_t attacker_source =
+		berserk_capture_damage_source(attacker);
+	const vec3_t inflictor_origin = inflictor_source.origin;
+	const size_t entity_count = min(
+		min(static_cast<size_t>(globals.num_entities),
+			static_cast<size_t>(game.maxentities)),
+		static_cast<size_t>(MAX_ENTITIES));
+	struct candidate_lifetime_t {
+		int32_t generation;
+		bool inuse;
+	};
+	std::vector<candidate_lifetime_t> candidate_lifetimes(entity_count);
+	for (size_t index = 0; index < entity_count; ++index) {
+		candidate_lifetimes[index] = {
+			g_entities[index].spawn_count, g_entities[index].inuse
+		};
+	}
+	const auto candidate_lifetime_matches = [&](const gentity_t *candidate) {
+		if (!candidate || candidate < g_entities ||
+			candidate >= g_entities + entity_count)
+			return false;
+		const size_t index = static_cast<size_t>(candidate - g_entities);
+		const candidate_lifetime_t &lifetime = candidate_lifetimes[index];
+		return lifetime.inuse && candidate->inuse &&
+			candidate->spawn_count == lifetime.generation;
+	};
 
-	while ((ent = findradius(ent, inflictor->s.origin, radius * 2.f)) != nullptr) {
+	while ((ent = findradius(ent, inflictor_origin, radius * 2.f)) != nullptr) {
+		if (!candidate_lifetime_matches(ent))
+			continue;
 		if (ent == ignore)
 			continue;
 		if (!ent->takedamage)
@@ -213,17 +325,29 @@ void T_SlamRadiusDamage(vec3_t point, gentity_t *inflictor, gentity_t *attacker,
 
 		dir = (ent->s.origin - point).normalized();
 
-		// keep the point at their feet so they always get knocked up
-		point[2] = ent->absmin[2];
-		T_Damage(ent, inflictor, attacker, dir, point, dir, (int)points, (int)(kick * amount),
+		// Keep this victim's damage point at their feet so they always get
+		// knocked up, without moving the shared slam origin for later victims.
+		vec3_t damage_point = point;
+		damage_point[2] = ent->absmin[2];
+		const int32_t target_generation = ent->spawn_count;
+		T_Damage(ent, inflictor, attacker, dir, damage_point, dir,
+			(int)points, (int)(kick * amount),
 			DAMAGE_RADIUS, mod);
+		if (!berserk_damage_sources_match(inflictor_source, attacker_source))
+			return;
+		if (!ent->inuse || ent->spawn_count != target_generation)
+			continue;
 
 		if (ent->client)
 			ent->velocity.z = max(270.f, ent->velocity.z);
 	}
 }
 
-static void berserk_attack_slam(gentity_t *self) {
+static bool berserk_attack_slam(gentity_t *self) {
+	if (!self)
+		return false;
+	const berserk_damage_source_snapshot_t self_source =
+		berserk_capture_damage_source(self);
 	gi.sound(self, CHAN_WEAPON, sound_thud, 1, ATTN_NORM, 0);
 	gi.sound(self, CHAN_AUTO, sound_explod, 0.75f, ATTN_NORM, 0);
 	gi.WriteByte(svc_temp_entity);
@@ -240,6 +364,7 @@ static void berserk_attack_slam(gentity_t *self) {
 	self->flags |= FL_KILL_VELOCITY;
 
 	T_SlamRadiusDamage(tr.endpos, self, self, 8, 300.f, self, 165, MOD_UNKNOWN);
+	return self_source.matches();
 }
 
 static TOUCH(berserk_jump_touch) (gentity_t *self, gentity_t *other, const trace_t &tr, bool other_touching_self) -> void {
@@ -251,8 +376,8 @@ static TOUCH(berserk_jump_touch) (gentity_t *self, gentity_t *other, const trace
 	if (self->groundentity) {
 		self->s.frame = FRAME_slam18;
 
-		if (self->touch)
-			berserk_attack_slam(self);
+		if (self->touch && !berserk_attack_slam(self))
+			return;
 
 		self->touch = nullptr;
 	}
@@ -296,7 +421,8 @@ static void berserk_check_landing(gentity_t *self) {
 		self->monsterinfo.unduck(self);
 		self->s.frame = FRAME_slam18;
 		if (self->touch) {
-			berserk_attack_slam(self);
+			if (!berserk_attack_slam(self))
+				return;
 			self->touch = nullptr;
 		}
 		self->flags &= ~FL_KILL_VELOCITY;

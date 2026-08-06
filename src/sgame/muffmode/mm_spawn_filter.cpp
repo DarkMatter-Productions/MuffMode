@@ -35,7 +35,8 @@ constexpr std::array<const char *, GT_NUM_GAMETYPES> k_gametype_spawn_tokens = {
 	"horde",
 	"ball",
 	"instagib",
-	"nadefest"
+	"nadefest",
+	"arena"
 };
 
 constexpr std::array<ItemClassnameRemap, 8> k_q3a_item_remaps = {{
@@ -106,19 +107,21 @@ bool TokenInList(const char *list, const char *token)
 
 const char *CurrentSpawnGametypeToken()
 {
-	const int gt = clamp(g_gametype ? g_gametype->integer : (int)GT_FFA, (int)GT_NONE, (int)GT_NUM_GAMETYPES - 1);
+	const int gt = clamp(g_gametype ? MM_EFFECTIVE_GT : (int)GT_FFA,
+		(int)GT_NONE, (int)GT_NUM_GAMETYPES - 1);
 	return k_gametype_spawn_tokens[gt];
 }
 
 int CurrentSpawnGametypeFlags()
 {
-	const int gt = clamp(g_gametype ? g_gametype->integer : (int)GT_FFA, (int)GT_NONE, (int)GT_NUM_GAMETYPES - 1);
+	const int gt = clamp(g_gametype ? MM_EFFECTIVE_GT : (int)GT_FFA,
+		(int)GT_NONE, (int)GT_NUM_GAMETYPES - 1);
 	return _gt[gt];
 }
 
 const char *CurrentSpawnRulesetToken()
 {
-	const int ruleset = clamp((int)game.ruleset, (int)RS_NONE + 1, (int)RS_NUM_RULESETS - 1);
+	const int ruleset = ClampPlayableRulesetIndex(static_cast<int>(game.ruleset));
 	return rs_short_name[ruleset];
 }
 

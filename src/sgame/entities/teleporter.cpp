@@ -2,6 +2,7 @@
 // Licensed under the GNU General Public License 2.0.
 
 #include "teleporter.h"
+#include "muffmode/mm_arena.h"
 
 namespace {
 
@@ -59,6 +60,26 @@ static TOUCH(teleporter_touch) (gentity_t *self, gentity_t *other, const trace_t
 	if (!other->client)
 		return;
 
+	// [MuffMode] The pad can be removed independently through a killtarget.
+	// Retire its trigger instead of touching a freed or reused owner slot.
+	if (!self->owner || !self->owner->inuse || self->owner->spawn_count != self->count) {
+		G_FreeEntity(self);
+		return;
+	}
+
+	// [MuffMode] Positive RA2 arena teleporters are selectors, not spatial
+	// teleporters. Enter the arena as an observer; its menu owns joining.
+	if (GT(GT_ARENA) && MM_Arena_UsesTaggedMap() && self->arena > 0 &&
+		MM_Arena_ValidId(self->arena)) {
+		MM_Arena_MoveTo(other, self->arena, true);
+		return;
+	}
+
+	// A targetless selector can outlive an arena gametype change. It no longer
+	// has a valid selector role, but it also has no spatial destination.
+	if (!self->target)
+		return;
+
 	gentity_t *dest = G_FindByString<&gentity_t::targetname>(nullptr, self->target);
 	if (!dest) {
 		gi.Com_PrintFmt("{}: Couldn't find destination, removing.\n", *self);
@@ -81,6 +102,8 @@ void SpawnTeleporterTrigger(gentity_t *ent, const TeleporterTriggerBounds &bound
 	trigger->solid = SOLID_TRIGGER;
 	trigger->target = ent->target;
 	trigger->owner = ent;
+	trigger->count = ent->spawn_count;
+	trigger->arena = ent->arena;
 	trigger->s.origin = ent->s.origin;
 	trigger->mins = bounds.mins;
 	trigger->maxs = bounds.maxs;
@@ -111,10 +134,10 @@ void TeleportPlayer(gentity_t *player, vec3_t origin, vec3_t angles)
 
 	gi.linkentity(player);
 
-	KillBox(player, !!player->client);
+	if (!KillBox(player, !!player->client))
+		return;
 
-	if (player->client->owned_sphere) {
-		gentity_t *sphere = player->client->owned_sphere;
+	if (gentity_t *sphere = G_ResolveOwnedSphere(player->client)) {
 		sphere->s.origin = player->s.origin;
 		sphere->s.origin[2] = player->absmax[2];
 		sphere->s.angles[YAW] = player->s.angles[YAW];
@@ -132,8 +155,12 @@ void SP_misc_teleporter(gentity_t *ent)
 	if (bounds.show_spawnpad)
 		SetupTeleporterSpawnPad(ent);
 
-	// N64 has some of these for visual effects only.
-	if (!ent->target)
+	// N64 has some of these for visual effects only. RA2 selector pads often
+	// omit target entirely; their positive arena key is the destination.
+	// Entity spawning precedes MM_Arena_Init, so use the preflight contract
+	// rather than the live room table for targetless RA2 selector pads.
+	if (!ent->target && !(GT(GT_ARENA) &&
+		MM_Arena_MapRoomDeclared(ent->arena)))
 		return;
 
 	SpawnTeleporterTrigger(ent, bounds);

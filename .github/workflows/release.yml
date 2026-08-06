@@ -54,8 +54,7 @@ on:
         type: string
         default: ""
 permissions:
-  contents: write
-  copilot-requests: write
+  contents: read
 
 concurrency:
   group: release-muff-mode
@@ -71,23 +70,8 @@ jobs:
       - name: Validate Inputs And Secrets
         shell: pwsh
         env:
-          COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
-          LEGACY_RELEASE_BOT_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN }}
           DISCORD_RELEASE_WEBHOOK: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}
         run: |
-          if (-not [string]::IsNullOrWhiteSpace($env:COPILOT_GITHUB_TOKEN)) {
-            Write-Host "Copilot auth: COPILOT_GITHUB_TOKEN repository secret."
-          }
-          elseif (-not [string]::IsNullOrWhiteSpace($env:LEGACY_RELEASE_BOT_TOKEN)) {
-            Write-Host "Copilot auth: RELEASE_BOT_TOKEN repository secret (legacy fallback)."
-          }
-          elseif ("${{ inputs.require_copilot }}" -eq "true") {
-            throw "Set COPILOT_GITHUB_TOKEN (fine-grained user PAT with Copilot Requests) so localized README files can be translated, or leave require_copilot unchecked to skip localized READMEs."
-          }
-          else {
-            Write-Warning "No Copilot token configured; this release will skip localized README translations (English README only)."
-          }
-
           if ([string]::IsNullOrWhiteSpace($env:DISCORD_RELEASE_WEBHOOK)) {
             throw "Set DISCORD_RELEASE_WEBHOOK so the release workflow can announce the published release."
           }
@@ -98,56 +82,97 @@ jobs:
     runs-on: windows-2025-vs2026
     timeout-minutes: 20
 
+    permissions:
+      contents: write
+
     outputs:
       target_version: ${{ steps.version.outputs.target_version }}
+      target_sha: ${{ steps.version.outputs.target_sha }}
       release_tag: ${{ steps.version.outputs.release_tag }}
       release_title: ${{ steps.version.outputs.release_title }}
       is_prerelease: ${{ steps.version.outputs.is_prerelease }}
 
-    env:
-      GH_TOKEN: ${{ github.token }}
-
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
+
+      - name: Check release workflow provenance contract
+        shell: pwsh
+        run: ./scripts/ci/check-release-workflow.ps1
 
       - name: Resolve And Optionally Commit Version
         id: version
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_CHANNEL: ${{ inputs.channel }}
+          RELEASE_COMMIT_VERSION_FILES: ${{ inputs.commit_version_files }}
+          RELEASE_INPUT_VERSION: ${{ inputs.version }}
+          RELEASE_PREVIOUS_TAG: ${{ inputs.previous_tag }}
+          RELEASE_REF_NAME: ${{ github.ref_name }}
+          RELEASE_REF_TYPE: ${{ github.ref_type }}
+          RELEASE_VERSION_MODE: ${{ inputs.version_mode }}
         run: |
+          $inputVersion = $env:RELEASE_INPUT_VERSION.Trim()
+          $previousTag = $env:RELEASE_PREVIOUS_TAG.Trim()
+          if ($inputVersion -and $inputVersion -cnotmatch "^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$") {
+            throw "Release version must be canonical MAJOR.MINOR.PATCH text: '$inputVersion'."
+          }
+          if ($previousTag) {
+            if ($previousTag.StartsWith("-", [System.StringComparison]::Ordinal)) {
+              throw "Previous release tag must not begin with '-': '$previousTag'."
+            }
+            git check-ref-format "refs/tags/$previousTag"
+            if ($LASTEXITCODE -ne 0) {
+              throw "Previous release tag is not a valid Git tag name: '$previousTag'."
+            }
+            git rev-parse --verify --end-of-options "refs/tags/${previousTag}^{commit}" *> $null
+            if ($LASTEXITCODE -ne 0) {
+              throw "Previous release tag does not exist as an exact local tag: '$previousTag'."
+            }
+          }
+
           $parameters = @{
             VersionOnly = $true
             AllowDirtyPackage = $true
-            Channel = "${{ inputs.channel }}"
+            Channel = $env:RELEASE_CHANNEL
           }
 
-          if ("${{ inputs.commit_version_files }}" -eq "true") {
-            $parameters["VersionMode"] = "${{ inputs.version_mode }}"
-            $parameters["UpdateVersionFiles"] = $true
-            if (-not [string]::IsNullOrWhiteSpace("${{ inputs.version }}")) {
-              $parameters["Version"] = "${{ inputs.version }}"
+          if ($env:RELEASE_COMMIT_VERSION_FILES -eq "true") {
+            if ($env:RELEASE_REF_TYPE -cne "branch") {
+              throw "Version-file commits may only run from a branch, not '$($env:RELEASE_REF_TYPE)'."
             }
-            if (-not [string]::IsNullOrWhiteSpace("${{ inputs.previous_tag }}")) {
-              $parameters["PreviousTag"] = "${{ inputs.previous_tag }}"
+            git check-ref-format "refs/heads/$($env:RELEASE_REF_NAME)"
+            if ($LASTEXITCODE -ne 0) {
+              throw "Release branch name is not a valid Git ref: '$($env:RELEASE_REF_NAME)'."
+            }
+
+            $parameters["VersionMode"] = $env:RELEASE_VERSION_MODE
+            $parameters["UpdateVersionFiles"] = $true
+            if ($inputVersion) {
+              $parameters["Version"] = $inputVersion
+            }
+            if ($previousTag) {
+              $parameters["PreviousTag"] = $previousTag
             }
           }
           else {
-            if (-not [string]::IsNullOrWhiteSpace("${{ inputs.version }}")) {
-              $parameters["Version"] = "${{ inputs.version }}"
+            if ($inputVersion) {
+              $parameters["Version"] = $inputVersion
             }
             else {
               $parameters["Version"] = (Get-Content -Raw VERSION).Trim()
             }
-            if (-not [string]::IsNullOrWhiteSpace("${{ inputs.previous_tag }}")) {
-              $parameters["PreviousTag"] = "${{ inputs.previous_tag }}"
+            if ($previousTag) {
+              $parameters["PreviousTag"] = $previousTag
             }
           }
 
           .\scripts\release.ps1 @parameters
 
-          if ("${{ inputs.commit_version_files }}" -eq "true") {
+          if ($env:RELEASE_COMMIT_VERSION_FILES -eq "true") {
             $changes = git status --porcelain VERSION src/sgame/g_local.h docs/changelog.md
             if ($changes) {
               $version = (Get-Content -Raw VERSION).Trim()
@@ -155,24 +180,39 @@ jobs:
               git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
               git add VERSION src/sgame/g_local.h docs/changelog.md
               git commit -m "Bump Muff Mode to v$version"
-              git push origin "HEAD:${{ github.ref_name }}"
+              if ($LASTEXITCODE -ne 0) {
+                throw "Could not commit the release version files."
+              }
+              git push origin "HEAD:refs/heads/$($env:RELEASE_REF_NAME)"
+              if ($LASTEXITCODE -ne 0) {
+                throw "Could not push the release version commit."
+              }
             }
             else {
               Write-Host "Version files already match the requested release."
             }
           }
 
+          $targetSha = "$(git rev-parse HEAD)".Trim().ToLowerInvariant()
+          if ($LASTEXITCODE -ne 0) {
+            throw "Could not resolve the release target commit."
+          }
+          if ($targetSha -cnotmatch "^[0-9a-f]{40}$") {
+            throw "Release target commit is not a lowercase 40-character SHA: '$targetSha'."
+          }
+
           $targetVersion = (Get-Content -Raw VERSION).Trim()
-          $channelName = switch ("${{ inputs.channel }}") {
+          $channelName = switch ($env:RELEASE_CHANNEL) {
             "alpha" { "Alpha" }
             "beta" { "Beta" }
             "rc" { "Release Candidate" }
             default { "" }
           }
           $releaseTitle = if ($channelName) { "MuffMode v$targetVersion $channelName" } else { "MuffMode v$targetVersion" }
-          $isPrerelease = if ("${{ inputs.channel }}" -eq "stable") { "false" } else { "true" }
+          $isPrerelease = if ($env:RELEASE_CHANNEL -eq "stable") { "false" } else { "true" }
 
           "target_version=$targetVersion" >> $env:GITHUB_OUTPUT
+          "target_sha=$targetSha" >> $env:GITHUB_OUTPUT
           "release_tag=v$targetVersion" >> $env:GITHUB_OUTPUT
           "release_title=$releaseTitle" >> $env:GITHUB_OUTPUT
           "is_prerelease=$isPrerelease" >> $env:GITHUB_OUTPUT
@@ -183,101 +223,298 @@ jobs:
     runs-on: windows-2025-vs2026
     timeout-minutes: 90
 
+    permissions:
+      contents: read
+
     env:
-      GH_TOKEN: ${{ github.token }}
-      GITHUB_TOKEN: ${{ github.token }}
       VCPKG_ROOT: ${{ github.workspace }}\..\vcpkg
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
-          ref: ${{ github.ref_name }}
+          ref: ${{ needs.version.outputs.target_sha }}
           persist-credentials: false
 
-      - name: Configure Copilot Auth
+      - name: Verify Immutable Release Checkout
         shell: pwsh
         env:
-          SECRET_COPILOT_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
-          SECRET_LEGACY_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN }}
+          RELEASE_TARGET_SHA: ${{ needs.version.outputs.target_sha }}
         run: |
-          if (-not [string]::IsNullOrWhiteSpace($env:SECRET_COPILOT_TOKEN)) {
-            "COPILOT_GITHUB_TOKEN=$env:SECRET_COPILOT_TOKEN" >> $env:GITHUB_ENV
-            Write-Host "Copilot auth: COPILOT_GITHUB_TOKEN repository secret."
+          $expectedSha = $env:RELEASE_TARGET_SHA.Trim().ToLowerInvariant()
+          $actualSha = "$(git rev-parse HEAD)".Trim().ToLowerInvariant()
+          if ($LASTEXITCODE -ne 0) {
+            throw "Could not resolve the checked-out release commit."
           }
-          elseif (-not [string]::IsNullOrWhiteSpace($env:SECRET_LEGACY_TOKEN)) {
-            "COPILOT_GITHUB_TOKEN=$env:SECRET_LEGACY_TOKEN" >> $env:GITHUB_ENV
-            Write-Host "Copilot auth: RELEASE_BOT_TOKEN repository secret (legacy fallback)."
+          if ($expectedSha -cnotmatch "^[0-9a-f]{40}$" -or $actualSha -cnotmatch "^[0-9a-f]{40}$") {
+            throw "Release checkout comparison requires lowercase 40-character SHAs. Expected '$expectedSha'; actual '$actualSha'."
           }
-          elseif ("${{ inputs.require_copilot }}" -eq "true") {
+          if ($actualSha -cne $expectedSha) {
+            throw "Release checkout mismatch. Expected '$expectedSha'; actual '$actualSha'."
+          }
+          Write-Host "Verified immutable release checkout: $actualSha"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22.23.2
+
+      - name: Verify And Prime GitHub Copilot CLI
+        shell: pwsh
+        run: |
+          if ("$(node --version)".Trim() -cne "v22.23.2") {
+            throw "Node.js runtime did not match reviewed version 22.23.2."
+          }
+          $expectedCopilotVersion = "1.0.77"
+          $expectedCopilotPackage = "@github/copilot-win32-x64"
+          $expectedCopilotIntegrity = "sha512-8Mo9y3/8CVU2w35WqwSiRMTGH1kKHR3URPSJYF4J4OG8L7NOEy2fafXR9Tuq3H21Srg3OzFkl/A+Taunqz9KcA=="
+          $expectedCopilotExecutableSize = 156874528
+          $copilotPackageDirectory = Join-Path $env:RUNNER_TEMP "muffmode-copilot-cli-$([Guid]::NewGuid().ToString('N'))"
+          New-Item -ItemType Directory -Path $copilotPackageDirectory -ErrorAction Stop | Out-Null
+          Push-Location $copilotPackageDirectory
+          try {
+            $packJson = (& npm pack "$expectedCopilotPackage@$expectedCopilotVersion" --ignore-scripts --json | Out-String).Trim()
+            if ($LASTEXITCODE -ne 0) {
+              throw "Could not download the reviewed GitHub Copilot CLI package."
+            }
+            $packRecords = @($packJson | ConvertFrom-Json)
+            if ($packRecords.Count -ne 1 -or
+                [string]$packRecords[0].name -cne $expectedCopilotPackage -or
+                [string]$packRecords[0].version -cne $expectedCopilotVersion -or
+                [string]$packRecords[0].integrity -cne $expectedCopilotIntegrity) {
+              throw "GitHub Copilot CLI platform package metadata did not match the reviewed package."
+            }
+            $copilotFileName = [string]$packRecords[0].filename
+            if ([System.IO.Path]::GetFileName($copilotFileName) -cne $copilotFileName) {
+              throw "GitHub Copilot CLI package returned an unsafe tarball name."
+            }
+            $copilotTarball = Get-Item -LiteralPath (Join-Path $copilotPackageDirectory $copilotFileName) -ErrorAction Stop
+            $copilotStream = [System.IO.File]::OpenRead($copilotTarball.FullName)
+            try {
+              $sha512 = [System.Security.Cryptography.SHA512]::Create()
+              try {
+                $actualCopilotIntegrity = "sha512-$([Convert]::ToBase64String($sha512.ComputeHash($copilotStream)))"
+              }
+              finally {
+                $sha512.Dispose()
+              }
+            }
+            finally {
+              $copilotStream.Dispose()
+            }
+            if ($actualCopilotIntegrity -cne $expectedCopilotIntegrity) {
+              throw "Downloaded GitHub Copilot CLI platform tarball did not match the reviewed integrity."
+            }
+          }
+          finally {
+            Pop-Location
+          }
+
+          $copilotExtractDirectory = Join-Path $copilotPackageDirectory "verified"
+          New-Item -ItemType Directory -Path $copilotExtractDirectory -ErrorAction Stop | Out-Null
+          $archiveEntries = @(& tar -tf $copilotTarball.FullName)
+          if ($LASTEXITCODE -ne 0 -or $archiveEntries.Count -eq 0) {
+            throw "Could not inspect the reviewed GitHub Copilot CLI platform package."
+          }
+          $copilotExecutableEntries = 0
+          foreach ($archiveEntry in $archiveEntries) {
+            $segments = @($archiveEntry -split '/')
+            if ([string]::IsNullOrWhiteSpace($archiveEntry) -or
+                $archiveEntry.Contains('\') -or
+                $archiveEntry.StartsWith('/') -or
+                $archiveEntry -match '^[A-Za-z]:' -or
+                $segments -contains '..' -or
+                -not $archiveEntry.StartsWith('package/')) {
+              throw "GitHub Copilot CLI platform package contains an unsafe archive path."
+            }
+            if ($archiveEntry -ceq 'package/copilot.exe') {
+              $copilotExecutableEntries++
+            }
+          }
+          if ($copilotExecutableEntries -ne 1) {
+            throw "GitHub Copilot CLI platform package must contain exactly one package/copilot.exe."
+          }
+          & tar -xf $copilotTarball.FullName -C $copilotExtractDirectory
+          if ($LASTEXITCODE -ne 0) {
+            throw "Could not extract the reviewed GitHub Copilot CLI platform package."
+          }
+          $copilotExecutable = Join-Path $copilotExtractDirectory "package\copilot.exe"
+          $copilotExecutableItem = Get-Item -LiteralPath $copilotExecutable -ErrorAction Stop
+          if ($copilotExecutableItem.Length -ne $expectedCopilotExecutableSize) {
+            throw "The reviewed GitHub Copilot CLI executable size did not match."
+          }
+          $copilotExecutableStream = [System.IO.File]::OpenRead($copilotExecutableItem.FullName)
+          try {
+            if ($copilotExecutableStream.ReadByte() -ne 0x4d -or
+                $copilotExecutableStream.ReadByte() -ne 0x5a) {
+              throw "The reviewed GitHub Copilot CLI payload is not a Windows executable."
+            }
+          }
+          finally {
+            $copilotExecutableStream.Dispose()
+          }
+          & $copilotExecutableItem.FullName --help
+          if ($LASTEXITCODE -ne 0) {
+            throw "The reviewed GitHub Copilot CLI platform executable could not start."
+          }
+          $copilotExecutableItem.DirectoryName | Add-Content -LiteralPath $env:GITHUB_PATH
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          dotnet-version: 8.0.423
+
+      - name: Verify .NET SDK Version
+        shell: pwsh
+        run: |
+          if ("$(dotnet --version)".Trim() -cne "8.0.423") {
+            throw ".NET SDK did not match reviewed version 8.0.423."
+          }
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@30375c66a4eea26614e0d39710365f22f8b0af57 # v3
+
+      - name: Cache vcpkg
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: |
+            ${{ github.workspace }}\..\vcpkg\downloads
+            ${{ github.workspace }}\..\vcpkg\buildtrees
+            ${{ github.workspace }}\..\vcpkg\packages
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'scripts/ci/setup-vcpkg.ps1') }}
+          restore-keys: vcpkg-${{ runner.os }}-
+
+      - name: Setup Pinned vcpkg And Install Dependencies
+        shell: pwsh
+        run: ./scripts/ci/setup-vcpkg.ps1 -Install
+
+      - name: Check Analysis And Fuzz Tooling Contracts
+        shell: pwsh
+        run: ./scripts/ci/check-tooling-contracts.ps1
+
+      - name: Check Regression Corpus
+        shell: pwsh
+        run: ./scripts/ci/check-regression-corpus.ps1
+
+      - name: Check Dependency Inventory
+        shell: pwsh
+        run: ./scripts/ci/check-dependency-inventory.ps1
+
+      - name: Run Host Smoke Tests
+        shell: pwsh
+        run: ./scripts/ci/run-host-tests.ps1 -Configuration Release -Platform x64
+
+      - name: Run Updater Cleanup Tests
+        shell: pwsh
+        run: ./scripts/ci/run-updater-tests.ps1 -Configuration Release
+
+      - name: Build Strict Release DLL
+        shell: pwsh
+        run: ./scripts/ci/build-msbuild.ps1 -Configuration Release -Platform x64 -TreatWarningsAsErrors -BinaryLog
+
+      - name: Record Strict Build Receipt
+        shell: pwsh
+        env:
+          RELEASE_TARGET_SHA: ${{ needs.version.outputs.target_sha }}
+        run: |
+          $sourceCommit = $env:RELEASE_TARGET_SHA.Trim().ToLowerInvariant()
+          if ($sourceCommit -cnotmatch "^[0-9a-f]{40}$") {
+            throw "Build receipt requires a lowercase 40-character source commit."
+          }
+          $dll = Get-Item -LiteralPath "build/msbuild/x64/Release/game_x64.dll" -ErrorAction Stop
+          $receipt = [ordered]@{
+            SchemaVersion = 1
+            SourceCommit = $sourceCommit
+            Configuration = "Release"
+            Platform = "x64"
+            DllName = $dll.Name
+            DllSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $dll.FullName).Hash.ToLowerInvariant()
+            WarningsAsErrors = $true
+          }
+          $receipt | ConvertTo-Json | Set-Content -LiteralPath "build/msbuild/x64/Release/muffmode-build-receipt.json" -Encoding utf8
+
+      - name: Install Inno Setup
+        id: inno
+        if: ${{ inputs.skip_installer != true }}
+        shell: pwsh
+        run: |
+          choco install innosetup --version 6.7.1 --allow-downgrade --yes --no-progress
+          if ($LASTEXITCODE -ne 0) {
+            throw "Could not install the reviewed Inno Setup package."
+          }
+
+          $compilerCandidates = @(
+            (Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6/ISCC.exe"),
+            (Join-Path $env:ProgramFiles "Inno Setup 6/ISCC.exe"),
+            (Get-Command iscc.exe -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source -First 1)
+          ) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) }
+          $compiler = $compilerCandidates | Select-Object -First 1
+          if (-not $compiler) {
+            throw "The reviewed Inno Setup compiler was not found after installation."
+          }
+          $compiler = (Resolve-Path -LiteralPath $compiler).Path
+          $compilerVersion = (Get-Item -LiteralPath $compiler).VersionInfo.ProductVersion
+          if ($compilerVersion -cnotmatch "^6\.7\.1(?:\.0)?$") {
+            throw "Inno Setup compiler version '$compilerVersion' did not match reviewed version 6.7.1."
+          }
+          "compiler_path=$compiler" >> $env:GITHUB_OUTPUT
+
+      - name: Build Release Package
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COPILOT_AUTH_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN || secrets.RELEASE_BOT_TOKEN }}
+          INNO_SETUP_COMPILER: ${{ steps.inno.outputs.compiler_path }}
+          RELEASE_INTRO: ${{ inputs.release_intro }}
+          RELEASE_CHANNEL: ${{ inputs.channel }}
+          RELEASE_PREVIOUS_TAG: ${{ inputs.previous_tag }}
+          RELEASE_REQUIRE_COPILOT: ${{ inputs.require_copilot }}
+          RELEASE_SKIP_INSTALLER: ${{ inputs.skip_installer }}
+          RELEASE_TARGET_VERSION: ${{ needs.version.outputs.target_version }}
+        run: |
+          if (-not [string]::IsNullOrWhiteSpace($env:COPILOT_AUTH_TOKEN)) {
+            $env:COPILOT_GITHUB_TOKEN = $env:COPILOT_AUTH_TOKEN
+            Write-Host "Copilot auth: configured release secret."
+          }
+          elseif ($env:RELEASE_REQUIRE_COPILOT -eq "true") {
             throw "Set COPILOT_GITHUB_TOKEN (fine-grained user PAT with Copilot Requests) so localized README files can be translated, or leave require_copilot unchecked to skip localized READMEs."
           }
           else {
             Write-Warning "No Copilot token configured; this release will skip localized README translations (English README only)."
           }
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: 22
-
-      - name: Install And Prime GitHub Copilot CLI
-        shell: pwsh
-        run: |
-          npm install -g @github/copilot
-          copilot --help
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v5
-        with:
-          dotnet-version: 8.0.x
-
-      - name: Setup MSBuild
-        uses: microsoft/setup-msbuild@v3
-
-      - name: Setup vcpkg
-        shell: pwsh
-        run: |
-          git clone https://github.com/microsoft/vcpkg.git $env:VCPKG_ROOT
-          & "$env:VCPKG_ROOT\bootstrap-vcpkg.bat" -disableMetrics
-
-      - name: Cache vcpkg
-        uses: actions/cache@v5
-        with:
-          path: |
-            ${{ github.workspace }}\..\vcpkg\downloads
-            ${{ github.workspace }}\..\vcpkg\buildtrees
-            ${{ github.workspace }}\..\vcpkg\packages
-          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}
-          restore-keys: vcpkg-${{ runner.os }}-
-
-      - name: Install vcpkg Dependencies
-        shell: pwsh
-        run: '& "$env:VCPKG_ROOT\vcpkg.exe" install --triplet x64-windows-static'
-
-      - name: Install Inno Setup
-        if: ${{ inputs.skip_installer != true }}
-        shell: pwsh
-        run: choco install innosetup --yes --no-progress
-
-      - name: Build Release Package
-        shell: pwsh
-        env:
-          RELEASE_INTRO: ${{ inputs.release_intro }}
-        run: |
           $parameters = @{
-            Version = "${{ needs.version.outputs.target_version }}"
-            Channel = "${{ inputs.channel }}"
+            Version = $env:RELEASE_TARGET_VERSION
+            Channel = $env:RELEASE_CHANNEL
+            SkipBuild = $true
           }
 
-          if (-not [string]::IsNullOrWhiteSpace("${{ inputs.previous_tag }}")) {
-            $parameters["PreviousTag"] = "${{ inputs.previous_tag }}"
+          $previousTag = $env:RELEASE_PREVIOUS_TAG.Trim()
+          if ($previousTag) {
+            if ($previousTag.StartsWith("-", [System.StringComparison]::Ordinal)) {
+              throw "Previous release tag must not begin with '-': '$previousTag'."
+            }
+            git check-ref-format "refs/tags/$previousTag"
+            if ($LASTEXITCODE -ne 0) {
+              throw "Previous release tag is not a valid Git tag name: '$previousTag'."
+            }
+            git rev-parse --verify --end-of-options "refs/tags/${previousTag}^{commit}" *> $null
+            if ($LASTEXITCODE -ne 0) {
+              throw "Previous release tag does not exist as an exact local tag: '$previousTag'."
+            }
+            $parameters["PreviousTag"] = $previousTag
           }
-          if ("${{ inputs.skip_installer }}" -eq "true") {
+          if ($env:RELEASE_SKIP_INSTALLER -eq "true") {
             $parameters["SkipInstaller"] = $true
           }
-          if ("${{ inputs.require_copilot }}" -eq "true") {
+          else {
+            if ([string]::IsNullOrWhiteSpace($env:INNO_SETUP_COMPILER)) {
+              throw "The verified Inno Setup compiler path was not provided to packaging."
+            }
+            $parameters["InnoSetupCompiler"] = $env:INNO_SETUP_COMPILER
+          }
+          if ($env:RELEASE_REQUIRE_COPILOT -eq "true") {
             $parameters["RequireCopilot"] = $true
           }
           if (-not [string]::IsNullOrWhiteSpace($env:RELEASE_INTRO)) {
@@ -287,12 +524,14 @@ jobs:
           .\scripts\release.ps1 @parameters
 
       - name: Upload Release Package
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: release-output
           path: |
             dist/release/*.zip
             dist/release/*.exe
+            dist/release/*.json
+            dist/release/*.txt
             dist/release/*.md
             dist/release/*.html
           if-no-files-found: error
@@ -305,71 +544,254 @@ jobs:
     runs-on: windows-2025-vs2026
     timeout-minutes: 20
 
-    env:
-      GH_TOKEN: ${{ github.token }}
+    permissions:
+      contents: write
 
     steps:
       - name: Download Release Package
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: release-output
           path: dist/release
 
       - name: Publish GitHub Release
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_CHANNEL: ${{ inputs.channel }}
+          RELEASE_IS_PRERELEASE: ${{ needs.version.outputs.is_prerelease }}
+          RELEASE_REPOSITORY: ${{ github.repository }}
+          RELEASE_SKIP_INSTALLER: ${{ inputs.skip_installer }}
+          RELEASE_TAG: ${{ needs.version.outputs.release_tag }}
+          RELEASE_TARGET_SHA: ${{ needs.version.outputs.target_sha }}
+          RELEASE_TITLE: ${{ needs.version.outputs.release_title }}
+          RELEASE_VERSION: ${{ needs.version.outputs.target_version }}
         run: |
-          $version = "${{ needs.version.outputs.target_version }}"
-          $tag = "${{ needs.version.outputs.release_tag }}"
-          $title = "${{ needs.version.outputs.release_title }}"
+          $version = $env:RELEASE_VERSION.Trim()
+          $tag = $env:RELEASE_TAG.Trim()
+          $title = $env:RELEASE_TITLE.Trim()
+          $targetSha = $env:RELEASE_TARGET_SHA.Trim()
+          $channel = $env:RELEASE_CHANNEL.Trim()
+          if ($version -cnotmatch "^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$") {
+            throw "Release version must be canonical MAJOR.MINOR.PATCH text: '$version'."
+          }
+          if ($targetSha -cnotmatch "^[0-9a-f]{40}$") {
+            throw "Release target commit is not a lowercase 40-character SHA: '$targetSha'."
+          }
+          if ($tag -cne "v$version") {
+            throw "Release tag '$tag' does not match version '$version'."
+          }
           $notes = Get-ChildItem -LiteralPath dist/release -Filter "muffmode-$version-release-notes.md" | Select-Object -First 1
           if (-not $notes) {
             throw "Could not find generated release notes for $version."
           }
 
-          $versionPattern = [regex]::Escape($version)
-          $package = Get-ChildItem -LiteralPath dist/release -Filter "*.zip" |
-            Where-Object { $_.Name -match "^muffmode-$versionPattern(?:-(?:alpha|beta|rc))?\.zip$" } |
-            Select-Object -First 1
-          if (-not $package) {
-            throw "Could not find the installable muffmode package zip for $version."
+          if ($channel -notin @("alpha", "beta", "rc", "stable")) {
+            throw "Unexpected release channel '$channel'."
+          }
+          $channelSuffix = if ($channel -eq "stable") { "" } else { "-$channel" }
+          $packageBaseName = "muffmode-$version$channelSuffix"
+
+          function Get-ExactReleaseFile([string]$Name, [bool]$Required = $true) {
+            $path = Join-Path "dist/release" $Name
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+              if ($Required) {
+                throw "Could not find required release asset '$Name'."
+              }
+              return $null
+            }
+            $item = Get-Item -LiteralPath $path -ErrorAction Stop
+            if ($item.Name -cne $Name) {
+              throw "Release asset casing did not match the exact expected name '$Name'."
+            }
+            return $item
           }
 
-          $installer = Get-ChildItem -LiteralPath dist/release -Filter "*.exe" |
-            Where-Object { $_.Name -match "^muffmode-$versionPattern(?:-(?:alpha|beta|rc))?-windows-installer\.exe$" } |
-            Select-Object -First 1
-          if ("${{ inputs.skip_installer }}" -ne "true" -and -not $installer) {
-            throw "Could not find the Windows installer asset for $version."
+          $package = Get-ExactReleaseFile "$packageBaseName.zip"
+          $mapSources = Get-ExactReleaseFile "$packageBaseName-map-sources.zip"
+          $originalMaps = Get-ExactReleaseFile "$packageBaseName-original-maps.zip"
+          $installer = Get-ExactReleaseFile "$packageBaseName-windows-installer.exe" ($env:RELEASE_SKIP_INSTALLER -ne "true")
+          if ($env:RELEASE_SKIP_INSTALLER -eq "true" -and $installer) {
+            throw "An installer asset was generated even though skip_installer was selected."
           }
 
-          $mapSources = Get-ChildItem -LiteralPath dist/release -Filter "*.zip" |
-            Where-Object { $_.Name -match "^muffmode-$versionPattern(?:-(?:alpha|beta|rc))?-map-sources\.zip$" } |
-            Select-Object -First 1
-          if (-not $mapSources) {
-            throw "Could not find the map source archive for $version."
-          }
-
-          $originalMaps = Get-ChildItem -LiteralPath dist/release -Filter "*.zip" |
-            Where-Object { $_.Name -match "^muffmode-$versionPattern(?:-(?:alpha|beta|rc))?-original-maps\.zip$" } |
-            Select-Object -First 1
-
-          $assets = @($package)
+          $binaryAssets = @($package)
           if ($installer) {
-            $assets += $installer
+            $binaryAssets += $installer
           }
-          $assets += $mapSources
-          if ($originalMaps) {
-            $assets += $originalMaps
+          $binaryAssets += $mapSources
+          $binaryAssets += $originalMaps
+
+          $provenance = Get-ExactReleaseFile "$packageBaseName-provenance.json"
+          $checksums = Get-ExactReleaseFile "$packageBaseName-SHA256SUMS.txt"
+          $provenanceData = Get-Content -Raw -LiteralPath $provenance.FullName | ConvertFrom-Json
+          $requiredProvenanceProperties = @("SchemaVersion", "Repository", "Version", "TagName", "Channel", "SourceCommit", "SourceTreeDirty", "Assets")
+          foreach ($propertyName in $requiredProvenanceProperties) {
+            if ($provenanceData.PSObject.Properties.Name -cnotcontains $propertyName) {
+              throw "Release provenance is missing required property '$propertyName'."
+            }
           }
+          if ($provenanceData.SchemaVersion -isnot [long] -or
+              [long]$provenanceData.SchemaVersion -ne 1 -or
+              [string]$provenanceData.Repository -cne $env:RELEASE_REPOSITORY -or
+              [string]$provenanceData.Version -cne $version -or
+              [string]$provenanceData.TagName -cne $tag -or
+              [string]$provenanceData.Channel -cne $channel -or
+              [string]$provenanceData.SourceCommit -cne $targetSha -or
+              $provenanceData.SourceTreeDirty -isnot [bool] -or
+              [bool]$provenanceData.SourceTreeDirty -or
+              $provenanceData.Assets -isnot [object[]]) {
+            throw "Release provenance does not describe the clean immutable release checkout."
+          }
+
+          $binaryAssetsByName = @{}
+          foreach ($asset in $binaryAssets) {
+            if ($binaryAssetsByName.ContainsKey($asset.Name)) {
+              throw "Duplicate release asset name: $($asset.Name)"
+            }
+            $binaryAssetsByName[$asset.Name] = $asset
+          }
+          $provenanceRecords = @($provenanceData.Assets)
+          if ($provenanceRecords.Count -ne $binaryAssetsByName.Count) {
+            throw "Release provenance asset count does not match the generated binary assets."
+          }
+          $seenProvenanceNames = @{}
+          foreach ($record in $provenanceRecords) {
+            foreach ($propertyName in @("Name", "Sha256", "Size")) {
+              if ($record.PSObject.Properties.Name -cnotcontains $propertyName) {
+                throw "Release provenance asset record is missing required property '$propertyName'."
+              }
+            }
+            $name = [string]$record.Name
+            $sha256 = [string]$record.Sha256
+            if ($seenProvenanceNames.ContainsKey($name) -or
+                -not $binaryAssetsByName.ContainsKey($name) -or
+                $sha256 -cnotmatch "^[0-9a-f]{64}$" -or
+                $record.Size -isnot [long] -or
+                [long]$record.Size -lt 0) {
+              throw "Release provenance contains a duplicate, unknown asset, or malformed hash: '$name'."
+            }
+            $seenProvenanceNames[$name] = $true
+            $asset = $binaryAssetsByName[$name]
+            $actualHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $asset.FullName).Hash.ToLowerInvariant()
+            if ($actualHash -cne $sha256 -or [Int64]$record.Size -ne [Int64]$asset.Length) {
+              throw "Release provenance mismatch for $name."
+            }
+          }
+          foreach ($name in $binaryAssetsByName.Keys) {
+            if (-not $seenProvenanceNames.ContainsKey($name)) {
+              throw "Release provenance omitted required asset '$name'."
+            }
+          }
+
+          $checksumAssetsByName = @{}
+          foreach ($asset in @($binaryAssets) + @($provenance)) {
+            $checksumAssetsByName[$asset.Name] = $asset
+          }
+          $checksumLines = @(Get-Content -LiteralPath $checksums.FullName | Where-Object { $_.Length -ne 0 })
+          if ($checksumLines.Count -ne $checksumAssetsByName.Count) {
+            throw "Release checksum manifest does not cover every published content asset exactly once."
+          }
+          $seenChecksumNames = @{}
+          foreach ($line in $checksumLines) {
+            if ($line -cnotmatch "^(?<sha>[0-9a-f]{64})  (?<name>[A-Za-z0-9][A-Za-z0-9._-]*)$") {
+              throw "Malformed release checksum line: '$line'"
+            }
+            $name = $Matches.name
+            if ($seenChecksumNames.ContainsKey($name) -or -not $checksumAssetsByName.ContainsKey($name)) {
+              throw "Release checksum manifest contains a duplicate or unknown asset: '$name'."
+            }
+            $seenChecksumNames[$name] = $true
+            $actualHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $checksumAssetsByName[$name].FullName).Hash.ToLowerInvariant()
+            if ($actualHash -cne $Matches.sha) {
+              throw "Release checksum mismatch for $name."
+            }
+          }
+
+          function Get-RemoteReleaseTagCommit([string]$Repository, [string]$TagName) {
+            $referenceJson = (& gh api "repos/$Repository/git/ref/tags/$TagName" 2>$null | Out-String).Trim()
+            if ($LASTEXITCODE -ne 0) {
+              return $null
+            }
+            try {
+              $reference = $referenceJson | ConvertFrom-Json
+            }
+            catch {
+              throw "GitHub returned malformed JSON while resolving release tag '$TagName'."
+            }
+
+            $target = $reference.object
+            for ($depth = 0; $depth -lt 8; $depth++) {
+              $targetType = [string]$target.type
+              $objectSha = ([string]$target.sha).ToLowerInvariant()
+              if ($objectSha -cnotmatch "^[0-9a-f]{40}$") {
+                throw "GitHub release tag '$TagName' resolved to an invalid object SHA."
+              }
+              if ($targetType -ceq "commit") {
+                return $objectSha
+              }
+              if ($targetType -cne "tag") {
+                throw "GitHub release tag '$TagName' resolved to unsupported object type '$targetType'."
+              }
+
+              $tagJson = (& gh api "repos/$Repository/git/tags/$objectSha" 2>$null | Out-String).Trim()
+              if ($LASTEXITCODE -ne 0) {
+                throw "Could not peel annotated GitHub release tag '$TagName'."
+              }
+              try {
+                $target = ($tagJson | ConvertFrom-Json).object
+              }
+              catch {
+                throw "GitHub returned malformed JSON while peeling release tag '$TagName'."
+              }
+            }
+            throw "GitHub release tag '$TagName' exceeded the supported annotated-tag nesting depth."
+          }
+
+          function Assert-RemoteReleaseTag([string]$Repository, [string]$TagName, [string]$SourceCommit) {
+            $remoteCommit = Get-RemoteReleaseTagCommit -Repository $Repository -TagName $TagName
+            if ($null -eq $remoteCommit) {
+              & gh api `
+                --method POST `
+                "repos/$Repository/git/refs" `
+                -f "ref=refs/tags/$TagName" `
+                -f "sha=$SourceCommit" *> $null
+              if ($LASTEXITCODE -ne 0) {
+                # A concurrent publisher may have created the tag after our read.
+                $remoteCommit = Get-RemoteReleaseTagCommit -Repository $Repository -TagName $TagName
+                if ($null -eq $remoteCommit) {
+                  throw "Could not create or resolve GitHub release tag '$TagName'."
+                }
+              }
+              else {
+                $remoteCommit = Get-RemoteReleaseTagCommit -Repository $Repository -TagName $TagName
+                if ($null -eq $remoteCommit) {
+                  throw "GitHub release tag '$TagName' was created but could not be verified."
+                }
+              }
+            }
+            if ($remoteCommit -cne $SourceCommit) {
+              throw "GitHub release tag '$TagName' resolves to $remoteCommit, not packaged source commit $SourceCommit."
+            }
+          }
+
+          Assert-RemoteReleaseTag `
+            -Repository $env:RELEASE_REPOSITORY `
+            -TagName $tag `
+            -SourceCommit $targetSha
+
+          $assets = @($binaryAssets) + @($provenance, $checksums)
 
           $arguments = @("release", "create", $tag)
           $arguments += @($assets | ForEach-Object { $_.FullName })
           $arguments += @(
-            "--repo", "${{ github.repository }}",
+            "--repo", $env:RELEASE_REPOSITORY,
+            "--verify-tag",
             "--title", $title,
             "--notes-file", $notes.FullName,
             "--fail-on-no-commits"
           )
-          if ("${{ needs.version.outputs.is_prerelease }}" -eq "true") {
+          if ($env:RELEASE_IS_PRERELEASE -eq "true") {
             $arguments += @("--prerelease", "--latest=false")
           }
           else {
@@ -388,7 +810,7 @@ jobs:
 
     steps:
       - name: Send Release Embed
-        uses: actions/github-script@v9
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}
           RELEASE_TAG: ${{ needs.version.outputs.release_tag }}

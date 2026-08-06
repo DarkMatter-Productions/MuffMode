@@ -37,15 +37,15 @@ static void ClearMoveToPointDebugState() {
 	moveToPointPos = vec3_origin;
 }
 
-static void ResetBotDebugState() {
+void Bot_ResetDebug() {
 	ClearFollowActorDebugState();
 	ClearMoveToPointDebugState();
 
-	if (bot_debug_follow_actor->integer) {
+	if (bot_debug_follow_actor && bot_debug_follow_actor->integer) {
 		gi.cvar_set("bot_debug_follow_actor", "0");
 	}
 
-	if (bot_debug_move_to_point->integer) {
+	if (bot_debug_move_to_point && bot_debug_move_to_point->integer) {
 		gi.cvar_set("bot_debug_move_to_point", "0");
 	}
 }
@@ -205,13 +205,13 @@ Bot_UpdateDebug
 */
 void Bot_UpdateDebug() {
 	if (!g_cheats->integer) {
-		ResetBotDebugState();
+		Bot_ResetDebug();
 		return;
 	}
 
 	const gentity_t *localPlayer = FindLocalPlayer();
 	if (localPlayer == nullptr) {
-		ResetBotDebugState();
+		Bot_ResetDebug();
 		return;
 	}
 

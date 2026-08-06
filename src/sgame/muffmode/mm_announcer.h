@@ -57,5 +57,11 @@ enum class mm_announce_event_t : uint16_t {
 void MM_Announce(mm_announce_event_t event, gentity_t *focus);
 void MM_AnnounceRaw(gentity_t *focus, const char *stem, const char *backup_sound, bool use_backup, bool backup_alongside_vo = false);
 
+// Single-listener variants. AnnouncerSound fans out by follow_target, which cannot express
+// "everyone in this Arena room": it leaks to spectators following a fighter from elsewhere and
+// misses free-flying room observers. Arena loops its own members and calls these per listener.
+void MM_Announce_ToClient(gentity_t *listener, mm_announce_event_t event);
+void MM_AnnounceRaw_ToClient(gentity_t *listener, const char *stem, const char *backup_sound, bool use_backup, bool backup_alongside_vo = false);
+
 void MM_Announcer_OnMatchReset();
 void MM_Announcer_OnPlayerFrag(gentity_t *attacker, gentity_t *victim);

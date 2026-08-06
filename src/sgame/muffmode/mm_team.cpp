@@ -2,11 +2,16 @@
 // Licensed under the GNU General Public License 2.0.
 
 #include "g_local.h"
+#include "muffmode/mm_arena.h"
 #include "muffmode/mm_captain.h"
 #include "muffmode/mm_command_contracts.h"
+#include "muffmode/mm_duel.h"
 #include "muffmode/mm_ghost.h"
 #include "muffmode/mm_match.h"
+#include "muffmode/mm_match_stats.h"
+#include "muffmode/mm_player_stats.h"
 #include "muffmode/mm_red_rover_rules.h"
+#include "muffmode/mm_statusbar.h"
 #include "muffmode/mm_team.h"
 #include "muffmode/mm_util.h"
 #include "muffmode/mm_vote.h"
@@ -14,8 +19,8 @@
 #include <algorithm>
 #include <array>
 #include <cstdlib>
-#include <numeric>
 #include <string>
+#include <vector>
 
 /*
 =================
@@ -187,11 +192,20 @@ void BroadcastTeamChange(gentity_t *ent, int old_team, bool inactive, bool silen
 	std::string t;
 	const std::string name = muffmode::team::DisplayName(ent);
 
+	// [MuffMode] Ported from WORR: the joining player's own notice carries their skill rating.
+	// Only on a ranked session — an unranked one would otherwise advertise a default placeholder
+	// rating that never moves, which is worse than saying nothing.
+	const int32_t rating = MM_PlayerStats_SessionIsRanked(ent)
+		? MM_PlayerStats_DisplayRating(MM_PlayerStats_Rating(ent))
+		: 0;
+
 	switch (ent->client->sess.team) {
 	case TEAM_FREE:
 		s = fmt::format("{} joined the battle.\n", name);
 		//t = "%bind:inven:Toggles Menu%You have joined the game.";
-		t = "You have joined the game.";
+		t = rating > 0
+			? fmt::format("You have joined the game.\nYour Skill Rating: {}", rating)
+			: "You have joined the game.";
 		break;
 	case TEAM_SPECTATOR:
 		if (inactive) {
@@ -210,7 +224,10 @@ void BroadcastTeamChange(gentity_t *ent, int old_team, bool inactive, bool silen
 	case TEAM_RED:
 	case TEAM_BLUE:
 		s = fmt::format("{} joined the {} Team.\n", name, Teams_TeamName(ent->client->sess.team));
-		t = fmt::format("You have joined the {} Team.\n", Teams_TeamName(ent->client->sess.team));
+		t = rating > 0
+			? fmt::format("You have joined the {} Team.\nYour Skill Rating: {}",
+				Teams_TeamName(ent->client->sess.team), rating)
+			: fmt::format("You have joined the {} Team.\n", Teams_TeamName(ent->client->sess.team));
 		break;
 	}
 
@@ -225,7 +242,7 @@ void BroadcastTeamChange(gentity_t *ent, int old_team, bool inactive, bool silen
 		//gi.Com_Print(s);
 	}
 
-	if (muffmode::CvarEnabled(g_dm_do_readyup) && level.match_state == matchst_t::MATCH_WARMUP_READYUP) {
+	if (muffmode::CvarEnabled(g_dm_do_readyup) && level.match_state == match_state_t::MATCH_WARMUP_READYUP) {
 		BroadcastReadyReminderMessage();
 	} else if (!t.empty()) {
 		gi.LocClient_Print(ent, PRINT_CENTER, "%bind:inven:Open menu%{}", t.c_str());
@@ -247,7 +264,7 @@ bool AllowTeamSwitch(gentity_t *ent, team_t desired_team) {
 	// already-playing player from manually switching sides to dodge the defect mechanic.
 	// Joining from spectator is allowed (otherwise nobody could enter a match in progress),
 	// and leaving to spectator is allowed - that's quitting, not dodging a defect.
-	if (MM_RedRoverBlocksManualTeamSwitch(ent->client->sess.team, desired_team, TEAM_SPECTATOR, GT(GT_RR), level.match_state == matchst_t::MATCH_IN_PROGRESS)) {
+	if (MM_RedRoverBlocksManualTeamSwitch(ent->client->sess.team, desired_team, TEAM_SPECTATOR, GT(GT_RR), level.match_state == match_state_t::MATCH_IN_PROGRESS)) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "You cannot change teams during a Red Rover match.\n");
 		return false;
 	}
@@ -315,20 +332,27 @@ Switch last joined player(s) from stacked team.
 ================
 */
 int TeamBalance(bool force) {
+	if (GT(GT_ARENA))
+		return 0;
+
 	if (!Teams())
 		return 0;
 
 	if (GT(GT_RR))
 		return 0;
 
-	int delta = std::abs(level.num_playing_red - level.num_playing_blue);
+	int logical_red = level.num_playing_red + static_cast<int>(
+		MM_Ghost_ActivePlayingReservationCountForTeam(TEAM_RED));
+	int logical_blue = level.num_playing_blue + static_cast<int>(
+		MM_Ghost_ActivePlayingReservationCountForTeam(TEAM_BLUE));
+	int delta = std::abs(logical_red - logical_blue);
 
 	if (delta < 2)
-		return level.num_playing_red - level.num_playing_blue;
+		return 0;
 
-	const team_t stack_team = level.num_playing_red > level.num_playing_blue ? TEAM_RED : TEAM_BLUE;
+	const team_t stack_team = logical_red > logical_blue ? TEAM_RED : TEAM_BLUE;
 
-	std::array<int, MAX_CLIENTS_KEX> client_indices = {};
+	std::array<int, MAX_LOBBY_PLAYERS> client_indices = {};
 	size_t count = 0;
 
 	// assemble list of client nums of everyone on stacked team
@@ -363,10 +387,18 @@ int TeamBalance(bool force) {
 		// state is cleaned up; the old raw `sess.team = ...; ClientRespawn()` left that
 		// state dangling and could crash on a CTF rebalance.
 		gentity_t *sw_ent = &g_entities[client_index + 1];
-		SetTeam(sw_ent, new_team, false, true, false);
+		if (!SetTeam(sw_ent, new_team, false, force, false))
+			continue;
 		gi.LocClient_Print(sw_ent, PRINT_CENTER, "You have changed teams to rebalance the game.\n");
 
-		delta--;
+		if (stack_team == TEAM_RED) {
+			logical_red--;
+			logical_blue++;
+		} else {
+			logical_blue--;
+			logical_red++;
+		}
+		delta = std::abs(logical_red - logical_blue);
 		switched++;
 	}
 
@@ -382,60 +414,45 @@ int TeamBalance(bool force) {
 ================
 TeamShuffle
 
-Randomly shuffles all players in teamplay
+Distributes active players by descending skill rating.
 ================
 */
 bool TeamShuffle() {
+	if (GT(GT_ARENA))
+		return false;
+
 	if (!Teams())
 		return false;
-	/*
-	if (level.num_playing_clients < 3)
-		return false;
-		*/
-	bool join_red = brandom();
-	std::array<int32_t, MAX_CLIENTS_KEX> client_indices = {};
-
-	std::iota(client_indices.begin(), client_indices.end(), 0);
-	std::shuffle(client_indices.begin(), client_indices.end(), mt_rand);
-
-	// determine max team size based from active players
-	const int maxteam = (level.num_playing_clients + 1) / 2;
-	int count_red = 0, count_blue = 0;
-	team_t setteam = join_red ? TEAM_RED : TEAM_BLUE;
-	
-#if 0
-	for (size_t i = 0; i < client_indices.size(); i++) {
-		gi.Com_PrintFmt("{}={}\n", i, client_indices[i]);
-	}
-#endif
-
-	// set teams
-	for (const int32_t client_index : client_indices) {
-		// client_indices holds client numbers (0..MAX_CLIENTS_KEX-1); client N is entity N+1.
+	std::vector<int32_t> client_indices;
+	client_indices.reserve(static_cast<size_t>(level.num_playing_clients));
+	for (size_t client_index = 0; client_index < game.maxclients; ++client_index) {
+		// client_indices holds client numbers (0..MAX_LOBBY_PLAYERS-1); client N is entity N+1.
 		gentity_t *ent = &g_entities[client_index + 1];
-		if (!ent->inuse)
-			continue;
-		if (!ent->client)
-			continue;
-		if (!ent->client->pers.connected)
-			continue;
-		if (!ClientIsPlaying(ent->client))
-			continue;
+		if (ent->inuse && ent->client && ent->client->pers.connected &&
+			ClientIsPlaying(ent->client))
+			client_indices.push_back(static_cast<int32_t>(client_index));
+	}
+	if (client_indices.size() < 2)
+		return false;
 
-		if (count_red >= maxteam || count_red > count_blue)
-			setteam = TEAM_BLUE;
-		else if (count_blue >= maxteam || count_blue > count_red)
-			setteam = TEAM_RED;
-		
-		if (!SetTeam(ent, setteam, false, true, true))
+	std::sort(client_indices.begin(), client_indices.end(),
+		[](int32_t lhs, int32_t rhs) {
+			const float lhs_rating = MM_PlayerStats_Rating(&g_entities[lhs + 1]);
+			const float rhs_rating = MM_PlayerStats_Rating(&g_entities[rhs + 1]);
+			if (lhs_rating != rhs_rating)
+				return lhs_rating > rhs_rating;
+			return lhs < rhs;
+		});
+
+	team_t target_team = TEAM_RED;
+	for (const int32_t client_index : client_indices) {
+		gentity_t *ent = &g_entities[client_index + 1];
+		if (!ent->inuse || !ent->client || !ent->client->pers.connected ||
+			!ClientIsPlaying(ent->client))
 			continue;
-
-		if (setteam == TEAM_RED)
-			count_red++;
-		else count_blue++;
-
-		join_red ^= true;
-		setteam = join_red ? TEAM_RED : TEAM_BLUE;
+		if (ent->client->sess.team != target_team)
+			SetTeam(ent, target_team, false, true, true);
+		target_team = target_team == TEAM_RED ? TEAM_BLUE : TEAM_RED;
 	}
 
 	return true;
@@ -449,6 +466,10 @@ SetTeam
 bool SetTeam(gentity_t *ent, team_t desired_team, bool inactive, bool force, bool silent) {
 	if (!ent || !ent->client)
 		return false;
+
+	bool arena_result = false;
+	if (MM_Arena_HandleTeamRequest(ent, desired_team, inactive, force, silent, arena_result))
+		return arena_result;
 
 	if (!muffmode::team::IsTeamInRange(desired_team))
 		return false;
@@ -464,7 +485,8 @@ bool SetTeam(gentity_t *ent, team_t desired_team, bool inactive, bool force, boo
 	
 	if (!force) {
 		// Check if this would be a duel queue join (spectator with queue flag)
-		bool would_be_duel_queue = GT(GT_DUEL) && desired_team != TEAM_SPECTATOR && level.num_playing_clients >= 2;
+		const bool would_be_duel_queue = GT(GT_DUEL) &&
+			desired_team != TEAM_SPECTATOR && MM_Duel_OccupiedSlots() >= 2;
 		
 		if (!ClientIsPlaying(ent->client) && desired_team != TEAM_SPECTATOR) {
 			bool revoke = false;
@@ -488,7 +510,7 @@ bool SetTeam(gentity_t *ent, team_t desired_team, bool inactive, bool force, boo
 		}
 
 		if (GT(GT_DUEL)) {
-			if (desired_team != TEAM_SPECTATOR && level.num_playing_clients >= 2) {
+			if (desired_team != TEAM_SPECTATOR && MM_Duel_OccupiedSlots() >= 2) {
 				desired_team = TEAM_SPECTATOR;
 				queue = true;
 				P_Menu_Close(ent);
@@ -517,12 +539,31 @@ bool SetTeam(gentity_t *ent, team_t desired_team, bool inactive, bool force, boo
 	// allow the change...
 
 	P_Menu_Close(ent);
-
-	if (desired_team == TEAM_SPECTATOR && inactive)
-		MM_Ghost_CaptureInactive(ent);
+	const bool was_match_player = muffmode::team::IsPlayingTeam(old_team);
+	const bool will_be_match_player = muffmode::team::IsPlayingTeam(desired_team);
+	bool inactive_reserved = false;
+	if (old_team != desired_team) {
+		const bool capture_inactive = inactive &&
+			desired_team == TEAM_SPECTATOR && was_match_player &&
+			!will_be_match_player;
+		if (capture_inactive) {
+			// Pause and archive before copying the reconnect state. A successful
+			// inactivity reservation remains an unsettled logical participant;
+			// a failed capture falls through to ordinary abandonment settlement.
+			MM_PlayerStats_OnClientPause(ent);
+			MM_MatchStats_ClientEnd(ent);
+			inactive_reserved = MM_Ghost_CaptureInactive(ent);
+		}
+		if (!inactive_reserved) {
+			MM_PlayerStats_OnTeamTransition(ent, old_team, desired_team);
+			if (was_match_player && !will_be_match_player && !capture_inactive)
+				MM_MatchStats_ClientEnd(ent);
+		}
+	}
 
 	// vacate captain if leaving a team
-	if (muffmode::team::IsPlayingTeam(old_team) && old_team != desired_team) {
+	if (notGT(GT_ARENA) &&
+		muffmode::team::IsPlayingTeam(old_team) && old_team != desired_team) {
 		if (level.captain[old_team] == ent)
 			VacateCaptain(old_team, ent);
 	}
@@ -533,18 +574,20 @@ bool SetTeam(gentity_t *ent, team_t desired_team, bool inactive, bool force, boo
 
 	CTF_DeadDropFlag(ent);
 	Tech_DeadDrop(ent);
+	if (old_team != desired_team && was_match_player && !will_be_match_player)
+		MM_MatchStats_ClientEnd(ent);
 
 	FreeFollower(ent);
 
 	ent->svflags &= ~SVF_NOCLIENT;
-	// Red Rover scores individual frags that persist for the whole match, but players
-	// change team constantly (defect on death, reshuffle each round). Zeroing on a team
-	// change here would wipe their running total every round, so skip it for RR - a fresh
-	// joiner already starts at 0 from client init.
-	if (notGT(GT_RR))
+	// Red Rover and multi-arena role projection change engine teams during play.
+	// Their own match controllers reset scores at real series boundaries.
+	if (notGT(GT_RR) && notGT(GT_ARENA))
 		ent->client->resp.score = 0;
 	ent->client->sess.team = desired_team;
 	P_PublishEngineTeam(ent);
+	if (old_team != desired_team && !was_match_player && will_be_match_player)
+		MM_MatchStats_ClientBegin(ent);
 	if (desired_team == TEAM_SPECTATOR)
 		ent->client->eliminated = false;
 	ent->client->resp.ctf_state = 0;
@@ -563,25 +606,34 @@ bool SetTeam(gentity_t *ent, team_t desired_team, bool inactive, bool force, boo
 	ent->client->sess.duel_queued = queue;
 
 	if (desired_team != TEAM_SPECTATOR) {
-		if (Teams())
+		if (Teams() || GT(GT_ARENA))
 			G_AssignPlayerSkin(ent, ent->client->pers.skin);
 
-		MM_RevertVote(ent->client);
+		if (notGT(GT_ARENA)) {
+			MM_RevertVote(ent->client);
 
-		// assign a ghost code
-		MM_Ghost_DoAssign(ent);
+			// assign a ghost code
+			MM_Ghost_DoAssign(ent);
+		}
 
 		// free any followers
 		FreeClientFollowers(ent);
 
 		// auto-assign captain if team has none
-		if (muffmode::team::IsPlayingTeam(desired_team) && !level.captain[desired_team])
+		if (notGT(GT_ARENA) &&
+			muffmode::team::IsPlayingTeam(desired_team) && !level.captain[desired_team])
 			SetCaptain(desired_team, ent);
-	} else if (!inactive) {
+	} else if (!inactive && notGT(GT_ARENA)) {
 		MM_Ghost_ClearClient(ent);
 	}
 
 	ent->client->sess.initialised = true;
+
+	// Joining the match re-arms the top-right gametype/ruleset notice. Test the real playing
+	// predicate, not IsPlayingTeam(): that one is red/blue only, so FFA/Duel/LMS/Horde joins land
+	// on TEAM_FREE and would never arm it. sess.team is already assigned above.
+	if (ClientIsPlaying(ent->client))
+		MM_MatchInfoHud_Show(ent);
 
 	// if they are playing a duel, count as a loss
 	if (GT(GT_DUEL) && old_team == TEAM_FREE)
@@ -607,6 +659,9 @@ MM_CmdTeam
 */
 void MM_CmdTeam(gentity_t *ent) {
 	if (!ent || !ent->client)
+		return;
+
+	if (MM_Arena_TeamCommand(ent))
 		return;
 
 	if (!MM_IsArgcInRangeValid(gi.argc(), 1, 2)) {
@@ -649,6 +704,9 @@ MM_CmdSetTeam
 */
 void MM_CmdSetTeam(gentity_t *ent) {
 	if (!ent || !ent->client)
+		return;
+
+	if (MM_Arena_SetTeamCommand(ent))
 		return;
 
 	if (!MM_IsArgcInRangeValid(gi.argc(), 2, 3)) {

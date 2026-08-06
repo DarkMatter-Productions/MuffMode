@@ -26,6 +26,10 @@ void SP_info_teleport_destination(gentity_t *self);
 void SP_info_ctf_teleport_destination(gentity_t *self);
 void SP_info_landmark(gentity_t *self); // [Paril-KEX]
 void SP_info_nav_lock(gentity_t *self); // [Paril-KEX]
+void SP_info_horde_spawn(gentity_t *self);
+void SP_info_horde_flying_spawn(gentity_t *self);
+void SP_info_horde_water_spawn(gentity_t *self);
+void SP_info_horde_boss_spawn(gentity_t *self);
 
 void SP_func_plat(gentity_t *ent);
 void SP_func_plat2(gentity_t *ent);
@@ -241,6 +245,10 @@ static const std::initializer_list<spawn_t> spawns = {
 	{ "info_landmark", SP_info_landmark },
 	{ "info_world_text", SP_info_world_text },
 	{ "info_nav_lock", SP_info_nav_lock },
+	{ "info_horde_spawn", SP_info_horde_spawn },
+	{ "info_horde_flying_spawn", SP_info_horde_flying_spawn },
+	{ "info_horde_water_spawn", SP_info_horde_water_spawn },
+	{ "info_horde_boss_spawn", SP_info_horde_boss_spawn },
 
 	{ "func_plat", SP_func_plat },
 	{ "func_plat2", SP_func_plat2 },
@@ -256,6 +264,7 @@ static const std::initializer_list<spawn_t> spawns = {
 	{ "func_areaportal", SP_func_areaportal },
 	{ "func_clock", SP_func_clock },
 	{ "func_wall", SP_func_wall },
+	{ "func_illusionary", SP_func_illusionary },
 	{ "func_force_wall", SP_func_force_wall },
 	{ "func_object", SP_func_object },
 	{ "func_timer", SP_func_timer },

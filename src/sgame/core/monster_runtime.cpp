@@ -4,6 +4,7 @@
 #include "bots/bot_includes.h"
 // [MuffMode] Horde kill scoring hook
 #include "muffmode/mm_horde.h"
+#include "muffmode/mm_horde_ai_rules.h"
 
 extern cvar_t *g_horde_enhanced_ai;
 
@@ -442,7 +443,11 @@ void M_SetAnimation(gentity_t *self, const save_mmove_t &move, bool instant) {
 	self->monsterinfo.next_move = move;
 }
 
-static void M_MoveFrame(gentity_t *self) {
+static bool M_MoveFrame(gentity_t *self) {
+	const int32_t self_generation = self->spawn_count;
+	const auto self_is_current = [&]() {
+		return self->inuse && self->spawn_count == self_generation;
+	};
 	const mmove_t *move = self->monsterinfo.active_move.pointer();
 
 	// [Paril-KEX] high tick rate adjustments;
@@ -462,7 +467,7 @@ static void M_MoveFrame(gentity_t *self) {
 	}
 
 	if (!move)
-		return;
+		return true;
 
 	// no, but maybe we were explicitly forced into another move (pain,
 	// death, etc)
@@ -481,6 +486,8 @@ static void M_MoveFrame(gentity_t *self) {
 			if (self->s.frame == move->lastframe) {
 				if (move->endfunc) {
 					move->endfunc(self);
+					if (!self_is_current())
+						return false;
 
 					if (self->monsterinfo.next_move) {
 						M_SetAnimation(self, self->monsterinfo.next_move, true);
@@ -497,7 +504,7 @@ static void M_MoveFrame(gentity_t *self) {
 
 					// check for death
 					if (self->svflags & SVF_DEADMONSTER)
-						return;
+						return true;
 				}
 			}
 
@@ -534,19 +541,28 @@ static void M_MoveFrame(gentity_t *self) {
 			move->frame[index].aifunc(self, dist);
 		} else
 			move->frame[index].aifunc(self, 0);
+		if (!self_is_current())
+			return false;
 	}
 
-	if (run_frame && move->frame[index].thinkfunc)
+	if (run_frame && move->frame[index].thinkfunc) {
 		move->frame[index].thinkfunc(self);
+		if (!self_is_current())
+			return false;
+	}
 
 	if (move->frame[index].lerp_frame != -1) {
 		self->s.renderfx |= RF_OLD_FRAME_LERP;
 		self->s.old_frame = move->frame[index].lerp_frame;
 	}
+	return true;
 }
 
 void G_MonsterKilled(gentity_t *self) {
-	level.killed_monsters++;
+	level.killed_monsters =
+		MM_Horde_SaturatingIncrement(max(0, level.killed_monsters));
+	// [MuffMode] Horde rolls kill rewards/scoring off every counted kill
+	MM_Horde_OnMonsterKilled(self);
 
 	if (coop->integer && self->enemy && self->enemy->client)
 		G_AdjustPlayerScore(self->enemy->client, 1, false, 0);
@@ -610,8 +626,14 @@ void M_ProcessPain(gentity_t *e) {
 				}
 			}
 
-			if (!(e->monsterinfo.aiflags & AI_DO_NOT_COUNT) && !(e->spawnflags & SPAWNFLAG_MONSTER_DEAD))
-				G_MonsterKilled(e);
+			if (!(e->spawnflags & SPAWNFLAG_MONSTER_DEAD)) {
+				if (!(e->monsterinfo.aiflags & AI_DO_NOT_COUNT))
+					G_MonsterKilled(e);
+				// [MuffMode] Pressure-only Horde reinforcements remain AI_DO_NOT_COUNT.
+				// Their reward class is zero, so this only invalidates live-count state.
+				else if (!(e->monsterinfo.aiflags & AI_GOOD_GUY))
+					MM_Horde_OnMonsterKilled(e);
+			}
 
 			e->touch = nullptr;
 			monster_death_use(e);
@@ -620,10 +642,15 @@ void M_ProcessPain(gentity_t *e) {
 		if (!e->deadflag) {
 			int32_t score_value = ceil(e->monsterinfo.base_health / 100);
 			if (score_value < 1) score_value = 1;
-			if (e->monsterinfo.damage_attacker && e->monsterinfo.damage_attacker->client)
+			// [MuffMode] Uncounted Horde spawns (horde_reward_class == 0) shouldn't award score
+			if (e->monsterinfo.damage_attacker && e->monsterinfo.damage_attacker->client &&
+				(notGT(GT_HORDE) || e->monsterinfo.horde_reward_class != 0))
 				MM_Horde_AdjustPlayerScore(e->monsterinfo.damage_attacker->client, score_value);
 		}
+		const int32_t generation = e->spawn_count;
 		e->die(e, e->monsterinfo.damage_inflictor, e->monsterinfo.damage_attacker, e->monsterinfo.damage_blood, e->monsterinfo.damage_from, e->monsterinfo.damage_mod);
+		if (!e->inuse || e->spawn_count != generation)
+			return;
 
 		// [Paril-KEX] medic commander only gets his slots back after the monster is gibbed, since we can revive them
 		if (e->health <= e->gib_health) {
@@ -658,7 +685,8 @@ void M_ProcessPain(gentity_t *e) {
 	if (e->healthtarget) {
 		const char *target = e->target;
 		e->target = e->healthtarget;
-		G_UseTargets(e, e->enemy);
+		if (!G_UseTargets(e, e->enemy))
+			return;
 		e->target = target;
 	}
 }
@@ -838,6 +866,10 @@ static bool CheckPathVisibility(const vec3_t &start, const vec3_t &end) {
 }
 
 THINK(monster_think) (gentity_t *self) -> void {
+	const int32_t self_generation = self->spawn_count;
+	const auto self_is_current = [&]() {
+		return self->inuse && self->spawn_count == self_generation;
+	};
 	// [Paril-KEX] monster sniff testing; if we can make an unobstructed path to the player, murder ourselves.
 	if (g_debug_monster_kills->integer) {
 		if (g_entities[1].inuse) {
@@ -891,6 +923,8 @@ THINK(monster_think) (gentity_t *self) -> void {
 					}
 				}
 			}
+			if (!self_is_current())
+				return;
 
 			if (!self->deadflag && !(self->monsterinfo.aiflags & AI_DO_NOT_COUNT))
 				gi.Draw_Bounds(self->absmin, self->absmax, rgba_red, gi.frame_time_s, false);
@@ -902,7 +936,7 @@ THINK(monster_think) (gentity_t *self) -> void {
 	M_ProcessPain(self);
 
 	// pain/die above freed us
-	if (!self->inuse || self->think != monster_think)
+	if (!self_is_current() || self->think != monster_think)
 		return;
 
 	// [MuffMode] horde: re-acquire least-burdened living player instead of slot 1
@@ -913,6 +947,11 @@ THINK(monster_think) (gentity_t *self) -> void {
 				FoundTarget(self);
 			}
 		}
+
+		// [MuffMode] horde: keep that assignment an active hunt rather than a cold trail walk
+		if (!self_is_current())
+			return;
+		MM_Horde_DrivePursuit(self);
 	} else if ((self->hackflags & HACKFLAG_ATTACK_PLAYER || GT(GT_HORDE)) && !self->enemy &&
 		g_entities[1].inuse && ClientIsPlaying(g_entities[1].client)) {
 		self->enemy = &g_entities[1];
@@ -921,14 +960,19 @@ THINK(monster_think) (gentity_t *self) -> void {
 
 	if (self->health > 0 && self->monsterinfo.dodge && !(globals.server_flags & SERVER_FLAG_LOADING))
 		M_CheckDodge(self);
+	if (!self_is_current())
+		return;
 
-	M_MoveFrame(self);
+	if (!M_MoveFrame(self) || !self_is_current())
+		return;
 	if (self->linkcount != self->monsterinfo.linkcount) {
 		self->monsterinfo.linkcount = self->linkcount;
 		M_CheckGround(self, G_GetClipMask(self));
 	}
 	M_CatagorizePosition(self, self->s.origin, self->waterlevel, self->watertype);
 	M_WorldEffects(self);
+	if (!self_is_current())
+		return;
 	M_SetEffects(self);
 }
 
@@ -969,7 +1013,8 @@ static THINK(monster_triggered_spawn) (gentity_t *self) -> void {
 	self->air_finished = level.time + 12_sec;
 	gi.linkentity(self);
 
-	KillBox(self, false);
+	if (!KillBox(self, false))
+		return;
 
 	monster_start_go(self);
 
@@ -1053,6 +1098,17 @@ enemy as activator.
 ================
 */
 void monster_death_use(gentity_t *self) {
+	gentity_t *const death_activator = self->enemy;
+	const int32_t death_activator_generation = death_activator
+		? death_activator->spawn_count : 0;
+	const auto resolve_death_activator = [&]() -> gentity_t * {
+		if (!death_activator || !death_activator->inuse ||
+			death_activator->spawn_count != death_activator_generation ||
+			(death_activator->client &&
+				!death_activator->client->pers.connected))
+			return nullptr;
+		return death_activator;
+	};
 	self->flags &= ~(FL_FLY | FL_SWIM);
 	self->monsterinfo.aiflags &= (AI_DOUBLE_TROUBLE | AI_GOOD_GUY | AI_STINKY | AI_SPAWNED_MASK);
 
@@ -1070,13 +1126,13 @@ void monster_death_use(gentity_t *self) {
 	if (self->deathtarget)
 		self->target = self->deathtarget;
 
-	if (self->target)
-		G_UseTargets(self, self->enemy);
+	if (self->target && !G_UseTargets(self, resolve_death_activator()))
+		return;
 
 	// [Paril-KEX] fire health target
 	if (self->healthtarget) {
 		self->target = self->healthtarget;
-		G_UseTargets(self, self->enemy);
+		(void) G_UseTargets(self, resolve_death_activator());
 	}
 }
 
@@ -1139,9 +1195,14 @@ bool monster_start(gentity_t *self) {
 		self->monsterinfo.aiflags |= AI_DO_NOT_COUNT;
 
 	if (!(self->monsterinfo.aiflags & AI_DO_NOT_COUNT) && !self->spawnflags.has(SPAWNFLAG_MONSTER_DEAD)) {
-		if (g_debug_monster_kills->integer)
-			level.monsters_registered[level.total_monsters] = self;
-		level.total_monsters++;
+		const int monster_index = max(0, level.total_monsters);
+		if (g_debug_monster_kills->integer) {
+			if (static_cast<size_t>(monster_index) < level.monsters_registered.size())
+				level.monsters_registered[monster_index] = self;
+			else if (static_cast<size_t>(monster_index) == level.monsters_registered.size())
+				gi.Com_PrintFmt("monster_start: debug registry full; later monsters will not be tracked.\n");
+		}
+		level.total_monsters = MM_Horde_SaturatingIncrement(monster_index);
 	}
 
 	self->nextthink = level.time + FRAME_TIME_S;
@@ -1254,9 +1315,11 @@ void monster_start_go(gentity_t *self) {
 			if (G_FixStuckObject(self, check) != stuck_result_t::NO_GOOD_POSITION) {
 				if (self->monsterinfo.aiflags & AI_GOOD_GUY)
 					is_stuck = gi.trace(self->s.origin, self->mins, self->maxs, self->s.origin, self, MASK_MONSTERSOLID).startsolid;
-				else if (!(self->flags & (FL_FLY | FL_SWIM)))
-					M_droptofloor(self);
-				is_stuck = false;
+				else {
+					if (!(self->flags & (FL_FLY | FL_SWIM)))
+						M_droptofloor(self);
+					is_stuck = false;
+				}
 			}
 		}
 
@@ -1467,7 +1530,8 @@ static USE(trigger_health_relay_use) (gentity_t *self, gentity_t *other, gentity
 		return;
 
 	// fire!
-	G_UseTargets(self, activator);
+	if (!G_UseTargets(self, activator))
+		return;
 
 	// kill self
 	G_FreeEntity(self);
@@ -1639,7 +1703,8 @@ static THINK(stationarymonster_triggered_spawn) (gentity_t *self) -> void {
 	self->air_finished = level.time + 12_sec;
 	gi.linkentity(self);
 
-	KillBox(self, false);
+	if (!KillBox(self, false))
+		return;
 
 	// FIXME - why doesn't this happen with real monsters?
 	self->spawnflags &= ~SPAWNFLAG_MONSTER_TRIGGER_SPAWN;

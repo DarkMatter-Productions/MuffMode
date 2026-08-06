@@ -5,13 +5,18 @@
 #pragma once
 
 #include "shared/gameplay.h"
+#include "muffmode/mm_arena_rules.h"
+#include "muffmode/mm_centerprint.h"
+#include "muffmode/mm_gametype.h"
+#include "muffmode/mm_match_stats_types.h"
+#include "muffmode/mm_maps.h"
 #include "muffmode/mm_vote_types.h"
 
 // the "gameversion" client command will print this plus compile date
 constexpr const char *GAMEVERSION = "baseq2";
 
 constexpr const char *GAMEMOD_TITLE = "Muff Mode";
-constexpr const char *GAMEMOD_VERSION = "0.60.21";
+constexpr const char *GAMEMOD_VERSION = "0.70.20";
 
 //==================================================================
 
@@ -20,8 +25,6 @@ constexpr const char *GAMEMOD_VERSION = "0.60.21";
 constexpr const int32_t GIB_HEALTH = -40;
 
 constexpr const int32_t AMMO_INFINITE = 1000;
-
-constexpr size_t MAX_CLIENTS_KEX = 32; // absolute limit
 
 enum mstats_t : uint32_t {
 	MSTAT_NONE,
@@ -168,6 +171,13 @@ enum ruleset_t : uint8_t {
 	RS_QC,
 	RS_NUM_RULESETS
 };
+
+constexpr int ClampPlayableRulesetIndex(int value) noexcept
+{
+	const int minimum = static_cast<int>(RS_NONE) + 1;
+	const int maximum = static_cast<int>(RS_NUM_RULESETS) - 1;
+	return value < minimum ? minimum : (value > maximum ? maximum : value);
+}
 #define RS( x ) (game.ruleset == (x))
 
 constexpr const char *rs_short_name[RS_NUM_RULESETS] = {
@@ -198,7 +208,7 @@ enum team_t {
 	TEAM_NUM_TEAMS
 };
 
-enum gametype_t {
+enum gametype_t : int {
 	GT_NONE,
 	GT_FFA,
 	GT_DUEL,
@@ -213,10 +223,11 @@ enum gametype_t {
 	GT_BALL,
 	GT_INSTAGIB,
 	GT_NADEFEST,
+	GT_ARENA,
 	GT_NUM_GAMETYPES
 };
 constexpr gametype_t GT_FIRST = GT_FFA;
-constexpr gametype_t GT_LAST = GT_NADEFEST;
+constexpr gametype_t GT_LAST = GT_ARENA;
 
 enum gtf_t {
 	GTF_TEAMS	= 0x01,
@@ -224,14 +235,30 @@ enum gtf_t {
 	GTF_ARENA	= 0x04,
 	GTF_ROUNDS	= 0x08,
 	GTF_ELIMINATION	= 0x10,
-	GTF_FRAGS	= 0x20
+	GTF_FRAGS	= 0x20,
+	// [MuffMode] Independent RA2/RA3 arenas. Unlike GTF_ROUNDS and
+	// GTF_ELIMINATION, this never opts into the singleton match state.
+	GTF_MULTI_ARENA = 0x40
 };
 
 extern int _gt[GT_NUM_GAMETYPES];
 
-#define GTF( x ) (_gt[g_gametype->integer] & (x))
-#define GT( x ) (g_gametype->integer == (int)(x))
-#define notGT( x ) (g_gametype->integer != (int)(x))
+// [MuffMode] Selecting MuffMode Arena is not enough to activate its gameplay.
+// Until the current entity lump passes the RA2 map contract, all normal
+// gameplay queries see FFA while registration/configuration code can use
+// GT_RAW to inspect the requested cvar value.
+bool MM_Arena_Active();
+#define GT_RAW( x ) (g_gametype && g_gametype->integer == (int)(x))
+#define MM_GAMETYPE_BOUNDARY() \
+	MM_ResolveGametypeBoundary( \
+		g_gametype ? g_gametype->integer : (int)GT_FFA, \
+		(int)GT_FIRST, (int)GT_LAST, (int)GT_ARENA, (int)GT_FFA, \
+		MM_Arena_Active())
+#define MM_EFFECTIVE_GT \
+	(MM_GAMETYPE_BOUNDARY().effective_index)
+#define GTF( x ) (_gt[MM_EFFECTIVE_GT] & (x))
+#define GT( x ) (MM_EFFECTIVE_GT == (int)(x))
+#define notGT( x ) (!GT(x))
 
 constexpr const char *gt_short_name[GT_NUM_GAMETYPES] = {
 	"cmp",
@@ -247,7 +274,8 @@ constexpr const char *gt_short_name[GT_NUM_GAMETYPES] = {
 	"horde",
 	"ball",
 	"instagib",
-	"nadefest"
+	"nadefest",
+	"arena"
 };
 constexpr const char *gt_short_name_upper[GT_NUM_GAMETYPES] = {
 	"CMP",
@@ -264,6 +292,7 @@ constexpr const char *gt_short_name_upper[GT_NUM_GAMETYPES] = {
 	"BALL",
 	"INSTAGIB",
 	"NADEFEST",
+	"ARENA",
 };
 constexpr const char *gt_long_name[GT_NUM_GAMETYPES] = {
 	"Campaign",
@@ -279,10 +308,11 @@ constexpr const char *gt_long_name[GT_NUM_GAMETYPES] = {
 	"Horde",
 	"ProBall",
 	"Instagib",
-	"NadeFest"
+	"NadeFest",
+	"MuffMode Arena"
 };
 
-typedef enum {
+enum match_state_t {
 	MATCH_NONE,
 	MATCH_WARMUP_DELAYED,	// pre-warmup (delay is active)
 	MATCH_WARMUP_DEFAULT,	// 'waiting for players' / match short of players / imbalanced teams
@@ -290,21 +320,21 @@ typedef enum {
 	MATCH_COUNTDOWN,		// all conditions met, counting down to match start, check conditions again at end of countdown before match start
 	MATCH_IN_PROGRESS,		// match is in progress, not used in round-based gametypes
 	MATCH_ENDED				// match or final round has ended
-} matchst_t;
+};
 
-typedef enum {
+enum warmup_req_t {
 	WARMUP_REQ_NONE,
 	WARMUP_REQ_MORE_PLAYERS,
 	WARMUP_REQ_BALANCE,
 	WARMUP_REQ_READYUP
-} warmupreq_t;
+};
 
-typedef enum {
+enum round_state_t {
 	ROUND_NONE,
 	ROUND_COUNTDOWN,	// round-based gametypes only: initial delay before round starts
 	ROUND_IN_PROGRESS,	// round-based gametypes only: round is in progress
 	ROUND_ENDED			// round-based gametypes only: round has ended
-} roundst_t;
+};
 
 enum playerspawn_t {
 	SPAWN_FULL_RAND,
@@ -328,16 +358,16 @@ enum medal_t : uint8_t {
 
 #define	RANK_TIED_FLAG		0x4000
 
-typedef enum {
+enum spectator_state_t {
 	SPECTATOR_NOT,
 	SPECTATOR_FREE,
 	SPECTATOR_FOLLOW
-} spectator_state_t;
+};
 
-typedef enum {
+enum player_team_status_t {
 	TEAM_BEGIN,		// Beginning a team game, spawn at base
 	TEAM_ACTIVE		// Now actively playing
-} player_team_state_state_t;
+};
 
 enum grapple_state_t {
 	GRAPPLE_STATE_FLY,
@@ -438,7 +468,8 @@ public:
 		size_t n = 0;
 		((loc_embed(args, buffers[n], buffer_ptrs[n]), ++n), ...);
 
-		Loc_Print(e, level, base, &buffer_ptrs.front(), sizeof...(args));
+		// [MuffMode] mark deathmatch centerprints so MuffMode clients can drop the console echo
+		Loc_Print(e, level, MM_MarkCenterPrint(level, base), &buffer_ptrs.front(), sizeof...(args));
 	}
 
 	template<typename... Args>
@@ -451,7 +482,8 @@ public:
 		size_t n = 0;
 		((loc_embed(args, buffers[n], buffer_ptrs[n]), ++n), ...);
 
-		Loc_Print(nullptr, (print_type_t)(level | print_type_t::PRINT_BROADCAST), base, &buffer_ptrs.front(), sizeof...(args));
+		// [MuffMode] mark deathmatch centerprints so MuffMode clients can drop the console echo
+		Loc_Print(nullptr, (print_type_t)(level | print_type_t::PRINT_BROADCAST), MM_MarkCenterPrint(level, base), &buffer_ptrs.front(), sizeof...(args));
 	}
 
 	template<typename... Args>
@@ -464,7 +496,8 @@ public:
 		size_t n = 0;
 		((loc_embed(args, buffers[n], buffer_ptrs[n]), ++n), ...);
 
-		Loc_Print(e, PRINT_CENTER, base, &buffer_ptrs.front(), sizeof...(args));
+		// [MuffMode] mark deathmatch centerprints so MuffMode clients can drop the console echo
+		Loc_Print(e, PRINT_CENTER, MM_MarkCenterPrint(PRINT_CENTER, base), &buffer_ptrs.front(), sizeof...(args));
 	}
 
 	// collision detection
@@ -1464,7 +1497,7 @@ struct game_locals_t {
 	int32_t max_lag_origins;
 	lag_compensation_sample_t *lag_samples; // maxclients * max_lag_origins
 
-	std::vector<std::string> mapqueue;
+	std::vector<muffmode::maps::mymap_queue_entry_t> mapqueue;
 
 	gametype_t	gametype;
 	std::string motd;
@@ -1499,8 +1532,8 @@ struct ghost_t {
 	gentity_t *ent;
 };
 
-typedef struct {
-	player_team_state_state_t	state;
+struct player_team_state_t {
+	player_team_status_t state;
 
 	gtime_t		returned_flag_time;
 	gtime_t		flag_pickup_time;
@@ -1516,7 +1549,7 @@ typedef struct {
 	int			assists;
 
 	int			hurt_carrier_time;
-} player_team_state_t;
+};
 
 //
 // this structure is cleared as each map is entered
@@ -1647,7 +1680,7 @@ struct level_locals_t {
 	uint8_t		num_playing_clients;		// connected, non-spectators
 	uint8_t		num_playing_human_clients;	// players, bots excluded
 	int			sorted_clients[MAX_CLIENTS];// sorted by score
-	uint8_t		follow1, follow2;			// clientNums for auto-follow spectators
+	uint8_t		follow1, follow2;			// clientNums for auto-follow spectators; UINT8_MAX = none
 
 	int			num_living_red;
 	int			num_eliminated_red;
@@ -1660,8 +1693,12 @@ struct level_locals_t {
 	int			team_scores[TEAM_NUM_TEAMS];
 	int			team_old_scores[TEAM_NUM_TEAMS];
 
-	matchst_t	match_state;
-	warmupreq_t	warmup_requisite;
+	// [MuffMode] Durable match collection/export state. This is independent of
+	// g_matchstats, which only controls the live player-stats menu.
+	mm_match_overall_stats_t match;
+
+	match_state_t match_state;
+	warmup_req_t warmup_requisite;
 	gtime_t		warmup_notice_time;
 	gtime_t		warmup_gametype_hud_time;	// reserved: gametype/ruleset HUD pulse anchor
 	gtime_t		match_time;
@@ -1675,7 +1712,9 @@ struct level_locals_t {
 	gtime_t		match_cancel_delay_timer;	// delay before cancelling match due to too few players
 
 	int			round_number;
-	roundst_t	round_state;
+	uint32_t	round_epoch;				// increments before every round reset
+	uint32_t	world_epoch;				// increments before a same-match world rebuild
+	round_state_t round_state;
 	int			round_state_queued;
 	gtime_t		round_state_timer;			// change match state at this time
 
@@ -1802,7 +1841,12 @@ struct spawn_temp_t {
 	std::unordered_set<const char *> keys_specified;
 
 	inline bool was_key_specified(const char *key) const {
-		return keys_specified.find(key) != keys_specified.end();
+		if (!key)
+			return false;
+		for (const char *specified : keys_specified)
+			if (specified && !strcmp(specified, key))
+				return true;
+		return false;
 	}
 
 	const char *cvar;
@@ -1855,7 +1899,7 @@ struct savable_allocated_memory_t {
 		ptr(ptr),
 		count(count) {}
 
-	inline ~savable_allocated_memory_t() {
+	inline ~savable_allocated_memory_t() noexcept {
 		release();
 	}
 
@@ -1864,15 +1908,17 @@ struct savable_allocated_memory_t {
 	constexpr savable_allocated_memory_t &operator=(const savable_allocated_memory_t &) = delete;
 
 	// free move
-	constexpr savable_allocated_memory_t(savable_allocated_memory_t &&move) {
-		ptr = move.ptr;
-		count = move.count;
-
+	savable_allocated_memory_t(savable_allocated_memory_t &&move) noexcept :
+		ptr(move.ptr), count(move.count) {
 		move.ptr = nullptr;
 		move.count = 0;
 	}
 
-	constexpr savable_allocated_memory_t &operator=(savable_allocated_memory_t &&move) {
+	savable_allocated_memory_t &operator=(savable_allocated_memory_t &&move) noexcept {
+		if (this == &move)
+			return *this;
+
+		release();
 		ptr = move.ptr;
 		count = move.count;
 
@@ -1882,12 +1928,11 @@ struct savable_allocated_memory_t {
 		return *this;
 	}
 
-	inline void release() {
-		if (ptr) {
+	inline void release() noexcept {
+		if (ptr)
 			gi.TagFree(ptr);
-			count = 0;
-			ptr = nullptr;
-		}
+		count = 0;
+		ptr = nullptr;
 	}
 
 	constexpr explicit operator T *() { return ptr; }
@@ -2165,7 +2210,18 @@ struct monsterinfo_t {
 	gtime_t	  strafe_check_time; // time until we should reconsider strafing
 	int32_t	  base_health; // health that we had on spawn, before any co-op adjustments
 	int32_t   health_scaling; // number of players we've been scaled up to
-	float	  champion_damage_scale; // horde: tapered outgoing-damage multiplier for champions (<= 1 means no buff / not a champion)
+	float	  champion_damage_scale; // horde: positive outgoing-damage multiplier for champions/bosses; 0 means inactive
+	gtime_t	  horde_retarget_time; // next enhanced-Horde target load rebalance
+	gtime_t	  horde_pursuit_sample_time; // next relentless-pursuit progress sample; 0 means none held
+	vec3_t	  horde_pursuit_last_origin; // origin captured at the last pursuit progress sample
+	uint8_t	  horde_reward_class; // horde: 0=none, 1=regular, 2=champion, 3=boss
+	// [MuffMode] horde: cached targeting strategy plus a per-fighter unreachable memory, so
+	// scoring never re-derives a strategy from classname and never pays for gi.GetPathToGoal.
+	uint8_t	  horde_strategy; // mm_horde_strategy_t + 1; 0 means not classified yet
+	uint64_t  horde_unreach_lo; // unreachable-fighter bits for entity slots 1..64
+	uint64_t  horde_unreach_hi; // unreachable-fighter bits for entity slots 65..128
+	gtime_t	  horde_unreach_time; // when the newest bit was set; the whole mask decays from here
+	gtime_t	  horde_reach_sample_time; // next allowed reachability-evidence harvest
 	gtime_t   next_move_time; // high tick rate
 	gtime_t	  bad_move_time; // don't try straight moves until this is over
 	gtime_t	  bump_time; // don't slide against walls for a bit
@@ -2363,6 +2419,10 @@ extern cvar_t *noplayerstime;
 
 extern cvar_t *g_ruleset;
 
+// [MuffMode] Master switch for ranking: skill ratings and match statistics. Default on; hosts that
+// turn it off run a purely casual server (player preference profiles still persist).
+extern cvar_t *g_ranked;
+
 extern cvar_t *password;
 extern cvar_t *spectator_password;
 extern cvar_t *admin_password;
@@ -2408,6 +2468,33 @@ extern cvar_t *g_allow_voting;
 extern cvar_t *g_arena_dmg_armor;
 extern cvar_t *g_arena_start_armor;
 extern cvar_t *g_arena_start_health;
+extern cvar_t *g_arena_players_per_team;
+extern cvar_t *g_arena_rounds;
+extern cvar_t *g_arena_falling_damage;
+extern cvar_t *g_arena_weapon_mask;
+extern cvar_t *g_arena_ammo_shells;
+extern cvar_t *g_arena_ammo_bullets;
+extern cvar_t *g_arena_ammo_grenades;
+extern cvar_t *g_arena_ammo_rockets;
+extern cvar_t *g_arena_ammo_cells;
+extern cvar_t *g_arena_ammo_slugs;
+extern cvar_t *g_arena_config;
+extern cvar_t *g_arena_legacy_idmap;
+extern cvar_t *g_arena_default_type;
+extern cvar_t *g_arena_health_protect;
+extern cvar_t *g_arena_armor_protect;
+extern cvar_t *g_arena_fast_switch;
+extern cvar_t *g_arena_grapple;
+extern cvar_t *g_arena_excessive;
+extern cvar_t *g_arena_competition;
+extern cvar_t *g_arena_warmup_readyup;
+extern cvar_t *g_arena_unbalanced;
+extern cvar_t *g_arena_lock;
+extern cvar_t *g_arena_lock_count;
+extern cvar_t *g_arena_max_players;
+extern cvar_t *g_arena_vote_time;
+extern cvar_t *g_arena_timeouts;
+extern cvar_t *g_arena_rocket_speed;
 extern cvar_t *g_auto_ghost_max;
 extern cvar_t *g_auto_ghost_time;
 extern cvar_t *g_auto_ghost_timeout;
@@ -2417,6 +2504,48 @@ extern cvar_t *g_coop_health_scaling;
 extern cvar_t *g_coop_instanced_items;
 extern cvar_t *g_coop_num_lives;
 extern cvar_t *g_horde_lives;
+extern cvar_t *g_horde_boss_powerup_chance;
+extern cvar_t *g_horde_boss_tier_window;
+extern cvar_t *g_horde_boss_machinegames;
+extern cvar_t *g_horde_boss_pairs;
+extern cvar_t *g_horde_boss_repeat_window;
+extern cvar_t *g_horde_boss_force;
+extern cvar_t *g_horde_boss_scale_limit;
+extern cvar_t *g_horde_boss_health_per_wave;
+extern cvar_t *g_horde_boss_damage_per_wave;
+extern cvar_t *g_horde_boss_pair_health_mult;
+extern cvar_t *g_horde_boss_armor_mult;
+extern cvar_t *g_horde_champion_drop_chance;
+extern cvar_t *g_horde_drop_chance;
+extern cvar_t *g_horde_drop_profile_bias;
+extern cvar_t *g_horde_featured_spawns;
+extern cvar_t *g_horde_map_monster_spawns;
+extern cvar_t *g_horde_map_spawn_chance;
+extern cvar_t *g_horde_map_spawn_cooldown;
+extern cvar_t *g_horde_map_spawn_min_dist;
+extern cvar_t *g_horde_momentum_messages;
+extern cvar_t *g_horde_streak_drop_bonus;
+extern cvar_t *g_horde_streak_max_tier;
+extern cvar_t *g_horde_streak_score_bonus;
+extern cvar_t *g_horde_streak_step;
+extern cvar_t *g_horde_streak_upgrade_chance;
+extern cvar_t *g_horde_wave_flawless_message;
+extern cvar_t *g_horde_wave_survival_bonus;
+extern cvar_t *g_horde_wave_type_ramp;
+extern cvar_t *g_horde_stall_timeout;
+extern cvar_t *g_horde_monster_edge_drops;
+extern cvar_t *g_horde_preset_allow_boss_waves;
+extern cvar_t *g_horde_preset_chance;
+extern cvar_t *g_horde_preset_weight_clone_army;
+extern cvar_t *g_horde_preset_weight_funhouse_horde;
+extern cvar_t *g_horde_preset_weight_get_over_here;
+extern cvar_t *g_horde_preset_weight_giant_horde;
+extern cvar_t *g_horde_preset_weight_glass_cannon;
+extern cvar_t *g_horde_preset_weight_low_gravity;
+extern cvar_t *g_horde_preset_weight_tiny_shamblers;
+extern cvar_t *g_horde_preset_weight_tiny_terror;
+extern cvar_t *g_horde_preset_weight_pinball_night;
+extern cvar_t *g_horde_preset_weight_sawstorm;
 extern cvar_t *g_lms_lives;
 extern cvar_t *g_horde_start_chainsaw;
 extern cvar_t *g_horde_item_respawn_scale;
@@ -2443,6 +2572,7 @@ extern cvar_t *g_dm_death_scoreboard;
 extern cvar_t *g_dm_do_readyup;
 extern cvar_t *g_dm_do_warmup;
 extern cvar_t *g_dm_exec_level_cfg;
+extern cvar_t *g_dm_explosive_respawn_time;
 extern cvar_t *g_dm_force_join;
 extern cvar_t *g_dm_force_respawn;
 extern cvar_t *g_dm_force_respawn_time;
@@ -2505,7 +2635,13 @@ extern cvar_t *g_lag_compensation;
 extern cvar_t *g_lag_compensation_enhanced;
 extern cvar_t *g_map_list;
 extern cvar_t *g_map_list_shuffle;
+extern cvar_t *g_map_pick;
+extern cvar_t *g_match_awards;
 extern cvar_t *g_map_pool;
+extern cvar_t *g_maps_pool_file;
+extern cvar_t *g_maps_cycle_file;
+extern cvar_t *g_maps_random;
+extern cvar_t *g_maps_repeat_delay;
 extern cvar_t *g_votable_gametypes;
 extern cvar_t *g_votable_rulesets;
 extern cvar_t *g_match_lock;
@@ -2603,7 +2739,8 @@ bool CheckFlood(gentity_t *ent);
 void Cmd_Help_f(gentity_t *ent);
 void Cmd_Score_f(gentity_t *ent);
 
-void G_AssignPlayerSkin(gentity_t *ent, const char *s);
+std::string_view G_FormatPlayerSkinConfigString(gentity_t *ent, const char *skin);
+void G_AssignPlayerSkin(gentity_t *ent, const char *s, bool refresh_overrides = true);
 
 void TransitionVoteState(VoteState new_state);
 void ClearVote();
@@ -2619,6 +2756,7 @@ void		QuadHog_Spawn(gitem_t *item, gentity_t *spot, bool reset);
 bool		AllowTechs();
 void		Tech_DeadDrop(gentity_t *ent);
 void		Tech_ApplyExpiry(gentity_t *ent);
+void		Tech_ReturnToWorld(item_id_t tech_id, const vec3_t &fallback_origin, gtime_t expire_time);
 void		Tech_Reset();
 void		Tech_HordeClear();
 void		Tech_HordeSpawnWave();
@@ -2641,6 +2779,7 @@ gitem_t		*FindItemByClassname(const char *classname);
 gentity_t		*Drop_Item(gentity_t *ent, gitem_t *item);
 void		SetRespawn(gentity_t *ent, gtime_t delay, bool hide_self = true);
 void		Change_Weapon(gentity_t *ent);
+void		Weapon_CancelFiring(gentity_t *ent);
 bool		SpawnItem(gentity_t *ent, gitem_t *item);
 void		Think_Weapon(gentity_t *ent);
 item_id_t	ArmorIndex(gentity_t *ent);
@@ -2657,6 +2796,11 @@ void		Compass_Update(gentity_t *ent, bool first);
 item_id_t	DoRandomRespawn(gentity_t *ent);
 void		RespawnItem(gentity_t *ent);
 void		fire_doppelganger(gentity_t *ent, const vec3_t &start, const vec3_t &aimdir);
+
+gentity_t *G_ResolveOwnedSphere(gclient_t *client) noexcept;
+void G_AssignOwnedSphere(gclient_t *client, gentity_t *sphere) noexcept;
+void G_ClearOwnedSphere(gclient_t *client) noexcept;
+void G_PrepareSphereEntityFree(gentity_t *sphere) noexcept;
 
 //
 // sgame/core/game_utils.cpp
@@ -2699,16 +2843,24 @@ gentity_t *G_FindByString(gentity_t *from, const std::string_view &value) {
 
 gentity_t *findradius(gentity_t *from, const vec3_t &org, float rad);
 gentity_t *G_PickTarget(const char *targetname);
-void	 G_UseTargets(gentity_t *ent, gentity_t *activator);
+[[nodiscard]] bool G_UseTargets(gentity_t *ent, gentity_t *activator);
 void	 G_PrintActivationMessage(gentity_t *ent, gentity_t *activator, bool coop_global);
 void	 G_SetMovedir(vec3_t &angles, vec3_t &movedir);
 
 void	 G_InitGentity(gentity_t *e);
 gentity_t *G_Spawn();
 void	 G_FreeEntity(gentity_t *e);
+void	 G_PrepareDoppelEntityFree(gentity_t *e) noexcept;
+void	 G_TurretPrepareEntityFree(gentity_t *e);
+void	 G_TurretRestoreEntityReferences(bool migrate_legacy_stamps);
+void	 G_SanitizeRestoredEntityTeams();
+void	 G_MigrateLegacyEntityReferenceStamps();
+void	 G_MigrateLegacyOrdnanceIdentities();
+void	 G_MigrateLegacyVehicleOrdnanceIdentities();
 
 void G_TouchTriggers(gentity_t *ent);
-void G_TouchProjectiles(gentity_t *ent, vec3_t previous_origin);
+[[nodiscard]] bool G_TouchProjectiles(
+	gentity_t *ent, vec3_t previous_origin);
 
 char *G_CopyString(const char *in, int32_t tag);
 
@@ -2753,7 +2905,7 @@ void G_StuffCmd(gentity_t *e, const char *fmt, ...);
 // sgame/entities/spawn.cpp
 //
 void  ED_CallSpawn(gentity_t *ent);
-char *ED_NewString(char *string);
+char *ED_NewString(const char *string);
 void GT_SetLongName(void);
 void GT_PrecacheAssets();
 
@@ -3030,6 +3182,7 @@ struct pierce_args_t {
 	// stuff we pierced
 	std::array<gentity_t *, MAX_PIERCE> pierced;
 	std::array<solid_t, MAX_PIERCE> pierce_solidities;
+	std::array<int32_t, MAX_PIERCE> pierce_generations;
 	size_t num_pierced = 0;
 	// the last trace that was done, when piercing stopped
 	trace_t tr;
@@ -3075,14 +3228,17 @@ void InitBodyQue();
 void CopyToBodyQue(gentity_t *ent);
 void ClientBeginServerFrame(gentity_t *ent);
 void ClientUserinfoChanged(gentity_t *ent, const char *userinfo);
+void ClientUserinfoChangedForRestore(gentity_t *ent, const char *userinfo);
 void P_AssignClientSkinnum(gentity_t *ent);
 void P_PublishEngineTeam(gentity_t *ent);
-void P_ForceFogTransition(gentity_t *ent, bool instant);
+void P_ForceFogTransition(gentity_t *ent, bool instant, bool force = false);
 void P_SendLevelPOI(gentity_t *ent);
 unsigned int P_GetLobbyUserNum(const gentity_t *player);
 void G_UpdateLevelEntry();
 void G_EndOfUnitMessage();
 bool SelectSpawnPoint(gentity_t *ent, vec3_t &origin, vec3_t &angles, bool force_spawn, bool &landmark);
+gentity_t *G_UnsafeSpawnPosition(vec3_t spot, bool check_players,
+	const gentity_t *ignore = nullptr, bool allow_nudge = true);
 
 struct select_spawn_result_t {
 	gentity_t *spot;
@@ -3121,6 +3277,7 @@ void ServerCommand();
 // sgame/client/view.cpp
 //
 void ClientEndServerFrame(gentity_t *ent);
+void ClientRestartAfterGhostRestoreAbort(gentity_t *ent);
 bool G_LagCompensate(gentity_t *from_player, const vec3_t &start, const vec3_t &dir);
 void G_UnLagCompensate();
 void G_ClearLagCompensationHistory(gentity_t *ent);
@@ -3196,9 +3353,10 @@ bool		G_RunThink(gentity_t *ent);
 void		G_AddRotationalFriction(gentity_t *ent);
 void		G_AddGravity(gentity_t *ent);
 void		G_CheckVelocity(gentity_t *ent);
-void		G_FlyMove(gentity_t *ent, float time, contents_t mask);
+[[nodiscard]] bool G_FlyMove(
+	gentity_t *ent, float time, contents_t mask);
 contents_t	G_GetClipMask(gentity_t *ent);
-void		G_Impact(gentity_t *e1, const trace_t &trace);
+[[nodiscard]] bool G_Impact(gentity_t *e1, const trace_t &trace);
 
 //
 // sgame/core/runtime.cpp
@@ -3220,6 +3378,12 @@ bool InAMatch();
 void ChangeGametype(gametype_t gt);
 void GT_Changes();
 void SpawnEntities(const char *mapname, const char *entities, const char *spawnpoint);
+enum class world_entity_reload_result_t : uint8_t {
+	reloaded,
+	fallback_allowed,
+	already_in_progress
+};
+world_entity_reload_result_t G_ResetWorldEntitiesFromSavedString();
 
 //
 // sgame/core/following_camera.cpp
@@ -3322,7 +3486,7 @@ constexpr spawnflags_t SPAWNFLAG_LANDMARK_KEEP_Z = 1_spawnflag;
 	return G_PowerUpExpiringRelative(time - level.time);
 }
 
-bool ClientIsPlaying(gclient_t *cl);
+bool ClientIsPlaying(const gclient_t *cl);
 bool ClientCanVote(gclient_t *cl);
 
 #include "client/menu.h"
@@ -3447,6 +3611,10 @@ struct client_persistant_t {
 	gtime_t			fog_transition_time;
 	gtime_t			megahealth_time; // relative megahealth time value
 	int32_t			lives; // player lives left (1 = no respawns remaining)
+	gtime_t			horde_reinforcement_protection; // duration carried through a delayed rally respawn
+	int32_t			horde_wave_kills;
+	int32_t			horde_kill_streak;
+	int32_t			horde_wave_deaths;
 	uint8_t			n64_crouch_warn_times;
 	gtime_t			n64_crouch_warning;
 
@@ -3480,6 +3648,9 @@ struct client_persistant_t {
 	gtime_t			kill_time;
 
 	gtime_t			last_spawn_time;
+
+	// [MuffMode] Detailed per-match counters survive respawns and world rebuilds.
+	mm_match_player_stats_t match;
 };
 
 // player config vars:
@@ -3495,7 +3666,7 @@ struct client_config_t {
 	bool			follow_powerup;
 	bool			follow_first_person;
 
-	bool			use_expanded;
+	bool			announcer_enabled;
 
 	// [MuffMode] Per-viewer skin overrides (eskin/tskin): how this player sees
 	// enemies and teammates on their own screen. Empty = no override.
@@ -3529,6 +3700,23 @@ struct client_session_t {
 
 	// real time of team joining
 	gtime_t			team_join_time;
+
+	// [MuffMode] Top-right gametype/ruleset notice stays up until this time; refreshed by joining
+	// a team and by gametype/ruleset changes (see MM_MatchInfoHud_Show). Lives in sess because
+	// ClientSpawn memsets everything outside pers/resp/sess, and SetTeam respawns on join.
+	gtime_t			match_info_hud_time;
+
+	// [MuffMode] Durable player profile/rating state. Keep this POD because
+	// gclient_t is allocated and reset through the engine's C-style paths.
+	bool			profile_persistence_ready;
+	float			skill_rating;
+	int32_t			skill_rating_change;
+	int64_t			stats_play_start_ms;
+	uint32_t		stats_saved_match_serial;
+	uint8_t			stats_saved_match_outcome;
+	bool			stats_reconnect_suspended;
+	std::array<item_id_t, IT_TOTAL> weapon_prefs;
+	uint8_t			weapon_pref_count;
 };
 
 // client data that stays across deathmatch respawns
@@ -3539,6 +3727,14 @@ struct client_respawn_t {
 	int32_t				old_score;		// track changes in score
 	int32_t				round_start_score;	// Red Rover: snapshot of score at round start, to find that round's top fragger
 	int32_t				round_dmg;			// Red Rover: enemy damage dealt this round (reset each round); tie-breaks the round winner. Tracked directly (not match-stats) so it counts bots.
+	// [MuffMode] Map-scoped RA2/RA3 multi-arena identity. Primitive storage
+	// keeps the core arena types out of the engine-facing client structure.
+	int16_t				arena_id;			// 0 = lobby, 1..N = playable arena.
+	uint16_t			arena_team_id;		// Logical team ID; 0 = no team.
+	uint8_t				arena_role;			// mm_arena_role_t encoded by mm_arena.
+	team_t				arena_side;			// Active red/blue projection, or spectator/free.
+	bool				arena_line_enabled;
+	bool				arena_late_join;
 	vec3_t				cmd_angles;	  // angles sent over in the last command
 
 	bool				spectator; // client is a spectator
@@ -3609,6 +3805,7 @@ struct gclient_t {
 	button_t buttons;
 	button_t oldbuttons;
 	button_t latched_buttons;
+	button_t menu_captured_buttons; // menu selection presses suppressed until released
 	usercmd_t cmd; // last CMD send
 
 	// weapon cannot fire until this time is up
@@ -3710,6 +3907,7 @@ struct gclient_t {
 	gtime_t tracker_pain_time;
 
 	gentity_t *owned_sphere; // this points to the player's sphere
+	int32_t owned_sphere_generation;
 
 	gtime_t empty_click_sound;
 
@@ -3870,6 +4068,9 @@ struct gentity_t {
 	spawnflags_t	spawnflags;
 
 	gtime_t timestamp;
+	// [MuffMode] Kept separate from timestamp, which tech entities use as an
+	// absolute lifetime deadline.
+	gtime_t item_available_time;
 
 	float		angle; // set in qe3, -1 = up, -2 = down
 	const char *target;
@@ -3932,6 +4133,9 @@ struct gentity_t {
 	float	splash_radius;
 	int32_t sounds; // make this a spawntemp var?
 	int32_t count;
+	// [MuffMode] RA2/RA3 map ownership. Worldspawn stores the declared arena
+	// count; 0 is lobby/untagged, and negative values are legacy shared markers.
+	int32_t arena;
 
 	gentity_t *chain;
 	gentity_t *enemy;
@@ -3941,6 +4145,25 @@ struct gentity_t {
 	int32_t	 groundentity_linkcount;
 	gentity_t *teamchain;
 	gentity_t *teammaster;
+	// [MuffMode] Generation stamps for the persistent turret reference graph.
+	// These are restored structurally when loading legacy v1 JSON saves.
+	int32_t turret_breach_generation;
+	int32_t turret_master_generation;
+	int32_t turret_controller_generation;
+	int32_t turret_activator_generation;
+	int32_t turret_enemy_generation;
+	// [MuffMode] Spheres retain an independently stamped target alongside
+	// their owner generation (stored in count for this spawned entity family).
+	int32_t sphere_enemy_generation;
+	// [MuffMode] The doppelganger base owns a cosmetic body through teamchain;
+	// keep its lifetime separate from the ordinary mover-team graph.
+	int32_t doppel_body_generation;
+	// [MuffMode] MegaHealth decay persists after pickup and must not transfer to
+	// a replacement occupant of the original client slot.
+	int32_t megahealth_owner_generation;
+	// [MuffMode] Persistent helper/destination target_ent links retain identity
+	// across delayed mover, teleporter, effect, and turret callbacks.
+	int32_t target_ent_generation;
 
 	gentity_t *mynoise; // can go in client only
 	gentity_t *mynoise2;
@@ -4366,6 +4589,7 @@ inline bool pierce_args_t::mark(gentity_t *ent) {
 
 	pierced[num_pierced] = ent;
 	pierce_solidities[num_pierced] = ent->solid;
+	pierce_generations[num_pierced] = ent->spawn_count;
 	num_pierced++;
 
 	ent->solid = SOLID_NOT;
@@ -4378,6 +4602,8 @@ inline bool pierce_args_t::mark(gentity_t *ent) {
 inline void pierce_args_t::restore() {
 	for (size_t i = 0; i < num_pierced; i++) {
 		auto &ent = pierced[i];
+		if (!ent->inuse || ent->spawn_count != pierce_generations[i])
+			continue;
 		ent->solid = pierce_solidities[i];
 		gi.linkentity(ent);
 	}

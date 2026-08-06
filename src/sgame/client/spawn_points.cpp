@@ -9,6 +9,7 @@
 
 #include "g_local.h"
 #include "entities/teleporter.h"
+#include "muffmode/mm_arena.h"
 #include "muffmode/mm_combat_heatmap.h"
 
 static THINK(info_player_start_drop) (gentity_t *self) -> void {
@@ -181,6 +182,8 @@ static float PlayersRangeFromSpot(gentity_t *ent, gentity_t *spot) {
 			continue;
 		if (ent && ec == ent)
 			continue;
+		if (GT(GT_ARENA) && ent && !MM_Arena_SameArena(ent, ec))
+			continue;
 
 		const vec3_t v = spot->s.origin - ec->s.origin;
 		const float playerdistance = v.length();
@@ -205,8 +208,12 @@ static gentity_t *UnsafeSpawnPosition(vec3_t spot, bool check_players, const gen
 	trace_t tr = gi.trace(spot, PLAYER_MINS, PLAYER_MAXS, spot, ignore_ent, mask);
 
 	if (!allow_nudge) {
-		if (tr.startsolid || tr.fraction != 1.0f)
+		if (tr.startsolid || tr.fraction != 1.0f) {
+			if (GT(GT_ARENA) && ignore && tr.ent && tr.ent->client &&
+				!MM_Arena_CanInteract(ignore, tr.ent))
+				return nullptr;
 			return tr.ent ? tr.ent : world;
+		}
 		return nullptr;
 	}
 
@@ -215,8 +222,12 @@ static gentity_t *UnsafeSpawnPosition(vec3_t spot, bool check_players, const gen
 		tr = gi.trace(spot, PLAYER_MINS, PLAYER_MAXS, spot, ignore_ent, mask);
 	}
 
-	if (tr.startsolid || tr.fraction != 1.0f)
+	if (tr.startsolid || tr.fraction != 1.0f) {
+		if (GT(GT_ARENA) && ignore && tr.ent && tr.ent->client &&
+			!MM_Arena_CanInteract(ignore, tr.ent))
+			return nullptr;
 		return tr.ent ? tr.ent : world;
+	}
 
 	return nullptr;
 }
@@ -250,6 +261,9 @@ static bool SpawnPointAllowsClient(const gentity_t *ent, const gentity_t *spot) 
 	if (!ent || !ent->client)
 		return true;
 
+	if (GT(GT_ARENA) && !MM_Arena_SpawnAllowed(ent, spot))
+		return false;
+
 	const bool is_bot = ent->client->sess.is_a_bot || (ent->svflags & SVF_BOT);
 	if (is_bot)
 		return !(spot->flags & FL_NO_BOTS);
@@ -269,12 +283,14 @@ static inline bool IsTrap(const gentity_t *ent) {
 	return ent && ent->classname && !strncmp(ent->classname, "food_cube_trap", 14);
 }
 
-static bool SpawnPointHasNearbyMines(const vec3_t &origin, float radius) {
+static bool SpawnPointHasNearbyMines(const gentity_t *requester, const vec3_t &origin, float radius) {
 	if (!IsFiniteVec3(origin))
 		return false;
 
 	gentity_t *ent = nullptr;
 	while ((ent = findradius(ent, origin, radius)) != nullptr) {
+		if (GT(GT_ARENA) && requester && !MM_Arena_CanInteract(requester, ent))
+			continue;
 		if (IsProxMine(ent) || IsTeslaMine(ent) || IsTrap(ent))
 			return true;
 	}
@@ -289,6 +305,8 @@ static inline vec3_t SpawnEye(const vec3_t &origin) {
 static bool IsEnemy(const gentity_t *requester, const gentity_t *other) {
 	if (!requester || !other || !requester->client || !other->client)
 		return true;
+	if (GT(GT_ARENA))
+		return !MM_Arena_SameTeam(requester, other);
 	if (!Teams())
 		return true;
 	return requester->client->sess.team != other->client->sess.team;
@@ -304,6 +322,8 @@ static bool AnyDirectEnemyLoS(const gentity_t *requester, const vec3_t &spot, fl
 		if (ec == requester || !ClientIsPlaying(ec->client) || ec->health <= 0 || ec->client->eliminated ||
 			ec->client->awaiting_respawn || ec->solid == SOLID_NOT || ec->movetype == MOVETYPE_FREECAM ||
 			!IsEnemy(requester, ec))
+			continue;
+		if (GT(GT_ARENA) && !MM_Arena_SameArena(requester, ec))
 			continue;
 
 		const vec3_t from = SpawnEye(ec->s.origin);
@@ -451,7 +471,7 @@ static std::vector<gentity_t *> FilterEligibleSpawns(const std::vector<gentity_t
 					gi.Com_PrintFmt("{}: avoiding spawn point near previous spawn\n", *spot);
 				continue;
 			}
-			if (SpawnPointHasNearbyMines(spot->s.origin, SPAWN_MINE_RADIUS))
+			if (SpawnPointHasNearbyMines(ent, spot->s.origin, SPAWN_MINE_RADIUS))
 				continue;
 			if (min_player_radius > 0.0f && PlayersRangeFromSpot(ent, spot) < min_player_radius)
 				continue;
@@ -490,7 +510,7 @@ static float CompositeDangerScore(gentity_t *spot, gentity_t *ent, const vec3_t 
 	const bool has_avoid_point = HasSpawnAvoidPoint(ent, avoid_point);
 	const float avoid_distance = has_avoid_point ? (spot->s.origin - avoid_point).length() : SPAWN_SCORE_AVOID_RANGE;
 	const float avoid_penalty = has_avoid_point ? NormalizeDistancePenalty(avoid_distance, SPAWN_SCORE_AVOID_RANGE) : 0.0f;
-	const float mine_penalty = SpawnPointHasNearbyMines(spot->s.origin, SPAWN_MINE_RADIUS) ? 1.0f : 0.0f;
+	const float mine_penalty = SpawnPointHasNearbyMines(ent, spot->s.origin, SPAWN_MINE_RADIUS) ? 1.0f : 0.0f;
 
 	return 0.35f * heat +
 		0.25f * near_penalty +
@@ -822,8 +842,9 @@ static gentity_t *SelectSingleSpawnPoint(gentity_t *ent) {
 }
 
 // [Paril-KEX]
-gentity_t *G_UnsafeSpawnPosition(vec3_t spot, bool check_players, const gentity_t *ignore) {
-	return UnsafeSpawnPosition(spot, check_players, ignore);
+gentity_t *G_UnsafeSpawnPosition(vec3_t spot, bool check_players,
+	const gentity_t *ignore, bool allow_nudge) {
+	return UnsafeSpawnPosition(spot, check_players, ignore, allow_nudge);
 }
 
 static gentity_t *SelectCoopSpawnPoint(gentity_t *ent, bool force_spawn, bool check_players) {
@@ -976,6 +997,36 @@ bool SelectSpawnPoint(gentity_t *ent, vec3_t &origin, vec3_t &angles, bool force
 		const bool wants_player_spawn = has_client && ClientIsPlaying(ent->client) && !player_is_eliminated;
 		const vec3_t avoid_point = has_client ? ent->client->spawn_origin : vec3_origin;
 		const bool initial_spawn = has_client && !ent->client->pers.spawned;
+
+		// [MuffMode] Validated RA2 maps carry independent fighter and observer
+		// starts for every playable room.
+		if (GT(GT_ARENA) && has_client) {
+			const bool spectator = level.intermission_time ||
+				!MM_Arena_IsFighter(ent->client) ||
+				MM_Arena_IsEliminated(ent->client);
+			spot = MM_Arena_SelectSpawnPoint(ent, spectator);
+			if (spot && spot->inuse && SpawnPointHasUsableOrigin(spot)) {
+				const bool fighter_start = spot->classname &&
+					(!strcmp(spot->classname, "info_player_deathmatch") ||
+					 !strcmp(spot->classname, "info_player_team_red") ||
+					 !strcmp(spot->classname, "info_player_team_blue"));
+				const bool ra2_observer_start = spot->classname &&
+					!strcmp(spot->classname, "misc_teleporter_dest");
+				origin = spot->s.origin +
+					vec3_t{ 0.0f, 0.0f,
+						(fighter_start || ra2_observer_start) ?
+							DeathmatchSpawnOriginLift() : 0.0f };
+				angles = spot->s.angles;
+				angles[ROLL] = 0.0f;
+				return true;
+			}
+			// A selected arena must never fall through to the singleton
+			// spectator/intermission origin, which may belong to the lobby or
+			// another room. Keep the client in retryable limbo if a malformed
+			// map provides no arena-local observer point.
+			if (spectator && MM_Arena_Id(ent) > 0)
+				return false;
+		}
 
 		if (level.intermission_time || (has_client && (!ClientIsPlaying(ent->client) || player_is_eliminated))) {
 			if (SelectSpectatorSpawnPoint(origin, angles)) {

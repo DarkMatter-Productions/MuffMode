@@ -8,6 +8,7 @@
 
 #include <array>
 #include <charconv>
+#include <cmath>
 
 constexpr int32_t STAT_MINUS = 10;  // num frame for '-' stats digit
 constexpr const char *sb_nums[2][11] =
@@ -42,12 +43,12 @@ static struct {
 		struct {
 			char    text[24];
 		} table_cells[6];
-	} table_rows[11]; // just enough to store 8 levels + header + total (+ one slack)
+	} table_rows[11]{}; // just enough to store 8 levels + header + total (+ one slack)
 
-	size_t column_widths[6];
+	int32_t column_widths[6]{};
 	int32_t num_rows = 0;
 	int32_t num_columns = 0;
-} hud_temp;
+} hud_temp{};
 
 layout_flags_t CG_LayoutFlags(const player_state_t *ps) {
 	return (layout_flags_t)ps->stats[STAT_LAYOUTS];
@@ -92,10 +93,59 @@ static int32_t CG_ParseLayoutClientIndex(const char *token) {
 
 static int32_t CG_ParseLayoutLocalizationArgCount(const char *token) {
 	const int32_t num_args = CG_ParseLayoutInt(token, "Bad loc string");
-	if (num_args < 0 || num_args >= static_cast<int32_t>(MAX_LOCALIZATION_ARGS))
+	if (!CG_IsValidHUDLocalizationArgCount(num_args, MAX_LOCALIZATION_ARGS))
 		cgi.Com_Error("Bad loc string");
 
 	return num_args;
+}
+
+static int32_t CG_CheckedHUDCoordinate(int64_t logical_coordinate, int32_t scale,
+	int64_t pixel_adjustment = 0) {
+	int32_t pixel_coordinate = 0;
+	if (!CG_TryScaleHUDCoordinate(logical_coordinate, scale, pixel_adjustment, pixel_coordinate))
+		cgi.Com_Error("HUD coordinate outside range");
+
+	return pixel_coordinate;
+}
+
+static int32_t CG_CheckedHUDPixelOffset(int32_t coordinate, int64_t adjustment) {
+	int32_t adjusted_coordinate = 0;
+	if (!CG_TryAddHUDPixels(coordinate, adjustment, adjusted_coordinate))
+		cgi.Com_Error("HUD coordinate outside range");
+
+	return adjusted_coordinate;
+}
+
+static int32_t CG_CheckedHUDTextExtent(size_t glyph_count, int32_t glyph_width,
+	int32_t scale) {
+	int32_t pixel_extent = 0;
+	if (!CG_TryHUDTextExtent(glyph_count, glyph_width, scale, pixel_extent))
+		cgi.Com_Error("HUD extent outside range");
+
+	return pixel_extent;
+}
+
+static int32_t CG_CheckedHUDScaledValue(int32_t value, int32_t scale) {
+	int32_t scaled_value = 0;
+	if (!CG_TryScaleHUDCoordinate(value, scale, 0, scaled_value))
+		cgi.Com_Error("HUD scaled value outside range");
+
+	return scaled_value;
+}
+
+static int32_t CG_CheckedHUDMeasuredExtent(float extent) {
+	if (!std::isfinite(extent) || extent < 0 ||
+		static_cast<double>(extent) > std::numeric_limits<int32_t>::max()) {
+		cgi.Com_Error("HUD font extent outside range");
+		return 0;
+	}
+
+	return static_cast<int32_t>(extent);
+}
+
+static int32_t CG_CheckedHUDFontY(int32_t y, int32_t scale) {
+	return CG_CheckedHUDPixelOffset(
+		y, -static_cast<int64_t>(font_y_offset) * scale);
 }
 
 bool CG_UseKFont() {
@@ -116,39 +166,52 @@ int CG_DrawHUDString(const char *string, int x, int y, int centerwidth, int xor_
 	margin = x;
 
 	while (*string) {
-		width = 0;
-		while (*string && *string != '\n')
-			line[width++] = *string++;
-		line[width] = 0;
+		const cg_hud_line_t parsed_line = CG_CopyHUDLine(string, line);
+		string = parsed_line.next;
 
-		vec2_t size;
+		const bool use_kfont = CG_UseKFont();
+		if (use_kfont) {
+			const size_t complete_length =
+				CG_CompleteUTF8PrefixLength(std::string_view(line, parsed_line.length));
+			line[complete_length] = '\0';
+			width = static_cast<int>(complete_length);
+		} else {
+			width = static_cast<int>(parsed_line.length);
+		}
+		int32_t measured_width = 0;
 
-		if (CG_UseKFont())
-			size = cgi.SCR_MeasureFontString(line, scale);
+		if (use_kfont)
+			measured_width = CG_CheckedHUDMeasuredExtent(
+				cgi.SCR_MeasureFontString(line, scale).x);
 
 		if (centerwidth) {
-			if (!CG_UseKFont())
-				x = margin + ((centerwidth - width * CONCHAR_WIDTH * scale)) / 2;
-			else
-				x = margin + ((centerwidth - size.x)) / 2;
+			const int32_t text_width = use_kfont
+				? measured_width
+				: CG_CheckedHUDTextExtent(
+					static_cast<size_t>(width), CONCHAR_WIDTH, scale);
+			x = CG_CheckedHUDPixelOffset(
+				margin,
+				(static_cast<int64_t>(centerwidth) - text_width) / 2);
 		} else {
 			x = margin;
 		}
 
-		if (!CG_UseKFont()) {
+		if (!use_kfont) {
 			for (i = 0; i < width; i++) {
 				cgi.SCR_DrawChar(x, y, scale, line[i] ^ xor_mask, shadow);
-				x += CONCHAR_WIDTH * scale;
+				x = CG_CheckedHUDPixelOffset(
+					x, static_cast<int64_t>(CONCHAR_WIDTH) * scale);
 			}
 		} else {
-			cgi.SCR_DrawFontString(line, x, y - (font_y_offset * scale), scale, xor_mask ? alt_color : rgba_white, true, text_align_t::LEFT);
-			x += size.x;
+			cgi.SCR_DrawFontString(line, x, CG_CheckedHUDFontY(y, scale), scale, xor_mask ? alt_color : rgba_white, true, text_align_t::LEFT);
+			x = CG_CheckedHUDPixelOffset(x, measured_width);
 		}
 
 		if (*string) {
 			string++;
 			x = margin;
-			y += (CG_UseKFont() ? 10 : CONCHAR_WIDTH) * scale;
+			y = CG_CheckedHUDPixelOffset(
+				y, static_cast<int64_t>(use_kfont ? 10 : CONCHAR_WIDTH) * scale);
 		}
 	}
 
@@ -163,7 +226,8 @@ CG_DrawString
 static void CG_DrawString(int x, int y, int scale, const char *s, bool alt = false, bool shadow = true) {
 	while (*s) {
 		cgi.SCR_DrawChar(x, y, scale, *s ^ (alt ? 0x80 : 0), shadow);
-		x += 8 * scale;
+		x = CG_CheckedHUDPixelOffset(
+			x, static_cast<int64_t>(CONCHAR_WIDTH) * scale);
 		s++;
 	}
 }
@@ -192,7 +256,9 @@ static void CG_DrawFieldHudCentered(vrect_t hud_vrect, int y, int color, int wid
 	if (l > width)
 		l = width;
 
-	int32_t x = ((hud_vrect.x + hud_vrect.width / 2) * scale) - ((l * CHAR_WIDTH) / 2) * scale;
+	int32_t x = CG_CheckedHUDCoordinate(
+		CG_HUDViewportCenter(hud_vrect.x, hud_vrect.width), scale,
+		-static_cast<int64_t>((l * CHAR_WIDTH) / 2) * scale);
 
 	ptr = num;
 	while (*ptr && l) {
@@ -202,8 +268,11 @@ static void CG_DrawFieldHudCentered(vrect_t hud_vrect, int y, int color, int wid
 			frame = *ptr - '0';
 		int w, h;
 		cgi.Draw_GetPicSize(&w, &h, sb_nums[color][frame]);
-		cgi.SCR_DrawPic(x, y, w * scale, h * scale, sb_nums[color][frame]);
-		x += CHAR_WIDTH * scale;
+		cgi.SCR_DrawPic(x, y,
+			CG_CheckedHUDTextExtent(1, w, scale),
+			CG_CheckedHUDTextExtent(1, h, scale), sb_nums[color][frame]);
+		x = CG_CheckedHUDPixelOffset(
+			x, static_cast<int64_t>(CHAR_WIDTH) * scale);
 		ptr++;
 		l--;
 	}
@@ -234,7 +303,8 @@ static void CG_DrawField(int x, int y, int color, int width, int value, int scal
 	if (l > width)
 		l = width;
 
-	x += (2 + CHAR_WIDTH * (width - l)) * scale;
+	x = CG_CheckedHUDPixelOffset(
+		x, static_cast<int64_t>(2 + CHAR_WIDTH * (width - l)) * scale);
 
 	ptr = num;
 	while (*ptr && l) {
@@ -244,62 +314,86 @@ static void CG_DrawField(int x, int y, int color, int width, int value, int scal
 			frame = *ptr - '0';
 		int w, h;
 		cgi.Draw_GetPicSize(&w, &h, sb_nums[color][frame]);
-		cgi.SCR_DrawPic(x, y, w * scale, h * scale, sb_nums[color][frame]);
-		x += CHAR_WIDTH * scale;
+		cgi.SCR_DrawPic(x, y,
+			CG_CheckedHUDTextExtent(1, w, scale),
+			CG_CheckedHUDTextExtent(1, h, scale), sb_nums[color][frame]);
+		x = CG_CheckedHUDPixelOffset(
+			x, static_cast<int64_t>(CHAR_WIDTH) * scale);
 		ptr++;
 		l--;
 	}
 }
 
 // [Paril-KEX]
-static void CG_DrawTable(int x, int y, uint32_t width, uint32_t height, int32_t scale) {
+static void CG_DrawTable(int x, int y, int32_t width, int32_t height, int32_t scale) {
 	// half left
-	int32_t width_pixels = width;
-	x -= width_pixels / 2;
-	y += CONCHAR_WIDTH * scale;
+	const int32_t width_pixels = width;
+	x = CG_CheckedHUDPixelOffset(x, -static_cast<int64_t>(width_pixels) / 2);
+	y = CG_CheckedHUDPixelOffset(
+		y, static_cast<int64_t>(CONCHAR_WIDTH) * scale);
 	// use Y as top though
 
-	int32_t height_pixels = height;
+	const int32_t height_pixels = height;
+	const int32_t glyph_step = CG_CheckedHUDTextExtent(1, CONCHAR_WIDTH, scale);
+	const int32_t left = CG_CheckedHUDPixelOffset(x, -glyph_step);
+	const int32_t right = CG_CheckedHUDPixelOffset(x, width_pixels);
+	const int32_t top = CG_CheckedHUDPixelOffset(y, -glyph_step);
+	const int32_t bottom = CG_CheckedHUDPixelOffset(y, height_pixels);
 
 	// draw border
 	// KEX_FIXME method that requires less chars
-	cgi.SCR_DrawChar(x - (CONCHAR_WIDTH * scale), y - (CONCHAR_WIDTH * scale), scale, 18, false);
-	cgi.SCR_DrawChar((x + width_pixels), y - (CONCHAR_WIDTH * scale), scale, 20, false);
-	cgi.SCR_DrawChar(x - (CONCHAR_WIDTH * scale), y + height_pixels, scale, 24, false);
-	cgi.SCR_DrawChar((x + width_pixels), y + height_pixels, scale, 26, false);
+	cgi.SCR_DrawChar(left, top, scale, 18, false);
+	cgi.SCR_DrawChar(right, top, scale, 20, false);
+	cgi.SCR_DrawChar(left, bottom, scale, 24, false);
+	cgi.SCR_DrawChar(right, bottom, scale, 26, false);
 
-	for (int cx = x; cx < x + width_pixels; cx += CONCHAR_WIDTH * scale) {
-		cgi.SCR_DrawChar(cx, y - (CONCHAR_WIDTH * scale), scale, 19, false);
-		cgi.SCR_DrawChar(cx, y + height_pixels, scale, 25, false);
+	for (int cx = x; cx < right;
+		cx = CG_CheckedHUDPixelOffset(cx, glyph_step)) {
+		cgi.SCR_DrawChar(cx, top, scale, 19, false);
+		cgi.SCR_DrawChar(cx, bottom, scale, 25, false);
 	}
 
-	for (int cy = y; cy < y + height_pixels; cy += CONCHAR_WIDTH * scale) {
-		cgi.SCR_DrawChar(x - (CONCHAR_WIDTH * scale), cy, scale, 21, false);
-		cgi.SCR_DrawChar((x + width_pixels), cy, scale, 23, false);
+	for (int cy = y; cy < bottom;
+		cy = CG_CheckedHUDPixelOffset(cy, glyph_step)) {
+		cgi.SCR_DrawChar(left, cy, scale, 21, false);
+		cgi.SCR_DrawChar(right, cy, scale, 23, false);
 	}
 
 	cgi.SCR_DrawColorPic(x, y, width_pixels, height_pixels, "_white", { 0, 0, 0, 255 });
 
 	// draw in columns
 	for (int i = 0; i < hud_temp.num_columns; i++) {
-		for (int r = 0, ry = y; r < hud_temp.num_rows; r++, ry += (CONCHAR_WIDTH + font_y_offset) * scale) {
+		const int32_t row_step = CG_CheckedHUDTextExtent(
+			1, CONCHAR_WIDTH + font_y_offset, scale);
+		for (int r = 0; r < hud_temp.num_rows; r++) {
+			const int32_t ry = CG_CheckedHUDPixelOffset(
+				y, static_cast<int64_t>(r) * row_step);
 			int x_offset = 0;
+			const int32_t measured_width = CG_CheckedHUDMeasuredExtent(
+				cgi.SCR_MeasureFontString(
+					hud_temp.table_rows[r].table_cells[i].text, scale).x);
 
 			// center 
 			if (r == 0) {
-				x_offset = ((hud_temp.column_widths[i]) / 2) -
-					((cgi.SCR_MeasureFontString(hud_temp.table_rows[r].table_cells[i].text, scale).x) / 2);
+				x_offset = (hud_temp.column_widths[i] / 2) -
+					(measured_width / 2);
 			}
 			// right align
 			else if (i != 0) {
-				x_offset = (hud_temp.column_widths[i] - cgi.SCR_MeasureFontString(hud_temp.table_rows[r].table_cells[i].text, scale).x);
+				x_offset = hud_temp.column_widths[i] - measured_width;
 			}
 
 			//CG_DrawString(x + x_offset, ry, scale, hud_temp.table_rows[r].table_cells[i].text, r == 0, true);
-			cgi.SCR_DrawFontString(hud_temp.table_rows[r].table_cells[i].text, x + x_offset, ry - (font_y_offset * scale), scale, r == 0 ? alt_color : rgba_white, true, text_align_t::LEFT);
+			cgi.SCR_DrawFontString(hud_temp.table_rows[r].table_cells[i].text,
+				CG_CheckedHUDPixelOffset(x, x_offset),
+				CG_CheckedHUDFontY(ry, scale), scale,
+				r == 0 ? alt_color : rgba_white, true, text_align_t::LEFT);
 		}
 
-		x += (hud_temp.column_widths[i] + cgi.SCR_MeasureFontString(" ", 1).x);
+		x = CG_CheckedHUDPixelOffset(
+			x, static_cast<int64_t>(hud_temp.column_widths[i]) +
+				CG_CheckedHUDMeasuredExtent(
+					cgi.SCR_MeasureFontString(" ", scale).x));
 	}
 }
 
@@ -347,6 +441,10 @@ static void CG_ExecuteLayoutString(const char *s, vrect_t hud_vrect, vrect_t hud
 
 	if (!s[0])
 		return;
+	if (scale <= 0) {
+		cgi.Com_Error("HUD scale outside range");
+		return;
+	}
 
 	x = hud_vrect.x;
 	y = hud_vrect.y;
@@ -367,38 +465,48 @@ static void CG_ExecuteLayoutString(const char *s, vrect_t hud_vrect, vrect_t hud
 		if (!strcmp(token, "xl")) {
 			token = COM_Parse(&s);
 			if (!skip_depth)
-				x = ((hud_vrect.x + CG_ParseLayoutInt(token)) * scale) + hud_safe.x;
+				x = CG_CheckedHUDCoordinate(
+					static_cast<int64_t>(hud_vrect.x) + CG_ParseLayoutInt(token), scale, hud_safe.x);
 			continue;
 		}
 		if (!strcmp(token, "xr")) {
 			token = COM_Parse(&s);
 			if (!skip_depth)
-				x = ((hud_vrect.x + hud_vrect.width + CG_ParseLayoutInt(token)) * scale) - hud_safe.x;
+				x = CG_CheckedHUDCoordinate(
+					static_cast<int64_t>(hud_vrect.x) + hud_vrect.width + CG_ParseLayoutInt(token),
+					scale, -static_cast<int64_t>(hud_safe.x));
 			continue;
 		}
 		if (!strcmp(token, "xv")) {
 			token = COM_Parse(&s);
 			if (!skip_depth)
-				x = (hud_vrect.x + hud_vrect.width / 2 + (CG_ParseLayoutInt(token) - hx)) * scale;
+				x = CG_CheckedHUDCoordinate(
+					CG_HUDViewportCenter(hud_vrect.x, hud_vrect.width) + CG_ParseLayoutInt(token) - hx,
+					scale);
 			continue;
 		}
 
 		if (!strcmp(token, "yt")) {
 			token = COM_Parse(&s);
 			if (!skip_depth)
-				y = ((hud_vrect.y + CG_ParseLayoutInt(token)) * scale) + hud_safe.y;
+				y = CG_CheckedHUDCoordinate(
+					static_cast<int64_t>(hud_vrect.y) + CG_ParseLayoutInt(token), scale, hud_safe.y);
 			continue;
 		}
 		if (!strcmp(token, "yb")) {
 			token = COM_Parse(&s);
 			if (!skip_depth)
-				y = ((hud_vrect.y + hud_vrect.height + CG_ParseLayoutInt(token)) * scale) - hud_safe.y;
+				y = CG_CheckedHUDCoordinate(
+					static_cast<int64_t>(hud_vrect.y) + hud_vrect.height + CG_ParseLayoutInt(token),
+					scale, -static_cast<int64_t>(hud_safe.y));
 			continue;
 		}
 		if (!strcmp(token, "yv")) {
 			token = COM_Parse(&s);
 			if (!skip_depth)
-				y = (hud_vrect.y + hud_vrect.height / 2 + (CG_ParseLayoutInt(token) - hy)) * scale;
+				y = CG_CheckedHUDCoordinate(
+					CG_HUDViewportCenter(hud_vrect.y, hud_vrect.height) + CG_ParseLayoutInt(token) - hy,
+					scale);
 			continue;
 		}
 
@@ -431,7 +539,9 @@ static void CG_ExecuteLayoutString(const char *s, vrect_t hud_vrect, vrect_t hud
 					} else {
 						cgi.Draw_GetPicSize(&w, &h, pic);
 					}
-					cgi.SCR_DrawPic(x, y, w * scale, h * scale, pic);
+					cgi.SCR_DrawPic(x, y,
+						CG_CheckedHUDScaledValue(w, scale),
+						CG_CheckedHUDScaledValue(h, scale), pic);
 				}
 			}
 
@@ -441,13 +551,15 @@ static void CG_ExecuteLayoutString(const char *s, vrect_t hud_vrect, vrect_t hud
 		if (!strcmp(token, "client")) {   // draw a deathmatch client block
 			token = COM_Parse(&s);
 			if (!skip_depth) {
-				x = (hud_vrect.x + hud_vrect.width / 2 + (CG_ParseLayoutInt(token) - hx)) * scale;
-				x += 8 * scale;
+				x = CG_CheckedHUDCoordinate(
+					CG_HUDViewportCenter(hud_vrect.x, hud_vrect.width) + CG_ParseLayoutInt(token) - hx + 8,
+					scale);
 			}
 			token = COM_Parse(&s);
 			if (!skip_depth) {
-				y = (hud_vrect.y + hud_vrect.height / 2 + (CG_ParseLayoutInt(token) - hy)) * scale;
-				y += 7 * scale;
+				y = CG_CheckedHUDCoordinate(
+					CG_HUDViewportCenter(hud_vrect.y, hud_vrect.height) + CG_ParseLayoutInt(token) - hy + 7,
+					scale);
 			}
 
 			token = COM_Parse(&s);
@@ -455,7 +567,7 @@ static void CG_ExecuteLayoutString(const char *s, vrect_t hud_vrect, vrect_t hud
 			if (!skip_depth)
 				value = CG_ParseLayoutClientIndex(token);
 
-			int score = 0, ping = 0, time = 0;
+			int score = 0, ping = 0;
 
 			token = COM_Parse(&s);
 			if (!skip_depth)
@@ -467,27 +579,41 @@ static void CG_ExecuteLayoutString(const char *s, vrect_t hud_vrect, vrect_t hud
 
 			token = COM_Parse(&s);
 			if (!skip_depth) {
-				time = CG_ParseLayoutInt(token);
+				(void)CG_ParseLayoutInt(token);
 
 				// Race mode removed - always show score, never format as time
 				const char *scr = G_Fmt("{}", score).data();
+				const int32_t client_text_x = CG_CheckedHUDPixelOffset(
+					x, static_cast<int64_t>(32) * scale);
+				const int32_t score_y = CG_CheckedHUDPixelOffset(
+					y, static_cast<int64_t>(10) * scale);
 
 				cgi.SCR_SetAltTypeface(ui_acc_alttypeface->integer && true);
 				if (!scr_usekfont->integer)
-					CG_DrawString(x + 32 * scale, y, scale, cgi.CL_GetClientName(value));
+					CG_DrawString(client_text_x, y, scale, cgi.CL_GetClientName(value));
 				else
-					cgi.SCR_DrawFontString(cgi.CL_GetClientName(value), x + 32 * scale, y - (font_y_offset * scale), scale, rgba_white, true, text_align_t::LEFT);
+					cgi.SCR_DrawFontString(cgi.CL_GetClientName(value), client_text_x,
+						CG_CheckedHUDFontY(y, scale), scale, rgba_white, true, text_align_t::LEFT);
 
 				if (!scr_usekfont->integer)
-					CG_DrawString(x + 32 * scale, y + 10 * scale, scale, scr, true);
+					CG_DrawString(client_text_x, score_y, scale, scr, true);
 				else
-					cgi.SCR_DrawFontString(scr, x + 32 * scale, y + (10 - font_y_offset) * scale, scale, rgba_white, true, text_align_t::LEFT);
+					cgi.SCR_DrawFontString(scr, client_text_x,
+						CG_CheckedHUDFontY(score_y, scale), scale, rgba_white, true, text_align_t::LEFT);
 
-				cgi.SCR_DrawPic(x + 32 + 96 * scale, y + 10 * scale, 9 * scale, 9 * scale, "ping");
+				cgi.SCR_DrawPic(CG_CheckedHUDCoordinate(96, scale,
+					static_cast<int64_t>(x) + 32), score_y,
+					CG_CheckedHUDScaledValue(9, scale),
+					CG_CheckedHUDScaledValue(9, scale), "ping");
 				if (!scr_usekfont->integer)
-					CG_DrawString(x + 32 + 73 * scale + 32 * scale, y + 10 * scale, scale, G_Fmt("{}", ping).data());
+					CG_DrawString(CG_CheckedHUDCoordinate(105, scale,
+						static_cast<int64_t>(x) + 32), score_y,
+						scale, G_Fmt("{}", ping).data());
 				else
-					cgi.SCR_DrawFontString(G_Fmt("{}", ping).data(), x + 32 + 107 * scale, y + (10 - font_y_offset) * scale, scale, rgba_white, true, text_align_t::LEFT);
+					cgi.SCR_DrawFontString(G_Fmt("{}", ping).data(),
+						CG_CheckedHUDCoordinate(107, scale,
+							static_cast<int64_t>(x) + 32), CG_CheckedHUDFontY(score_y, scale),
+						scale, rgba_white, true, text_align_t::LEFT);
 
 				cgi.SCR_SetAltTypeface(false);
 			}
@@ -499,10 +625,14 @@ static void CG_ExecuteLayoutString(const char *s, vrect_t hud_vrect, vrect_t hud
 
 			token = COM_Parse(&s);
 			if (!skip_depth)
-				x = (hud_vrect.x + hud_vrect.width / 2 - hx + CG_ParseLayoutInt(token)) * scale;
+				x = CG_CheckedHUDCoordinate(
+					CG_HUDViewportCenter(hud_vrect.x, hud_vrect.width) - hx + CG_ParseLayoutInt(token),
+					scale);
 			token = COM_Parse(&s);
 			if (!skip_depth)
-				y = (hud_vrect.y + hud_vrect.height / 2 - hy + CG_ParseLayoutInt(token)) * scale;
+				y = CG_CheckedHUDCoordinate(
+					CG_HUDViewportCenter(hud_vrect.y, hud_vrect.height) - hy + CG_ParseLayoutInt(token),
+					scale);
 
 			token = COM_Parse(&s);
 			if (!skip_depth)
@@ -524,16 +654,22 @@ static void CG_ExecuteLayoutString(const char *s, vrect_t hud_vrect, vrect_t hud
 			if (!skip_depth) {
 
 				cgi.SCR_SetAltTypeface(ui_acc_alttypeface->integer && true);
-				cgi.SCR_DrawFontString(G_Fmt("{}", score).data(), x, y - (font_y_offset * scale), scale, value == playernum ? alt_color : rgba_white, true, text_align_t::LEFT);
-				x += 3 * 9 * scale;
-				cgi.SCR_DrawFontString(G_Fmt("{}", ping).data(), x, y - (font_y_offset * scale), scale, value == playernum ? alt_color : rgba_white, true, text_align_t::LEFT);
-				x += 3 * 9 * scale;
-				cgi.SCR_DrawFontString(cgi.CL_GetClientName(value), x, y - (font_y_offset * scale), scale, value == playernum ? alt_color : rgba_white, true, text_align_t::LEFT);
+				const int32_t font_y = CG_CheckedHUDFontY(y, scale);
+				cgi.SCR_DrawFontString(G_Fmt("{}", score).data(), x, font_y, scale, value == playernum ? alt_color : rgba_white, true, text_align_t::LEFT);
+				x = CG_CheckedHUDPixelOffset(
+					x, static_cast<int64_t>(3 * 9) * scale);
+				cgi.SCR_DrawFontString(G_Fmt("{}", ping).data(), x, font_y, scale, value == playernum ? alt_color : rgba_white, true, text_align_t::LEFT);
+				x = CG_CheckedHUDPixelOffset(
+					x, static_cast<int64_t>(3 * 9) * scale);
+				cgi.SCR_DrawFontString(cgi.CL_GetClientName(value), x, font_y, scale, value == playernum ? alt_color : rgba_white, true, text_align_t::LEFT);
 				cgi.SCR_SetAltTypeface(false);
 
 				if (*token) {
 					cgi.Draw_GetPicSize(&w, &h, token);
-					cgi.SCR_DrawPic(x - ((w + 2) * scale), y, w * scale, h * scale, token);
+					cgi.SCR_DrawPic(CG_CheckedHUDPixelOffset(
+						x, -(static_cast<int64_t>(w) + 2) * scale), y,
+						CG_CheckedHUDScaledValue(w, scale),
+						CG_CheckedHUDScaledValue(h, scale), token);
 				}
 			}
 			continue;
@@ -552,15 +688,20 @@ static void CG_ExecuteLayoutString(const char *s, vrect_t hud_vrect, vrect_t hud
 				} else {
 					cgi.Draw_GetPicSize(&w, &h, token);
 				}
-				cgi.SCR_DrawPic(x, y, w * scale, h * scale, token);
+				cgi.SCR_DrawPic(x, y,
+					CG_CheckedHUDScaledValue(w, scale),
+					CG_CheckedHUDScaledValue(h, scale), token);
 			}
 			continue;
 		}
 
 		if (!strcmp(token, "num")) {   // draw a number
 			token = COM_Parse(&s);
-			if (!skip_depth)
+			if (!skip_depth) {
 				width = CG_ParseLayoutInt(token);
+				if (!CG_IsValidHUDNumericWidth(width))
+					cgi.Com_Error("Bad num width");
+			}
 			token = COM_Parse(&s);
 			if (!skip_depth) {
 				int32_t stat = 0;
@@ -612,7 +753,10 @@ static void CG_ExecuteLayoutString(const char *s, vrect_t hud_vrect, vrect_t hud
 						w = 48;
 						h = 24;
 						w += delta;
-						cgi.SCR_DrawPic(x - delta, y, w * scale, h * scale, "field_3");
+						cgi.SCR_DrawPic(CG_CheckedHUDCoordinate(0, scale,
+							static_cast<int64_t>(x) - delta), y,
+							CG_CheckedHUDScaledValue(w, scale),
+							CG_CheckedHUDScaledValue(h, scale), "field_3");
 					}
 
 					CG_DrawField(x, y, color, width, value, scale);
@@ -641,7 +785,9 @@ static void CG_ExecuteLayoutString(const char *s, vrect_t hud_vrect, vrect_t hud
 						continue;   // negative number = don't show
 					if (ps->stats[STAT_FLASHES] & 4) {
 						cgi.Draw_GetPicSize(&w, &h, "field_3");
-						cgi.SCR_DrawPic(x, y, w * scale, h * scale, "field_3");
+						cgi.SCR_DrawPic(x, y,
+							CG_CheckedHUDScaledValue(w, scale),
+							CG_CheckedHUDScaledValue(h, scale), "field_3");
 					}
 
 					CG_DrawField(x, y, color, width, value, scale);
@@ -662,7 +808,9 @@ static void CG_ExecuteLayoutString(const char *s, vrect_t hud_vrect, vrect_t hud
 					color = 0;  // green
 					if (ps->stats[STAT_FLASHES] & 2) {
 						cgi.Draw_GetPicSize(&w, &h, "field_3");
-						cgi.SCR_DrawPic(x, y, w * scale, h * scale, "field_3");
+						cgi.SCR_DrawPic(x, y,
+							CG_CheckedHUDScaledValue(w, scale),
+							CG_CheckedHUDScaledValue(h, scale), "field_3");
 					}
 
 					CG_DrawField(x, y, color, width, value, scale);
@@ -691,7 +839,7 @@ static void CG_ExecuteLayoutString(const char *s, vrect_t hud_vrect, vrect_t hud
 					CG_DrawString(x, y, scale, str);
 				else {
 					cgi.SCR_SetAltTypeface(ui_acc_alttypeface->integer && true);
-					cgi.SCR_DrawFontString(str, x, y - (font_y_offset * scale), scale, rgba_white, true, text_align_t::LEFT);
+					cgi.SCR_DrawFontString(str, x, CG_CheckedHUDFontY(y, scale), scale, rgba_white, true, text_align_t::LEFT);
 					cgi.SCR_SetAltTypeface(false);
 				}
 			}
@@ -715,7 +863,7 @@ static void CG_ExecuteLayoutString(const char *s, vrect_t hud_vrect, vrect_t hud
 					CG_DrawString(x, y, scale, cgi.get_configstring(index));
 				else {
 					cgi.SCR_SetAltTypeface(ui_acc_alttypeface->integer && true);
-					cgi.SCR_DrawFontString(cgi.get_configstring(index), x, y - (font_y_offset * scale), scale, alt_color, true, text_align_t::LEFT);
+					cgi.SCR_DrawFontString(cgi.get_configstring(index), x, CG_CheckedHUDFontY(y, scale), scale, alt_color, true, text_align_t::LEFT);
 					cgi.SCR_SetAltTypeface(false);
 				}
 			}
@@ -726,7 +874,8 @@ static void CG_ExecuteLayoutString(const char *s, vrect_t hud_vrect, vrect_t hud
 			token = COM_Parse(&s);
 			if (!skip_depth) {
 				cgi.SCR_SetAltTypeface(ui_acc_alttypeface->integer && true);
-				CG_DrawHUDString(token, x, y, hx * 2 * scale, 0, scale);
+				CG_DrawHUDString(token, x, y,
+					CG_CheckedHUDTextExtent(1, hx * 2, scale), 0, scale);
 				cgi.SCR_SetAltTypeface(false);
 			}
 			continue;
@@ -739,7 +888,7 @@ static void CG_ExecuteLayoutString(const char *s, vrect_t hud_vrect, vrect_t hud
 					CG_DrawString(x, y, scale, token);
 				else {
 					cgi.SCR_SetAltTypeface(ui_acc_alttypeface->integer && true);
-					cgi.SCR_DrawFontString(token, x, y - (font_y_offset * scale), scale, rgba_white, true, text_align_t::LEFT);
+					cgi.SCR_DrawFontString(token, x, CG_CheckedHUDFontY(y, scale), scale, rgba_white, true, text_align_t::LEFT);
 					cgi.SCR_SetAltTypeface(false);
 				}
 			}
@@ -750,7 +899,8 @@ static void CG_ExecuteLayoutString(const char *s, vrect_t hud_vrect, vrect_t hud
 			token = COM_Parse(&s);
 			if (!skip_depth) {
 				cgi.SCR_SetAltTypeface(ui_acc_alttypeface->integer && true);
-				CG_DrawHUDString(token, x, y, hx * 2 * scale, 0x80, scale);
+				CG_DrawHUDString(token, x, y,
+					CG_CheckedHUDTextExtent(1, hx * 2, scale), 0x80, scale);
 				cgi.SCR_SetAltTypeface(false);
 			}
 			continue;
@@ -763,7 +913,7 @@ static void CG_ExecuteLayoutString(const char *s, vrect_t hud_vrect, vrect_t hud
 					CG_DrawString(x, y, scale, token, true);
 				else {
 					cgi.SCR_SetAltTypeface(ui_acc_alttypeface->integer && true);
-					cgi.SCR_DrawFontString(token, x, y - (font_y_offset * scale), scale, alt_color, true, text_align_t::LEFT);
+					cgi.SCR_DrawFontString(token, x, CG_CheckedHUDFontY(y, scale), scale, alt_color, true, text_align_t::LEFT);
 					cgi.SCR_SetAltTypeface(false);
 				}
 			}
@@ -830,7 +980,7 @@ static void CG_ExecuteLayoutString(const char *s, vrect_t hud_vrect, vrect_t hud
 					CG_DrawString(x, y, scale, cgi.Localize(cgi.get_configstring(index), nullptr, 0));
 				else {
 					cgi.SCR_SetAltTypeface(ui_acc_alttypeface->integer && true);
-					cgi.SCR_DrawFontString(cgi.Localize(cgi.get_configstring(index), nullptr, 0), x, y - (font_y_offset * scale), scale, rgba_white, true, text_align_t::LEFT);
+					cgi.SCR_DrawFontString(cgi.Localize(cgi.get_configstring(index), nullptr, 0), x, CG_CheckedHUDFontY(y, scale), scale, rgba_white, true, text_align_t::LEFT);
 					cgi.SCR_SetAltTypeface(false);
 				}
 			}
@@ -850,12 +1000,20 @@ static void CG_ExecuteLayoutString(const char *s, vrect_t hud_vrect, vrect_t hud
 				if (index < 0 || index >= MAX_CONFIGSTRINGS)
 					cgi.Com_Error("Bad stat_string index");
 				const char *s = cgi.Localize(cgi.get_configstring(index), nullptr, 0);
-				if (!scr_usekfont->integer)
-					CG_DrawString(x - (strlen(s) * CONCHAR_WIDTH * scale), y, scale, s);
+				if (!scr_usekfont->integer) {
+					const int32_t text_width = CG_CheckedHUDTextExtent(
+						strlen(s), CONCHAR_WIDTH, scale);
+					CG_DrawString(
+						CG_CheckedHUDPixelOffset(x, -static_cast<int64_t>(text_width)),
+						y, scale, s);
+				}
 				else {
 					cgi.SCR_SetAltTypeface(ui_acc_alttypeface->integer && true);
-					vec2_t size = cgi.SCR_MeasureFontString(s, scale);
-					cgi.SCR_DrawFontString(s, x - size.x, y - (font_y_offset * scale), scale, rgba_white, true, text_align_t::LEFT);
+					const int32_t text_width = CG_CheckedHUDMeasuredExtent(
+						cgi.SCR_MeasureFontString(s, scale).x);
+					cgi.SCR_DrawFontString(s,
+						CG_CheckedHUDPixelOffset(x, -static_cast<int64_t>(text_width)),
+						CG_CheckedHUDFontY(y, scale), scale, rgba_white, true, text_align_t::LEFT);
 					cgi.SCR_SetAltTypeface(false);
 				}
 			}
@@ -875,7 +1033,8 @@ static void CG_ExecuteLayoutString(const char *s, vrect_t hud_vrect, vrect_t hud
 				if (index < 0 || index >= MAX_CONFIGSTRINGS)
 					cgi.Com_Error("Bad stat_string index");
 				cgi.SCR_SetAltTypeface(ui_acc_alttypeface->integer && true);
-				CG_DrawHUDString(cgi.Localize(cgi.get_configstring(index), nullptr, 0), x, y, hx * 2 * scale, 0, scale);
+				CG_DrawHUDString(cgi.Localize(cgi.get_configstring(index), nullptr, 0), x, y,
+					CG_CheckedHUDTextExtent(1, hx * 2, scale), 0, scale);
 				cgi.SCR_SetAltTypeface(false);
 			}
 			continue;
@@ -894,7 +1053,8 @@ static void CG_ExecuteLayoutString(const char *s, vrect_t hud_vrect, vrect_t hud
 				if (index < 0 || index >= MAX_CONFIGSTRINGS)
 					cgi.Com_Error("Bad stat_string index");
 				cgi.SCR_SetAltTypeface(ui_acc_alttypeface->integer && true);
-				CG_DrawHUDString(cgi.Localize(cgi.get_configstring(index), nullptr, 0), x, y, hx * 2 * scale, 0x80, scale);
+				CG_DrawHUDString(cgi.Localize(cgi.get_configstring(index), nullptr, 0), x, y,
+					CG_CheckedHUDTextExtent(1, hx * 2, scale), 0x80, scale);
 				cgi.SCR_SetAltTypeface(false);
 			}
 			continue;
@@ -919,7 +1079,8 @@ static void CG_ExecuteLayoutString(const char *s, vrect_t hud_vrect, vrect_t hud
 
 			if (!skip_depth) {
 				cgi.SCR_SetAltTypeface(ui_acc_alttypeface->integer && true);
-				CG_DrawHUDString(cgi.Localize(arg_tokens[0], arg_buffers, num_args), x, y, hx * 2 * scale, 0, scale);
+				CG_DrawHUDString(cgi.Localize(arg_tokens[0], arg_buffers, num_args), x, y,
+					CG_CheckedHUDTextExtent(1, hx * 2, scale), 0, scale);
 				cgi.SCR_SetAltTypeface(false);
 			}
 			continue;
@@ -944,7 +1105,7 @@ static void CG_ExecuteLayoutString(const char *s, vrect_t hud_vrect, vrect_t hud
 					CG_DrawString(x, y, scale, cgi.Localize(arg_tokens[0], arg_buffers, num_args));
 				else {
 					cgi.SCR_SetAltTypeface(ui_acc_alttypeface->integer && true);
-					cgi.SCR_DrawFontString(cgi.Localize(arg_tokens[0], arg_buffers, num_args), x, y - (font_y_offset * scale), scale, rgba_white, true, text_align_t::LEFT);
+					cgi.SCR_DrawFontString(cgi.Localize(arg_tokens[0], arg_buffers, num_args), x, CG_CheckedHUDFontY(y, scale), scale, rgba_white, true, text_align_t::LEFT);
 					cgi.SCR_SetAltTypeface(false);
 				}
 			}
@@ -967,7 +1128,8 @@ static void CG_ExecuteLayoutString(const char *s, vrect_t hud_vrect, vrect_t hud
 
 			if (!skip_depth) {
 				cgi.SCR_SetAltTypeface(ui_acc_alttypeface->integer && true);
-				CG_DrawHUDString(cgi.Localize(arg_tokens[0], arg_buffers, num_args), x, y, hx * 2 * scale, 0x80, scale);
+				CG_DrawHUDString(cgi.Localize(arg_tokens[0], arg_buffers, num_args), x, y,
+					CG_CheckedHUDTextExtent(1, hx * 2, scale), 0x80, scale);
 				cgi.SCR_SetAltTypeface(false);
 			}
 			continue;
@@ -992,22 +1154,26 @@ static void CG_ExecuteLayoutString(const char *s, vrect_t hud_vrect, vrect_t hud
 
 			if (!skip_depth) {
 				const char *locStr = cgi.Localize(arg_tokens[0], arg_buffers, num_args);
-				int xOffs = 0;
+				int32_t xOffs = 0;
 				if (rightAlign) {
 					if (!scr_usekfont->integer)
-						xOffs = strlen(locStr) * CONCHAR_WIDTH * scale;
+						xOffs = CG_CheckedHUDTextExtent(
+							strlen(locStr), CONCHAR_WIDTH, scale);
 					else {
 						cgi.SCR_SetAltTypeface(ui_acc_alttypeface->integer && true);
-						xOffs = cgi.SCR_MeasureFontString(locStr, scale).x;
+						xOffs = CG_CheckedHUDMeasuredExtent(
+							cgi.SCR_MeasureFontString(locStr, scale).x);
 						cgi.SCR_SetAltTypeface(false);
 					}
 				}
+				const int32_t draw_x = CG_CheckedHUDPixelOffset(
+					x, -static_cast<int64_t>(xOffs));
 
 				if (!scr_usekfont->integer)
-					CG_DrawString(x - xOffs, y, scale, locStr, green);
+					CG_DrawString(draw_x, y, scale, locStr, green);
 				else {
 					cgi.SCR_SetAltTypeface(ui_acc_alttypeface->integer && true);
-					cgi.SCR_DrawFontString(locStr, x - xOffs, y - (font_y_offset * scale), scale, green ? alt_color : rgba_white, true, text_align_t::LEFT);
+					cgi.SCR_DrawFontString(locStr, draw_x, CG_CheckedHUDFontY(y, scale), scale, green ? alt_color : rgba_white, true, text_align_t::LEFT);
 					cgi.SCR_SetAltTypeface(false);
 				}
 			}
@@ -1020,30 +1186,39 @@ static void CG_ExecuteLayoutString(const char *s, vrect_t hud_vrect, vrect_t hud
 			token = COM_Parse(&s);
 
 			if (!skip_depth) {
-				int32_t end_frame = CG_ParseLayoutInt(token);
+				const int32_t end_frame = CG_ParseLayoutInt(token);
+				const int32_t server_frame = cgi.CL_ServerFrame();
+				const int64_t remaining_frames =
+					static_cast<int64_t>(end_frame) - server_frame;
 
-				if (end_frame < cgi.CL_ServerFrame())
+				if (remaining_frames < 0)
 					continue;
 
-				uint64_t remaining_ms = (end_frame - cgi.CL_ServerFrame()) * cgi.frame_time_ms;
+				const uint64_t remaining_ms =
+					static_cast<uint64_t>(remaining_frames) *
+					static_cast<uint64_t>(cgi.frame_time_ms);
 
 				const bool green = true;
 				arg_buffers[0] = G_Fmt("{:02}:{:02}", (remaining_ms / 1000) / 60, (remaining_ms / 1000) % 60).data();
 
 				const char *locStr = cgi.Localize("$g_score_time", arg_buffers, 1);
-				int xOffs;
+				int32_t xOffs;
 				if (!scr_usekfont->integer)
-					xOffs = strlen(locStr) * CONCHAR_WIDTH * scale;
+					xOffs = CG_CheckedHUDTextExtent(
+						strlen(locStr), CONCHAR_WIDTH, scale);
 				else {
 					cgi.SCR_SetAltTypeface(ui_acc_alttypeface->integer && true);
-					xOffs = cgi.SCR_MeasureFontString(locStr, scale).x;
+					xOffs = CG_CheckedHUDMeasuredExtent(
+						cgi.SCR_MeasureFontString(locStr, scale).x);
 					cgi.SCR_SetAltTypeface(false);
 				}
+				const int32_t draw_x = CG_CheckedHUDPixelOffset(
+					x, -static_cast<int64_t>(xOffs));
 				if (!scr_usekfont->integer)
-					CG_DrawString(x - xOffs, y, scale, locStr, green);
+					CG_DrawString(draw_x, y, scale, locStr, green);
 				else {
 					cgi.SCR_SetAltTypeface(ui_acc_alttypeface->integer && true);
-					cgi.SCR_DrawFontString(locStr, x - xOffs, y - (font_y_offset * scale), scale, green ? alt_color : rgba_white, true, text_align_t::LEFT);
+					cgi.SCR_DrawFontString(locStr, draw_x, CG_CheckedHUDFontY(y, scale), scale, green ? alt_color : rgba_white, true, text_align_t::LEFT);
 					cgi.SCR_SetAltTypeface(false);
 				}
 			}
@@ -1057,7 +1232,9 @@ static void CG_ExecuteLayoutString(const char *s, vrect_t hud_vrect, vrect_t hud
 				value = CG_ParseLayoutClientIndex(token);
 
 				const std::string_view path = G_Fmt("/tags/{}", cgi.CL_GetClientDogtag(value));
-				cgi.SCR_DrawPic(x, y, 198 * scale, 32 * scale, path.data());
+				cgi.SCR_DrawPic(x, y,
+					CG_CheckedHUDScaledValue(198, scale),
+					CG_CheckedHUDScaledValue(32, scale), path.data());
 			}
 		}
 
@@ -1081,7 +1258,10 @@ static void CG_ExecuteLayoutString(const char *s, vrect_t hud_vrect, vrect_t hud
 				if (!skip_depth) {
 					token = cgi.Localize(token, nullptr, 0);
 					Q_strlcpy(hud_temp.table_rows[0].table_cells[i].text, token, sizeof(hud_temp.table_rows[0].table_cells[i].text));
-					hud_temp.column_widths[i] = max(hud_temp.column_widths[i], (size_t)cgi.SCR_MeasureFontString(hud_temp.table_rows[0].table_cells[i].text, scale).x);
+					hud_temp.column_widths[i] = max(
+						hud_temp.column_widths[i],
+						CG_CheckedHUDMeasuredExtent(cgi.SCR_MeasureFontString(
+							hud_temp.table_rows[0].table_cells[i].text, scale).x));
 				}
 			}
 		}
@@ -1106,7 +1286,10 @@ static void CG_ExecuteLayoutString(const char *s, vrect_t hud_vrect, vrect_t hud
 				token = COM_Parse(&s);
 				if (!skip_depth) {
 					Q_strlcpy(row->table_cells[i].text, token, sizeof(row->table_cells[i].text));
-					hud_temp.column_widths[i] = max(hud_temp.column_widths[i], (size_t)cgi.SCR_MeasureFontString(row->table_cells[i].text, scale).x);
+					hud_temp.column_widths[i] = max(
+						hud_temp.column_widths[i],
+						CG_CheckedHUDMeasuredExtent(cgi.SCR_MeasureFontString(
+							row->table_cells[i].text, scale).x));
 				}
 			}
 
@@ -1121,17 +1304,23 @@ static void CG_ExecuteLayoutString(const char *s, vrect_t hud_vrect, vrect_t hud
 		if (!strcmp(token, "draw_table")) {
 			if (!skip_depth) {
 				// in scaled pixels, incl padding between elements
-				uint32_t total_inner_table_width = 0;
+				int32_t total_inner_table_width = 0;
+				const int32_t space_width = CG_CheckedHUDMeasuredExtent(
+					cgi.SCR_MeasureFontString(" ", scale).x);
 
 				for (int i = 0; i < hud_temp.num_columns; i++) {
 					if (i != 0)
-						total_inner_table_width += cgi.SCR_MeasureFontString(" ", scale).x;
+						total_inner_table_width = CG_CheckedHUDPixelOffset(
+							total_inner_table_width, space_width);
 
-					total_inner_table_width += hud_temp.column_widths[i];
+					total_inner_table_width = CG_CheckedHUDPixelOffset(
+						total_inner_table_width, hud_temp.column_widths[i]);
 				}
 
 				// in scaled pixels
-				uint32_t total_table_height = hud_temp.num_rows * (CONCHAR_WIDTH + font_y_offset) * scale;
+				const int32_t total_table_height = CG_CheckedHUDTextExtent(
+					static_cast<size_t>(hud_temp.num_rows),
+					CONCHAR_WIDTH + font_y_offset, scale);
 
 				CG_DrawTable(x, y, total_inner_table_width, total_table_height, scale);
 			}
@@ -1147,7 +1336,9 @@ static void CG_ExecuteLayoutString(const char *s, vrect_t hud_vrect, vrect_t hud
 
 				//muff: hacky hacks - move crosshair id text to 160, align centrally
 				if (index == STAT_CROSSHAIR_ID_VIEW) {
-					x = (hud_vrect.x + hud_vrect.width / 2 + 160 - hx) * scale;
+					x = CG_CheckedHUDCoordinate(
+						CG_HUDViewportCenter(hud_vrect.x, hud_vrect.width) + 160 - hx,
+						scale);
 					align = text_align_t::CENTER;
 				}
 
@@ -1159,7 +1350,7 @@ static void CG_ExecuteLayoutString(const char *s, vrect_t hud_vrect, vrect_t hud
 					CG_DrawString(x, y, scale, cgi.CL_GetClientName(index));
 				else {
 					cgi.SCR_SetAltTypeface(ui_acc_alttypeface->integer && true);
-					cgi.SCR_DrawFontString(cgi.CL_GetClientName(index), x, y - (font_y_offset * scale), scale, rgba_white, true, align);
+					cgi.SCR_DrawFontString(cgi.CL_GetClientName(index), x, CG_CheckedHUDFontY(y, scale), scale, rgba_white, true, align);
 					cgi.SCR_SetAltTypeface(false);
 				}
 			}
@@ -1173,12 +1364,16 @@ static void CG_ExecuteLayoutString(const char *s, vrect_t hud_vrect, vrect_t hud
 			const byte *stat = reinterpret_cast<const byte *>(&ps->stats[STAT_HEALTH_BARS]);
 			const char *name = cgi.Localize(cgi.get_configstring(CONFIG_HEALTH_BAR_NAME), nullptr, 0);
 			cgi.SCR_SetAltTypeface(ui_acc_alttypeface->integer && true);
-			CG_DrawHUDString(name, (hud_vrect.x + hud_vrect.width / 2 + -160) * scale, y, (320 / 2) * 2 * scale, 0, scale);
+			CG_DrawHUDString(name,
+				CG_CheckedHUDCoordinate(
+					CG_HUDViewportCenter(hud_vrect.x, hud_vrect.width) - 160, scale),
+				y, CG_CheckedHUDTextExtent(1, 320, scale), 0, scale);
 			cgi.SCR_SetAltTypeface(false);
 			float bar_width = ((hud_vrect.width * scale) - (hud_safe.x * 2)) * 0.50f;
 			float bar_height = 4 * scale;
 
-			y += cgi.SCR_FontLineHeight(scale);
+			y = CG_CheckedHUDPixelOffset(
+				y, CG_CheckedHUDMeasuredExtent(cgi.SCR_FontLineHeight(scale)));
 
 			float x = ((hud_vrect.x + (hud_vrect.width * 0.5f)) * scale) - (bar_width * 0.5f);
 
@@ -1196,7 +1391,8 @@ static void CG_ExecuteLayoutString(const char *s, vrect_t hud_vrect, vrect_t hud
 				if (percent < 1)
 					cgi.SCR_DrawColorPic(x + (bar_width * percent), y, bar_width * (1.f - percent), bar_height, "_white", { 80, 80, 80, 255 });
 
-				y += bar_height * 3;
+				y = CG_CheckedHUDPixelOffset(
+					y, CG_CheckedHUDMeasuredExtent(bar_height * 3));
 			}
 		}
 
@@ -1217,7 +1413,7 @@ static void CG_ExecuteLayoutString(const char *s, vrect_t hud_vrect, vrect_t hud
 		}
 	}
 
-	if (skip_depth)
+	if (!CG_HUDLayoutConditionsBalanced(if_depth, skip_depth))
 		cgi.Com_Error("if with no matching endif");
 }
 
@@ -1280,8 +1476,9 @@ static void CG_DrawInventory(const player_state_t *ps, const std::array<int16_t,
 		item = index[i];
 		if (item == selected) // draw a blinky cursor by the selected item
 		{
-			if ((cgi.CL_ClientRealTime() * 10) & 1)
-				cgi.SCR_DrawChar(x - 8, y, scale, 15, false);
+			if (CG_HUDBlinkVisible(cgi.CL_ClientRealTime()))
+			cgi.SCR_DrawChar(CG_CheckedHUDCoordinate(0, scale,
+				static_cast<int64_t>(x) - 8), y, scale, 15, false);
 		}
 
 		if (!scr_usekfont->integer) {

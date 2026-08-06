@@ -3,8 +3,132 @@
 // Damage, death and combat rule helpers.
 
 #include "g_local.h"
+#include "muffmode/mm_arena.h"
 #include "muffmode/mm_combat_heatmap.h"
 #include "muffmode/mm_freezetag.h"
+#include "muffmode/mm_horde.h"
+#include "muffmode/mm_match_stats.h"
+#include "muffmode/mm_horde_ai_rules.h"
+#include "muffmode/mm_scoring.h"
+
+// Damage callbacks can free and immediately recycle entity slots, teleport a
+// still-live source, or move it across an arena policy boundary. A single blast
+// must keep the spatial and rules context it had when dispatch began.
+struct damage_source_snapshot_t {
+	gentity_t *entity{};
+	int32_t generation{};
+	vec3_t origin{};
+	vec3_t spatial_center{};
+	bool linked{};
+	bool has_client{};
+	bool connected{};
+	bool arena_mode{};
+	bool arena_fighter{};
+	bool arena_running{};
+	bool arena_paused{};
+	int32_t client_team{};
+	uint16_t arena_team{};
+	int arena_id{};
+
+	vec3_t center() const noexcept
+	{
+		return spatial_center;
+	}
+
+	bool matches() const noexcept
+	{
+		if (!entity || !entity->inuse || entity->spawn_count != generation ||
+			entity->s.origin != origin || entity->linked != linked ||
+			(entity->client != nullptr) != has_client ||
+			GT(GT_ARENA) != arena_mode || MM_Arena_Id(entity) != arena_id)
+			return false;
+
+		if (has_client) {
+			if (entity->client->pers.connected != connected ||
+				MM_Arena_IsFighter(entity->client) != arena_fighter ||
+				static_cast<int32_t>(entity->client->sess.team) != client_team ||
+				entity->client->resp.arena_team_id != arena_team)
+				return false;
+		}
+
+		return (arena_id <= 0 ||
+			(MM_Arena_IsRunning(arena_id) == arena_running &&
+			 MM_Arena_IsPaused(arena_id) == arena_paused));
+	}
+};
+
+static damage_source_snapshot_t CaptureDamageSource(gentity_t *entity) noexcept
+{
+	damage_source_snapshot_t snapshot;
+	snapshot.entity = entity;
+	snapshot.generation = entity ? entity->spawn_count : 0;
+	if (!entity)
+		return snapshot;
+
+	snapshot.origin = entity->s.origin;
+	snapshot.linked = entity->linked;
+	snapshot.spatial_center = snapshot.linked
+		? ((entity->absmax + entity->absmin) * 0.5f) : snapshot.origin;
+	snapshot.has_client = entity->client != nullptr;
+	snapshot.connected = !entity->client || entity->client->pers.connected;
+	snapshot.arena_mode = GT(GT_ARENA);
+	snapshot.arena_fighter = entity->client &&
+		MM_Arena_IsFighter(entity->client);
+	snapshot.client_team = entity->client
+		? static_cast<int32_t>(entity->client->sess.team) : 0;
+	snapshot.arena_team = entity->client
+		? entity->client->resp.arena_team_id : 0;
+	snapshot.arena_id = MM_Arena_Id(entity);
+	snapshot.arena_running = snapshot.arena_id > 0 &&
+		MM_Arena_IsRunning(snapshot.arena_id);
+	snapshot.arena_paused = snapshot.arena_id > 0 &&
+		MM_Arena_IsPaused(snapshot.arena_id);
+	return snapshot;
+}
+
+static bool DamageSourcesMatch(const damage_source_snapshot_t &inflictor,
+	const damage_source_snapshot_t &attacker) noexcept
+{
+	return inflictor.matches() &&
+		(inflictor.entity == attacker.entity || attacker.matches());
+}
+
+struct damage_candidate_snapshot_t {
+	struct lifetime_t {
+		int32_t generation{};
+		bool inuse{};
+	};
+
+	size_t entity_count{};
+	std::vector<lifetime_t> lifetimes;
+
+	bool matches(const gentity_t *entity) const noexcept
+	{
+		if (!entity || entity < g_entities ||
+			entity >= g_entities + entity_count)
+			return false;
+		const size_t index = static_cast<size_t>(entity - g_entities);
+		const lifetime_t &lifetime = lifetimes[index];
+		return lifetime.inuse && entity->inuse &&
+			entity->spawn_count == lifetime.generation;
+	}
+};
+
+static damage_candidate_snapshot_t CaptureDamageCandidates() noexcept
+{
+	damage_candidate_snapshot_t snapshot;
+	snapshot.entity_count = min(
+		min(static_cast<size_t>(globals.num_entities),
+			static_cast<size_t>(game.maxentities)),
+		static_cast<size_t>(MAX_ENTITIES));
+	snapshot.lifetimes.resize(snapshot.entity_count);
+	for (size_t index = 0; index < snapshot.entity_count; ++index) {
+		snapshot.lifetimes[index] = {
+			g_entities[index].spawn_count, g_entities[index].inuse
+		};
+	}
+	return snapshot;
+}
 
 /*
 ============
@@ -14,17 +138,13 @@ Returns true if the inflictor can directly damage the target.  Used for
 explosions and melee attacks.
 ============
 */
-bool CanDamage(gentity_t *targ, gentity_t *inflictor) {
+static bool CanDamageFromPoint(gentity_t *targ, gentity_t *inflictor,
+	const vec3_t &inflictor_center) {
 	vec3_t	dest;
 	trace_t trace;
 
-	// bmodels need special checking because their origin is 0,0,0
-	vec3_t inflictor_center;
-
-	if (inflictor->linked)
-		inflictor_center = (inflictor->absmin + inflictor->absmax) * 0.5f;
-	else
-		inflictor_center = inflictor->s.origin;
+	if (GT(GT_ARENA) && !MM_Arena_CanInteract(targ, inflictor))
+		return false;
 
 	if (targ->solid == SOLID_BSP) {
 		dest = closest_point_to_box(inflictor_center, targ->absmin, targ->absmax);
@@ -76,6 +196,14 @@ bool CanDamage(gentity_t *targ, gentity_t *inflictor) {
 	return false;
 }
 
+bool CanDamage(gentity_t *targ, gentity_t *inflictor) {
+	// bmodels need special checking because their origin is 0,0,0
+	const vec3_t inflictor_center = inflictor->linked
+		? ((inflictor->absmin + inflictor->absmax) * 0.5f)
+		: inflictor->s.origin;
+	return CanDamageFromPoint(targ, inflictor, inflictor_center);
+}
+
 /*
 ============
 Killed
@@ -112,9 +240,7 @@ void Killed(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, int dama
 SpawnDamage
 ================
 */
-void SpawnDamage(int type, const vec3_t &origin, const vec3_t &normal, int damage) {
-	if (damage > 255)
-		damage = 255;
+void SpawnDamage(int type, const vec3_t &origin, const vec3_t &normal, int /*damage*/) {
 	gi.WriteByte(svc_temp_entity);
 	gi.WriteByte(type);
 	gi.WritePosition(origin);
@@ -457,6 +583,9 @@ bool OnSameTeam(gentity_t *ent1, gentity_t *ent2) {
 	else if (ent1 == ent2)
 		return false;
 
+	if (GT(GT_ARENA))
+		return MM_Arena_SameTeam(ent1, ent2);
+
 	if (!ent1->client || !ent2->client)
 		return false;
 
@@ -480,6 +609,12 @@ bool OnSameTeam(gentity_t *ent1, gentity_t *ent2) {
 // check if the two entities are on a team and that
 // they wouldn't damage each other
 bool CheckTeamDamage(gentity_t *targ, gentity_t *attacker) {
+	// [MuffMode] Arena weapons must acquire same-side targets independently
+	// of the global friendly-fire cvar. Per-room health/armor protection is
+	// applied in T_Damage while preserving the configured knockback.
+	if (GT(GT_ARENA))
+		return false;
+
 	// always damage teammates if friendly fire is enabled
 	if (g_friendly_fire->integer)
 		return false;
@@ -508,6 +643,7 @@ void T_Damage(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, const 
 	int			asave = 0, psave = 0;
 	int			te_sparks;
 	bool		sphere_notified;
+	bool		arena_nonlethal_hit = false;
 
 	if (!targ->takedamage)
 		return;
@@ -515,7 +651,17 @@ void T_Damage(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, const 
 	if (!attacker)
 		attacker = world;
 
-	if ((g_instagib->integer || GT(GT_INSTAGIB)) && attacker->client && targ->client) {
+	// [MuffMode] Reject cross-arena damage before knockback, hit statistics,
+	// armor consumption, effects, and health changes. Practice arenas may
+	// instead zero damage while retaining knockback.
+	if (GT(GT_ARENA) &&
+		!MM_Arena_FilterDamage(targ, attacker, damage, knockback))
+		return;
+	if (GT(GT_ARENA))
+		arena_nonlethal_hit = damage <= 0;
+
+	if (!arena_nonlethal_hit && notGT(GT_ARENA) &&
+		(g_instagib->integer || GT(GT_INSTAGIB)) && attacker->client && targ->client) {
 		// [Kex] always kill no matter what on instagib
 		damage = 9999;
 	}
@@ -530,7 +676,7 @@ void T_Damage(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, const 
 			mod.friendly_fire = true;
 
 			// if we're not a nuke & friendly fire is disabled, just kill the damage
-			if (!g_friendly_fire->integer && (mod.id != MOD_NUKE)) {
+			if (notGT(GT_ARENA) && !g_friendly_fire->integer && (mod.id != MOD_NUKE)) {
 				damage = 0;
 			}
 		}
@@ -549,14 +695,20 @@ void T_Damage(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, const 
 		damage *= g_damage_scale->integer;
 	} // mal: just for debugging...
 
-	// horde champion: tapered outgoing-damage buff (weak champions hit hard, heavy ones store <= 1 = no buff)
-	if ((attacker->svflags & SVF_MONSTER) && attacker->monsterinfo.champion_damage_scale > 1.0f)
-		damage = (int)ceil(damage * attacker->monsterinfo.champion_damage_scale);
+	// [MuffMode] Horde champions and bosses use a positive outgoing-damage
+	// multiplier; zero is the inactive/default sentinel.
+	if (attacker->svflags & SVF_MONSTER)
+		damage = MM_Horde_ScaleOutgoingDamage(damage, attacker->monsterinfo.champion_damage_scale);
 
 	client = targ->client;
+	std::array<int32_t, IT_TOTAL> arena_inventory_before{};
+	const bool arena_inventory_snapshot = GT(GT_ARENA) && client;
+	if (arena_inventory_snapshot)
+		arena_inventory_before = client->pers.inventory;
 
 	// PMM - defender sphere takes half damage
-	if (damage && (client) && (client->owned_sphere) && (client->owned_sphere->spawnflags == SF_SPHERE_DEFENDER)) {
+	if (gentity_t *sphere = client ? G_ResolveOwnedSphere(client) : nullptr;
+		damage && sphere && sphere->spawnflags == SF_SPHERE_DEFENDER) {
 		damage /= 2;
 		if (!damage)
 			damage = 1;
@@ -576,12 +728,14 @@ void T_Damage(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, const 
 
 	// power amplifier tech
 	damage = Tech_ApplyPowerAmp(attacker, damage);
+	damage = MM_Horde_ModifyDamage(targ, attacker, damage, static_cast<int>(mod.id));
 
-	if (RS(RS_Q3A)) {
+	if (RS(RS_Q3A) && !arena_nonlethal_hit) {
 		knockback = damage;
 		if (knockback > 200)
 			knockback = 200;
 	}
+	knockback = MM_Horde_ModifyKnockback(targ, attacker, knockback);
 
 	if ((targ->flags & FL_NO_KNOCKBACK) ||
 			((targ->flags & FL_ALIVE_KNOCKBACK_ONLY) && (!targ->deadflag || targ->dead_time != level.time)))
@@ -634,18 +788,11 @@ void T_Damage(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, const 
 	if (RS(RS_Q3A) && targ == attacker && damage > 0)
 		damage = max(1, (int)(damage * 0.5f));
 
-	if (targ != attacker && attacker->client && !OnSameTeam(targ, attacker)) {
-		if ((!inflictor->skip && (dflags & DAMAGE_STAT_ONCE)) || !(dflags & DAMAGE_STAT_ONCE)) {
-			MS_Adjust(attacker->client, MSTAT_HITS, 1);
-			inflictor->skip = true;
-		}
-	}
-
 	take = damage;
 	save = 0;
 
 	if (!(dflags & DAMAGE_NO_PROTECTION)) {
-		if (IsCombatDisabled()) {
+		if (notGT(GT_ARENA) && IsCombatDisabled()) {
 			take = 0;
 			save = damage;
 		}
@@ -682,12 +829,15 @@ void T_Damage(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, const 
 	}
 
 	// check for getting out of self damage
-	if (targ == attacker && deathmatch->integer && g_dm_no_self_damage->integer) {
+	if (targ == attacker && deathmatch->integer && notGT(GT_ARENA) &&
+		g_dm_no_self_damage->integer) {
 		take = 0;
 		save = damage;
 	}
 
-	if (g_vampiric_damage->integer && targ->health > 0 && attacker != targ && !OnSameTeam(targ, attacker) && take > 0) {
+	if (notGT(GT_ARENA) && g_vampiric_damage->integer &&
+		targ->health > 0 && attacker != targ &&
+		!OnSameTeam(targ, attacker) && take > 0) {
 		int vtake = take;
 		int hmax = clamp(g_vampiric_health_max->integer, 100, 9999);
 
@@ -703,12 +853,13 @@ void T_Damage(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, const 
 	}
 
 	// team armor protect
-	if (Teams() && targ->client && attacker->client &&
+	if (notGT(GT_ARENA) && Teams() && targ->client && attacker->client &&
 			targ->client->sess.team == attacker->client->sess.team && targ != attacker &&
 			g_teamplay_armor_protect->integer) {
 		psave = asave = 0;
 	} else {
-		if (targ == attacker && GTF(GTF_ARENA) && !g_arena_dmg_armor->integer) {
+		if (targ == attacker && GTF(GTF_ARENA) && notGT(GT_ARENA) &&
+			!g_arena_dmg_armor->integer) {
 			take = 0;
 			save = damage;
 		} else {
@@ -720,15 +871,31 @@ void T_Damage(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, const 
 		}
 	}
 
+	if (GT(GT_ARENA) && client && !(dflags & DAMAGE_NO_PROTECTION)) {
+		const int calculated_armor_loss = psave + asave;
+		int protected_health_damage = take;
+		int protected_armor_loss = calculated_armor_loss;
+		MM_Arena_AdjustProtection(targ, attacker,
+			protected_health_damage, protected_armor_loss);
+
+		take = max(0, protected_health_damage);
+		if (arena_inventory_snapshot && calculated_armor_loss > 0 &&
+			protected_armor_loss == 0) {
+			// RA3 armor protection still lets armor absorb the hit, but does
+			// not consume it. CheckArmor mutates eagerly, so restore the
+			// pre-hit inventory after using its calculated absorption.
+			client->pers.inventory = arena_inventory_before;
+		}
+	}
+
 	// treat cheat/powerup savings the same as armor
 	asave += save;
 
 	if (!(dflags & DAMAGE_NO_PROTECTION)) {
 		// Arena modes always block self-health damage; g_arena_dmg_armor only
 		// affects whether self-hit damage can be absorbed by armor.
-		if (targ == attacker && GTF(GTF_ARENA)) {
+		if (targ == attacker && GTF(GTF_ARENA) && notGT(GT_ARENA)) {
 			take = 0;
-			save = 0;	// damage;
 		}
 
 		// check for protection powerup
@@ -740,6 +907,7 @@ void T_Damage(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, const 
 
 	// resistance tech
 	take = Tech_ApplyDisruptorShield(targ, take);
+	MM_Horde_ApplyDamagePull(targ, attacker, take);
 
 	CTF_CheckHurtCarrier(targ, attacker);
 
@@ -751,22 +919,31 @@ void T_Damage(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, const 
 		}
 	}
 
-	if (targ != attacker && attacker->client && targ->health > 0) {
+	if (targ != attacker && attacker && attacker->client && targ->health > 0) {
 		int stat_take = take;
 		if (stat_take > targ->health)
 			stat_take = targ->health;
 
+		// Count only live-target impacts. DAMAGE_STAT_ONCE lets a single
+		// projectile suppress its later direct/splash/tick callbacks, while
+		// hitscan pellets and continuous-fire rounds remain independent hits.
+		const bool count_once = (dflags & DAMAGE_STAT_ONCE) != 0;
+		if (MM_MatchStatsShouldCountHit(true, OnSameTeam(targ, attacker), count_once,
+			inflictor != nullptr, inflictor && inflictor->skip)) {
+			MS_Adjust(attacker->client, MSTAT_HITS, 1);
+			MM_MatchStats_RecordHit(attacker->client, mod);
+			if (inflictor && count_once)
+				inflictor->skip = true;
+		}
+
 		// arena player scoring: 1 point per 100 damage dealt to opponents, capped to 0 health
 		// (Red Rover and LMS score by frags / round-wins only, so they opt out of arena damage-scoring)
-		if (GTF(GTF_ARENA) && notGT(GT_RR) && notGT(GT_LMS) && !OnSameTeam(targ, attacker)) {
-			attacker->client->pers.dmg_scorer += stat_take + psave + asave;
-
-			if (attacker->client->pers.dmg_scorer >= 100) {
-				int32_t score_add = floor(attacker->client->pers.dmg_scorer / 100);
-				attacker->client->pers.dmg_scorer -= score_add * 100;
-
-				G_AdjustPlayerScore(attacker->client, score_add, false, 0);
-			}
+		const bool arena_damage_scoring =
+			GT(GT_ARENA) && MM_Arena_DamageScoringEnabled(attacker);
+		if (((GTF(GTF_ARENA) && notGT(GT_ARENA) && notGT(GT_RR) && notGT(GT_LMS)) ||
+				arena_damage_scoring) &&
+			!OnSameTeam(targ, attacker)) {
+			MM_AwardDamageScore(attacker->client, stat_take + psave + asave);
 		}
 
 		// Red Rover: tally enemy damage dealt this round for the round-winner tie-break and
@@ -792,6 +969,10 @@ void T_Damage(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, const 
 			attacker->client->ps.stats[STAT_HIT_MARKER] += take + psave + asave;
 		}
 		MS_Adjust(attacker->client, MSTAT_DMG_DEALT, stat_take + psave + asave);
+		MM_MatchStats_RecordDamage(attacker->client,
+			targ->client,
+			mod,
+			static_cast<uint32_t>(max(0, stat_take + psave + asave)));
 
 		if (targ->client)
 			MS_Adjust(targ->client, MSTAT_DMG_RECEIVED, stat_take + psave + asave);
@@ -813,20 +994,21 @@ void T_Damage(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, const 
 				SpawnDamage(te_sparks, point, normal, take);
 		}
 
-		if (!IsCombatDisabled()) {
+		if (GT(GT_ARENA) || !IsCombatDisabled()) {
 			if (ShouldRecordCombatHeat(attacker, client))
 				muffmode::combat_heatmap::AddEvent(CombatHeatOrigin(targ, inflictor, point), static_cast<float>(take));
 			targ->health = targ->health - take;
+			MM_Horde_OnMonsterDamaged(targ, take);
 		}
 
 		if ((targ->flags & FL_IMMORTAL) && targ->health <= 0)
 			targ->health = 1;
 
 		// spheres need to know who to shoot at
-		if (client && client->owned_sphere) {
+		if (gentity_t *sphere = client ? G_ResolveOwnedSphere(client) : nullptr) {
 			sphere_notified = true;
-			if (client->owned_sphere->pain)
-				client->owned_sphere->pain(client->owned_sphere, attacker, 0, 0, mod);
+			if (sphere->pain)
+				sphere->pain(sphere, attacker, 0, 0, mod);
 		}
 
 		if (targ->health <= 0) {
@@ -848,10 +1030,9 @@ void T_Damage(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, const 
 
 	// spheres need to know who to shoot at
 	if (!sphere_notified) {
-		if (client && client->owned_sphere) {
-			sphere_notified = true;
-			if (client->owned_sphere->pain)
-				client->owned_sphere->pain(client->owned_sphere, attacker, 0, 0, mod);
+		if (gentity_t *sphere = client ? G_ResolveOwnedSphere(client) : nullptr) {
+			if (sphere->pain)
+				sphere->pain(sphere, attacker, 0, 0, mod);
 		}
 	}
 
@@ -926,14 +1107,26 @@ void T_RadiusDamage(gentity_t *inflictor, gentity_t *attacker, float damage, gen
 	vec3_t	 v;
 	vec3_t	 dir;
 	vec3_t   inflictor_center;
+	if (!inflictor || !inflictor->inuse ||
+		(inflictor->client && !inflictor->client->pers.connected))
+		return;
+	if (!attacker || !attacker->inuse ||
+		(attacker->client && !attacker->client->pers.connected))
+		attacker = world;
+	if (!attacker || !attacker->inuse)
+		return;
+	const damage_source_snapshot_t inflictor_source =
+		CaptureDamageSource(inflictor);
+	const damage_source_snapshot_t attacker_source =
+		CaptureDamageSource(attacker);
+	const damage_candidate_snapshot_t candidates = CaptureDamageCandidates();
 
-	inflictor_center = inflictor->linked ? ((inflictor->absmax + inflictor->absmin) * 0.5f) : inflictor->s.origin;
+	inflictor_center = inflictor_source.center();
 
 	if (RS(RS_Q3A)) {
-		size_t entity_count = min(static_cast<size_t>(globals.num_entities), static_cast<size_t>(game.maxentities));
-		for (size_t entnum = 1; entnum < entity_count; entnum++) {
+		for (size_t entnum = 1; entnum < candidates.entity_count; entnum++) {
 			ent = &g_entities[entnum];
-			if (!ent->inuse)
+			if (!candidates.matches(ent))
 				continue;
 			if (ent == ignore)
 				continue;
@@ -957,11 +1150,13 @@ void T_RadiusDamage(gentity_t *inflictor, gentity_t *attacker, float damage, gen
 			if (points <= 0)
 				continue;
 
-			if (CanDamage(ent, inflictor)) {
+			if (CanDamageFromPoint(ent, inflictor, inflictor_center)) {
 				dir = ent->s.origin - inflictor_center;
 				dir[2] += 24;
 				vec3_t normal = dir.normalized();
 				T_Damage(ent, inflictor, attacker, dir, closest_point_to_box(inflictor_center, ent->absmin, ent->absmax), normal, (int)points, (int)points, dflags | DAMAGE_RADIUS, mod);
+				if (!DamageSourcesMatch(inflictor_source, attacker_source))
+					return;
 			}
 		}
 
@@ -969,6 +1164,8 @@ void T_RadiusDamage(gentity_t *inflictor, gentity_t *attacker, float damage, gen
 	}
 
 	while ((ent = findradius(ent, inflictor_center, radius)) != nullptr) {
+		if (!candidates.matches(ent))
+			continue;
 		if (ent == ignore)
 			continue;
 		if (!ent->takedamage)
@@ -985,7 +1182,7 @@ void T_RadiusDamage(gentity_t *inflictor, gentity_t *attacker, float damage, gen
 		if (ent == attacker)
 			points *= 0.5f;
 		if (points > 0) {
-			if (CanDamage(ent, inflictor)) {
+			if (CanDamageFromPoint(ent, inflictor, inflictor_center)) {
 				dir = (ent->s.origin - inflictor_center).normalized();
 				// [Paril-KEX] use closest point on bbox to explosion position
 				// to spawn damage effect
@@ -996,10 +1193,12 @@ void T_RadiusDamage(gentity_t *inflictor, gentity_t *attacker, float damage, gen
 				// [MuffMode] self rocket-jump: use the ruleset's dedicated knockback base
 				// (RS_Q2RE-equivalent) so RJ height matches q2re while self damage stays lower.
 				else if (ent == attacker && inflictor->splash_knockback > 0 &&
-						 inflictor->owner && inflictor->owner->client)
+						 attacker->client)
 					kb = ((float)inflictor->splash_knockback - 0.5f * v.length()) * 0.5f;
 
 				T_Damage(ent, inflictor, attacker, dir, closest_point_to_box(inflictor_center, ent->absmin, ent->absmax), dir, (int)points, (int)kb, dflags | DAMAGE_RADIUS, mod);
+				if (!DamageSourcesMatch(inflictor_source, attacker_source))
+					return;
 			}
 		}
 	}
@@ -1027,6 +1226,14 @@ Like T_RadiusDamage, but ignores walls (skips CanDamage check, among others)
 ============
 */
 
+static bool NukeAffectsClient(const gentity_t *inflictor, const gentity_t *player) {
+	if (notGT(GT_ARENA))
+		return true;
+
+	const int arena_id = MM_Arena_Id(inflictor);
+	return arena_id <= 0 || MM_Arena_Id(player) == arena_id;
+}
+
 void T_RadiusNukeDamage(gentity_t *inflictor, gentity_t *attacker, float damage, gentity_t *ignore, float radius, mod_t mod) {
 	float	 points;
 	gentity_t *ent = nullptr;
@@ -1036,11 +1243,27 @@ void T_RadiusNukeDamage(gentity_t *inflictor, gentity_t *attacker, float damage,
 	float	 killzone, killzone2;
 	trace_t	 tr;
 	float	 dist;
+	if (!inflictor || !inflictor->inuse ||
+		(inflictor->client && !inflictor->client->pers.connected))
+		return;
+	if (!attacker || !attacker->inuse ||
+		(attacker->client && !attacker->client->pers.connected))
+		attacker = world;
+	if (!attacker || !attacker->inuse)
+		return;
+	const damage_source_snapshot_t inflictor_source =
+		CaptureDamageSource(inflictor);
+	const damage_source_snapshot_t attacker_source =
+		CaptureDamageSource(attacker);
+	const damage_candidate_snapshot_t candidates = CaptureDamageCandidates();
+	const vec3_t inflictor_origin = inflictor_source.origin;
 
 	killzone = radius;
 	killzone2 = radius * 2.0f;
 
-	while ((ent = findradius(ent, inflictor->s.origin, killzone2)) != nullptr) {
+	while ((ent = findradius(ent, inflictor_origin, killzone2)) != nullptr) {
+		if (!candidates.matches(ent))
+			continue;
 		// ignore nobody
 		if (ent == ignore)
 			continue;
@@ -1050,10 +1273,14 @@ void T_RadiusNukeDamage(gentity_t *inflictor, gentity_t *attacker, float damage,
 			continue;
 		if (!(ent->client || (ent->svflags & SVF_MONSTER) || (ent->flags & FL_DAMAGEABLE)))
 			continue;
+		if (GT(GT_ARENA) &&
+			(ent->client ? !NukeAffectsClient(inflictor, ent) :
+				!MM_Arena_CanInteract(inflictor, ent)))
+			continue;
 
 		v = ent->mins + ent->maxs;
 		v = ent->s.origin + (v * 0.5f);
-		v = inflictor->s.origin - v;
+		v = inflictor_origin - v;
 		len = v.length();
 		if (len <= killzone) {
 			if (ent->client)
@@ -1067,27 +1294,31 @@ void T_RadiusNukeDamage(gentity_t *inflictor, gentity_t *attacker, float damage,
 		if (points > 0) {
 			if (ent->client)
 				ent->client->nuke_time = level.time + 2_sec;
-			dir = ent->s.origin - inflictor->s.origin;
-			T_Damage(ent, inflictor, attacker, dir, inflictor->s.origin, vec3_origin, (int)points, (int)points, DAMAGE_RADIUS, mod);
+			dir = ent->s.origin - inflictor_origin;
+			T_Damage(ent, inflictor, attacker, dir, inflictor_origin, vec3_origin, (int)points, (int)points, DAMAGE_RADIUS, mod);
+			if (!DamageSourcesMatch(inflictor_source, attacker_source))
+				return;
 		}
 	}
-	ent = g_entities + 1; // skip the worldspawn
-	// cycle through players
-	while (ent) {
-		if ((ent->client) && (ent->client->nuke_time != level.time + 2_sec) && (ent->inuse)) {
-			tr = gi.traceline(inflictor->s.origin, ent->s.origin, inflictor, MASK_SOLID);
-			if (tr.fraction == 1.0f)
-				ent->client->nuke_time = level.time + 2_sec;
-			else {
-				dist = realrange(ent, inflictor);
-				if (dist < 2048)
-					ent->client->nuke_time = max(ent->client->nuke_time, level.time + 1.5_sec);
-				else
-					ent->client->nuke_time = max(ent->client->nuke_time, level.time + 1_sec);
-			}
-			ent++;
-		} else
-			ent = nullptr;
+	// Players outside the direct damage radius still receive the flash, but
+	// never leak that client-side effect into another arena.
+	for (gentity_t *player : active_clients()) {
+		if (!candidates.matches(player))
+			continue;
+		if (!NukeAffectsClient(inflictor, player) ||
+			player->client->nuke_time == level.time + 2_sec)
+			continue;
+
+		tr = gi.traceline(inflictor_origin, player->s.origin, inflictor, MASK_SOLID);
+		if (tr.fraction == 1.0f)
+			player->client->nuke_time = level.time + 2_sec;
+		else {
+			dist = (player->s.origin - inflictor_origin).length();
+			if (dist < 2048)
+				player->client->nuke_time = max(player->client->nuke_time, level.time + 1.5_sec);
+			else
+				player->client->nuke_time = max(player->client->nuke_time, level.time + 1_sec);
+		}
 	}
 }
 
@@ -1103,8 +1334,25 @@ void T_RadiusClassDamage(gentity_t *inflictor, gentity_t *attacker, float damage
 	gentity_t *ent = nullptr;
 	vec3_t	 v;
 	vec3_t	 dir;
+	if (!inflictor || !inflictor->inuse ||
+		(inflictor->client && !inflictor->client->pers.connected))
+		return;
+	if (!attacker || !attacker->inuse ||
+		(attacker->client && !attacker->client->pers.connected))
+		attacker = world;
+	if (!attacker || !attacker->inuse)
+		return;
+	const damage_source_snapshot_t inflictor_source =
+		CaptureDamageSource(inflictor);
+	const damage_source_snapshot_t attacker_source =
+		CaptureDamageSource(attacker);
+	const damage_candidate_snapshot_t candidates = CaptureDamageCandidates();
+	const vec3_t inflictor_origin = inflictor_source.origin;
+	const vec3_t inflictor_center = inflictor_source.center();
 
-	while ((ent = findradius(ent, inflictor->s.origin, radius)) != nullptr) {
+	while ((ent = findradius(ent, inflictor_origin, radius)) != nullptr) {
+		if (!candidates.matches(ent))
+			continue;
 		if (ent->classname && !strcmp(ent->classname, ignoreClass))
 			continue;
 		if (!ent->takedamage)
@@ -1112,14 +1360,16 @@ void T_RadiusClassDamage(gentity_t *inflictor, gentity_t *attacker, float damage
 
 		v = ent->mins + ent->maxs;
 		v = ent->s.origin + (v * 0.5f);
-		v = inflictor->s.origin - v;
+		v = inflictor_origin - v;
 		points = damage - 0.5f * v.length();
 		if (ent == attacker)
 			points = points * 0.5f;
 		if (points > 0) {
-			if (CanDamage(ent, inflictor)) {
-				dir = ent->s.origin - inflictor->s.origin;
-				T_Damage(ent, inflictor, attacker, dir, inflictor->s.origin, vec3_origin, (int)points, (int)points, DAMAGE_RADIUS, mod);
+			if (CanDamageFromPoint(ent, inflictor, inflictor_center)) {
+				dir = ent->s.origin - inflictor_origin;
+				T_Damage(ent, inflictor, attacker, dir, inflictor_origin, vec3_origin, (int)points, (int)points, DAMAGE_RADIUS, mod);
+				if (!DamageSourcesMatch(inflictor_source, attacker_source))
+					return;
 			}
 		}
 	}

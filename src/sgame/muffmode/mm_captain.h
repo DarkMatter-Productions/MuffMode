@@ -13,6 +13,7 @@ void ValidateCaptains();
 void ReadyAll();
 void UnReadyAll();
 void BroadcastReadyReminderMessage();
+bool MM_CaptainEligible(const gentity_t *ent);
 void MM_CmdCaptain(gentity_t *ent);
 void MM_CmdLockTeam(gentity_t *ent);
 void MM_CmdUnlockTeam(gentity_t *ent);

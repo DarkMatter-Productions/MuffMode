@@ -2,6 +2,8 @@
 // Licensed under the GNU General Public License 2.0.
 
 #include "g_local.h"
+#include "muffmode/mm_arena.h"
+#include "muffmode/mm_message_budget.h"
 #include "muffmode/mm_pconfig.h"
 #include "muffmode/mm_pconfig_rules.h"
 #include "muffmode/mm_skin.h"
@@ -21,8 +23,18 @@
 
 namespace {
 
+enum class skin_relationship_t {
+	None,
+	Teammate,
+	Enemy
+};
+
 bool MM_IsClientEntity(gentity_t *ent) {
 	return ent && ent->inuse && ent->client && ent->client->pers.connected;
+}
+
+bool MM_IsSkinClientReady(gentity_t *ent) {
+	return MM_IsClientEntity(ent) && ent->client->pers.spawned;
 }
 
 size_t MM_PlayerSkinConfigStringLength(const char *netname, const char *skin) {
@@ -54,23 +66,39 @@ bool MM_BuildSkinOverrideConfigString(gentity_t *target, const char *skin, char 
 	return true;
 }
 
-void MM_SendPlayerSkinConfigString(gentity_t *viewer, int32_t playernum, const char *value) {
-	if (!MM_IsClientEntity(viewer) || !value)
-		return;
+bool MM_SendPlayerSkinConfigString(gentity_t *viewer, int32_t playernum, const char *value) {
+	if (!MM_IsSkinClientReady(viewer) || !value)
+		return false;
+	if (playernum < 0 || playernum >= static_cast<int32_t>(game.maxclients))
+		return false;
+
+	// Reserve the entire protocol message before the first write. memchr keeps a
+	// malformed canonical value from turning the accounting itself into an
+	// unbounded read; valid player configstrings include a NUL within this span.
+	const void *terminator = std::memchr(value, '\0', CS_MAX_STRING_LENGTH);
+	if (!terminator)
+		return false;
+	const size_t value_bytes = static_cast<size_t>(
+		static_cast<const char *>(terminator) - value) + 1;
+	constexpr size_t CONFIGSTRING_MESSAGE_HEADER_BYTES = 1 + 2;
+	if (!MM_ReserveReliableFanoutMessage(
+			CONFIGSTRING_MESSAGE_HEADER_BYTES + value_bytes))
+		return false;
 
 	gi.WriteByte(svc_configstring);
 	gi.WriteShort(CS_PLAYERSKINS + playernum);
 	gi.WriteString(value);
 	gi.unicast(viewer, true);
+	return true;
 }
 
-void MM_SendCanonicalPlayerSkin(gentity_t *viewer, gentity_t *target) {
+bool MM_SendCanonicalPlayerSkin(gentity_t *viewer, gentity_t *target) {
 	const int32_t playernum = target - g_entities - 1;
 
 	if (playernum < 0 || playernum >= static_cast<int32_t>(game.maxclients))
-		return;
+		return false;
 
-	MM_SendPlayerSkinConfigString(viewer, playernum, gi.get_configstring(CS_PLAYERSKINS + playernum));
+	return MM_SendPlayerSkinConfigString(viewer, playernum, gi.get_configstring(CS_PLAYERSKINS + playernum));
 }
 
 // [MuffMode] Overrides live in the player's session config (sess.pc), matching
@@ -97,22 +125,40 @@ gentity_t *MM_EffectiveSkinOverrideViewer(gentity_t *viewer) {
 }
 
 bool MM_SkinOverridesEnabled() {
-	return Teams() || GT(GT_DUEL);
+	return Teams() || GT(GT_DUEL) || GT(GT_ARENA);
 }
 
-bool MM_IsSkinOverrideEnemy(gentity_t *perspective, gentity_t *target) {
+skin_relationship_t MM_SkinOverrideRelationship(gentity_t *perspective, gentity_t *target) {
 	if (!MM_IsClientEntity(perspective) || !MM_IsClientEntity(target))
-		return false;
+		return skin_relationship_t::None;
 
 	if (GT(GT_DUEL))
 		return perspective != target &&
 			ClientIsPlaying(perspective->client) &&
-			ClientIsPlaying(target->client);
+			ClientIsPlaying(target->client) ?
+			skin_relationship_t::Enemy : skin_relationship_t::None;
+
+	if (GT(GT_ARENA)) {
+		// Arena sides are a transient red/blue projection. Skin relationships
+		// follow the persistent logical team, and only exist between fighters
+		// in the same room; observers, coaches, queued players, and fighters in
+		// other arenas are unrelated for per-viewer overrides.
+		if (!MM_Arena_IsFighter(perspective->client) ||
+			!MM_Arena_IsFighter(target->client) ||
+			MM_Arena_Id(perspective) <= 0 ||
+			MM_Arena_Id(target) <= 0 ||
+			!MM_Arena_SameArena(perspective, target))
+			return skin_relationship_t::None;
+
+		return MM_Arena_SameTeam(perspective, target) ?
+			skin_relationship_t::Teammate : skin_relationship_t::Enemy;
+	}
 
 	if (!Teams())
-		return false;
+		return skin_relationship_t::None;
 
-	return perspective->client->sess.team != target->client->sess.team;
+	return perspective->client->sess.team == target->client->sess.team ?
+		skin_relationship_t::Teammate : skin_relationship_t::Enemy;
 }
 
 bool MM_ShouldOverrideTarget(gentity_t *viewer, gentity_t *target, const char **skin) {
@@ -131,33 +177,43 @@ bool MM_ShouldOverrideTarget(gentity_t *viewer, gentity_t *target, const char **
 	if (team_viewer == target || !ClientIsPlaying(target->client))
 		return false;
 
-	const bool is_enemy = MM_IsSkinOverrideEnemy(team_viewer, target);
-	const bool is_teammate = !is_enemy && Teams() &&
-		team_viewer->client->sess.team == target->client->sess.team;
-
-	if (!is_enemy && !is_teammate)
+	const skin_relationship_t relationship =
+		MM_SkinOverrideRelationship(team_viewer, target);
+	if (relationship == skin_relationship_t::None)
 		return false;
 
-	*skin = MM_StoredSkinOverride(viewer, is_enemy);
+	*skin = MM_StoredSkinOverride(viewer,
+		relationship == skin_relationship_t::Enemy);
 
 	return **skin != 0;
 }
 
-void MM_SendSkinOverride(gentity_t *viewer, gentity_t *target) {
+bool MM_SendSkinOverride(gentity_t *viewer, gentity_t *target) {
 	const char *skin = nullptr;
 
 	if (!MM_ShouldOverrideTarget(viewer, target, &skin))
-		return;
+		return false;
 
 	const int32_t playernum = target - g_entities - 1;
 	char config[CS_MAX_STRING_LENGTH] = {};
 
 	if (MM_BuildSkinOverrideConfigString(target, skin, config))
-		MM_SendPlayerSkinConfigString(viewer, playernum, config);
+		return MM_SendPlayerSkinConfigString(viewer, playernum, config);
+
+	return false;
+}
+
+void MM_SendEffectivePlayerSkin(gentity_t *viewer, gentity_t *target) {
+	// Exactly one value wins for a viewer/target pair. Sending the canonical
+	// value and then immediately replacing it doubled reliable reconnect traffic.
+	if (!MM_SendSkinOverride(viewer, target))
+		MM_SendCanonicalPlayerSkin(viewer, target);
 }
 
 void MM_CmdSkinOverride(gentity_t *ent, bool is_enemy, const char *label, const char *affected_players, const char *command) {
 	if (!MM_IsClientEntity(ent))
+		return;
+	if (CheckFlood(ent))
 		return;
 
 	if (!g_allow_skin_overrides->integer) {
@@ -197,8 +253,15 @@ void MM_CmdSkinOverride(gentity_t *ent, bool is_enemy, const char *label, const 
 	const char *skin = gi.argv(1);
 
 	if (muffmode::pconfig::IsDisableToken(skin)) {
+		if (!store[0]) {
+			gi.LocClient_Print(ent, PRINT_HIGH,
+				"{} skin override is already off.\n", label);
+			return;
+		}
 		store[0] = 0;
-		MM_ClientSavePConfigOrWarn(ent);
+		MM_ClientSavePConfigOrWarn(ent,
+			is_enemy ? MM_CLIENT_PROFILE_PREFERENCE_ENEMY_SKIN :
+				MM_CLIENT_PROFILE_PREFERENCE_TEAM_SKIN);
 		MM_RefreshSkinOverridesForViewer(ent);
 		gi.LocClient_Print(ent, PRINT_HIGH, "{} skin override cleared. Only your view changes; {} now use their normal skins for you.\n", label, affected_players);
 		return;
@@ -216,14 +279,44 @@ void MM_CmdSkinOverride(gentity_t *ent, bool is_enemy, const char *label, const 
 		gi.LocClient_Print(ent, PRINT_HIGH, "{} is too long for player skin configstrings.\n", skin);
 		return;
 	}
+	if (std::strcmp(store, skin) == 0) {
+		gi.LocClient_Print(ent, PRINT_HIGH,
+			"{} skin override is already '{}'.\n", label, skin);
+		return;
+	}
 
 	Q_strlcpy(store, skin, MAX_QPATH);
-	MM_ClientSavePConfigOrWarn(ent);
+	MM_ClientSavePConfigOrWarn(ent,
+		is_enemy ? MM_CLIENT_PROFILE_PREFERENCE_ENEMY_SKIN :
+			MM_CLIENT_PROFILE_PREFERENCE_TEAM_SKIN);
 	MM_RefreshSkinOverridesForViewer(ent);
 	gi.LocClient_Print(ent, PRINT_HIGH, "{} skin override set to '{}'. Only your view changes; {} will use that skin for you.\n", label, skin, affected_players);
 }
 
 } // namespace
+
+bool MM_PublishCanonicalPlayerSkin(gentity_t *target) {
+	if (!MM_IsClientEntity(target))
+		return false;
+
+	const int32_t playernum = target - g_entities - 1;
+	if (playernum < 0 || playernum >= static_cast<int32_t>(game.maxclients))
+		return false;
+
+	const std::string_view value = Teams() || GT(GT_ARENA) ?
+		G_FormatPlayerSkinConfigString(target, target->client->pers.skin) :
+		G_Fmt("{}\\{}", target->client->resp.netname, target->client->pers.skin);
+	if (value.size() >= CS_SIZE(CS_PLAYERSKINS + playernum))
+		return false;
+
+	constexpr size_t CONFIGSTRING_MESSAGE_HEADER_BYTES = 1 + 2;
+	if (!MM_ReserveReliableFanoutMessage(
+			CONFIGSTRING_MESSAGE_HEADER_BYTES + value.size() + 1))
+		return false;
+
+	gi.configstring(CS_PLAYERSKINS + playernum, value.data());
+	return true;
+}
 
 void MM_CmdEnemySkin(gentity_t *ent) {
 	if (GT(GT_DUEL))
@@ -237,27 +330,34 @@ void MM_CmdTeamSkin(gentity_t *ent) {
 }
 
 void MM_RefreshSkinOverridesForTarget(gentity_t *target) {
-	if (!MM_IsClientEntity(target))
+	if (!MM_IsSkinClientReady(target))
 		return;
 
 	for (auto viewer : active_clients()) {
 		if (viewer == target)
 			continue;
 
-		MM_SendCanonicalPlayerSkin(viewer, target);
+		// G_AssignPlayerSkin has just broadcast the canonical value. Only viewers
+		// that actually override this target need a correcting unicast.
 		MM_SendSkinOverride(viewer, target);
 	}
 }
 
 void MM_RefreshSkinOverridesForViewer(gentity_t *viewer) {
-	if (!MM_IsClientEntity(viewer))
+	if (!MM_IsSkinClientReady(viewer))
 		return;
 
 	for (auto target : active_clients()) {
 		if (target == viewer)
 			continue;
 
-		MM_SendCanonicalPlayerSkin(viewer, target);
-		MM_SendSkinOverride(viewer, target);
+		MM_SendEffectivePlayerSkin(viewer, target);
 	}
+}
+
+bool MM_ReapplySkinOverride(gentity_t *viewer, gentity_t *target) {
+	if (!MM_IsSkinClientReady(viewer) || !MM_IsSkinClientReady(target) || viewer == target)
+		return false;
+
+	return MM_SendSkinOverride(viewer, target);
 }

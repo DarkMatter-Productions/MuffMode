@@ -183,7 +183,11 @@ static USE(use_killbox) (gentity_t *self, gentity_t *other, gentity_t *activator
 	self->solid = SOLID_TRIGGER;
 	gi.linkentity(self);
 
-	KillBox(self, false, MOD_TELEFRAG, self->spawnflags.has(SPAWNFLAG_KILLBOX_EXACT_COLLISION));
+	if (!KillBox(self, false, MOD_TELEFRAG,
+		self->spawnflags.has(SPAWNFLAG_KILLBOX_EXACT_COLLISION))) {
+		level.deadly_kill_box = false;
+		return;
+	}
 
 	self->solid = SOLID_NOT;
 	gi.linkentity(self);
@@ -245,7 +249,13 @@ static THINK(func_eye_think) (gentity_t *self) -> void {
 
 	if (self->enemy) {
 		if (!(self->spawnflags & SPAWNFLAG_FUNC_EYE_FIRED_TARGETS)) {
-			G_UseTargets(self, self->enemy);
+			gentity_t *const enemy = self->enemy;
+			const int32_t enemy_generation = enemy->spawn_count;
+			if (!G_UseTargets(self, self->enemy))
+				return;
+			if (self->enemy != enemy || !enemy->inuse ||
+				enemy->spawn_count != enemy_generation)
+				return;
 			self->spawnflags |= SPAWNFLAG_FUNC_EYE_FIRED_TARGETS;
 		}
 
@@ -431,7 +441,8 @@ static THINK(object_repair_fx) (gentity_t *ent) -> void {
 }
 
 static THINK(object_repair_dead) (gentity_t *ent) -> void {
-	G_UseTargets(ent, ent);
+	if (!G_UseTargets(ent, ent))
+		return;
 	ent->nextthink = level.time + 10_hz;
 	ent->think = object_repair_fx;
 }

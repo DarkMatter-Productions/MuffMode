@@ -3,6 +3,7 @@
 
 #include "messages.h"
 #include "hud_text.h"
+#include "muffmode/mm_centerprint.h"
 
 #include <array>
 #include <optional>
@@ -65,24 +66,14 @@ bool InIntermission(const player_state_t *ps)
 	return ps->stats[STAT_LAYOUTS] & LAYOUTS_INTERMISSION;
 }
 
-size_t FindEndOfUTF8Codepoint(const std::string &str, size_t pos)
+int32_t CheckedHUDCoordinate(int64_t logical_coordinate, int32_t scale,
+	int64_t pixel_adjustment = 0)
 {
-	if (pos >= str.size())
-		return std::string::npos;
+	int32_t pixel_coordinate = 0;
+	if (!CG_TryScaleHUDCoordinate(logical_coordinate, scale, pixel_adjustment, pixel_coordinate))
+		cgi.Com_Error("HUD coordinate outside range");
 
-	for (size_t i = pos; i < str.size(); i++) {
-		const char &ch = str[i];
-
-		if ((ch & 0x80) == 0) {
-			return i;
-		}
-		if ((ch & 0xC0) == 0x80) {
-			continue;
-		}
-		return i;
-	}
-
-	return std::string::npos;
+	return pixel_coordinate;
 }
 
 void CheckNotifyExpire(HudMessageState &data)
@@ -200,9 +191,10 @@ void DrawCenterString(
 
 	if (!center.finished && center.time_tick < now) {
 		center.time_tick = now + static_cast<uint64_t>(scr_printspeed->value * 1000);
-		center.line_count = FindEndOfUTF8Codepoint(center.lines[center.current_line], center.line_count + 1);
+		center.line_count = CG_FindEndOfUTF8Codepoint(
+			center.lines[center.current_line], center.line_count + 1);
 
-		if (center.line_count == std::string::npos) {
+		if (center.line_count == std::string_view::npos) {
 			center.current_line++;
 			center.line_count = 0;
 
@@ -214,17 +206,20 @@ void DrawCenterString(
 		}
 	}
 
-	char buffer[256] = {};
+	std::string visible_line;
 
 	for (size_t i = 0; i < center.lines.size(); i++) {
 		cgi.SCR_SetAltTypeface(ui_acc_alttypeface->integer != 0);
 
 		const auto &line = center.lines[i];
-
-		if (center.finished || i != center.current_line)
-			Q_strlcpy(buffer, line.c_str(), sizeof(buffer));
-		else
-			Q_strlcpy(buffer, line.c_str(), min(center.line_count + 1, sizeof(buffer)));
+		const bool complete = center.finished || i != center.current_line;
+		const std::string_view visible = CG_CenterPrintVisiblePrefix(
+			line, center.line_count, complete);
+		const char *draw_line = line.c_str();
+		if (!complete) {
+			visible_line.assign(visible.data(), visible.size());
+			draw_line = visible_line.c_str();
+		}
 
 		int cursor_x = 0;
 
@@ -235,15 +230,19 @@ void DrawCenterString(
 			cgi.SCR_DrawColorPic((hud_vrect.x + hud_vrect.width / 2) * scale - (size.x / 2), bar_y, size.x, line_height, "_white", rgba_black);
 		}
 
-		if (buffer[0])
-			cursor_x = CG_DrawHUDString(buffer, (hud_vrect.x + hud_vrect.width / 2 - 160) * scale, y, 320 * scale, 0, scale);
+		if (*draw_line)
+			cursor_x = CG_DrawHUDString(draw_line,
+				CheckedHUDCoordinate(CG_HUDViewportCenter(hud_vrect.x, hud_vrect.width) - 160, scale),
+				y, 320 * scale, 0, scale);
 		else
-			cursor_x = (hud_vrect.width / 2) * scale;
+			cursor_x = CheckedHUDCoordinate(
+				CG_HUDViewportCenter(hud_vrect.x, hud_vrect.width), scale);
 
 		cgi.SCR_SetAltTypeface(false);
 
 		if (i == center.current_line && !ui_acc_alttypeface->integer)
-			cgi.SCR_DrawChar(cursor_x, y, scale, 10 + ((cgi.CL_ClientRealTime() >> 8) & 1), true);
+			cgi.SCR_DrawChar(cursor_x, y, scale,
+				10 + (CG_HUDBlinkVisible(cgi.CL_ClientRealTime()) ? 1 : 0), true);
 
 		y += line_height;
 
@@ -371,39 +370,50 @@ void CG_ParseCenterPrint(const char *str, int isplit, bool instant)
 		text = text.substr(end_of_bind + 1);
 	}
 
-	cgi.Com_Print("\n\n\35\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\37\n\n");
+	// [MuffMode] A marker space here (after any bind run, where the server inserts it) means this is
+	// a MuffMode deathmatch centerprint: strip it and keep the message out of the console. Stock
+	// clients have no such rule, which is why the marker is a space and not a visible glyph. Exactly
+	// one is removed, so text that legitimately begins with a space still arrives intact.
+	const bool echo_to_console = text.empty() || text.front() != MM_CENTERPRINT_MARKER;
+	if (!echo_to_console)
+		text.erase(0, 1);
 
-	s = text.c_str();
-	do {
-		for (length = 0; length < 40; length++)
-			if (s[length] == '\n' || !s[length])
+	if (echo_to_console) {
+		cgi.Com_Print("\n\n\35\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\37\n\n");
+
+		s = text.c_str();
+		do {
+			for (length = 0; length < 40; length++)
+				if (s[length] == '\n' || !s[length])
+					break;
+			for (i = 0; i < (40 - length) / 2; i++)
+				line[i] = ' ';
+
+			for (j = 0; j < length; j++)
+				line[i++] = s[j];
+
+			line[i] = '\n';
+			line[i + 1] = 0;
+
+			cgi.Com_Print(line);
+
+			while (*s && *s != '\n')
+				s++;
+
+			if (!*s)
 				break;
-		for (i = 0; i < (40 - length) / 2; i++)
-			line[i] = ' ';
-
-		for (j = 0; j < length; j++)
-			line[i++] = s[j];
-
-		line[i] = '\n';
-		line[i + 1] = 0;
-
-		cgi.Com_Print(line);
-
-		while (*s && *s != '\n')
 			s++;
+		} while (true);
 
-		if (!*s)
-			break;
-		s++;
-	} while (true);
+		cgi.Com_Print("\n\n\35\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\37\n\n");
+	}
 
-	cgi.Com_Print("\n\n\35\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\36\37\n\n");
 	CG_ClearNotify(isplit);
 
 	for (size_t line_end = 0;;) {
-		line_end = FindEndOfUTF8Codepoint(text, line_end);
+		line_end = CG_FindEndOfUTF8Codepoint(text, line_end);
 
-		if (line_end == std::string::npos) {
+		if (line_end == std::string_view::npos) {
 			if (line_start < text.size())
 				center.lines.emplace_back(text.c_str() + line_start);
 			break;

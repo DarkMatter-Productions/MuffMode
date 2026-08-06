@@ -1,5 +1,9 @@
 # MuffMode Hardening Guide
 
+Run the PowerShell gates in PowerShell 7 (`pwsh`); the push verifier enforces
+this up front so its JSON and staged-asset checks cannot fail late under
+Windows PowerShell 5.1.
+
 [README](../README.md) | [Build Guide](build-guide.md) | [Build Matrix](build-matrix.md) | [Release Process](release-process.md)
 
 This guide is the contributor-facing entrypoint for robustness checks. Run the same scripts locally that CI runs.
@@ -29,12 +33,16 @@ Use `-IncludeAnalysis` and `-IncludeSanitizers` for slower local parity with the
 ## Required Local Gates
 
 ```powershell
+./scripts/ci/check-release-workflow.ps1
+./scripts/ci/check-tooling-contracts.ps1
 ./scripts/ci/check-generated-artifacts.ps1
+./scripts/ci/check-map-pool-examples.ps1
 ./scripts/ci/check-changelog.ps1
 ./scripts/ci/check-test-assets.ps1 -RepoOnly
 ./scripts/ci/check-dependency-inventory.ps1
 ./scripts/ci/check-regression-corpus.ps1
 ./scripts/ci/run-host-tests.ps1 -Configuration Release -Platform x64
+./scripts/ci/run-updater-tests.ps1 -Configuration Release
 ./scripts/ci/build-msbuild.ps1 -Configuration Release -Platform x64 -TreatWarningsAsErrors -BinaryLog
 ```
 
@@ -56,24 +64,54 @@ Useful local commands:
 ./scripts/ci/run-clang-tidy.ps1 -Files src/sgame/muffmode/mm_pconfig.cpp
 ./scripts/ci/run-cppcheck.ps1
 ./scripts/ci/run-sanitized-build.ps1 -Sanitizer Address
-./scripts/ci/run-sanitized-build.ps1 -Sanitizer Undefined -AllowUnsupported
+./scripts/ci/run-sanitized-build.ps1 -Sanitizer Undefined
 ```
 
 AddressSanitizer is the blocking sanitizer build on the Windows/MSBuild path. UndefinedBehaviorSanitizer remains experimental until the ClangCL toolset and runtime are stable on CI.
 
 ## Tests And Fuzzing
 
-Host tests cover parser helpers, command argument contracts, vote/config parsing, Red Rover rules, scoreboard footer safety, and fake import boundaries.
+Host tests cover parser helpers, command argument contracts, vote/config parsing, Red Rover rules, scoreboard footer safety, and fake import boundaries. The dependency-free updater harness exercises exact-hash obsolete-file removal, preservation cases, path containment, and deferred self-update cleanup wiring.
 
 Regression and fuzz corpora live under `docs-dev/test-assets/` and `tests/fuzz/`.
 
 ```powershell
 ./scripts/ci/run-host-tests.ps1 -Configuration Release -Platform x64
+./scripts/ci/run-updater-tests.ps1 -Configuration Release
 ./scripts/ci/check-regression-corpus.ps1
-./scripts/ci/build-fuzz-targets.ps1 -AllowUnsupported
+./scripts/ci/build-fuzz-targets.ps1
+./scripts/ci/run-fuzz-smoke.ps1 -Runs 1000
 ```
 
-Runtime fuzzing is still experimental because local libFuzzer execution depends on the LLVM sanitizer runtime DLL being available.
+The fuzz build verifies and stages the LLVM sanitizer runtime, then the bounded
+smoke command executes a generated copy of the checked-in corpus. Missing
+toolchains and target build failures remain visible instead of producing a
+false-green job.
+
+## Ghost Reconnect Runtime Soak
+
+For a dedicated-server reconnect soak whose test client cannot supply a platform
+social ID, build the game DLL with the opt-in runtime-test seam:
+
+```powershell
+./scripts/ci/build-msbuild.ps1 -Configuration Release -Platform x64 -TreatWarningsAsErrors -AdditionalMsBuildArgs "/p:MMGhostRuntimeTesting=true"
+```
+
+This writes to `build/runtime-soak/` so it cannot replace a normal build. The
+flag derives a temporary `runtime-soak:<unique-name>` identity only when a
+non-bot test client supplies no engine identity. Never package or deploy this
+DLL; production builds continue to require the authenticated engine social ID.
+
+During the soak, use `sv ghost_diag reset` immediately before the disconnect,
+then `sv ghost_diag` after reinstatement. Exercise a full 128-client server, an
+active-match disconnect/reconnect, a reconnect while skin-override reliable
+traffic is active, a match reset during the three-second pending delay, and a
+Horde reconnect. The expected end state is one capture and restore success,
+no invalid restore or rejected game-side reliable reservation, no active skin
+queue, and every client still connected. The report deliberately cannot show
+the engine netchan backlog because that occupancy is not exposed to the game
+API; retain the dedicated-server log to correlate engine-side drops or reliable
+overflow errors.
 
 ## Crash Triage
 
@@ -88,6 +126,12 @@ Minimum crash triage record:
 - Whether the issue is parser/input rejection, state corruption, ABI drift, save/load migration, or gameplay logic.
 
 Add a regression seed or host test before closing a crash fix whenever the failure can be reduced.
+
+### Kex `bad allocation` / `muffmode_alloc.log`
+
+The engine dialog `Standard exception caught in kexPlatformApp::Main: bad allocation` is caught inside Kex, so it often produces no `CRASHLOG.TXT` or minidump. MuffMode's `mm_alloc_guard` logs oversized or failed game-DLL `operator new` calls to `muffmode_alloc.log` (and mirrors lines to DebugView via `OutputDebugStringA`).
+
+Look for the log next to the loaded `game_x64.dll`, then `%TEMP%\muffmode_alloc.log`, then the process working directory. A healthy deploy writes a `LOADED` breadcrumb as soon as the DLL loads. If you see the Kex dialog with a `LOADED` line but no `FAILED`/`HUGE` line, the failing allocation was almost certainly outside the game DLL (engine heap / another module).
 
 ## Performance Profiling
 

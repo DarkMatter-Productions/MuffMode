@@ -1,0 +1,383 @@
+{
+  "maps": [
+    {
+      "bsp": "q2dm1",
+      "title": "The Edge",
+      "episode": "baseq2",
+      "dm": true,
+      "duel": true,
+      "popular": true
+    },
+    {
+      "bsp": "q2dm2",
+      "title": "Tokay's Towers",
+      "episode": "baseq2",
+      "dm": true
+    },
+    {
+      "bsp": "q2dm3",
+      "title": "The Frag Pipe",
+      "episode": "baseq2",
+      "dm": true,
+      "popular": true
+    },
+    {
+      "bsp": "q2dm4",
+      "title": "Lost Hallways",
+      "episode": "baseq2",
+      "dm": true
+    },
+    {
+      "bsp": "q2dm5",
+      "title": "The Pits",
+      "episode": "baseq2",
+      "dm": true
+    },
+    {
+      "bsp": "q2dm6",
+      "title": "Lava Tomb",
+      "episode": "baseq2",
+      "dm": true
+    },
+    {
+      "bsp": "q2dm7",
+      "title": "The Slimy Place",
+      "episode": "baseq2",
+      "dm": true
+    },
+    {
+      "bsp": "q2dm8",
+      "title": "WareHouse",
+      "episode": "baseq2",
+      "dm": true
+    },
+    {
+      "bsp": "base64",
+      "title": "The Strogg Base",
+      "episode": "baseq2",
+      "dm": true
+    },
+    {
+      "bsp": "city64",
+      "title": "Courts at War",
+      "episode": "baseq2",
+      "dm": true
+    },
+    {
+      "bsp": "sewer64",
+      "title": "The Sewers of Stroggos",
+      "episode": "baseq2",
+      "dm": true
+    },
+    {
+      "bsp": "mgdm1",
+      "title": "Misty Heights",
+      "episode": "mg2",
+      "dm": true
+    },
+    {
+      "bsp": "q2ctf1",
+      "title": "McKinley Revival",
+      "episode": "baseq2",
+      "ctf": true,
+      "popular": true
+    },
+    {
+      "bsp": "q2ctf2",
+      "title": "Stronghold Opposition",
+      "episode": "baseq2",
+      "ctf": true
+    },
+    {
+      "bsp": "q2ctf3",
+      "title": "The Smelter",
+      "episode": "baseq2",
+      "ctf": true
+    },
+    {
+      "bsp": "q2ctf4",
+      "title": "Outlands II",
+      "episode": "baseq2",
+      "ctf": true
+    },
+    {
+      "bsp": "q2ctf5",
+      "title": "Capture Showdown",
+      "episode": "baseq2",
+      "ctf": true
+    },
+    {
+      "bsp": "ndctf0",
+      "title": "Something Epic",
+      "episode": "baseq2",
+      "ctf": true
+    },
+    {
+      "bsp": "q2kctf1",
+      "title": "Captured Reckoning",
+      "episode": "baseq2",
+      "ctf": true
+    },
+    {
+      "bsp": "q2kctf2",
+      "title": "Nexus CTF",
+      "episode": "baseq2",
+      "ctf": true
+    },
+    {
+      "bsp": "xdm1",
+      "title": "Munitions Dump",
+      "episode": "xatrix",
+      "dm": true
+    },
+    {
+      "bsp": "xdm2",
+      "title": "Deadly Reckoning",
+      "episode": "xatrix",
+      "dm": true
+    },
+    {
+      "bsp": "xdm3",
+      "title": "Reservoir Stroggs",
+      "episode": "xatrix",
+      "dm": true
+    },
+    {
+      "bsp": "xdm4",
+      "title": "The Sludge Pit",
+      "episode": "xatrix",
+      "dm": true
+    },
+    {
+      "bsp": "xdm5",
+      "title": "Stomping Grounds",
+      "episode": "xatrix",
+      "dm": true
+    },
+    {
+      "bsp": "xdm6",
+      "title": "Hidden Agenda",
+      "episode": "xatrix",
+      "dm": true
+    },
+    {
+      "bsp": "xdm7",
+      "title": "The XEdge",
+      "episode": "xatrix",
+      "dm": true
+    },
+    {
+      "bsp": "rdm1",
+      "title": "The Low Road",
+      "episode": "rogue",
+      "dm": true
+    },
+    {
+      "bsp": "rdm2",
+      "title": "The High Road",
+      "episode": "rogue",
+      "dm": true
+    },
+    {
+      "bsp": "rdm3",
+      "title": "Boxed In",
+      "episode": "rogue",
+      "dm": true
+    },
+    {
+      "bsp": "rdm4",
+      "title": "Razor's Edge",
+      "episode": "rogue",
+      "dm": true
+    },
+    {
+      "bsp": "rdm5",
+      "title": "Stone Hinge",
+      "episode": "rogue",
+      "dm": true
+    },
+    {
+      "bsp": "rdm6",
+      "title": "Nexus",
+      "episode": "rogue",
+      "dm": true
+    },
+    {
+      "bsp": "rdm7",
+      "title": "Sewer Citadel",
+      "episode": "rogue",
+      "dm": true
+    },
+    {
+      "bsp": "rdm8",
+      "title": "Styx & Stones",
+      "episode": "rogue",
+      "dm": true
+    },
+    {
+      "bsp": "rdm9",
+      "title": "Scenic Overlook",
+      "episode": "rogue",
+      "dm": true
+    },
+    {
+      "bsp": "rdm10",
+      "title": "Great Divide",
+      "episode": "rogue",
+      "dm": true
+    },
+    {
+      "bsp": "rdm11",
+      "title": "Dish It Out",
+      "episode": "rogue",
+      "dm": true
+    },
+    {
+      "bsp": "rdm12",
+      "title": "Fall From Grace",
+      "episode": "rogue",
+      "dm": true
+    },
+    {
+      "bsp": "rdm13",
+      "title": "Roads to Nowhere",
+      "episode": "rogue",
+      "dm": true
+    },
+    {
+      "bsp": "rdm14",
+      "title": "Rogue's Edge",
+      "episode": "rogue",
+      "dm": true
+    },
+    {
+      "bsp": "q64/dm1",
+      "title": "Agony",
+      "episode": "n64",
+      "dm": true
+    },
+    {
+      "bsp": "q64/dm2",
+      "title": "Corridors",
+      "episode": "n64",
+      "dm": true
+    },
+    {
+      "bsp": "q64/dm3",
+      "title": "War Room",
+      "episode": "n64",
+      "dm": true
+    },
+    {
+      "bsp": "q64/dm4",
+      "title": "Twists",
+      "episode": "n64",
+      "dm": true
+    },
+    {
+      "bsp": "q64/dm5",
+      "title": "Fortress",
+      "episode": "n64",
+      "dm": true
+    },
+    {
+      "bsp": "q64/dm6",
+      "title": "Cold Steel",
+      "episode": "n64",
+      "dm": true
+    },
+    {
+      "bsp": "q64/dm7",
+      "title": "Mad Dash",
+      "episode": "n64",
+      "dm": true
+    },
+    {
+      "bsp": "q64/dm8",
+      "title": "Dying Halls",
+      "episode": "n64",
+      "dm": true
+    },
+    {
+      "bsp": "q64/dm9",
+      "title": "Empty Space",
+      "episode": "n64",
+      "dm": true
+    },
+    {
+      "bsp": "q64/dm10",
+      "title": "Overflow",
+      "episode": "n64",
+      "dm": true
+    },
+    {
+      "bsp": "mm-aerow",
+      "title": "Aerowalk",
+      "episode": "muffmode",
+      "dm": true,
+      "duel": true,
+      "popular": true,
+      "custom": true
+    },
+    {
+      "bsp": "mm-coldzero",
+      "title": "Cold Zero",
+      "episode": "muffmode",
+      "dm": true,
+      "custom": true
+    },
+    {
+      "bsp": "mm-crucible",
+      "title": "The Crucible",
+      "episode": "muffmode",
+      "dm": true,
+      "duel": true,
+      "custom": true
+    },
+    {
+      "bsp": "mm-kmachine",
+      "title": "The Killing Machine",
+      "episode": "muffmode",
+      "dm": true,
+      "duel": true,
+      "custom": true
+    },
+    {
+      "bsp": "mm-powertrip",
+      "title": "Powertrip",
+      "episode": "muffmode",
+      "dm": true,
+      "custom": true
+    },
+    {
+      "bsp": "mm-rage",
+      "title": "The Rage",
+      "episode": "muffmode",
+      "dm": true,
+      "duel": true,
+      "custom": true
+    },
+    {
+      "bsp": "mm-railgun101",
+      "title": "Railgun 101",
+      "episode": "muffmode",
+      "dm": true,
+      "custom": true
+    },
+    {
+      "bsp": "mm-reclamation",
+      "title": "Reclamation",
+      "episode": "muffmode",
+      "dm": true,
+      "duel": true,
+      "custom": true
+    },
+    {
+      "bsp": "mm-recycler",
+      "title": "Recycler",
+      "episode": "muffmode",
+      "dm": true,
+      "custom": true
+    }
+  ]
+}

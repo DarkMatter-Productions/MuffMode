@@ -2,7 +2,10 @@
 // Licensed under the GNU General Public License 2.0.
 
 #include "g_local.h"
+#include "muffmode/mm_announcer_rules.h"
+#include "muffmode/mm_client_profile.h"
 #include "muffmode/mm_command_contracts.h"
+#include "muffmode/mm_gametype.h"
 #include "muffmode/mm_pconfig.h"
 #include "muffmode/mm_pconfig_rules.h"
 #include "muffmode/mm_parse.h"
@@ -13,7 +16,6 @@
 #include <array>
 #include <cstdio>
 #include <filesystem>
-#include <iterator>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -37,8 +39,7 @@ enum class config_line_result_t {
 enum class save_result_t {
 	saved,
 	session_only,
-	failed,
-	skipped
+	failed
 };
 
 struct config_load_stats_t {
@@ -50,7 +51,7 @@ struct config_load_stats_t {
 constexpr uint32_t k_config_field_show_id = bit_v<0>;
 constexpr uint32_t k_config_field_show_timer = bit_v<1>;
 constexpr uint32_t k_config_field_show_fragmessages = bit_v<2>;
-constexpr uint32_t k_config_field_use_expanded = bit_v<3>;
+constexpr uint32_t k_config_field_announcer_enabled = bit_v<3>;
 constexpr uint32_t k_config_field_killbeep = bit_v<4>;
 constexpr uint32_t k_config_field_follow_killer = bit_v<5>;
 constexpr uint32_t k_config_field_follow_leader = bit_v<6>;
@@ -58,19 +59,7 @@ constexpr uint32_t k_config_field_follow_powerup = bit_v<7>;
 constexpr uint32_t k_config_field_enemy_skin = bit_v<8>;
 constexpr uint32_t k_config_field_team_skin = bit_v<9>;
 constexpr uint32_t k_config_field_follow_first_person = bit_v<10>;
-constexpr uint32_t k_all_config_fields =
-	k_config_field_show_id |
-	k_config_field_show_timer |
-	k_config_field_show_fragmessages |
-	k_config_field_use_expanded |
-	k_config_field_killbeep |
-	k_config_field_follow_killer |
-	k_config_field_follow_leader |
-	k_config_field_follow_powerup |
-	k_config_field_enemy_skin |
-	k_config_field_team_skin |
-	k_config_field_follow_first_person;
-
+constexpr uint32_t k_config_field_show_match_info = bit_v<11>;
 int ClientSlotNumber(const gentity_t *ent)
 {
 	const uint32_t max_clients = static_cast<uint32_t>(game.maxclients);
@@ -85,11 +74,6 @@ const char *BoolText(bool value) noexcept
 	return value ? "ON" : "OFF";
 }
 
-int BoolInt(bool value) noexcept
-{
-	return value ? 1 : 0;
-}
-
 constexpr std::array<const char *, 5> k_kill_beep_names = { "off", "clang", "beep-boop", "insane", "tang-tang" };
 
 bool RequireCommandArgc(gentity_t *ent, int min_expected, int max_expected, const char *usage)
@@ -102,6 +86,11 @@ bool RequireCommandArgc(gentity_t *ent, int min_expected, int max_expected, cons
 
 	gi.LocClient_Print(ent, PRINT_HIGH, "Usage: {}\n", usage);
 	return false;
+}
+
+bool BeginPreferenceCommand(gentity_t *ent)
+{
+	return ent && ent->client && !CheckFlood(ent);
 }
 
 std::optional<bool> ReadOptionalBoolCommandArg(gentity_t *ent, bool current_value)
@@ -129,26 +118,6 @@ bool SetBoolPreference(gentity_t *ent, mm_pconfig_bool_setting_t setting, const 
 
 	MM_PConfigSetBool(ent, setting, *value);
 	gi.LocClient_Print(ent, PRINT_HIGH, "{}: {}\n", label, BoolText(*value));
-	return true;
-}
-
-bool EnsureDirectory()
-{
-	const std::filesystem::path dir(k_player_config_dir);
-	std::error_code error;
-
-	std::filesystem::create_directories(dir, error);
-	if (error) {
-		gi.Com_PrintFmt("{}: Cannot create player config directory \"{}\": {}\n", __FUNCTION__, dir.string(), error.message());
-		return false;
-	}
-
-	error.clear();
-	if (!std::filesystem::is_directory(dir, error)) {
-		gi.Com_PrintFmt("{}: Player config path is not a directory: \"{}\"\n", __FUNCTION__, dir.string());
-		return false;
-	}
-
 	return true;
 }
 
@@ -296,10 +265,12 @@ config_line_result_t ApplyConfigLine(client_config_t &config, std::string_view r
 		return apply_known(k_config_field_show_id, ApplyBoolLine(config.show_id, args, name, line_number));
 	if (EqualsI(command, "timer"))
 		return apply_known(k_config_field_show_timer, ApplyBoolLine(config.show_timer, args, name, line_number));
+	if (EqualsI(command, "infohud") || EqualsI(command, "matchinfo"))
+		return apply_known(k_config_field_show_match_info, ApplyBoolLine(config.show_match_info, args, name, line_number));
 	if (EqualsI(command, "fm") || EqualsI(command, "fragmessages"))
 		return apply_known(k_config_field_show_fragmessages, ApplyBoolLine(config.show_fragmessages, args, name, line_number));
 	if (EqualsI(command, "announcer"))
-		return apply_known(k_config_field_use_expanded, ApplyBoolLine(config.use_expanded, args, name, line_number));
+		return apply_known(k_config_field_announcer_enabled, ApplyBoolLine(config.announcer_enabled, args, name, line_number));
 	if (EqualsI(command, "followkiller"))
 		return apply_known(k_config_field_follow_killer, ApplyBoolLine(config.follow_killer, args, name, line_number));
 	if (EqualsI(command, "followleader"))
@@ -354,74 +325,6 @@ config_load_stats_t ApplyConfigText(client_config_t &config, std::string_view te
 	return stats;
 }
 
-bool ShouldRewriteConfig(const config_load_stats_t &stats)
-{
-	return stats.invalid > 0 || (stats.loaded_fields & k_all_config_fields) != k_all_config_fields;
-}
-
-std::string RenderConfigText(gentity_t *ent)
-{
-	const client_config_t &config = ent->client->sess.pc;
-	const std::string player_name = SanitizeConfigCommentText(ent->client->resp.netname, MAX_INFO_VALUE - 1);
-	std::string text = fmt::format(
-		"// {}'s Player Config\n"
-		"// Generated by MuffMode. Boolean values accept 1/0 or on/off.\n\n",
-		player_name);
-
-	fmt::format_to(std::back_inserter(text), FMT_STRING("id {}\n"), BoolInt(config.show_id));
-	fmt::format_to(std::back_inserter(text), FMT_STRING("timer {}\n"), BoolInt(config.show_timer));
-	fmt::format_to(std::back_inserter(text), FMT_STRING("fm {}\n"), BoolInt(config.show_fragmessages));
-	fmt::format_to(std::back_inserter(text), FMT_STRING("announcer {}\n"), BoolInt(config.use_expanded));
-	fmt::format_to(std::back_inserter(text), FMT_STRING("kb {}\n"), config.killbeep_num);
-	fmt::format_to(std::back_inserter(text), FMT_STRING("followkiller {}\n"), BoolInt(config.follow_killer));
-	fmt::format_to(std::back_inserter(text), FMT_STRING("followleader {}\n"), BoolInt(config.follow_leader));
-	fmt::format_to(std::back_inserter(text), FMT_STRING("followpowerup {}\n"), BoolInt(config.follow_powerup));
-	fmt::format_to(std::back_inserter(text), FMT_STRING("followview {}\n"), config.follow_first_person ? "first" : "third");
-	fmt::format_to(std::back_inserter(text), FMT_STRING("eskin {}\n"), config.enemy_skin[0] ? config.enemy_skin : "off");
-	fmt::format_to(std::back_inserter(text), FMT_STRING("tskin {}\n"), config.team_skin[0] ? config.team_skin : "off");
-	return text;
-}
-
-bool WriteTextFileAtomically(const std::filesystem::path &path, std::string_view text)
-{
-	std::filesystem::path temp_path = path;
-	temp_path += ".tmp";
-	const auto remove_temp = [&temp_path]() {
-		std::error_code remove_error;
-		std::filesystem::remove(temp_path, remove_error);
-	};
-
-	const std::string temp_name = temp_path.string();
-	auto file = muffmode::OpenFile(temp_name.c_str(), "wb");
-	if (!file)
-		return false;
-
-	if (!text.empty() && std::fwrite(text.data(), 1, text.size(), file.get()) != text.size()) {
-		file.reset();
-		remove_temp();
-		return false;
-	}
-
-	if (std::fflush(file.get()) != 0) {
-		file.reset();
-		remove_temp();
-		return false;
-	}
-
-	file.reset();
-
-	std::error_code error;
-	std::filesystem::rename(temp_path, path, error);
-	if (error) {
-		error.clear();
-		std::filesystem::copy_file(temp_path, path, std::filesystem::copy_options::overwrite_existing, error);
-		std::error_code remove_error;
-		std::filesystem::remove(temp_path, remove_error);
-	}
-
-	return !error;
-}
-
 void ClearQueuedFollowTarget(gentity_t *ent)
 {
 	if (!ent || !ent->client)
@@ -429,30 +332,6 @@ void ClearQueuedFollowTarget(gentity_t *ent)
 
 	ent->client->follow_queued_target = nullptr;
 	ent->client->follow_queued_time = 0_sec;
-}
-
-save_result_t SavePConfig(gentity_t *ent, bool log_success)
-{
-	if (!ent || !ent->client || (ent->svflags & SVF_BOT))
-		return save_result_t::skipped;
-
-	const auto path = ConfigPathForClient(ent, false);
-	if (!path)
-		return save_result_t::session_only;
-
-	if (!EnsureDirectory())
-		return save_result_t::failed;
-
-	const std::string config_text = RenderConfigText(ent);
-	if (!WriteTextFileAtomically(*path, config_text)) {
-		gi.Com_PrintFmt("{}: Player config write error: \"{}\"\n", __FUNCTION__, path->string());
-		return save_result_t::failed;
-	}
-
-	if (log_success)
-		gi.Com_PrintFmt("{}: Player config written to: \"{}\"\n", __FUNCTION__, path->string());
-
-	return save_result_t::saved;
 }
 
 void WarnSaveResult(gentity_t *ent, save_result_t result)
@@ -516,10 +395,12 @@ bool *MM_PConfigBoolField(gentity_t *ent, mm_pconfig_bool_setting_t setting)
 		return &config.show_id;
 	case mm_pconfig_bool_setting_t::show_timer:
 		return &config.show_timer;
+	case mm_pconfig_bool_setting_t::show_match_info:
+		return &config.show_match_info;
 	case mm_pconfig_bool_setting_t::show_fragmessages:
 		return &config.show_fragmessages;
-	case mm_pconfig_bool_setting_t::use_expanded:
-		return &config.use_expanded;
+	case mm_pconfig_bool_setting_t::announcer_enabled:
+		return &config.announcer_enabled;
 	case mm_pconfig_bool_setting_t::follow_first_person:
 		return &config.follow_first_person;
 	case mm_pconfig_bool_setting_t::follow_killer:
@@ -536,6 +417,33 @@ bool *MM_PConfigBoolField(gentity_t *ent, mm_pconfig_bool_setting_t setting)
 const bool *MM_PConfigBoolField(const gentity_t *ent, mm_pconfig_bool_setting_t setting)
 {
 	return MM_PConfigBoolField(const_cast<gentity_t *>(ent), setting);
+}
+
+mm_client_profile_preference_mask_t MM_PConfigBoolPreferenceMask(
+	mm_pconfig_bool_setting_t setting)
+{
+	switch (setting) {
+	case mm_pconfig_bool_setting_t::show_id:
+		return MM_CLIENT_PROFILE_PREFERENCE_SHOW_ID;
+	case mm_pconfig_bool_setting_t::show_timer:
+		return MM_CLIENT_PROFILE_PREFERENCE_SHOW_TIMER;
+	case mm_pconfig_bool_setting_t::show_match_info:
+		return MM_CLIENT_PROFILE_PREFERENCE_SHOW_MATCH_INFO;
+	case mm_pconfig_bool_setting_t::show_fragmessages:
+		return MM_CLIENT_PROFILE_PREFERENCE_SHOW_FRAG_MESSAGES;
+	case mm_pconfig_bool_setting_t::announcer_enabled:
+		return MM_CLIENT_PROFILE_PREFERENCE_ANNOUNCER;
+	case mm_pconfig_bool_setting_t::follow_first_person:
+		return MM_CLIENT_PROFILE_PREFERENCE_FOLLOW_VIEW;
+	case mm_pconfig_bool_setting_t::follow_killer:
+		return MM_CLIENT_PROFILE_PREFERENCE_FOLLOW_KILLER;
+	case mm_pconfig_bool_setting_t::follow_leader:
+		return MM_CLIENT_PROFILE_PREFERENCE_FOLLOW_LEADER;
+	case mm_pconfig_bool_setting_t::follow_powerup:
+		return MM_CLIENT_PROFILE_PREFERENCE_FOLLOW_POWERUP;
+	}
+
+	return 0;
 }
 
 gentity_t *MM_PConfigLeader()
@@ -594,7 +502,7 @@ client_config_t MM_DefaultClientConfig()
 	config.follow_leader = false;
 	config.follow_powerup = false;
 	config.follow_first_person = true;
-	config.use_expanded = false;
+	config.announcer_enabled = MM_ANNOUNCER_DEFAULT_ENABLED;
 	config.enemy_skin[0] = 0;
 	config.team_skin[0] = 0;
 	return config;
@@ -604,7 +512,8 @@ client_config_t MM_DefaultClientConfig()
 =============
 MM_ClientInitPConfig
 
-Load or create the player's server-side configuration file on connect.
+Load or create the player's server-side configuration file on connect or when
+a retained client begins a new level/gametype.
 =============
 */
 void MM_ClientInitPConfig(gentity_t *ent)
@@ -612,46 +521,79 @@ void MM_ClientInitPConfig(gentity_t *ent)
 	if (!ent || !ent->client)
 		return;
 
-	ent->client->sess.pc = MM_DefaultClientConfig();
-
-	if (ent->svflags & SVF_BOT)
-		return;
-
-	const auto path = muffmode::pconfig::ConfigPathForClient(ent, true);
-	if (!path)
-		return;
-
-	if (!muffmode::pconfig::EnsureDirectory())
-		return;
-
-	const std::string name = path->string();
-	auto existing_file = muffmode::OpenFile(name.c_str(), "rb");
-	if (existing_file) {
-		const auto config_text = muffmode::pconfig::ReadConfigText(existing_file.get());
-		if (!config_text) {
-			gi.Com_PrintFmt("{}: Player config load error for \"{}\"; using defaults.\n", __FUNCTION__, name);
-			return;
-		}
-
-		const auto stats = muffmode::pconfig::ApplyConfigText(ent->client->sess.pc, *config_text, name.c_str());
-		if (muffmode::pconfig::ShouldRewriteConfig(stats))
-			muffmode::pconfig::SavePConfig(ent, false);
-		muffmode::pconfig::ApplyLoadedConfigEffects(ent);
+	if ((ent->svflags & SVF_BOT) || ent->client->sess.is_a_bot) {
+		ent->client->sess.pc = MM_DefaultClientConfig();
+		ent->client->sess.profile_persistence_ready = false;
+		ent->client->sess.skill_rating = MM_ClientProfileDefaultRating();
+		ent->client->sess.skill_rating_change = 0;
+		MM_ClientProfileClearWeaponPreferences(ent->client);
 		return;
 	}
 
-	muffmode::pconfig::SavePConfig(ent, true);
+	// Import the old line-based .cfg as the seed only when a canonical JSON
+	// profile does not exist. The profile loader owns persistence after that.
+	client_config_t legacy_seed = MM_DefaultClientConfig();
+	const client_config_t *missing_profile_seed = nullptr;
+	if (!MM_ClientProfileCanonicalExists(ent->client->pers.social_id)) {
+		missing_profile_seed = &legacy_seed;
+		const auto path = muffmode::pconfig::ConfigPathForClient(ent, true);
+		if (path) {
+			const std::string name = path->string();
+			auto existing_file = muffmode::OpenFile(name.c_str(), "rb");
+			if (existing_file) {
+				const auto config_text = muffmode::pconfig::ReadConfigText(existing_file.get());
+				if (!config_text) {
+					gi.Com_PrintFmt("{}: Player config load error for \"{}\"; using defaults.\n", __FUNCTION__, name);
+				} else {
+					muffmode::pconfig::ApplyConfigText(
+						legacy_seed, *config_text, name.c_str());
+				}
+			}
+		}
+	}
+
+	const int gametype = clamp(static_cast<int>(MM_CurrentGametype()),
+		0, static_cast<int>(GT_NUM_GAMETYPES) - 1);
+	ent->client->sess.profile_persistence_ready = false;
+	const mm_client_profile_load_status_t profile_status = MM_ClientProfileLoad(
+		ent->client,
+		ent->client->pers.social_id,
+		ent->client->pers.netname,
+		gt_short_name_upper[gametype],
+		missing_profile_seed);
+	ent->client->sess.profile_persistence_ready =
+		profile_status == mm_client_profile_load_status_t::created ||
+		profile_status == mm_client_profile_load_status_t::loaded ||
+		profile_status == mm_client_profile_load_status_t::repaired ||
+		profile_status == mm_client_profile_load_status_t::recovered;
 	muffmode::pconfig::ApplyLoadedConfigEffects(ent);
 }
 
-bool MM_ClientSavePConfig(gentity_t *ent)
+bool MM_ClientSavePConfig(
+	gentity_t *ent,
+	mm_client_profile_preference_mask_t dirty_mask)
 {
-	return muffmode::pconfig::SavePConfig(ent, false) == muffmode::pconfig::save_result_t::saved;
+	return ent && ent->client &&
+		MM_ClientProfileSavePreferences(
+			ent->client, ent->client->pers.social_id, dirty_mask);
 }
 
-void MM_ClientSavePConfigOrWarn(gentity_t *ent)
+void MM_ClientSavePConfigOrWarn(
+	gentity_t *ent,
+	mm_client_profile_preference_mask_t dirty_mask)
 {
-	muffmode::pconfig::WarnSaveResult(ent, muffmode::pconfig::SavePConfig(ent, false));
+	if (!ent || !ent->client || (ent->svflags & SVF_BOT) ||
+		ent->client->sess.is_a_bot)
+		return;
+	if (!MM_ClientProfileCanPersistIdentity(ent->client->pers.social_id)) {
+		muffmode::pconfig::WarnSaveResult(ent,
+			muffmode::pconfig::save_result_t::session_only);
+		return;
+	}
+	muffmode::pconfig::WarnSaveResult(ent,
+		MM_ClientSavePConfig(ent, dirty_mask)
+			? muffmode::pconfig::save_result_t::saved
+			: muffmode::pconfig::save_result_t::failed);
 }
 
 bool MM_PConfigGetBool(const gentity_t *ent, mm_pconfig_bool_setting_t setting)
@@ -666,8 +608,10 @@ bool MM_PConfigSetBool(gentity_t *ent, mm_pconfig_bool_setting_t setting, bool v
 	if (!field)
 		return false;
 
+	const bool changed = *field != value;
 	*field = value;
-	MM_ClientSavePConfigOrWarn(ent);
+	if (changed)
+		MM_ClientSavePConfigOrWarn(ent, MM_PConfigBoolPreferenceMask(setting));
 	MM_PConfigApplyBoolEffects(ent, setting, value);
 	return true;
 }
@@ -706,8 +650,10 @@ bool MM_PConfigSetKillBeep(gentity_t *ent, int value)
 	if (!ent || !ent->client || value < 0 || value >= MM_PConfigKillBeepCount())
 		return false;
 
+	if (ent->client->sess.pc.killbeep_num == value)
+		return true;
 	ent->client->sess.pc.killbeep_num = value;
-	MM_ClientSavePConfigOrWarn(ent);
+	MM_ClientSavePConfigOrWarn(ent, MM_CLIENT_PROFILE_PREFERENCE_KILL_BEEP);
 	return true;
 }
 
@@ -726,7 +672,7 @@ MM_CmdCrosshairID
 */
 void MM_CmdCrosshairID(gentity_t *ent)
 {
-	if (!ent || !ent->client)
+	if (!muffmode::pconfig::BeginPreferenceCommand(ent))
 		return;
 
 	muffmode::pconfig::SetBoolPreference(ent, mm_pconfig_bool_setting_t::show_id, "Player identification display");
@@ -739,7 +685,7 @@ MM_CmdTimer
 */
 void MM_CmdTimer(gentity_t *ent)
 {
-	if (!ent || !ent->client)
+	if (!muffmode::pconfig::BeginPreferenceCommand(ent))
 		return;
 
 	muffmode::pconfig::SetBoolPreference(ent, mm_pconfig_bool_setting_t::show_timer, "Match timer display");
@@ -752,14 +698,10 @@ MM_CmdInfoHud
 */
 void MM_CmdInfoHud(gentity_t *ent)
 {
-	if (!ent || !ent->client)
+	if (!muffmode::pconfig::BeginPreferenceCommand(ent))
 		return;
 
-	if (!muffmode::pconfig::RequireCommandArgc(ent, 1, 1, gi.argv(0)))
-		return;
-
-	ent->client->sess.pc.show_match_info ^= true;
-	gi.LocClient_Print(ent, PRINT_HIGH, "Info HUD: {}\n", ent->client->sess.pc.show_match_info ? "ON" : "OFF");
+	muffmode::pconfig::SetBoolPreference(ent, mm_pconfig_bool_setting_t::show_match_info, "Match info HUD");
 }
 
 /*
@@ -769,7 +711,7 @@ MM_CmdFragMessages
 */
 void MM_CmdFragMessages(gentity_t *ent)
 {
-	if (!ent || !ent->client)
+	if (!muffmode::pconfig::BeginPreferenceCommand(ent))
 		return;
 
 	muffmode::pconfig::SetBoolPreference(ent, mm_pconfig_bool_setting_t::show_fragmessages, "Frag messages");
@@ -782,10 +724,10 @@ MM_CmdAnnouncer
 */
 void MM_CmdAnnouncer(gentity_t *ent)
 {
-	if (!ent || !ent->client)
+	if (!muffmode::pconfig::BeginPreferenceCommand(ent))
 		return;
 
-	muffmode::pconfig::SetBoolPreference(ent, mm_pconfig_bool_setting_t::use_expanded, "Match announcer");
+	muffmode::pconfig::SetBoolPreference(ent, mm_pconfig_bool_setting_t::announcer_enabled, "Match announcer");
 }
 
 /*
@@ -795,7 +737,7 @@ MM_CmdKillBeep
 */
 void MM_CmdKillBeep(gentity_t *ent)
 {
-	if (!ent || !ent->client)
+	if (!muffmode::pconfig::BeginPreferenceCommand(ent))
 		return;
 
 	if (!muffmode::pconfig::RequireCommandArgc(ent, 1, 2, G_Fmt("{} [0-4|off|clang|beep-boop|insane|tang-tang]", gi.argv(0)).data()))
@@ -824,7 +766,7 @@ MM_CmdFollowView
 */
 void MM_CmdFollowView(gentity_t *ent)
 {
-	if (!ent || !ent->client)
+	if (!muffmode::pconfig::BeginPreferenceCommand(ent))
 		return;
 
 	if (!muffmode::pconfig::RequireCommandArgc(ent, 1, 2, G_Fmt("{} [first|third]", gi.argv(0)).data()))
@@ -851,7 +793,7 @@ MM_CmdFollowKiller
 */
 void MM_CmdFollowKiller(gentity_t *ent)
 {
-	if (!ent || !ent->client)
+	if (!muffmode::pconfig::BeginPreferenceCommand(ent))
 		return;
 
 	muffmode::pconfig::SetBoolPreference(ent, mm_pconfig_bool_setting_t::follow_killer, "Auto-follow killer");
@@ -864,7 +806,7 @@ MM_CmdFollowLeader
 */
 void MM_CmdFollowLeader(gentity_t *ent)
 {
-	if (!ent || !ent->client)
+	if (!muffmode::pconfig::BeginPreferenceCommand(ent))
 		return;
 
 	const auto value = muffmode::pconfig::ReadOptionalBoolCommandArg(ent, ent->client->sess.pc.follow_leader);
@@ -899,7 +841,7 @@ MM_CmdFollowPowerup
 */
 void MM_CmdFollowPowerup(gentity_t *ent)
 {
-	if (!ent || !ent->client)
+	if (!muffmode::pconfig::BeginPreferenceCommand(ent))
 		return;
 
 	muffmode::pconfig::SetBoolPreference(ent, mm_pconfig_bool_setting_t::follow_powerup, "Auto-follow powerup pick-ups");

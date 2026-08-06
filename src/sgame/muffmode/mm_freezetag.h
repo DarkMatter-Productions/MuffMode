@@ -18,6 +18,7 @@ bool MM_FreezeTag_IsFrozenViewProxyVisibleTo(const gentity_t *ent, const gentity
 bool MM_FreezeTag_ShouldFreezeDeath(gentity_t *self, gentity_t *attacker, const mod_t &mod);
 void MM_FreezeTag_FreezePlayer(gentity_t *self, gentity_t *attacker, const mod_t &mod);
 void MM_FreezeTag_ClearClient(gentity_t *ent);
+void MM_FreezeTag_DetachWorldEntities();
 void MM_FreezeTag_OnRoundReset();
 void MM_FreezeTag_ResetRoundPlayers();
 bool MM_FreezeTag_ShouldHoldSpawnForRound();

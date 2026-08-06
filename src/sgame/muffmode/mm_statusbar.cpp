@@ -14,7 +14,8 @@ namespace muffmode::statusbar {
 // Most recently built CS_STATUSBAR layout string, kept for the hud_dump dev command.
 std::string g_last_layout;
 
-// JSON-escape the layout string (it contains quoted tokens like string2 "SPECTATOR MODE").
+// JSON-escape the layout string (it contains quoted tokens such as string "FOLLOWING" and
+// string2 "SPECTATOR").
 std::string JsonEscape(const std::string &in)
 {
 	std::string out;
@@ -53,6 +54,7 @@ using muffmode::hud::kBottomMiniscoreRow2Yb;
 using muffmode::hud::kBottomMiniscoreMetaRow1Yb;
 using muffmode::hud::kMiniscoreHighlightXr;
 using muffmode::hud::kMiniscoreHighlightYInset;
+using muffmode::hud::kMiniscoreLimitTextXr;
 using muffmode::hud::kMiniscoreNumFieldWidth;
 using muffmode::hud::kMiniscoreNumXr;
 using muffmode::hud::kMiniscorePicXr;
@@ -130,8 +132,6 @@ void EmitCoopStackAdvancePastNum(int32_t *coop_y)
 	*coop_y += kCoopStackNumFieldHeight;
 }
 
-const char *ScoreLimitLabel();
-
 void EmitCoopStackLabeledNum(statusbar_t &sb, int32_t *coop_y, player_stat_t stat, const char *label, int field_width)
 {
 	sb.ifstat(stat).xr(RightStackLabelXr(label)).yt(*coop_y += kCoopStackItemGap).loc_rstring(label).xr(RightHudNumXr(field_width)).yt(*coop_y += kCoopStackLabelToNumGap).num(field_width, stat).endifstat();
@@ -163,11 +163,6 @@ void EmitRightLivesStack(statusbar_t &sb, int32_t yt)
 		.endifstat();
 }
 
-void EmitCoopStackScoreLimit(statusbar_t &sb, int32_t *coop_y)
-{
-	EmitCoopStackLabeledNum(sb, coop_y, STAT_SCORELIMIT, ScoreLimitLabel(), kRightHudNumFieldWidth);
-}
-
 void EmitRoundCounter(statusbar_t &sb, round_counter_profile_t profile, const char *label, int32_t *coop_y = nullptr)
 {
 	if (!MM_GametypeHasFlag(GTF_ROUNDS))
@@ -196,6 +191,7 @@ void EmitHordeWaveAndRemainingStack(statusbar_t &sb)
 	if (g_horde_lives->integer > 0)
 		y += kLabelBelowNum;
 
+	// Lives → Wave → Monsters (honkhonk ordering), right-aligned.
 	sb.ifstat(STAT_HORDE_WAVE)
 		.xr(MiniscoreAlignedNumXr(kMiniscoreNumFieldWidth)).yt(y += 10).num(kMiniscoreNumFieldWidth, STAT_HORDE_WAVE)
 		.xr(kRightHudTextXr).yt(y += kLabelBelowNum).loc_rstring("Wave")
@@ -203,7 +199,7 @@ void EmitHordeWaveAndRemainingStack(statusbar_t &sb)
 
 	sb.ifstat(STAT_HORDE_REMAINING)
 		.xr(MiniscoreAlignedNumXr(kMiniscoreNumFieldWidth)).yt(y += 10).num(kMiniscoreNumFieldWidth, STAT_HORDE_REMAINING)
-		.xr(kRightHudTextXr).yt(y += kLabelBelowNum).loc_rstring("Monsters")
+		.xr(kRightHudTextXr).yt(y + kLabelBelowNum).loc_rstring("Monsters")
 		.endifstat();
 }
 
@@ -237,11 +233,22 @@ void EmitTopRightMatchInfo(statusbar_t &sb)
 	sb.ifstat(STAT_GAMETYPE_HUD).xr(kRightHudTextXr).yt(kGametypeYt).loc_stat_rstring(STAT_GAMETYPE_HUD).endifstat();
 	if (GT(GT_STRIKE)) {
 		sb.ifstat(STAT_ARENA_ROLE).xr(kRightHudTextXr).yt(kGametypeYt).loc_stat_rstring(STAT_ARENA_ROLE).endifstat();
+	} else if (GT(GT_ARENA)) {
+		sb.ifstat(STAT_ARENA_ROLE).xr(kRightHudTextXr).yt(kRulesetYt).loc_stat_rstring(STAT_ARENA_ROLE).endifstat();
 	} else {
 		sb.ifstat(STAT_RULESET_HUD).xr(kRightHudTextXr).yt(kRulesetYt).loc_stat_rstring(STAT_RULESET_HUD).endifstat();
 	}
 
 	EmitRedRoverTeamBadge(sb);
+}
+
+void EmitCountdownAndMatchState(statusbar_t &sb)
+{
+	// Vanilla num(3) right-aligns in a 50px field (2 + 3*16). Digit centre:
+	// xv + 50 - 8*l. hx=160 therefore needs xv(118) for one digit.
+	sb.ifstat(STAT_COUNTDOWN).xv(118).yb(-256).num(3, STAT_COUNTDOWN).endifstat();
+	// Match timer / warmup — bottom-centre, classic MuffMode placement.
+	sb.ifstat(STAT_MATCH_STATE).xv(0).yb(-78).stat_string(STAT_MATCH_STATE).endifstat();
 }
 
 // VANILLA_BASE — centre eliminated/frozen label (CA/RR/Freeze team modes, not Strike).
@@ -264,28 +271,23 @@ void EmitTeamHeader(statusbar_t &sb)
 	sb.ifstat(STAT_TEAMPLAY_INFO).xl(0).yb(-88).stat_string(STAT_TEAMPLAY_INFO).endifstat();
 }
 
-const char *ScoreLimitLabel()
-{
-	if (GT(GT_STRIKE) || GT(GT_CTF))
-		return "Captures";
-	if (MM_GametypeHasFlag(GTF_ROUNDS))
-		return "Rounds";
-	return "Frags";
-}
-
 void EmitBottomTeamMiniscoreRows(statusbar_t &sb)
 {
 	EmitTeamMiniscoreRow(sb, hud_vanchor_t::Bottom, kBottomMiniscoreRow1Yb, STAT_MINISCORE_FIRST_PIC, STAT_MINISCORE_FIRST_SCORE, STAT_MINISCORE_FIRST_POS);
 	EmitTeamMiniscoreRow(sb, hud_vanchor_t::Bottom, kBottomMiniscoreRow2Yb, STAT_MINISCORE_SECOND_PIC, STAT_MINISCORE_SECOND_SCORE, STAT_MINISCORE_SECOND_POS);
 }
 
+// Match limit under the miniscore rows: small white text, right-aligned to the same edge as the
+// score digits above it (num(3) at kMiniscoreNumXr ends at kMiniscoreLimitTextXr).
+// The inner ifstat is required, not cosmetic: stat_string/loc_stat_rstring take the stat's value
+// as a configstring index, so an unset STAT_SCORELIMIT would print configstring 0 (the level name).
 void EmitMiniscoreMetaRows(statusbar_t &sb)
 {
 	sb.ifstat(STAT_MINISCORE_FIRST_PIC)
-		.ifstat(STAT_ROUND_NUMBER)
-			.xr(MiniscoreAlignedNumXr(kMiniscoreNumFieldWidth))
+		.ifstat(STAT_SCORELIMIT)
+			.xr(kMiniscoreLimitTextXr)
 			.yb(kBottomMiniscoreMetaRow1Yb)
-			.num(kMiniscoreNumFieldWidth, STAT_ROUND_NUMBER)
+			.loc_stat_rstring(STAT_SCORELIMIT)
 		.endifstat()
 		.endifstat();
 }
@@ -296,12 +298,43 @@ void EmitStandardTeamMiniscore(statusbar_t &sb)
 	EmitMiniscoreMetaRows(sb);
 }
 
+// Top-right gametype/ruleset notice window. Long enough to read, short enough to stay out of
+// the way for the rest of warmup.
+constexpr gtime_t kMatchInfoHudTime = 5_sec;
+
 } // namespace muffmode::statusbar
+
+void MM_MatchInfoHud_Show(gentity_t *ent)
+{
+	if (!ent || !ent->client)
+		return;
+
+	ent->client->sess.match_info_hud_time = level.time + muffmode::statusbar::kMatchInfoHudTime;
+}
+
+void MM_MatchInfoHud_ShowAll()
+{
+	for (auto ec : active_clients())
+		MM_MatchInfoHud_Show(ec);
+}
+
+bool MM_MatchInfoHud_Visible(const gentity_t *ent)
+{
+	if (!ent || !ent->client)
+		return false;
+
+	// Bounded on both sides: sess survives map changes but level.time restarts, so a stamp carried
+	// in from a longer previous level (or a ghost restore) must not park the notice on screen.
+	const gtime_t expires = ent->client->sess.match_info_hud_time;
+	return expires > level.time && expires <= level.time + muffmode::statusbar::kMatchInfoHudTime;
+}
 
 void MM_InitStatusbar()
 {
 	statusbar_t sb;
-	bool minhud = (g_instagib->integer || GT(GT_INSTAGIB)) || (g_nadefest->integer || GT(GT_NADEFEST));
+	bool minhud = notGT(GT_ARENA) &&
+		((g_instagib->integer || GT(GT_INSTAGIB)) ||
+		 (g_nadefest->integer || GT(GT_NADEFEST)));
 
 	sb.yb(-24);
 
@@ -363,18 +396,16 @@ void MM_InitStatusbar()
 		if (Teams())
 			muffmode::statusbar::EmitTeamHeader(sb);
 
-		muffmode::statusbar::EmitTopRightMatchInfo(sb);
+		if (notGT(GT_ARENA))
+			muffmode::statusbar::EmitTopRightMatchInfo(sb);
 
 		if (MM_GametypeHasFlag(GTF_ELIMINATION) && MM_GametypeHasFlag(GTF_TEAMS)) {
 			if (!GT(GT_STRIKE))
 				muffmode::statusbar::EmitCenterArenaRole(sb, 48);
 		}
 
-		// Vanilla num(3) right-aligns in a 50px field (2 + 3*16). Digit centre: xv + 50 - 8*l.
-		// hx=160 → l=1 needs xv(118), l=2 needs xv(126). Use 118 for 3…2…1 (brief "10" sits ~8px left).
-		sb.ifstat(STAT_COUNTDOWN).xv(118).yb(-256).num(3, STAT_COUNTDOWN).endifstat();
-		// Match timer / warmup — bottom-centre (xv 0 yb -78, classic MuffMode placement).
-		sb.ifstat(STAT_MATCH_STATE).xv(0).yb(-78).stat_string(STAT_MATCH_STATE).endifstat();
+		if (notGT(GT_ARENA))
+			muffmode::statusbar::EmitCountdownAndMatchState(sb);
 		if (GT(GT_LMS))
 			sb.ifstat(STAT_CENTER_LINE).xv(0).yt(26).stat_string(STAT_CENTER_LINE).endifstat();
 		sb.ifstat(STAT_FOLLOW).xv(0).yb(-68).string("FOLLOWING").xv(80).stat_string(STAT_FOLLOW).endifstat();
@@ -384,6 +415,14 @@ void MM_InitStatusbar()
 		sb.ifstat(STAT_CROSSHAIR_ID_VIEW_COLOR).xv(156).yb(-118).pic(STAT_CROSSHAIR_ID_VIEW_COLOR).endifstat();
 
 		sb.endifstat();
+
+		// Arena lobby, line, coach and free-observer roles intentionally project
+		// to engine spectators, whose combat statusbar gate is zero. Keep the
+		// room-local identity and clock visible without exposing fighter vitals.
+		if (GT(GT_ARENA)) {
+			muffmode::statusbar::EmitTopRightMatchInfo(sb);
+			muffmode::statusbar::EmitCountdownAndMatchState(sb);
+		}
 
 		muffmode::statusbar::EmitStandardTeamMiniscore(sb);
 	}

@@ -1,21 +1,36 @@
 // Copyright (c) ZeniMax Media Inc.
 // Licensed under the GNU General Public License 2.0.
 
+#include <algorithm>
+#include <array>
 #include <charconv>
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <memory>
+#include <new>
+#include <string>
+#include <string_view>
 
 #include "g_local.h"
+#include "bots/bot_debug.h"
 #include "core/debug_log.h"
 #include "shadow_lights.h"
 // [MuffMode] Spawn filtering, statusbar and gametype hooks
+#include "muffmode/mm_arena.h"
+#include "muffmode/mm_awards.h"
 #include "muffmode/mm_combat_heatmap.h"
+#include "muffmode/mm_ent_respawn.h"
 #include "muffmode/mm_gametype.h"
+#include "muffmode/mm_map_pick.h"
 #include "muffmode/mm_ghost.h"
 #include "muffmode/mm_parse.h"
 #include "muffmode/mm_horde.h"
+#include "muffmode/mm_items_rules.h"
+#include "muffmode/mm_map_pool.h"
+#include "muffmode/mm_player_stats.h"
 #include "muffmode/mm_spawn_filter.h"
+#include "muffmode/mm_spawn_rules.h"
 #include "muffmode/mm_statusbar.h"
 #include "muffmode/mm_strike.h"
 
@@ -121,26 +136,15 @@ ED_NewString
 =============
 */
 char *ED_NewString(const char *string) {
-	char *newb, *new_p;
-	int		i;
-	size_t	l;
+	// [MuffMode] Escape expansion never grows the value, so strlen + 1 always
+	// holds the result. The previous in-place loop dropped the terminator when a
+	// value ended in a lone backslash, because the backslash consumed it, and
+	// left every later reader of that field walking off the allocation.
+	const std::string_view value = string ? std::string_view(string) : std::string_view();
+	const size_t capacity = value.size() + 1;
+	char *newb = (char *)gi.TagMalloc(capacity, TAG_LEVEL);
 
-	l = strlen(string) + 1;
-
-	newb = (char *)gi.TagMalloc(l, TAG_LEVEL);
-
-	new_p = newb;
-
-	for (i = 0; i < l; i++) {
-		if (string[i] == '\\' && i < l - 1) {
-			i++;
-			if (string[i] == 'n')
-				*new_p++ = '\n';
-			else
-				*new_p++ = '\\';
-		} else
-			*new_p++ = string[i];
-	}
+	MM_UnescapeEntityValue(value, newb, capacity);
 
 	return newb;
 }
@@ -224,14 +228,16 @@ struct type_loaders_t {
 
 	template<typename T, std::enable_if_t<std::is_same_v<T, vec3_t>, int> = 0>
 	static T load(const char *s) {
+		// [MuffMode] Every component parses through a private buffer. `s` is the
+		// value token ED_ParseEntity is still holding, which lives in COM_Parse's
+		// shared buffer, so an unbuffered COM_Parse here rewrote the very string
+		// it was reading. Sizing the buffer like the shared one keeps y and z at
+		// the bound they already had and lifts x to match its siblings.
+		char component[MAX_TOKEN_CHARS];
 		vec3_t vec;
-		static char vec_buffer[32];
-		const char *token = COM_Parse(&s, vec_buffer, sizeof(vec_buffer));
-		vec.x = ED_LoadFloat(token);
-		token = COM_Parse(&s);
-		vec.y = ED_LoadFloat(token);
-		token = COM_Parse(&s);
-		vec.z = ED_LoadFloat(token);
+		vec.x = ED_LoadFloat(COM_Parse(&s, component, sizeof(component)));
+		vec.y = ED_LoadFloat(COM_Parse(&s, component, sizeof(component)));
+		vec.z = ED_LoadFloat(COM_Parse(&s, component, sizeof(component)));
 		return vec;
 	}
 };
@@ -244,26 +250,23 @@ struct type_loaders_t {
 static int32_t ED_LoadColor(const char *value) {
 	// space means rgba as values
 	if (strchr(value, ' ')) {
-		static char color_buffer[32];
+		// [MuffMode] The buffer is per-call, not shared: `value` can point into
+		// COM_Parse's own token buffer. Packing moved to MM_PackEntityColorRgba,
+		// which clamps each channel before composing the word. Casting an
+		// unbounded map float to int32_t is undefined, and the saturated result
+		// then reached a left shift of a negative value; a merely large component
+		// stayed defined but bled across the neighbouring channel boundary.
+		char component[MM_ENTITY_COLOR_COMPONENT_CHARS];
 		std::array<float, 4> raw_values{ 0, 0, 0, 1.0f };
-		bool is_float = true;
 
 		for (auto &v : raw_values) {
-			const char *token = COM_Parse(&value, color_buffer, sizeof(color_buffer));
+			const char *token = COM_Parse(&value, component, sizeof(component));
 
-			if (*token) {
+			if (*token)
 				v = ED_LoadFloat(token);
-
-				if (v > 1.0f)
-					is_float = false;
-			}
 		}
 
-		if (is_float)
-			for (auto &v : raw_values)
-				v *= 255.f;
-
-		return ((int32_t)raw_values[3]) | (((int32_t)raw_values[2]) << 8) | (((int32_t)raw_values[1]) << 16) | (((int32_t)raw_values[0]) << 24);
+		return MM_PackEntityColorRgba(raw_values);
 	}
 
 	// integral
@@ -310,6 +313,7 @@ static const std::initializer_list<field_t> entity_fields = {
 	FIELD_AUTO(style_off),
 	FIELD_AUTO(crosslevel_flags),
 	FIELD_AUTO(count),
+	FIELD_AUTO(arena),
 	FIELD_AUTO(health),
 	FIELD_AUTO(sounds),
 	{ "light" },
@@ -328,7 +332,12 @@ static const std::initializer_list<field_t> entity_fields = {
 	FIELD_AUTO(hackflags), // [Paril-KEX] n64
 	FIELD_AUTO_NAMED("alpha", s.alpha), // [Paril-KEX]
 	FIELD_AUTO_NAMED("scale", s.scale), // [Paril-KEX]
-	{ "mangle" }, // editor field
+	// [MuffMode] RA2 uses mangle on info_player_intermission for its
+	// spectator view. Keep the legacy alias scoped to validated RA2 maps.
+	{ "mangle", [](gentity_t *e, const char *value) {
+		if (MM_Arena_Active())
+			e->s.angles = type_loaders_t::load<vec3_t>(value);
+	} },
 	FIELD_AUTO_NAMED("dead_frame", monsterinfo.start_frame), // [Paril-KEX]
 	FIELD_AUTO_NAMED("frame", s.frame),
 	FIELD_AUTO_NAMED("effects", s.effects),
@@ -408,6 +417,45 @@ static const std::initializer_list<field_t> entity_fields = {
 	FIELD_AUTO(bfg_off),
 	FIELD_AUTO(plasmabeam_on),
 	FIELD_AUTO(plasmabeam_off),
+
+	// [MuffMode] Bespoke Horde spawn-anchor aliases. These reuse generic
+	// gentity fields so authored .ent overrides need no private map format.
+	FIELD_AUTO_NAMED("horde_monster", map),
+	FIELD_AUTO_NAMED("horde_min_wave", count),
+	FIELD_AUTO_NAMED("horde_max_wave", health),
+	FIELD_AUTO_NAMED("horde_weight", random),
+	FIELD_AUTO_NAMED("horde_cooldown", wait),
+	FIELD_AUTO_NAMED("horde_boss", message),
+	FIELD_AUTO_NAMED("horde_boss_health_mult", speed),
+	FIELD_AUTO_NAMED("horde_boss_damage_mult", accel),
+	FIELD_AUTO_NAMED("horde_boss_scale", s.scale),
+	{ "horde_boss_spawnflags", [](gentity_t *s, const char *v) {
+		s->sounds = ED_LoadInteger<int32_t>(v);
+		s->noise_index2 = 1;
+	} },
+	{ "horde_boss_power_armor", [](gentity_t *s, const char *v) {
+		s->monsterinfo.power_armor_power = ED_LoadInteger<int32_t>(v);
+		s->volume = 1.f;
+	} },
+	{ "horde_boss_power_armor_type", [](gentity_t *s, const char *v) {
+		const int32_t type = ED_LoadInteger<int32_t>(v);
+
+		if (type == 0)
+			s->monsterinfo.power_armor_type = IT_NULL;
+		else if (type == 1)
+			s->monsterinfo.power_armor_type = IT_POWER_SCREEN;
+		else
+			s->monsterinfo.power_armor_type = IT_POWER_SHIELD;
+		s->decel = 1.f;
+	} },
+	{ "horde_boss_monster_slots", [](gentity_t *s, const char *v) {
+		s->monsterinfo.monster_slots = ED_LoadInteger<int32_t>(v);
+		s->attenuation = 1.f;
+	} },
+	{ "horde_boss_reinforcements", [](gentity_t *s, const char *v) {
+		s->model = ED_NewString(v);
+		s->noise_index = 1;
+	} },
 //-muff
 
 	FIELD_AUTO_NAMED("monster_slots", monsterinfo.monster_slots)
@@ -596,7 +644,7 @@ static const char *ED_ParseEntity(const char *data, gentity_t *ent) {
 	}
 
 	if (!init)
-		memset(ent, 0, sizeof(*ent));
+		memset(ent, 0, sizeof(*ent)); // NOLINT(bugprone-undefined-memory-manipulation): engine-owned gentity_t slots are intentionally raw C ABI storage.
 
 	return data;
 }
@@ -616,6 +664,18 @@ All but the last will have the teamchain field set to the next one
 // are in the front of the team
 static uint32_t G_SpawnEntityLimit() {
 	return min(globals.num_entities, game.maxentities);
+}
+
+static bool G_CanJoinEntityTeam(const gentity_t *first, const gentity_t *second) {
+	if (notGT(GT_ARENA))
+		return true;
+
+	// Positive arena ids are map-owned namespaces. Keep identically named
+	// mover/item teams from separate RA2 rooms independent during spawn setup.
+	if (first->arena > 0 || second->arena > 0)
+		return first->arena > 0 && first->arena == second->arena;
+
+	return true;
 }
 
 static void G_FixTeams() {
@@ -644,6 +704,8 @@ static void G_FixTeams() {
 					if (!e2->inuse)
 						continue;
 					if (!e2->team)
+						continue;
+					if (!G_CanJoinEntityTeam(e, e2))
 						continue;
 					if (!strcmp(e->team, e2->team)) {
 						chain->teamchain = e2;
@@ -690,6 +752,8 @@ static void G_FindTeams() {
 			if (!e2->team)
 				continue;
 			if (e2->flags & FL_TEAMSLAVE)
+				continue;
+			if (!G_CanJoinEntityTeam(e1, e2))
 				continue;
 			if (!strcmp(e1->team, e2->team)) {
 				c2++;
@@ -760,8 +824,36 @@ void PrecacheInventoryItems() {
 	}
 }
 
+static bool ValidateStartItems(char *invalid_item, size_t invalid_item_size) {
+	if (invalid_item && invalid_item_size)
+		invalid_item[0] = '\0';
+	if (!g_start_items || !g_start_items->string || !*g_start_items->string)
+		return true;
+
+	char token_copy[MAX_TOKEN_CHARS];
+	const char *ptr = g_start_items->string;
+
+	while (const char *token = COM_ParseEx(&ptr, ";")) {
+		if (!*token)
+			break;
+
+		Q_strlcpy(token_copy, token, sizeof(token_copy));
+		const char *ptr_copy = token_copy;
+		const char *item_name = COM_Parse(&ptr_copy);
+		gitem_t *item = FindItemByClassname(item_name);
+		if (item && item->pickup)
+			continue;
+
+		if (invalid_item && invalid_item_size)
+			Q_strlcpy(invalid_item, item_name, invalid_item_size);
+		return false;
+	}
+
+	return true;
+}
+
 static void PrecacheStartItems() {
-	if (!*g_start_items->string)
+	if (!g_start_items || !g_start_items->string || !*g_start_items->string)
 		return;
 
 	char token_copy[MAX_TOKEN_CHARS];
@@ -938,43 +1030,22 @@ static void FS_Read(void *buffer, int len, FILE *f) {
 VerifyEntityString
 ==============
 */
-static bool VerifyEntityString(const char *entities) {
-	const char *or_token;
-	gentity_t *or_ent = nullptr;
-	const char *or_buf = entities;
-	bool		or_error = false;
+static bool VerifyEntityString(std::string_view entities) {
+	if (entities.empty())
+		return false;
 
-	while (1) {
-		// parse the opening brace
-		or_token = COM_Parse(&or_buf);
-		if (!or_buf)
-			break;
-		if (or_token[0] != '{') {
-			gi.Com_PrintFmt("{}: Found \"{}\" when expecting {{ in override.\n", __FUNCTION__, or_token);
-			return false;
-		}
-
-		while (1) {
-			// parse key
-			or_token = COM_Parse(&or_buf);
-			if (or_token[0] == '}')
-				break;
-			if (!or_buf) {
-				gi.Com_ErrorFmt("{}: EOF without closing brace.\n", __FUNCTION__);
-				return false;
-			}
-			// parse value
-			or_token = COM_Parse(&or_buf);
-			if (!or_buf) {
-				gi.Com_ErrorFmt("{}: EOF without closing brace.\n", __FUNCTION__);
-				return false;
-			}
-			if (or_token[0] == '}') {
-				gi.Com_ErrorFmt("{}: Closing brace without data.\n", __FUNCTION__);
-				return false;
-			}
-		}
-
+	const size_t reserved_slots =
+		static_cast<size_t>(game.maxclients) + BODY_QUEUE_SIZE;
+	const size_t definition_capacity =
+		static_cast<size_t>(game.maxentities) > reserved_slots
+			? static_cast<size_t>(game.maxentities) - reserved_slots
+			: 0;
+	const mm_entity_lump_validation_t validation =
+		MM_ValidateEntityLump(entities, definition_capacity);
+	if (!validation.valid) {
+		gi.Com_PrintFmt("{}: invalid entity string: {}.\n",
+			__FUNCTION__, validation.error ? validation.error : "unknown error");
+		return false;
 	}
 	return true;
 }
@@ -1086,90 +1157,183 @@ static void G_LocateSpawnSpots(void) {
 	level.num_spawn_spots = n;
 }
 
-static void ParseWorldEntityString(const char *mapname, bool try_q3) {
-	bool	ent_file_exists = false, ent_valid = true;
-	const char *entities = level.entstring.c_str();
+struct world_spawn_stats_t {
+	int entity_count = 0;
+	int inhibited = 0;
+	int horde_anchors_converted = 0;
+};
 
-	// load up ent override
-	const char *name = G_Fmt("baseq2/{}/{}.ent", g_entity_override_dir->string[0] ? g_entity_override_dir->string : "maps", mapname).data();
-	FILE *f = fopen(name, "rb");
-	if (f != NULL) {
-		char *buffer = nullptr;
-		size_t length;
-		size_t read_length;
+using item_inhibit_modes_t = std::array<int8_t, 6>;
 
-		fseek(f, 0, SEEK_END);
-		length = ftell(f);
-		fseek(f, 0, SEEK_SET);
+static item_inhibit_modes_t cached_entity_item_inhibit_modes {};
+static bool cached_entity_item_inhibit_modes_valid = false;
 
-		if (length > 0x40000) {
-			//gi.Com_PrintFmt("{}: Entities override file length exceeds maximum: \"{}\"\n", __FUNCTION__, name);
-			ent_valid = false;
-		}
-		if (ent_valid) {
-			buffer = (char *)gi.TagMalloc(length + 1, TAG_LEVEL);
-			if (length) {
-				read_length = fread(buffer, 1, length, f);
+struct world_spawn_profile_t {
+	int effective_gametype = GT_NONE;
+	ruleset_t ruleset = RS_NONE;
+	int configured_ruleset = RS_NONE;
+	int deathmatch_mode = 0;
+	int coop_mode = 0;
+	int skill_mode = 0;
+	bool teams = false;
+	bool no_powerups = false;
+	bool no_bfg = false;
+	bool no_plasmabeam = false;
+	bool random_items = false;
+	int dm_spawnpads = 0;
+	bool quadhog = false;
+	bool allow_dm_monsters = false;
+	bool precache_blaster = false;
+	bool precache_horde_chainfist = false;
+	bool precache_grapple = false;
+	bool tech_setup = false;
+	int tech_copies = 0;
+	std::array<int16_t, IT_TOTAL> item_replacements {};
+	std::array<uint8_t, IT_TOTAL> item_enabled {};
+	std::string start_items;
+};
 
-				if (length != read_length) {
-					//gi.Com_PrintFmt("{}: Entities override file read error: \"{}\"\n", __FUNCTION__, name);
-					ent_valid = false;
-				}
-			}
-		}
-		ent_file_exists = true;
-		fclose(f);
+static world_spawn_profile_t cached_world_spawn_profile {};
+static bool cached_world_spawn_profile_valid = false;
 
-		if (ent_valid) {
-			if (g_entity_override_load->integer && !strstr(level.mapname, ".dm2")) {
-
-				if (VerifyEntityString((const char *)buffer)) {
-					entities = (const char *)buffer;
-					//gi.Com_PrintFmt("Entities override: \"{}\"\n", name);
-				}
-			}
-		} else {
-			gi.Com_PrintFmt("{}: Entities override file load error for \"{}\", discarding.\n", __FUNCTION__, name);
-		}
-	}
-
-	// save ent override
-	if (g_entity_override_save->integer && !strstr(level.mapname, ".dm2")) {
-		if (!ent_file_exists) {
-			f = fopen(name, "w");
-			if (f) {
-				fwrite(entities, 1, strlen(entities), f);
-				if (g_verbose->integer)
-					gi.Com_PrintFmt("{}: Entities override file written to: \"{}\"\n", __FUNCTION__, name);
-				fclose(f);
-			}
-		} else {
-			if (g_verbose->integer)
-				gi.Com_PrintFmt("{}: Entities override file not saved as file already exists: \"{}\"\n", __FUNCTION__, name);
-		}
-	}
-	level.entstring = entities;
+static item_inhibit_modes_t CaptureItemInhibitModes() {
+	return {
+		game.item_inhibit_pu,
+		game.item_inhibit_pa,
+		game.item_inhibit_ht,
+		game.item_inhibit_ar,
+		game.item_inhibit_am,
+		game.item_inhibit_wp
+	};
 }
 
-static void ParseWorldEntities() {
-	gentity_t		*ent = nullptr;
-	int			inhibit = 0;
-	const char	*com_token;
-	const char	*entities = level.entstring.c_str();
+static void ApplyItemInhibitModes(const item_inhibit_modes_t &modes) {
+	game.item_inhibit_pu = modes[0];
+	game.item_inhibit_pa = modes[1];
+	game.item_inhibit_ht = modes[2];
+	game.item_inhibit_ar = modes[3];
+	game.item_inhibit_am = modes[4];
+	game.item_inhibit_wp = modes[5];
+}
+
+static bool ShouldPrecacheBlaster() {
+	return GT(GT_ARENA) ||
+		(!(g_instagib->integer || GT(GT_INSTAGIB)) &&
+		 !(g_nadefest->integer || GT(GT_NADEFEST)));
+}
+
+static bool ShouldPrecacheHordeChainfist() {
+	return GT(GT_HORDE) && g_horde_start_chainsaw->integer;
+}
+
+static bool ShouldPrecacheGrapple() {
+	return GT(GT_ARENA) ||
+		(!strcmp(g_allow_grapple->string, "auto")
+			? (GTF(GTF_CTF) && !level.no_grapple)
+			: !!g_allow_grapple->integer);
+}
+
+static world_spawn_profile_t CaptureWorldSpawnProfile() {
+	world_spawn_profile_t profile;
+	profile.effective_gametype = MM_EFFECTIVE_GT;
+	profile.ruleset = game.ruleset;
+	profile.configured_ruleset = g_ruleset->integer;
+	profile.deathmatch_mode = deathmatch->integer;
+	profile.coop_mode = coop->integer;
+	profile.skill_mode = skill->integer;
+	profile.teams = Teams();
+	profile.no_powerups = !!g_no_powerups->integer;
+	profile.no_bfg = !!g_mapspawn_no_bfg->integer;
+	profile.no_plasmabeam = !!g_mapspawn_no_plasmabeam->integer;
+	profile.random_items = !!g_dm_random_items->integer;
+	profile.dm_spawnpads = g_dm_spawnpads->integer;
+	profile.quadhog = !!g_quadhog->integer;
+	profile.allow_dm_monsters = !!ai_allow_dm_spawn->integer;
+	profile.precache_blaster = ShouldPrecacheBlaster();
+	profile.precache_horde_chainfist = ShouldPrecacheHordeChainfist();
+	profile.precache_grapple = ShouldPrecacheGrapple();
+
+	const bool allow_techs = AllowTechs();
+	profile.tech_setup = allow_techs &&
+		!(GT(GT_HORDE) && g_horde_tech_reset_each_wave->integer);
+	// g_allow_techs is a boolean/auto setting. Tech_SpawnAll uses one copy of
+	// each tech for either enabled spelling.
+	profile.tech_copies = profile.tech_setup ? 1 : 0;
+
+	for (int i = IT_NULL; i < IT_TOTAL; i++) {
+		gitem_t *item = GetItemByIndex(static_cast<item_id_t>(i));
+		if (!item || !item->classname) {
+			profile.item_replacements[i] = static_cast<int16_t>(IT_NULL);
+			profile.item_enabled[i] = 0;
+			continue;
+		}
+
+		gitem_t *replacement = CheckItemReplacements(item);
+		profile.item_replacements[i] = replacement
+			? static_cast<int16_t>(replacement->id)
+			: static_cast<int16_t>(IT_NULL);
+		profile.item_enabled[i] =
+			replacement && CheckItemEnabled(replacement) ? 1 : 0;
+	}
+
+	profile.start_items =
+		g_start_items && g_start_items->string ? g_start_items->string : "";
+	return profile;
+}
+
+static bool WorldSpawnProfilesMatch(
+	const world_spawn_profile_t &lhs, const world_spawn_profile_t &rhs) {
+	return lhs.effective_gametype == rhs.effective_gametype &&
+		lhs.ruleset == rhs.ruleset &&
+		lhs.configured_ruleset == rhs.configured_ruleset &&
+		lhs.deathmatch_mode == rhs.deathmatch_mode &&
+		lhs.coop_mode == rhs.coop_mode &&
+		lhs.skill_mode == rhs.skill_mode &&
+		lhs.teams == rhs.teams &&
+		lhs.no_powerups == rhs.no_powerups &&
+		lhs.no_bfg == rhs.no_bfg &&
+		lhs.no_plasmabeam == rhs.no_plasmabeam &&
+		lhs.random_items == rhs.random_items &&
+		lhs.dm_spawnpads == rhs.dm_spawnpads &&
+		lhs.quadhog == rhs.quadhog &&
+		lhs.allow_dm_monsters == rhs.allow_dm_monsters &&
+		lhs.precache_blaster == rhs.precache_blaster &&
+		lhs.precache_horde_chainfist == rhs.precache_horde_chainfist &&
+		lhs.precache_grapple == rhs.precache_grapple &&
+		lhs.tech_setup == rhs.tech_setup &&
+		lhs.tech_copies == rhs.tech_copies &&
+		lhs.item_replacements == rhs.item_replacements &&
+		lhs.item_enabled == rhs.item_enabled &&
+		lhs.start_items == rhs.start_items;
+}
+
+static world_spawn_stats_t ParseWorldEntities() {
+	world_spawn_stats_t stats;
+	gentity_t *ent = nullptr;
+	const char *entities = level.entstring.c_str();
 
 	// parse entities
 	while (1) {
 		// parse the opening brace
-		com_token = COM_Parse(&entities);
+		const char *com_token = COM_Parse(&entities);
 		if (!entities)
 			break;
 		if (com_token[0] != '{')
 			gi.Com_ErrorFmt("{}: Found \"{}\" when expecting {{ in entity string.", __FUNCTION__, com_token);
 
-		if (!ent)
+		stats.entity_count++;
+		if (!ent) {
 			ent = g_entities;
-		else
+			G_InitGentity(ent);
+		} else {
 			ent = G_Spawn();
+		}
+		// [MuffMode] Keep the allocator failure boundary explicit before the
+		// entity parser and compatibility hooks dereference the result.
+		if (!ent) {
+			gi.Com_ErrorFmt("{}: Failed to allocate an entity.", __FUNCTION__);
+			return stats;
+		}
 		entities = ED_ParseEntity(entities, ent);
 
 		// nasty hacks time!
@@ -1181,42 +1345,78 @@ static void ParseWorldEntities() {
 
 		// remove things (except the world) from different skill levels or deathmatch
 		if (ent != g_entities) {
+			if (MM_Horde_ConvertMapMonsterSpawn(ent))
+				stats.horde_anchors_converted++;
+
 			if (G_InhibitEntity(ent)) {
 				G_FreeEntity(ent);
-				inhibit++;
+				stats.inhibited++;
 				continue;
 			}
 
 			ent->spawnflags &= ~SPAWNFLAG_EDITOR_MASK;
 		}
 
-		if (!ent)
-			gi.Com_ErrorFmt("{}: Invalid or empty entity string.", __FUNCTION__);
-
 		// do this before calling the spawn function so it can be overridden.
 		ent->gravityVector = { 0.0, 0.0, -1.0 };
 
 		ED_CallSpawn(ent);
 
+		// [MuffMode] Record map-authored props that respawn in deathmatch. Done
+		// here rather than inside ED_CallSpawn so that runtime spawns -- a
+		// target_spawner firing barrels, a debug "sv spawn" -- stay untracked.
+		MM_EntRespawn_CaptureMapEntity(ent);
+
 		ent->s.renderfx |= RF_IR_VISIBLE;
 	}
 
-	if (inhibit && g_verbose->integer)
-		gi.Com_PrintFmt("{} entities inhibited.\n", inhibit);
+	if (stats.inhibited && g_verbose->integer)
+		gi.Com_PrintFmt("{} entities inhibited.\n", stats.inhibited);
+
+	if (!g_entities[0].inuse ||
+		!g_entities[0].classname ||
+		strcmp(g_entities[0].classname, "worldspawn") ||
+		g_entities[0].solid != SOLID_BSP ||
+		g_entities[0].s.modelindex != MODELINDEX_WORLD) {
+		gi.Com_ErrorFmt("{}: worldspawn failed to initialize.", __FUNCTION__);
+	}
+
+	return stats;
 }
 
-void ClearWorldEntities() {
-	gentity_t *ent = nullptr;
-	//memset(g_entities, 0, game.maxentities * sizeof(g_entities[0]));
+static world_spawn_stats_t SpawnCachedWorldEntities(bool initialize_level_services) {
+	InitBodyQue();
+	const world_spawn_stats_t stats = ParseWorldEntities();
 
-	for (size_t i = MAX_CLIENTS; i < game.maxentities; i++) {
-		ent = &g_entities[i];
+	// Arena state and the combat heatmap span a live match and are only
+	// initialized on a true map load. Arena never enters the singleton match
+	// reload path.
+	if (initialize_level_services)
+		MM_Arena_Init();
 
-		if (!ent || !ent->inuse || ent->client)
-			continue;
+	PrecacheStartItems();
+	PrecacheInventoryItems();
+	G_FindTeams();
 
-		memset(&g_entities[i], 0, sizeof(g_entities[i]));
+	QuadHog_SetupSpawn(5_sec);
+	Tech_SetupSpawn();
+
+	if (deathmatch->integer) {
+		if (g_dm_random_items->integer)
+			PrecacheForRandomRespawn();
+	} else {
+		InitHintPaths();
 	}
+
+	G_LocateSpawnSpots();
+	MM_Horde_FinalizeLevelSpawns();
+	if (initialize_level_services)
+		muffmode::combat_heatmap::ResetForNewLevel();
+
+	SetIntermissionPoint();
+	setup_shadow_lights();
+	level.init = true;
+	return stats;
 }
 
 /*
@@ -1228,77 +1428,110 @@ parsing textual entity definitions out of an ent file.
 ==============
 */
 void SpawnEntities(const char *mapname, const char *entities, const char *spawnpoint) {
+	// [MuffMode] The engine routes every server state through this entry point,
+	// including demo playback, cinematics and pic screens. Those states load no
+	// collision model and hand us an empty entity lump, so they reset level state
+	// and spawn nothing rather than failing the real-map contract below.
+	const bool map_has_world = MM_MapStateHasWorld(mapname);
+
+	// A MyMap selection is a transaction with the next full engine map load.
+	// Consume it before any fallible work, but keep the modes local until the
+	// target map has passed the pre-reset validation path. A worldless state is
+	// not that transition, so it leaves the selection armed for the next map.
+	muffmode::maps::mymap_modifier_modes_t mymap_modifier_modes {};
+	const bool has_mymap_modifier_modes = map_has_world &&
+		MM_MQ_TakePendingModifiersForMap(mapname, mymap_modifier_modes);
+	// One-shot modes must never be inherited from an earlier load. In
+	// particular, Com_Error may leave SpawnCachedWorldEntities non-locally, so
+	// clear any previously published modes before this load performs fallible
+	// validation. A matching pending selection remains private in the local
+	// snapshot above until entity spawning begins.
+	MM_ClearItemInhibitFlags();
+
+	// [MuffMode] Record the map being left before level.mapname is replaced.
+	MM_RecordStructuredMapPlayed();
 	MuffModeLog("MAP", "Loading map: '%s' (spawnpoint: '%s')", mapname, spawnpoint ? spawnpoint : "(none)");
 	
-	bool		ent_file_exists = false, ent_valid = true;
-	//const char	*entities = level.entstring.c_str();
-//#if 0
-	// load up ent override
-	//const char *name = G_Fmt("baseq2/maps/{}.ent", mapname).data();
-	const char *name = G_Fmt("baseq2/{}/{}.ent", g_entity_override_dir->string[0] ? g_entity_override_dir->string : "maps", mapname).data();
-	FILE *f = fopen(name, "rb");
-	if (f != NULL) {
-		char *buffer = nullptr;
-		size_t length;
-		size_t read_length;
-
-		fseek(f, 0, SEEK_END);
-		length = ftell(f);
-		fseek(f, 0, SEEK_SET);
-
-		if (length > 0x40000) {
-			//gi.Com_PrintFmt("{}: Entities override file length exceeds maximum: \"{}\"\n", __FUNCTION__, name);
-			ent_valid = false;
-		}
-		if (ent_valid) {
-			buffer = (char *)gi.TagMalloc(length + 1, TAG_LEVEL);
-			if (length) {
-				read_length = fread(buffer, 1, length, f);
-
-				if (length != read_length) {
-					//gi.Com_PrintFmt("{}: Entities override file read error: \"{}\"\n", __FUNCTION__, name);
-					ent_valid = false;
-				}
-			}
-		}
+	bool ent_file_exists = false;
+	bool ent_valid = false;
+	std::string override_entities;
+	const std::string override_name = std::string(G_Fmt("baseq2/{}/{}.ent",
+		g_entity_override_dir->string[0] ? g_entity_override_dir->string : "maps",
+		mapname));
+	// Worldless states have no authored entities to override or export.
+	FILE *f = map_has_world ? fopen(override_name.c_str(), "rb") : nullptr;
+	if (f != nullptr) {
 		ent_file_exists = true;
+		long length = -1;
+		if (fseek(f, 0, SEEK_END) == 0)
+			length = ftell(f);
+		if (length > 0 && length <= 0x40000 && fseek(f, 0, SEEK_SET) == 0) {
+			override_entities.resize(static_cast<size_t>(length));
+			const size_t read_length =
+				fread(override_entities.data(), 1, override_entities.size(), f);
+			ent_valid = read_length == override_entities.size() &&
+				VerifyEntityString(override_entities);
+		}
 		fclose(f);
 
-		if (ent_valid) {
-			if (g_entity_override_load->integer && !strstr(level.mapname, ".dm2")) {
-
-				if (VerifyEntityString((const char *)buffer)) {
-					entities = (const char *)buffer;
-					if (g_verbose->integer)
-						gi.Com_PrintFmt("{}: Entities override file verified and loaded: \"{}\"\n", __FUNCTION__, name);
-				}
-			}
-		} else {
-			gi.Com_PrintFmt("{}: Entities override file load error for \"{}\", discarding.\n", __FUNCTION__, name);
+		if (ent_valid && g_entity_override_load->integer) {
+			entities = override_entities.c_str();
+			if (g_verbose->integer)
+				gi.Com_PrintFmt("{}: Entities override file verified and loaded: \"{}\"\n",
+					__FUNCTION__, override_name);
+		} else if (!ent_valid) {
+			gi.Com_PrintFmt("{}: Entities override file load error for \"{}\", discarding.\n",
+				__FUNCTION__, override_name);
 		}
 	}
 
 	// save ent override
-	if (g_entity_override_save->integer && !strstr(level.mapname, ".dm2")) {
+	if (g_entity_override_save->integer && map_has_world) {
 		if (!ent_file_exists) {
-			f = fopen(name, "w");
+			f = fopen(override_name.c_str(), "wb");
 			if (f) {
-				fwrite(entities, 1, strlen(entities), f);
+				if (entities)
+					fwrite(entities, 1, strlen(entities), f);
 				if (g_verbose->integer)
-					gi.Com_PrintFmt("{}: Entities override file written to: \"{}\"\n", __FUNCTION__, name);
+					gi.Com_PrintFmt("{}: Entities override file written to: \"{}\"\n",
+						__FUNCTION__, override_name);
 				fclose(f);
 			}
-		} else {
-			//gi.Com_PrintFmt("{}: Entities override file not saved as file already exists: \"{}\"\n", __FUNCTION__, name);
 		}
 	}
-	// Save entity string into a std::string BEFORE FreeTags, because if an .ent
-	// override file was loaded, 'entities' points to TAG_LEVEL memory that will
-	// be freed. This copy ensures we have a safe copy for parsing later.
-	std::string saved_entstring(entities);
-	level.entstring = entities;
-//#endif
-	//ParseWorldEntityString(mapname, RS(RS_Q3A));
+
+	// Own and validate the final effective lump before any level allocation or
+	// entity is destroyed. The same exact bytes become the deterministic source
+	// for every match/round world reload.
+	std::string saved_entstring(entities ? entities : "");
+	const size_t reserved_slots =
+		static_cast<size_t>(game.maxclients) + BODY_QUEUE_SIZE;
+	const size_t definition_capacity =
+		static_cast<size_t>(game.maxentities) > reserved_slots
+			? static_cast<size_t>(game.maxentities) - reserved_slots
+			: 0;
+	// Only a real map owes us a complete world; a worldless state legitimately
+	// carries no entities and no start-item contract to honour.
+	if (map_has_world) {
+		const mm_entity_lump_validation_t validation =
+			MM_ValidateEntityLump(saved_entstring, definition_capacity);
+		if (!validation.valid) {
+			gi.Com_ErrorFmt("{}: invalid entity string for map \"{}\": {}.",
+				__FUNCTION__, mapname,
+				validation.error ? validation.error : "unknown error");
+		}
+		char invalid_start_item[MAX_TOKEN_CHARS];
+		if (!ValidateStartItems(invalid_start_item, sizeof(invalid_start_item))) {
+			gi.Com_ErrorFmt("Invalid g_start_item entry: {}\n", invalid_start_item);
+		}
+	}
+	item_inhibit_modes_t effective_item_inhibit_modes {};
+	if (has_mymap_modifier_modes)
+		effective_item_inhibit_modes = mymap_modifier_modes;
+
+	const size_t ent_lump_bytes = saved_entstring.size();
+	MuffModeLog("MAP", "SpawnEntities: phase=pre-reset map='%s' ent_lump_bytes=%zu",
+		mapname, ent_lump_bytes);
 
 	// clear cached indices
 	cached_soundindex::clear_all();
@@ -1309,40 +1542,63 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
 	if (skill->integer != skill_level)
 		gi.cvar_forceset("skill", G_Fmt("{}", skill_level).data());
 
+	// [MuffMode] Validate the final (possibly overridden) entity lump before
+	// freeing the previous level or spawning anything. Arena remains an
+	// ordinary effective FFA unless the complete RA2 map contract passes.
+	MM_Arena_PreflightMap(mapname, saved_entstring.c_str());
+
+	// A direct gamemap/map_restart can bypass normal Match_End. Close the old
+	// singleton rating lifecycle while its clients and reservations still exist;
+	// the no-contest hook is exact-once after an ordinary completed match.
+	MM_PlayerStats_OnMatchAbort();
 	SaveClientData();
 
-	// Dump client menu pointers BEFORE FreeTags to detect what will become stale
-	for (size_t dbg_i = 0; dbg_i < game.maxclients; dbg_i++) {
-		if (game.clients[dbg_i].menu)
-			MuffModeLog("DEBUG", "SpawnEntities: client %d has menu=%p BEFORE FreeTags",
-			           (int)dbg_i, (void*)game.clients[dbg_i].menu);
+	// Menus own TAG_LEVEL allocations; release them while their pointers are
+	// still valid rather than merely nulling dangling pointers after FreeTags.
+	const size_t client_slots = min({
+		static_cast<size_t>(game.maxclients),
+		static_cast<size_t>(game.maxentities > 0 ? game.maxentities - 1 : 0),
+		static_cast<size_t>(MAX_CLIENTS)
+	});
+	for (size_t i = 0; i < client_slots; i++) {
+		gentity_t *client_ent = &g_entities[i + 1];
+		client_ent->client = &game.clients[i];
+		if (client_ent->client->menu)
+			P_Menu_Close(client_ent);
 	}
 
+	Bot_ResetDebug();
+	// [MuffMode] Prop respawn records borrow TAG_LEVEL strings; retire them while
+	// those pointers are still valid.
+	MM_EntRespawn_ClearAll();
+	// [MuffMode] The next-map pick and the post-match awards reel keep their
+	// state module-side, so neither comes back cleared with level_locals_t.
+	MM_MapPick_Reset();
+	MM_Awards_Reset();
 	gi.FreeTags(TAG_LEVEL);
 
-	// After FreeTags, any TAG_LEVEL pointers in game.clients are now dangling.
-	// Null them out to prevent use-after-free.
-	for (size_t dbg_i = 0; dbg_i < game.maxclients; dbg_i++) {
-		if (game.clients[dbg_i].menu) {
-			MuffModeLog("DEBUG", "SpawnEntities: nulling stale menu pointer for client %d (was %p)",
-			           (int)dbg_i, (void*)game.clients[dbg_i].menu);
-			game.clients[dbg_i].menu = nullptr;
-			game.clients[dbg_i].inmenu = false;
-		}
-	}
-
-	// After FreeTags, 'entities' may be a dangling pointer if it was from an .ent file.
-	// Redirect it to our saved copy.
-	entities = saved_entstring.c_str();
-
-	// A plain memset here would zero std::string members' internal pointers
-	// without running their destructors first, leaking whatever heap buffer
-	// they held (notably level.entstring, the map's full entity-lump text).
-	level = {};
-	level.entstring = saved_entstring;
+	// Proper C++ reset: destroy and reconstruct the whole object instead of
+	// memset + partial placement-new, which leaked heap blocks on every gamemap.
+	// Avoid assigning from a value-initialized temporary: level_locals_t is large
+	// enough for that temporary to consume a significant fraction of the game
+	// thread's stack.
+	level.~level_locals_t();
+	new (&level) level_locals_t {};
+	level.entstring = std::move(saved_entstring);
+	entities = level.entstring.c_str();
 	MM_Ghost_ClearAll();
-	
-	memset(g_entities, 0, game.maxentities * sizeof(g_entities[0]));
+
+	MuffModeLog("MAP", "SpawnEntities: phase=reset-complete ent_lump_bytes=%zu",
+		level.entstring.size());
+
+	memset(g_entities, 0, game.maxentities * sizeof(g_entities[0])); // NOLINT(bugprone-undefined-memory-manipulation): engine-owned gentity_t slots are intentionally raw C ABI storage.
+
+	// The entity array is empty again, so its published high-water mark must be
+	// reset as well. Leaving the previous map's peak here makes the engine consume
+	// hundreds of zeroed entity states during the first reconnect snapshot; after
+	// a busy Horde map those stale slots can retain invalid renderer resources.
+	globals.num_entities = static_cast<uint32_t>(
+		min(static_cast<size_t>(game.maxclients) + 1, static_cast<size_t>(game.maxentities)));
 	
 	// all other flags are not important atm
 	globals.server_flags &= SERVER_FLAG_LOADING;
@@ -1356,8 +1612,9 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
 
 	level.is_n64 = strncmp(level.mapname, "q64/", 4) == 0;
 	
+	const int gametype_index = static_cast<int>(MM_CurrentGametype());
 	MuffModeLog("MAP", "Map name set: '%s' (is_n64=%d, gametype=%s)", 
-	           level.mapname, level.is_n64 ? 1 : 0, gt_short_name[g_gametype->integer]);
+	           level.mapname, level.is_n64 ? 1 : 0, gt_short_name[gametype_index]);
 
 	level.coop_scale_players = 0;
 	level.coop_health_scaling = clamp(g_coop_health_scaling->value, 0.f, 1.f);
@@ -1373,17 +1630,9 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
 		game.clients[i].eliminated = false;
 	}
 
-	// reserve some spots for dead player bodies for coop / deathmatch
-	InitBodyQue();
-
-	gentity_t *ent = nullptr;
-	int			inhibit = 0;
-	const char *com_token;
-	//const char *entities = level.entstring.c_str();
-
 	// Log entity string state before parsing
-	size_t ent_str_len = entities ? strlen(entities) : 0;
-	MuffModeLog("DEBUG", "SpawnEntities: entity string ptr=%p, len=%zu, first_32='%.32s'",
+	const size_t ent_str_len = level.entstring.size();
+	MuffModeLog("MAP", "SpawnEntities: phase=parse-begin ptr=%p len=%zu first_32='%.32s'",
 	           (void*)entities, ent_str_len, entities ? entities : "(null)");
 	if (ent_str_len > 0) {
 		// Log last 64 chars to see if string is truncated
@@ -1391,92 +1640,786 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
 		MuffModeLog("DEBUG", "SpawnEntities: entity string tail='%s'", entities + tail_start);
 	}
 
-	int ent_count = 0;
-
-	// parse entities
-	while (1) {
-		// parse the opening brace
-		com_token = COM_Parse(&entities);
-		if (!entities)
-			break;
-		if (com_token[0] != '{')
-			gi.Com_ErrorFmt("{}: Found \"{}\" when expecting {{ in entity string.\n", __FUNCTION__, com_token);
-
-		ent_count++;
-		if (!ent)
-			ent = g_entities;
-		else
-			ent = G_Spawn();
-		entities = ED_ParseEntity(entities, ent);
-
-		// nasty hacks time!
-		if (!strcmp(level.mapname, "bunk1")) {
-			if (!strcmp(ent->classname, "func_button") && !Q_strcasecmp(ent->model, "*36")) {
-				ent->wait = -1;
-			}
-		}
-
-		// remove things (except the world) from different skill levels or deathmatch
-		if (ent != g_entities) {
-			if (G_InhibitEntity(ent)) {
-				G_FreeEntity(ent);
-				inhibit++;
-				continue;
-			}
-
-			ent->spawnflags &= ~SPAWNFLAG_EDITOR_MASK;
-		}
-
-		if (!ent)
-			gi.Com_ErrorFmt("{}: Invalid or empty entity string.", __FUNCTION__);
-
-		// do this before calling the spawn function so it can be overridden.
-		ent->gravityVector = { 0.0, 0.0, -1.0 };
-
-		ED_CallSpawn(ent);
-
-		ent->s.renderfx |= RF_IR_VISIBLE;
+	// [MuffMode] A worldless state now holds a fully reset level with no entities
+	// and level.init still false, which is exactly what the engine expects while a
+	// demo or cinematic streams. There is no world left to rebuild from, so the
+	// match/round reload path must fall back until a real map loads again.
+	if (!map_has_world) {
+		cached_entity_item_inhibit_modes_valid = false;
+		cached_world_spawn_profile_valid = false;
+		MuffModeLog("MAP",
+			"SpawnEntities: phase=complete map='%s' worldless state; no entities spawned",
+			level.mapname);
+		MuffModeLog_Separator();
+		return;
 	}
 
-	if (inhibit && g_verbose->integer)
-		gi.Com_PrintFmt("{} entities inhibited.\n", inhibit);
+	// Publish the selected modes only once the matching map is committed to its
+	// entity spawn. Validation or preflight failures above leave no global state
+	// that a later map can inherit.
+	ApplyItemInhibitModes(effective_item_inhibit_modes);
+	const world_spawn_stats_t stats = SpawnCachedWorldEntities(true);
+	cached_entity_item_inhibit_modes = effective_item_inhibit_modes;
+	cached_entity_item_inhibit_modes_valid = true;
+	// Random-item selection consumes the one-shot MyMap flags. Reapply the
+	// effective map-load modes while recording the successful world's complete
+	// spawn profile, then retain the normal post-load flag behavior.
+	ApplyItemInhibitModes(effective_item_inhibit_modes);
+	cached_world_spawn_profile = CaptureWorldSpawnProfile();
+	cached_world_spawn_profile_valid = true;
+	if (deathmatch->integer)
+		MM_ClearItemInhibitFlags();
 
-	// precache start_items
-	PrecacheStartItems();
+	MuffModeLog("MAP",
+		"SpawnEntities: phase=parse-complete entities=%d inhibited=%d horde_anchors=%d num_entities=%u",
+		stats.entity_count, stats.inhibited, stats.horde_anchors_converted,
+		static_cast<unsigned>(globals.num_entities));
 
-	// precache player inventory items
-	PrecacheInventoryItems();
-
-	G_FindTeams();
-
-	QuadHog_SetupSpawn(5_sec);
-	Tech_SetupSpawn();
-
-	if (deathmatch->integer) {
-		if (g_dm_random_items->integer)
-			PrecacheForRandomRespawn();
-
-		game.item_inhibit_pu = 0;
-		game.item_inhibit_pa = 0;
-		game.item_inhibit_ht = 0;
-		game.item_inhibit_ar = 0;
-		game.item_inhibit_am = 0;
-		game.item_inhibit_wp = 0;
-	} else {
-		InitHintPaths(); // if there aren't hintpaths on this map, enable quick aborts
-	}
-
-	G_LocateSpawnSpots();
-	muffmode::combat_heatmap::ResetForNewLevel();
-
-	SetIntermissionPoint();
-
-	setup_shadow_lights();
-
-	level.init = true;
-	
-	MuffModeLog("MAP", "Map '%s' loaded successfully (entities spawned, init=true)", level.mapname);
+	MuffModeLog("MAP",
+		"SpawnEntities: phase=complete map='%s' entities=%d horde_anchors=%d init=true",
+		level.mapname, stats.entity_count, stats.horde_anchors_converted);
 	MuffModeLog_Separator();
+}
+
+namespace {
+
+struct world_reload_state_t {
+	bool in_frame = false;
+	gtime_t time;
+	gtime_t start_time;
+	gtime_t exit_time;
+	bool ready_to_exit = false;
+
+	std::array<char, MAX_QPATH> mapname {};
+	std::array<char, MAX_QPATH> nextmap {};
+	std::array<char, MAX_QPATH> forcemap {};
+	std::string changemap;
+	std::string entstring;
+
+	gtime_t intermission_time;
+	gtime_t intermission_queued;
+	bool intermission_exit = false;
+	bool intermission_eou = false;
+	bool intermission_clear = false;
+	bool intermission_fade = false;
+	bool intermission_fading = false;
+	gtime_t intermission_fade_time;
+	bool respawn_intermission = false;
+	int32_t intermission_server_frame = 0;
+
+	level_entry_t *entry = nullptr;
+	gentity_t *current_entity = nullptr;
+	gentity_t *disguise_violator = nullptr;
+	gtime_t disguise_violation_time;
+	gtime_t next_auto_save;
+	gtime_t next_match_report;
+
+	VoteStateData vote_state;
+	uint8_t num_connected_clients = 0;
+	uint8_t num_nonspectator_clients = 0;
+	uint8_t num_playing_clients = 0;
+	uint8_t num_playing_human_clients = 0;
+	std::array<int, MAX_CLIENTS> sorted_clients {};
+	uint8_t follow1 = 0;
+	uint8_t follow2 = 0;
+	int num_living_red = 0;
+	int num_eliminated_red = 0;
+	int num_living_blue = 0;
+	int num_eliminated_blue = 0;
+	int num_living_free = 0;
+	int num_playing_red = 0;
+	int num_playing_blue = 0;
+
+	std::array<int, TEAM_NUM_TEAMS> team_scores {};
+	std::array<int, TEAM_NUM_TEAMS> team_old_scores {};
+	match_state_t match_state = match_state_t::MATCH_NONE;
+	warmup_req_t warmup_requisite = warmup_req_t::WARMUP_REQ_NONE;
+	gtime_t warmup_notice_time;
+	gtime_t warmup_gametype_hud_time;
+	gtime_t match_time;
+	gtime_t match_start_time;
+	int match_state_queued = 0;
+	gtime_t match_state_timer;
+	int warmup_modification_count = 0;
+	gtime_t countdown_check;
+	gtime_t matchendwarn_check;
+	gtime_t match_cancel_delay_timer;
+
+	int round_number = 0;
+	uint32_t round_epoch = 0;
+	uint32_t world_epoch = 0;
+	round_state_t round_state = round_state_t::ROUND_NONE;
+	int round_state_queued = 0;
+	gtime_t round_state_timer;
+	bool restarted = false;
+	gtime_t overtime;
+	bool suddendeath = false;
+	gtime_t tied_overtime_start;
+	std::array<int, TEAM_NUM_TEAMS> count_living {};
+	std::array<int, TEAM_NUM_TEAMS> last_standing_count {};
+	std::array<bool, TEAM_NUM_TEAMS> locked {};
+	std::array<gentity_t *, TEAM_NUM_TEAMS> captain {};
+
+	gtime_t ctf_last_flag_capture;
+	team_t ctf_last_capture_team = TEAM_NONE;
+	std::array<ghost_t, MAX_CLIENTS> ghosts {};
+	gtime_t no_players_time;
+	int total_player_deaths = 0;
+
+	bool strike_red_attacks = false;
+	bool strike_flag_touch = false;
+	int8_t strike_turn = 0;
+
+	gtime_t timeout_in_place;
+	gentity_t *timeout_ent = nullptr;
+	bool timeout_auto = false;
+	bool timeout_resuming = false;
+	std::string match_id;
+	mm_match_overall_stats_t match;
+	std::array<bool, 3> frag_warning {};
+	bool prepare_to_fight = false;
+	std::array<char, 64> intermission_victor_msg {};
+
+	std::array<bool, MAX_CLIENTS> client_was_linked {};
+	std::array<int, MAX_CLIENTS> client_ghost_index {};
+};
+
+size_t ReloadClientSlotCount()
+{
+	if (game.maxentities <= 1)
+		return 0;
+	return min({
+		static_cast<size_t>(game.maxclients),
+		static_cast<size_t>(game.maxentities) - 1,
+		static_cast<size_t>(MAX_CLIENTS)
+	});
+}
+
+gentity_t *ReloadEntity(gentity_t *ent)
+{
+	if (!ent || !g_entities)
+		return nullptr;
+
+	const uintptr_t address = reinterpret_cast<uintptr_t>(ent);
+	const uintptr_t base = reinterpret_cast<uintptr_t>(g_entities);
+	if (address < base)
+		return nullptr;
+	const uintptr_t delta = address - base;
+	if (delta % sizeof(gentity_t))
+		return nullptr;
+
+	const size_t index = static_cast<size_t>(delta / sizeof(gentity_t));
+	return index < static_cast<size_t>(game.maxentities) ? &g_entities[index] : nullptr;
+}
+
+gentity_t *ReloadClientEntity(gentity_t *ent)
+{
+	ent = ReloadEntity(ent);
+	if (!ent)
+		return nullptr;
+
+	const size_t index = static_cast<size_t>(ent - g_entities);
+	return index >= 1 && index <= ReloadClientSlotCount() ? ent : nullptr;
+}
+
+gentity_t *ReloadDynamicEntity(gentity_t *ent)
+{
+	ent = ReloadEntity(ent);
+	if (!ent)
+		return nullptr;
+
+	const size_t index = static_cast<size_t>(ent - g_entities);
+	const size_t first_dynamic =
+		static_cast<size_t>(game.maxclients) + BODY_QUEUE_SIZE + 1;
+	return index >= first_dynamic ? ent : nullptr;
+}
+
+gclient_t *ReloadClient(gclient_t *client)
+{
+	if (!client || !game.clients)
+		return nullptr;
+
+	const uintptr_t address = reinterpret_cast<uintptr_t>(client);
+	const uintptr_t base = reinterpret_cast<uintptr_t>(game.clients);
+	if (address < base)
+		return nullptr;
+	const uintptr_t delta = address - base;
+	if (delta % sizeof(gclient_t))
+		return nullptr;
+
+	const size_t index = static_cast<size_t>(delta / sizeof(gclient_t));
+	return index < ReloadClientSlotCount() ? &game.clients[index] : nullptr;
+}
+
+int ReloadGhostIndex(const ghost_t *ghost)
+{
+	if (!ghost)
+		return -1;
+
+	const uintptr_t address = reinterpret_cast<uintptr_t>(ghost);
+	const uintptr_t base = reinterpret_cast<uintptr_t>(&level.ghosts[0]);
+	if (address < base)
+		return -1;
+	const uintptr_t delta = address - base;
+	if (delta % sizeof(ghost_t))
+		return -1;
+
+	const size_t index = static_cast<size_t>(delta / sizeof(ghost_t));
+	return index < std::size(level.ghosts) ? static_cast<int>(index) : -1;
+}
+
+std::unique_ptr<world_reload_state_t> CaptureWorldReloadState()
+{
+	auto state = std::make_unique<world_reload_state_t>();
+	state->client_ghost_index.fill(-1);
+
+	state->in_frame = level.in_frame;
+	state->time = level.time;
+	state->start_time = level.start_time;
+	state->exit_time = level.exit_time;
+	state->ready_to_exit = level.ready_to_exit;
+	Q_strlcpy(state->mapname.data(), level.mapname, state->mapname.size());
+	Q_strlcpy(state->nextmap.data(), level.nextmap, state->nextmap.size());
+	Q_strlcpy(state->forcemap.data(), level.forcemap, state->forcemap.size());
+	if (level.changemap)
+		state->changemap = level.changemap;
+	state->entstring = level.entstring;
+
+	state->intermission_time = level.intermission_time;
+	state->intermission_queued = level.intermission_queued;
+	state->intermission_exit = level.intermission_exit;
+	state->intermission_eou = level.intermission_eou;
+	state->intermission_clear = level.intermission_clear;
+	state->intermission_fade = level.intermission_fade;
+	state->intermission_fading = level.intermission_fading;
+	state->intermission_fade_time = level.intermission_fade_time;
+	state->respawn_intermission = level.respawn_intermission;
+	state->intermission_server_frame = level.intermission_server_frame;
+
+	state->entry = level.entry;
+	state->current_entity = ReloadClientEntity(level.current_entity);
+	state->disguise_violator = ReloadClientEntity(level.disguise_violator);
+	state->disguise_violation_time = level.disguise_violation_time;
+	state->next_auto_save = level.next_auto_save;
+	state->next_match_report = level.next_match_report;
+
+	state->vote_state = level.vote_state;
+	state->vote_state.caller = ReloadClient(state->vote_state.caller);
+	state->num_connected_clients = level.num_connected_clients;
+	state->num_nonspectator_clients = level.num_nonspectator_clients;
+	state->num_playing_clients = level.num_playing_clients;
+	state->num_playing_human_clients = level.num_playing_human_clients;
+	std::copy(std::begin(level.sorted_clients), std::end(level.sorted_clients),
+		state->sorted_clients.begin());
+	state->follow1 = level.follow1;
+	state->follow2 = level.follow2;
+	state->num_living_red = level.num_living_red;
+	state->num_eliminated_red = level.num_eliminated_red;
+	state->num_living_blue = level.num_living_blue;
+	state->num_eliminated_blue = level.num_eliminated_blue;
+	state->num_living_free = level.num_living_free;
+	state->num_playing_red = level.num_playing_red;
+	state->num_playing_blue = level.num_playing_blue;
+
+	std::copy(std::begin(level.team_scores), std::end(level.team_scores),
+		state->team_scores.begin());
+	std::copy(std::begin(level.team_old_scores), std::end(level.team_old_scores),
+		state->team_old_scores.begin());
+	state->match_state = level.match_state;
+	state->warmup_requisite = level.warmup_requisite;
+	state->warmup_notice_time = level.warmup_notice_time;
+	state->warmup_gametype_hud_time = level.warmup_gametype_hud_time;
+	state->match_time = level.match_time;
+	state->match_start_time = level.match_start_time;
+	state->match_state_queued = level.match_state_queued;
+	state->match_state_timer = level.match_state_timer;
+	state->warmup_modification_count = level.warmup_modification_count;
+	state->countdown_check = level.countdown_check;
+	state->matchendwarn_check = level.matchendwarn_check;
+	state->match_cancel_delay_timer = level.match_cancel_delay_timer;
+
+	state->round_number = level.round_number;
+	state->round_epoch = level.round_epoch;
+	state->world_epoch = level.world_epoch;
+	state->round_state = level.round_state;
+	state->round_state_queued = level.round_state_queued;
+	state->round_state_timer = level.round_state_timer;
+	state->restarted = level.restarted;
+	state->overtime = level.overtime;
+	state->suddendeath = level.suddendeath;
+	state->tied_overtime_start = level.tied_overtime_start;
+	std::copy(std::begin(level.count_living), std::end(level.count_living),
+		state->count_living.begin());
+	std::copy(std::begin(level.last_standing_count), std::end(level.last_standing_count),
+		state->last_standing_count.begin());
+	std::copy(std::begin(level.locked), std::end(level.locked), state->locked.begin());
+	for (size_t i = 0; i < state->captain.size(); i++)
+		state->captain[i] = ReloadClientEntity(level.captain[i]);
+
+	state->ctf_last_flag_capture = level.ctf_last_flag_capture;
+	state->ctf_last_capture_team = level.ctf_last_capture_team;
+	std::copy(std::begin(level.ghosts), std::end(level.ghosts), state->ghosts.begin());
+	for (ghost_t &ghost : state->ghosts)
+		ghost.ent = ReloadClientEntity(ghost.ent);
+	state->no_players_time = level.no_players_time;
+	state->total_player_deaths = level.total_player_deaths;
+
+	state->strike_red_attacks = level.strike_red_attacks;
+	state->strike_flag_touch = level.strike_flag_touch;
+	state->strike_turn = level.strike_turn;
+	state->timeout_in_place = level.timeout_in_place;
+	state->timeout_ent = ReloadClientEntity(level.timeout_ent);
+	state->timeout_auto = level.timeout_auto;
+	state->timeout_resuming = level.timeout_resuming;
+	state->match_id = level.match_id;
+	state->match = level.match;
+	std::copy(std::begin(level.frag_warning), std::end(level.frag_warning),
+		state->frag_warning.begin());
+	state->prepare_to_fight = level.prepare_to_fight;
+	std::copy(std::begin(level.intermission_victor_msg),
+		std::end(level.intermission_victor_msg),
+		state->intermission_victor_msg.begin());
+
+	for (size_t i = 0; i < ReloadClientSlotCount(); i++)
+		state->client_ghost_index[i] = ReloadGhostIndex(game.clients[i].resp.ghost);
+
+	return state;
+}
+
+void RestoreWorldReloadState(world_reload_state_t &state)
+{
+	level.in_frame = state.in_frame;
+	level.time = state.time;
+	level.start_time = state.start_time;
+	level.exit_time = state.exit_time;
+	level.ready_to_exit = state.ready_to_exit;
+	Q_strlcpy(level.mapname, state.mapname.data(), sizeof(level.mapname));
+	Q_strlcpy(level.nextmap, state.nextmap.data(), sizeof(level.nextmap));
+	Q_strlcpy(level.forcemap, state.forcemap.data(), sizeof(level.forcemap));
+	if (!state.changemap.empty())
+		level.changemap = G_CopyString(state.changemap.c_str(), TAG_LEVEL);
+	level.entstring = std::move(state.entstring);
+
+	level.intermission_time = state.intermission_time;
+	level.intermission_queued = state.intermission_queued;
+	level.intermission_exit = state.intermission_exit;
+	level.intermission_eou = state.intermission_eou;
+	level.intermission_clear = state.intermission_clear;
+	level.intermission_fade = state.intermission_fade;
+	level.intermission_fading = state.intermission_fading;
+	level.intermission_fade_time = state.intermission_fade_time;
+	level.respawn_intermission = state.respawn_intermission;
+	level.intermission_server_frame = state.intermission_server_frame;
+
+	level.entry = state.entry;
+	level.current_entity = state.current_entity;
+	level.disguise_violator = state.disguise_violator;
+	level.disguise_violation_time = state.disguise_violation_time;
+	level.next_auto_save = state.next_auto_save;
+	level.next_match_report = state.next_match_report;
+
+	level.vote_state = std::move(state.vote_state);
+	level.num_connected_clients = state.num_connected_clients;
+	level.num_nonspectator_clients = state.num_nonspectator_clients;
+	level.num_playing_clients = state.num_playing_clients;
+	level.num_playing_human_clients = state.num_playing_human_clients;
+	std::copy(state.sorted_clients.begin(), state.sorted_clients.end(),
+		std::begin(level.sorted_clients));
+	level.follow1 = state.follow1;
+	level.follow2 = state.follow2;
+	level.num_living_red = state.num_living_red;
+	level.num_eliminated_red = state.num_eliminated_red;
+	level.num_living_blue = state.num_living_blue;
+	level.num_eliminated_blue = state.num_eliminated_blue;
+	level.num_living_free = state.num_living_free;
+	level.num_playing_red = state.num_playing_red;
+	level.num_playing_blue = state.num_playing_blue;
+
+	std::copy(state.team_scores.begin(), state.team_scores.end(),
+		std::begin(level.team_scores));
+	std::copy(state.team_old_scores.begin(), state.team_old_scores.end(),
+		std::begin(level.team_old_scores));
+	level.match_state = state.match_state;
+	level.warmup_requisite = state.warmup_requisite;
+	level.warmup_notice_time = state.warmup_notice_time;
+	level.warmup_gametype_hud_time = state.warmup_gametype_hud_time;
+	level.match_time = state.match_time;
+	level.match_start_time = state.match_start_time;
+	level.match_state_queued = state.match_state_queued;
+	level.match_state_timer = state.match_state_timer;
+	level.warmup_modification_count = state.warmup_modification_count;
+	level.countdown_check = state.countdown_check;
+	level.matchendwarn_check = state.matchendwarn_check;
+	level.match_cancel_delay_timer = state.match_cancel_delay_timer;
+
+	level.round_number = state.round_number;
+	level.round_epoch = state.round_epoch;
+	level.world_epoch = state.world_epoch;
+	level.round_state = state.round_state;
+	level.round_state_queued = state.round_state_queued;
+	level.round_state_timer = state.round_state_timer;
+	level.restarted = state.restarted;
+	level.overtime = state.overtime;
+	level.suddendeath = state.suddendeath;
+	level.tied_overtime_start = state.tied_overtime_start;
+	std::copy(state.count_living.begin(), state.count_living.end(),
+		std::begin(level.count_living));
+	std::copy(state.last_standing_count.begin(), state.last_standing_count.end(),
+		std::begin(level.last_standing_count));
+	std::copy(state.locked.begin(), state.locked.end(), std::begin(level.locked));
+	std::copy(state.captain.begin(), state.captain.end(), std::begin(level.captain));
+
+	level.ctf_last_flag_capture = state.ctf_last_flag_capture;
+	level.ctf_last_capture_team = state.ctf_last_capture_team;
+	std::copy(state.ghosts.begin(), state.ghosts.end(), std::begin(level.ghosts));
+	level.no_players_time = state.no_players_time;
+
+	level.strike_red_attacks = state.strike_red_attacks;
+	level.strike_flag_touch = state.strike_flag_touch;
+	level.strike_turn = state.strike_turn;
+	level.timeout_in_place = state.timeout_in_place;
+	level.timeout_ent = state.timeout_ent;
+	level.timeout_auto = state.timeout_auto;
+	level.timeout_resuming = state.timeout_resuming;
+	level.match_id = std::move(state.match_id);
+	level.match = std::move(state.match);
+	std::copy(state.frag_warning.begin(), state.frag_warning.end(),
+		std::begin(level.frag_warning));
+	level.prepare_to_fight = state.prepare_to_fight;
+	std::copy(state.intermission_victor_msg.begin(),
+		state.intermission_victor_msg.end(),
+		std::begin(level.intermission_victor_msg));
+}
+
+void PrepareClientsForWorldReload(world_reload_state_t &state)
+{
+	const size_t client_slots = ReloadClientSlotCount();
+	for (size_t i = 0; i < client_slots; i++) {
+		gentity_t *ent = &g_entities[i + 1];
+		gclient_t *client = &game.clients[i];
+		ent->client = client;
+		state.client_was_linked[i] = ent->linked;
+		client->follow_queued_target = ReloadClientEntity(client->follow_queued_target);
+		client->follow_target = ReloadClientEntity(client->follow_target);
+
+		if (client->menu)
+			P_Menu_Close(ent);
+
+		// These helpers dereference their owned entities, so first prove that
+		// each pointer still names its expected dynamic entity. Then release it
+		// before any slot can be reused by a freshly parsed map entity.
+		gentity_t *grapple = ReloadDynamicEntity(client->grapple_ent);
+		if (grapple && grapple->inuse && grapple->owner == ent &&
+			grapple->count == ent->spawn_count) {
+			client->grapple_ent = grapple;
+			Weapon_Grapple_DoReset(client);
+		} else {
+			client->grapple_ent = nullptr;
+		}
+		if (client->owned_sphere) {
+			gentity_t *sphere = ReloadDynamicEntity(client->owned_sphere);
+			if (sphere && sphere->inuse &&
+				sphere->spawn_count == client->owned_sphere_generation &&
+				sphere->owner == ent && sphere->count == ent->spawn_count &&
+				sphere->classname && !strcmp(sphere->classname, "sphere"))
+				G_FreeEntity(sphere);
+			G_ClearOwnedSphere(client);
+		}
+
+		client->grapple_ent = nullptr;
+		client->grapple_state = GRAPPLE_STATE_FLY;
+		client->grapple_release_time = level.time + 1_sec;
+		client->trail_head = nullptr;
+		client->trail_tail = nullptr;
+		client->landmark_name = nullptr;
+		client->oldgroundentity = nullptr;
+		client->sight_entity = nullptr;
+		client->sound_entity = nullptr;
+		client->sound2_entity = nullptr;
+		client->tracker_pain_time = 0_ms;
+		G_ClearLagCompensationHistory(ent);
+
+		ent->owner = ReloadClientEntity(ent->owner);
+		ent->flags &= ~FL_NO_KNOCKBACK;
+		ent->target_ent = ReloadClientEntity(ent->target_ent);
+		ent->goalentity = ReloadClientEntity(ent->goalentity);
+		ent->movetarget = ReloadClientEntity(ent->movetarget);
+		ent->chain = ReloadClientEntity(ent->chain);
+		ent->enemy = ReloadClientEntity(ent->enemy);
+		ent->oldenemy = ReloadClientEntity(ent->oldenemy);
+		ent->activator = ReloadClientEntity(ent->activator);
+		ent->groundentity = nullptr;
+		ent->groundentity_linkcount = 0;
+		ent->teamchain = ReloadClientEntity(ent->teamchain);
+		ent->teammaster = ReloadClientEntity(ent->teammaster);
+		ent->mynoise = nullptr;
+		ent->mynoise2 = nullptr;
+		ent->bad_area = nullptr;
+		ent->hint_chain = nullptr;
+		ent->monster_hint_chain = nullptr;
+		ent->target_hint_chain = nullptr;
+		ent->beam = nullptr;
+		ent->beam2 = nullptr;
+		ent->proboscus = nullptr;
+		ent->disintegrator = nullptr;
+		ent->disintegrator_time = 0_ms;
+		ent->monsterinfo.damage_attacker = nullptr;
+		ent->monsterinfo.damage_inflictor = nullptr;
+		ent->monsterinfo.damage_blood = 0;
+		ent->monsterinfo.damage_knockback = 0;
+		ent->monsterinfo.damage_from = {};
+		ent->monsterinfo.damage_mod = MOD_UNKNOWN;
+
+		ent->model = ent->inuse ? "players/male/tris.md2" : nullptr;
+		ent->message = nullptr;
+		ent->target = nullptr;
+		ent->targetname = nullptr;
+		ent->killtarget = nullptr;
+		ent->team = nullptr;
+		ent->pathtarget = nullptr;
+		ent->deathtarget = nullptr;
+		ent->healthtarget = nullptr;
+		ent->itemtarget = nullptr;
+		ent->combattarget = nullptr;
+		ent->map = nullptr;
+		ent->item = nullptr;
+		ent->style_on = nullptr;
+		ent->style_off = nullptr;
+		ent->gametype = nullptr;
+		ent->not_gametype = nullptr;
+		ent->notteam = nullptr;
+		ent->notfree = nullptr;
+		ent->notq2 = nullptr;
+		ent->notq3a = nullptr;
+		ent->notarena = nullptr;
+		ent->ruleset = nullptr;
+		ent->not_ruleset = nullptr;
+		ent->powerups_on = nullptr;
+		ent->powerups_off = nullptr;
+		ent->bfg_on = nullptr;
+		ent->bfg_off = nullptr;
+		ent->plasmabeam_on = nullptr;
+		ent->plasmabeam_off = nullptr;
+		ent->sv.enemy = ReloadClientEntity(ent->sv.enemy);
+		ent->sv.ground_entity = nullptr;
+		ent->sv.classname = ent->classname;
+		ent->sv.targetname = nullptr;
+
+		if (ent->linked)
+			gi.unlinkentity(ent);
+	}
+}
+
+void ClearWorldEntitySlots()
+{
+	const size_t max_entities = static_cast<size_t>(game.maxentities);
+	const size_t first_nonclient = min(
+		static_cast<size_t>(game.maxclients) + 1, max_entities);
+
+	for (size_t i = 0; i < max_entities; i++) {
+		if (i > 0 && i < first_nonclient)
+			continue;
+
+		gentity_t *ent = &g_entities[i];
+		const bool occupied = ent->inuse;
+		if (ent->linked)
+			gi.unlinkentity(ent);
+		if (occupied &&
+			i > static_cast<size_t>(game.maxclients) + BODY_QUEUE_SIZE)
+			gi.Bot_UnRegisterEntity(ent);
+
+		const int32_t generation = occupied
+			? MM_NextEntityGeneration(ent->spawn_count)
+			: ent->spawn_count;
+		memset(ent, 0, sizeof(*ent)); // NOLINT(bugprone-undefined-memory-manipulation): engine-owned gentity_t slots are intentionally raw C ABI storage.
+		ent->s.number = static_cast<int32_t>(i);
+		ent->spawn_count = generation;
+		ent->classname = "freed";
+	}
+}
+
+} // namespace
+
+/*
+=============
+G_ResetWorldEntitiesFromSavedString
+
+Rebuilds map-owned entities from the exact effective lump captured at map load
+while retaining client slots and match/session state.
+=============
+*/
+world_entity_reload_result_t G_ResetWorldEntitiesFromSavedString()
+{
+	static bool reload_in_progress = false;
+	if (reload_in_progress)
+		return world_entity_reload_result_t::already_in_progress;
+	if (!deathmatch->integer || !level.init)
+		return world_entity_reload_result_t::fallback_allowed;
+	// Arena has its own room lifecycle and a preflight contract that is consumed
+	// during true map initialization. It deliberately remains on its established
+	// reset path rather than rebuilding selectors mid-session.
+	if (GT(GT_ARENA))
+		return world_entity_reload_result_t::fallback_allowed;
+	if (game.maxclients > MAX_CLIENTS ||
+		static_cast<size_t>(game.maxclients) + BODY_QUEUE_SIZE + 1 >
+			static_cast<size_t>(game.maxentities)) {
+		gi.Com_Print("Entity reload skipped: invalid client/entity slot layout; using legacy reset.\n");
+		return world_entity_reload_result_t::fallback_allowed;
+	}
+
+	const size_t reserved_slots =
+		static_cast<size_t>(game.maxclients) + BODY_QUEUE_SIZE;
+	const size_t definition_capacity =
+		static_cast<size_t>(game.maxentities) > reserved_slots
+			? static_cast<size_t>(game.maxentities) - reserved_slots
+			: 0;
+	const mm_entity_lump_validation_t validation =
+		MM_ValidateEntityLump(level.entstring, definition_capacity);
+	if (!validation.valid) {
+		gi.Com_PrintFmt(
+			"Entity reload skipped: cached entity string is invalid ({}); using legacy reset.\n",
+			validation.error ? validation.error : "unknown error");
+		return world_entity_reload_result_t::fallback_allowed;
+	}
+	if (!cached_entity_item_inhibit_modes_valid) {
+		gi.Com_Print(
+			"Entity reload skipped: map item-filter state is unavailable; using legacy reset.\n");
+		return world_entity_reload_result_t::fallback_allowed;
+	}
+	if (!cached_world_spawn_profile_valid) {
+		gi.Com_Print(
+			"Entity reload skipped: map spawn profile is unavailable; using legacy reset.\n");
+		return world_entity_reload_result_t::fallback_allowed;
+	}
+	if (cached_world_spawn_profile.random_items || g_dm_random_items->integer) {
+		// Random substitution deliberately consumes fresh RNG and can change
+		// whether an authored definition survives its final disable/replacement
+		// checks. Keep this mode on the non-destructive established reset path
+		// instead of claiming a reload has deterministic capacity.
+		gi.Com_Print(
+			"Entity reload skipped: random-item mode requires the legacy reset.\n");
+		return world_entity_reload_result_t::fallback_allowed;
+	}
+	char invalid_start_item[MAX_TOKEN_CHARS];
+	if (!ValidateStartItems(invalid_start_item, sizeof(invalid_start_item))) {
+		gi.Com_PrintFmt(
+			"Entity reload skipped: invalid g_start_item entry \"{}\"; using legacy reset.\n",
+			invalid_start_item);
+		return world_entity_reload_result_t::fallback_allowed;
+	}
+
+	// Parsing invokes helper-producing spawn functions. Only repeat the cached
+	// lump when all mutable inputs that can alter that topology still match the
+	// profile which successfully built the current map. This check happens
+	// before snapshotting clients or tearing down a single live entity.
+	const item_inhibit_modes_t pending_item_inhibit_modes =
+		CaptureItemInhibitModes();
+	world_spawn_profile_t current_spawn_profile;
+	try {
+		struct profile_probe_scope_t {
+			item_inhibit_modes_t item_modes;
+			ruleset_t ruleset;
+			~profile_probe_scope_t() {
+				ApplyItemInhibitModes(item_modes);
+				game.ruleset = ruleset;
+			}
+		} restore {
+			pending_item_inhibit_modes,
+			game.ruleset
+		};
+
+		ApplyItemInhibitModes(cached_entity_item_inhibit_modes);
+		// SP_worldspawn will resolve this same cached result when the authored
+		// lump and configured g_ruleset are unchanged.
+		game.ruleset = cached_world_spawn_profile.ruleset;
+		current_spawn_profile = CaptureWorldSpawnProfile();
+	} catch (const std::bad_alloc &) {
+		gi.Com_Print(
+			"Entity reload skipped: unable to inspect map spawn profile; using legacy reset.\n");
+		return world_entity_reload_result_t::fallback_allowed;
+	}
+	if (!WorldSpawnProfilesMatch(
+			cached_world_spawn_profile, current_spawn_profile)) {
+		gi.Com_Print(
+			"Entity reload skipped: map spawn rules changed since load; using legacy reset.\n");
+		return world_entity_reload_result_t::fallback_allowed;
+	}
+
+	std::unique_ptr<world_reload_state_t> state;
+	try {
+		state = CaptureWorldReloadState();
+	} catch (const std::bad_alloc &) {
+		gi.Com_Print("Entity reload skipped: unable to snapshot live match state; using legacy reset.\n");
+		return world_entity_reload_result_t::fallback_allowed;
+	}
+	reload_in_progress = true;
+	struct reload_scope_t {
+		bool &active;
+		~reload_scope_t() { active = false; }
+	} reload_scope { reload_in_progress };
+
+	const auto saved_server_flags = globals.server_flags;
+	globals.server_flags |= SERVER_FLAG_LOADING;
+
+	Bot_ResetDebug();
+	PrepareClientsForWorldReload(*state);
+	ClearWorldEntitySlots();
+	// [MuffMode] The lump is about to recreate every prop, so any queued rebuild is
+	// now a duplicate. Drop the records before their TAG_LEVEL strings go away.
+	MM_EntRespawn_ClearAll();
+	// [MuffMode] The next-map pick and the post-match awards reel keep their
+	// state module-side, so neither comes back cleared with level_locals_t.
+	MM_MapPick_Reset();
+	MM_Awards_Reset();
+	gi.FreeTags(TAG_LEVEL);
+
+	level.~level_locals_t();
+	new (&level) level_locals_t {};
+	RestoreWorldReloadState(*state);
+
+	level.is_n64 = strncmp(level.mapname, "q64/", 4) == 0;
+	level.coop_scale_players = 0;
+	level.coop_health_scaling = clamp(g_coop_health_scaling->value, 0.f, 1.f);
+	globals.num_entities = static_cast<uint32_t>(
+		min(static_cast<size_t>(game.maxclients) + 1,
+			static_cast<size_t>(game.maxentities)));
+
+	// MyMap item filters are one-shot map-load inputs. Reapply the exact modes
+	// that built this world, then restore any modifiers queued for a future map.
+	ApplyItemInhibitModes(cached_entity_item_inhibit_modes);
+	const world_spawn_stats_t stats = SpawnCachedWorldEntities(false);
+	ApplyItemInhibitModes(pending_item_inhibit_modes);
+	// trigger_deathcount is a spawn-time map trigger. Rebuild it against the
+	// same zero-death baseline as a true map load, then put the live match
+	// counter back once every map entity and delayed target has been recreated.
+	level.total_player_deaths = state->total_player_deaths;
+
+	// Worldspawn owns the map default, but an in-progress vote or server command
+	// may have changed the live rotation target. Keep that runtime decision.
+	Q_strlcpy(level.nextmap, state->nextmap.data(), sizeof(level.nextmap));
+	Q_strlcpy(level.forcemap, state->forcemap.data(), sizeof(level.forcemap));
+
+	for (size_t i = 0; i < ReloadClientSlotCount(); i++) {
+		gentity_t *ent = &g_entities[i + 1];
+		ent->client = &game.clients[i];
+		ent->s.number = static_cast<int32_t>(i + 1);
+
+		const int ghost_index = state->client_ghost_index[i];
+		game.clients[i].resp.ghost =
+			ghost_index >= 0 && ghost_index < static_cast<int>(std::size(level.ghosts))
+				? &level.ghosts[ghost_index]
+				: nullptr;
+
+		if (state->client_was_linked[i] && ent->inuse)
+			gi.linkentity(ent);
+	}
+
+	globals.server_flags = saved_server_flags;
+	MuffModeLog("MATCH",
+		"Entity reload complete: definitions=%d inhibited=%d horde_anchors=%d live_entities=%u",
+		stats.entity_count, stats.inhibited, stats.horde_anchors_converted,
+		static_cast<unsigned>(globals.num_entities));
+	return world_entity_reload_result_t::reloaded;
 }
 
 //===================================================================
@@ -1555,10 +2498,12 @@ void SP_worldspawn(gentity_t *ent) {
 		game.ruleset = RS_IndexFromString(st.ruleset);
 		gi.Com_PrintFmt("st={} game={}\n", st.ruleset, rs_long_name[(int)game.ruleset]);
 		if (!game.ruleset)
-			game.ruleset = (ruleset_t)clamp(g_ruleset->integer, 1, (int)RS_NUM_RULESETS);
+			game.ruleset = static_cast<ruleset_t>(
+				ClampPlayableRulesetIndex(g_ruleset->integer));
 	} else
 		if ((int)game.ruleset != g_ruleset->integer)
-			game.ruleset = (ruleset_t)clamp(g_ruleset->integer, 1, (int)RS_NUM_RULESETS);
+			game.ruleset = static_cast<ruleset_t>(
+				ClampPlayableRulesetIndex(g_ruleset->integer));
 
 	if (st.sky && st.sky[0])
 		gi.configstring(CS_SKY, st.sky);
@@ -1645,16 +2590,15 @@ void SP_worldspawn(gentity_t *ent) {
 
 	PrecacheItem(GetItemByIndex(IT_COMPASS));
 
-	if (!(g_instagib->integer || GT(GT_INSTAGIB)) && !(g_nadefest->integer || GT(GT_NADEFEST)))
+	if (ShouldPrecacheBlaster())
 		PrecacheItem(GetItemByIndex(IT_WEAPON_BLASTER));
 
 	// Horde can start players on the chainfist; precache it so the vwep model/sounds exist.
-	if (GT(GT_HORDE) && g_horde_start_chainsaw->integer)
+	if (ShouldPrecacheHordeChainfist())
 		PrecacheItem(GetItemByIndex(IT_WEAPON_CHAINFIST));
 
-	if ((!strcmp(g_allow_grapple->string, "auto")) ?
-		(GTF(GTF_CTF) ? !level.no_grapple : 0) :
-		g_allow_grapple->integer) {
+	// [MuffMode] Arena rooms can enable the grapple independently of the global cvar.
+	if (ShouldPrecacheGrapple()) {
 		PrecacheItem(GetItemByIndex(IT_WEAPON_GRAPPLE));
 	}
 

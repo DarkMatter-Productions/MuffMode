@@ -8,6 +8,22 @@ void train_piece_wait(gentity_t *self);
 
 namespace {
 
+gentity_t *ResolveTrainCorner(gentity_t *self)
+{
+	if (!self || !self->target_ent)
+		return nullptr;
+	gentity_t *const corner = self->target_ent;
+	if (!corner->inuse || (self->target_ent_generation &&
+		corner->spawn_count != self->target_ent_generation)) {
+		self->target_ent = nullptr;
+		self->target_ent_generation = 0;
+		return nullptr;
+	}
+	if (!self->target_ent_generation)
+		self->target_ent_generation = corner->spawn_count;
+	return corner;
+}
+
 constexpr spawnflags_t SPAWNFLAG_TRAIN_TOGGLE = 2_spawnflag;
 constexpr spawnflags_t SPAWNFLAG_TRAIN_BLOCK_STOPS = 4_spawnflag;
 constexpr spawnflags_t SPAWNFLAG_TRAIN_FIX_OFFSET = 16_spawnflag;
@@ -109,16 +125,28 @@ MOVEINFO_BLOCKED(train_blocked) (gentity_t *self, gentity_t *other) -> void {
 }
 
 MOVEINFO_ENDFUNC(train_wait) (gentity_t *self) -> void {
-	if (self->target_ent->pathtarget) {
-		gentity_t *ent = self->target_ent;
+	gentity_t *const current_corner = ResolveTrainCorner(self);
+	if (!current_corner) {
+		// The path corner can be removed by a target while the train is in
+		// flight. Stop cleanly instead of following a retired entity slot.
+		self->s.sound = 0;
+		self->velocity = {};
+		self->nextthink = 0_ms;
+		self->spawnflags &= ~SPAWNFLAG_TRAIN_START_ON;
+		return;
+	}
+	if (current_corner->pathtarget) {
+		gentity_t *ent = current_corner;
 		const char *savetarget = ent->target;
+		const int32_t self_generation = self->spawn_count;
 
 		ent->target = ent->pathtarget;
-		G_UseTargets(ent, self->activator);
+		if (!G_UseTargets(ent, self->activator))
+			return;
 		ent->target = savetarget;
 
 		// make sure we didn't get killed by a killtarget
-		if (!self->inuse)
+		if (!self->inuse || self->spawn_count != self_generation)
 			return;
 	}
 
@@ -128,6 +156,7 @@ MOVEINFO_ENDFUNC(train_wait) (gentity_t *self) -> void {
 			self->think = train_next;
 		} else if (self->spawnflags.has(SPAWNFLAG_TRAIN_TOGGLE)) {
 			self->target_ent = nullptr;
+			self->target_ent_generation = 0;
 			self->spawnflags &= ~SPAWNFLAG_TRAIN_START_ON;
 			self->velocity = {};
 			self->nextthink = 0_ms;
@@ -182,6 +211,7 @@ again:
 
 	self->moveinfo.wait = ent->wait;
 	self->target_ent = ent;
+	self->target_ent_generation = ent->spawn_count;
 
 	if (!(self->flags & FL_TEAMSLAVE)) {
 		if (self->moveinfo.sound_start)
@@ -194,7 +224,10 @@ again:
 }
 
 static void train_resume(gentity_t *self) {
-	const vec3_t dest = TrainDestinationFor(self, self->target_ent);
+	gentity_t *const corner = ResolveTrainCorner(self);
+	if (!corner)
+		return;
+	const vec3_t dest = TrainDestinationFor(self, corner);
 	StartTrainMove(self, dest, train_wait);
 }
 
@@ -236,7 +269,7 @@ USE(train_use) (gentity_t *self, gentity_t *other, gentity_t *activator) -> void
 		self->velocity = {};
 		self->nextthink = 0_ms;
 	} else {
-		if (self->target_ent)
+		if (ResolveTrainCorner(self))
 			train_resume(self);
 		else
 			train_next(self);
@@ -316,6 +349,7 @@ static USE(trigger_elevator_use) (gentity_t *self, gentity_t *other, gentity_t *
 	}
 
 	self->movetarget->target_ent = target;
+	self->movetarget->target_ent_generation = target->spawn_count;
 	train_resume(self->movetarget);
 }
 
@@ -360,7 +394,8 @@ so, the basic time between firing is a random time between
 These can used but not touched.
 */
 static THINK(func_timer_think) (gentity_t *self) -> void {
-	G_UseTargets(self, self->activator);
+	if (!G_UseTargets(self, self->activator))
+		return;
 	self->nextthink = level.time + gtime_t::from_sec(self->wait + crandom() * self->random);
 }
 
