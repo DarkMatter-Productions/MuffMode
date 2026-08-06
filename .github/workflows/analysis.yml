@@ -34,7 +34,7 @@ jobs:
             vcpkg/downloads
             vcpkg/buildtrees
             vcpkg/packages
-          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'scripts/ci/setup-vcpkg.ps1') }}
           restore-keys: vcpkg-${{ runner.os }}-
 
       - name: Setup vcpkg
@@ -122,7 +122,7 @@ jobs:
             vcpkg/downloads
             vcpkg/buildtrees
             vcpkg/packages
-          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'scripts/ci/setup-vcpkg.ps1') }}
           restore-keys: vcpkg-${{ runner.os }}-
 
       - name: Setup vcpkg
@@ -184,7 +184,7 @@ jobs:
             vcpkg/downloads
             vcpkg/buildtrees
             vcpkg/packages
-          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'scripts/ci/setup-vcpkg.ps1') }}
           restore-keys: vcpkg-${{ runner.os }}-
 
       - name: Setup vcpkg

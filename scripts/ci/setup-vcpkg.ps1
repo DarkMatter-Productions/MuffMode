@@ -31,11 +31,13 @@ function Ensure-VcpkgCheckout {
     )
 
     $vcpkgRepository = "https://github.com/microsoft/vcpkg.git"
+    $createdCheckout = $false
 
     if (-not (Test-Path -LiteralPath $Root)) {
         Invoke-NativeCommand -FilePath "git" -Arguments @(
             "clone", "--filter=blob:none", "--no-checkout", $vcpkgRepository, $Root
         ) -WorkingDirectory $repoRoot
+        $createdCheckout = $true
     }
     elseif (-not (Test-Path -LiteralPath (Join-Path $Root ".git"))) {
         # [MuffMode] actions/cache restores these mutable cache directories
@@ -62,12 +64,17 @@ function Ensure-VcpkgCheckout {
         Invoke-NativeCommand -FilePath "git" -Arguments @("remote", "set-url", "origin", $vcpkgRepository) -WorkingDirectory $Root
     }
 
-    $dirty = @(& git -C $Root status --porcelain --untracked-files=no)
-    if ($LASTEXITCODE -ne 0) {
-        throw "Could not inspect the vcpkg checkout at $Root."
-    }
-    if ($dirty.Count -ne 0) {
-        throw "Refusing to replace a modified vcpkg checkout at $Root."
+    # This guard protects a checkout somebody else owns. A --no-checkout clone we
+    # just made reports its whole tree as deleted, so exempt the one we created or
+    # no machine could ever start from nothing.
+    if (-not $createdCheckout) {
+        $dirty = @(& git -C $Root status --porcelain --untracked-files=no)
+        if ($LASTEXITCODE -ne 0) {
+            throw "Could not inspect the vcpkg checkout at $Root."
+        }
+        if ($dirty.Count -ne 0) {
+            throw "Refusing to replace a modified vcpkg checkout at $Root."
+        }
     }
 
     $currentRevision = (& git -C $Root rev-parse HEAD 2>$null)
@@ -90,6 +97,102 @@ function Ensure-VcpkgCheckout {
     }
 }
 
+function Test-PkgConfigProgram {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        return $false
+    }
+
+    try {
+        & $Path --version | Out-Null
+    }
+    catch {
+        return $false
+    }
+
+    return ($LASTEXITCODE -eq 0)
+}
+
+function Use-PkgConfig {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    $env:PKG_CONFIG = $Path
+
+    # Ports build in an environment vcpkg sanitizes, so PKG_CONFIG only reaches the
+    # portfile when it is named here.
+    $kept = @()
+    if (-not [string]::IsNullOrWhiteSpace($env:VCPKG_KEEP_ENV_VARS)) {
+        $kept = @($env:VCPKG_KEEP_ENV_VARS -split ';' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    }
+    if ($kept -notcontains "PKG_CONFIG") {
+        $kept += "PKG_CONFIG"
+    }
+    $env:VCPKG_KEEP_ENV_VARS = ($kept -join ';')
+
+    Write-Host "PKG_CONFIG=$Path"
+}
+
+function Ensure-PkgConfig {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Root,
+
+        [Parameter(Mandatory = $true)]
+        [string]$VcpkgExe,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Triplet
+    )
+
+    # [MuffMode] Both manifest ports end in vcpkg_fixup_pkgconfig(), which resolves
+    # pkg-config from an MSYS2 build pinned by the baseline. MSYS2 only serves current
+    # package versions, so that download now fails on every mirror and a cold cache
+    # dies before a single translation unit is compiled. vcpkg skips the download when
+    # PKG_CONFIG names a program, and the baseline's own pkgconf port fixes its files
+    # up with SKIP_CHECK, so it builds without needing one to already exist.
+    if (-not [string]::IsNullOrWhiteSpace($env:PKG_CONFIG)) {
+        if (-not (Test-PkgConfigProgram -Path $env:PKG_CONFIG)) {
+            throw "PKG_CONFIG does not name a usable pkg-config program: $($env:PKG_CONFIG)"
+        }
+        Use-PkgConfig -Path $env:PKG_CONFIG
+        return
+    }
+
+    # actions/cache carries packages\ but not installed\, so accept either copy before
+    # paying for the build again.
+    $candidates = @(
+        (Join-Path $Root "installed\$Triplet\tools\pkgconf\pkgconf.exe"),
+        (Join-Path $Root "packages\pkgconf_$Triplet\tools\pkgconf\pkgconf.exe")
+    )
+
+    $pkgConfig = $candidates | Where-Object { Test-PkgConfigProgram -Path $_ } | Select-Object -First 1
+    if (-not $pkgConfig) {
+        # The root manifest is inventory-reviewed and must not gain a build-only
+        # dependency, so install this the classic way, into the tool checkout. vcpkg
+        # selects manifest mode from the first vcpkg.json at or above its working
+        # directory and manifest mode refuses named packages, so run it from a scratch
+        # directory outside the repository.
+        $classicRoot = Join-Path ([System.IO.Path]::GetTempPath()) "muffmode-vcpkg-classic"
+        New-Item -ItemType Directory -Path $classicRoot -Force | Out-Null
+        Invoke-NativeCommand -FilePath $VcpkgExe -Arguments @(
+            "install", "pkgconf:$Triplet", "--vcpkg-root", $Root
+        ) -WorkingDirectory $classicRoot
+        $pkgConfig = $candidates | Where-Object { Test-PkgConfigProgram -Path $_ } | Select-Object -First 1
+    }
+    if (-not $pkgConfig) {
+        throw "The pinned vcpkg baseline did not produce a pkg-config program for $Triplet."
+    }
+
+    Use-PkgConfig -Path $pkgConfig
+}
+
 Ensure-VcpkgCheckout -Root $VcpkgRoot -Revision $vcpkgRevision
 
 $vcpkgExe = Join-Path $VcpkgRoot "vcpkg.exe"
@@ -102,6 +205,7 @@ if (-not (Test-Path -LiteralPath $vcpkgExe -PathType Leaf)) {
 }
 
 if ($Install) {
+    Ensure-PkgConfig -Root $VcpkgRoot -VcpkgExe $vcpkgExe -Triplet $Triplet
     Invoke-NativeCommand -FilePath $vcpkgExe -Arguments @("install", "--triplet", $Triplet) -WorkingDirectory $repoRoot
 }
 
