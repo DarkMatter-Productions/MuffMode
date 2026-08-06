@@ -738,8 +738,13 @@ static bool InitPlayerTeam(gentity_t *ent) {
 		return true;
 	}
 
-	// already initialised
-	if (ent->client->sess.team != TEAM_NONE)
+	// already initialised. ClientConnect pre-sets fresh deathmatch clients to
+	// TEAM_SPECTATOR before first spawn, which made this early-return swallow
+	// every human before the g_dm_force_join / g_dm_auto_join block below could
+	// run (the cvars were dead for humans). An uninitialised spectator is really
+	// a brand-new client awaiting first join, so let them fall through. [MuffMode]
+	if (ent->client->sess.team != TEAM_NONE &&
+		(ent->client->sess.initialised || ent->client->sess.team != TEAM_SPECTATOR))
 		return true;
 
 	ent->client->sess.team = TEAM_SPECTATOR;
@@ -1389,6 +1394,10 @@ to be placed into the game.  This will happen every level load.
 ============
 */
 void ClientBegin(gentity_t *ent) {
+	// Null-ent guard; same engine teardown class as ClientThink/ClientDisconnect.
+	if (!ent)
+		return;
+
 	ent->client = game.clients + (ent - g_entities - 1);
 	const bool retained_level_client = !ent->client->pers.spawned &&
 		!ent->client->sess.is_a_bot &&
@@ -1692,6 +1701,10 @@ loadgames will.
 ============
 */
 bool ClientConnect(gentity_t *ent, char *userinfo, const char *social_id, bool is_bot) {
+	// Null-ent guard; same engine teardown class as ClientThink/ClientDisconnect.
+	if (!ent)
+		return false;
+
 #if defined(MM_GHOST_RUNTIME_TESTING)
 	char derived_social_id[MAX_INFO_VALUE]{};
 	social_id = RuntimeTestSocialId(userinfo, social_id, is_bot, derived_social_id);
@@ -1811,7 +1824,10 @@ Will not be called between levels.
 ============
 */
 void ClientDisconnect(gentity_t *ent) {
-	if (!ent->client)
+	// The engine calls this with a null ent when a kick lands on an empty or
+	// still-connecting slot (crash observed at ClientDisconnect+0x1E: access
+	// violation reading offset 0x78, rcx = 0).
+	if (!ent || !ent->client)
 		return;
 
 	// Raw references to this reusable client slot must end with this lifetime.
@@ -2273,6 +2289,11 @@ void ClientThink(gentity_t *ent, usercmd_t *ucmd) {
 	gentity_t *other;
 	uint32_t   i;
 	pmove_t	   pm;
+
+	// The engine can dispatch a think for a client slot whose entity is
+	// already torn down (kick/disconnect race), passing a null ent.
+	if (!ent || !ent->client)
+		return;
 
 	level.current_entity = ent;
 	client = ent->client;

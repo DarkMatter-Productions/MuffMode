@@ -235,6 +235,9 @@ unsigned int P_GetLobbyUserNum(const gentity_t *player)
 
 void ClientUserinfoChanged(gentity_t *ent, const char *userinfo)
 {
+	// Null-ent guard; same engine teardown class as ClientThink/ClientDisconnect.
+	if (!ent)
+		return;
 	muffmode::player::ApplyUserinfoChanged(ent, userinfo, true, true);
 }
 
