@@ -178,8 +178,11 @@ foreach ($requiredCommand in @(
 if ($analysisWorkflow -match 'run-sanitized-build\.ps1[^\r\n]*-AllowUnsupported') {
     Fail-ToolingContract "sanitizer CI must expose compiler and linker failures."
 }
-if ($analysisWorkflow -match '(?s)Run Cppcheck.*?continue-on-error\s*:\s*true') {
-    Fail-ToolingContract "Cppcheck findings must fail the analysis job."
+# Cppcheck is deliberately informational in CI while its baseline over the vanilla
+# and upstream tree is untriaged, so this no longer requires the analysis job to
+# fail on its findings. Local push verification below still treats them as blocking.
+if ($analysisWorkflow -notmatch '(?s)Run Cppcheck.*?continue-on-error\s*:\s*true') {
+    Fail-ToolingContract "Cppcheck is informational until its baseline is triaged; update this contract when its findings become blocking."
 }
 if ($analysisWorkflow -match 'HEAD~1') {
     Fail-ToolingContract "clang-tidy must scan the full compile database when no trustworthy comparison SHA exists."

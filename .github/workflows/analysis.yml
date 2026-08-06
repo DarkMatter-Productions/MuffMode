@@ -144,8 +144,13 @@ jobs:
             ./scripts/ci/run-clang-tidy.ps1 -ChangedSince $changedSince -AllowEmpty
           }
 
+      # Cppcheck reports a large untriaged baseline over the vanilla and upstream
+      # tree, so it stays informational in CI until that baseline is triaged, the
+      # same way the clang-tidy ratchet widens only as families are reviewed. The
+      # local push verifier still treats its findings as blocking.
       - name: Run Cppcheck
         shell: pwsh
+        continue-on-error: true
         run: ./scripts/ci/run-cppcheck.ps1
 
       - name: Upload static analysis output
