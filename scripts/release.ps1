@@ -399,8 +399,8 @@ function ConvertFrom-ChangelogLedger {
         }
 
         $cells = Split-MarkdownTableRow $line
-        if ($cells.Count -lt $headers.Count) {
-            throw "Changelog row $($i + 1) has $($cells.Count) columns, but the table header has $($headers.Count)."
+        if ($cells.Count -ne $headers.Count) {
+            throw "Changelog row $($i + 1) has $($cells.Count) columns, but the table header has $($headers.Count). Escape any literal pipe inside a cell as \|, including one inside a code span."
         }
 
         $summary = ConvertFrom-ChangelogTableCell $cells[$columnIndex["Summary"]]
@@ -489,8 +489,8 @@ function Update-ChangelogReleaseVersions {
         }
 
         $cells = Split-MarkdownTableRow $line
-        if ($cells.Count -lt $headers.Count) {
-            throw "Changelog row $($i + 1) has $($cells.Count) columns, but the table header has $($headers.Count)."
+        if ($cells.Count -ne $headers.Count) {
+            throw "Changelog row $($i + 1) has $($cells.Count) columns, but the table header has $($headers.Count). Escape any literal pipe inside a cell as \|, including one inside a code span."
         }
 
         $release = Get-CanonicalChangelogRelease $cells[$releaseColumn]

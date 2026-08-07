@@ -107,8 +107,8 @@ for ($i = $headerIndex + 2; $i -lt $lines.Count; $i++) {
     }
 
     $cells = Split-MarkdownTableRow $line
-    if ($cells.Count -lt $headers.Count) {
-        throw "Changelog row $($i + 1) has $($cells.Count) columns, but the table header has $($headers.Count)."
+    if ($cells.Count -ne $headers.Count) {
+        throw "Changelog row $($i + 1) has $($cells.Count) columns, but the table header has $($headers.Count). Escape any literal pipe inside a cell as \|, including one inside a code span."
     }
 
     $release = ConvertFrom-ChangelogCell $cells[$columnIndex["Release"]]
