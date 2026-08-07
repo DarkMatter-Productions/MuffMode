@@ -37,6 +37,8 @@ The release script writes both files into new packages, and the updater rewrites
 
 ## Build
 
+`global.json` pins the .NET SDK to the reviewed 8.0.423 with roll-forward disabled, so every `dotnet` command in this repository resolves to the same SDK that builds the shipped updater. Install that exact SDK before building; `dotnet` reports the requested version and the `global.json` that asked for it when it is missing.
+
 Build a framework-dependent debug copy:
 
 ```powershell

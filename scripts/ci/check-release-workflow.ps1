@@ -339,6 +339,29 @@ foreach ($runtimeContract in @(
         Fail-ReleaseWorkflowContract "release runtime verification is missing '$runtimeContract'."
     }
 }
+# Installing the reviewed SDK does not select it: dotnet resolves to the newest SDK on the
+# runner image unless global.json pins one, so the pin and the workflow must agree exactly.
+$dotnetPin = [regex]::Match($buildJob, '(?m)^\s*dotnet-version:\s*(?<version>\d+\.\d+\.\d+)\s*$')
+if (-not $dotnetPin.Success) {
+    Fail-ReleaseWorkflowContract "release build must install an exact .NET SDK version."
+}
+$reviewedDotnetVersion = $dotnetPin.Groups['version'].Value
+$globalJsonPath = Join-Path $repoRoot "global.json"
+if (-not (Test-Path -LiteralPath $globalJsonPath -PathType Leaf)) {
+    Fail-ReleaseWorkflowContract "global.json must pin the reviewed .NET SDK, or dotnet selects whichever SDK the runner image ships."
+}
+$sdkPin = (Get-Content -LiteralPath $globalJsonPath -Raw | ConvertFrom-Json).PSObject.Properties['sdk']
+if (-not $sdkPin) {
+    Fail-ReleaseWorkflowContract "global.json is missing its sdk block."
+}
+$sdkVersionPin = $sdkPin.Value.PSObject.Properties['version']
+$sdkRollForwardPin = $sdkPin.Value.PSObject.Properties['rollForward']
+if (-not $sdkVersionPin -or $sdkVersionPin.Value -cne $reviewedDotnetVersion) {
+    Fail-ReleaseWorkflowContract "global.json must pin sdk.version to the reviewed $reviewedDotnetVersion that the workflow installs."
+}
+if (-not $sdkRollForwardPin -or $sdkRollForwardPin.Value -cne "disable") {
+    Fail-ReleaseWorkflowContract "global.json must set sdk.rollForward to disable so a newer SDK on the runner image cannot be selected."
+}
 if ($copilotPackIndex -lt 0 -or $copilotPackIndex -ge $copilotPrepareIndex -or
     (Get-SnippetCount -Text $buildJob -Snippet $copilotPack) -ne 1 -or
     (Get-SnippetCount -Text $buildJob -Snippet $copilotPrepare) -ne 1 -or
