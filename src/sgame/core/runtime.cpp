@@ -13,8 +13,10 @@
 #include "muffmode/mm_command_contracts.h"
 #include "muffmode/mm_duel.h"
 #include "muffmode/mm_ent_respawn.h"
+#include "muffmode/mm_factory.h"
 #include "muffmode/mm_gametype.h"
 #include "muffmode/mm_ghost.h"
+#include "muffmode/mm_gt_session.h"
 #include "muffmode/mm_horde.h"
 #include "muffmode/mm_loc.h"
 #include "muffmode/mm_map_pick.h"
@@ -231,6 +233,10 @@ cvar_t *g_drop_cmds;
 cvar_t *g_entity_override_dir;
 cvar_t *g_entity_override_load;
 cvar_t *g_entity_override_save;
+cvar_t *g_factory;
+cvar_t *g_gametype_locked;
+cvar_t *g_factory_file;
+cvar_t *g_factory_title;
 cvar_t *g_fast_doors;
 cvar_t *g_frag_messages;
 cvar_t *g_freezetag_arena_loadout;
@@ -393,6 +399,7 @@ cvar_t *g_maps_pool_file;
 cvar_t *g_maps_cycle_file;
 cvar_t *g_maps_random;
 cvar_t *g_maps_repeat_delay;
+cvar_t *g_votable_factories;
 cvar_t *g_votable_gametypes;
 cvar_t *g_votable_rulesets;
 cvar_t *g_match_lock;
@@ -415,7 +422,6 @@ cvar_t *g_mapspawn_no_plasmabeam;
 cvar_t *g_no_spheres;
 cvar_t *g_owner_auto_join;
 cvar_t *g_owner_push_scores;
-cvar_t *g_gametype_cfg;
 cvar_t *g_quadhog;
 cvar_t *g_quick_weapon_switch;
 cvar_t *g_ranked;
@@ -500,23 +506,9 @@ void InitSave();
 
 #include <chrono>
 
-int _gt[] = {
-	/* GT_NONE */ 0,
-	/* GT_FFA */ GTF_FRAGS,
-	/* GT_DUEL */ GTF_FRAGS,
-	/* GT_TDM */ GTF_TEAMS | GTF_FRAGS,
-	/* GT_CTF */ GTF_TEAMS | GTF_CTF,
-	/* GT_CA */ GTF_TEAMS | GTF_ARENA | GTF_ROUNDS | GTF_ELIMINATION,
-	/* GT_FREEZE */ GTF_TEAMS | GTF_ROUNDS,
-	/* GT_STRIKE */ GTF_TEAMS | GTF_ARENA | GTF_ROUNDS | GTF_CTF | GTF_ELIMINATION,
-	/* GT_RR */ GTF_TEAMS | GTF_ARENA | GTF_ROUNDS | GTF_FRAGS,
-	/* GT_LMS */ GTF_ARENA | GTF_ROUNDS | GTF_ELIMINATION,
-	/* GT_HORDE */ GTF_ROUNDS,
-	/* GT_BALL */ 0, // removed
-	/* GT_INSTAGIB */ GTF_FRAGS,
-	/* GT_NADEFEST */ GTF_FRAGS,
-	/* GT_ARENA */ GTF_ARENA | GTF_MULTI_ARENA
-};
+// [MuffMode] The gametype capability table now lives in
+// muffmode/mm_gametype_table.h, generated from the descriptor table alongside
+// the name tables so the two can no longer drift apart.
 
 // =================================================
 
@@ -560,14 +552,6 @@ static void InitGametype() {
 	}
 }
 
-void ChangeGametype(gametype_t gt) {
-	MM_ChangeGametype(gt);
-}
-
-void GT_Changes() {
-	MM_GTChanges();
-}
-
 /*
 ============
 PreInitGame
@@ -597,10 +581,15 @@ static void PreInitGame() {
 	g_gametype = gi.cvar("g_gametype", G_Fmt("{}", (int)GT_FFA).data(), CVAR_SERVERINFO);
 	coop = gi.cvar("coop", "0", CVAR_LATCH);
 	InitGametype();
+	// [MuffMode] Publish the resolved gametype now that g_gametype exists.
+	// Nothing else is safe here: g_entities and game.clients are not allocated
+	// until InitGame, and most cvars are not registered yet.
+	muffmode::gametype::MM_GT_SessionInit();
 }
 
-// Tracks whether the map list has been shuffled for the current gametype session.
-// Reset by ChangeGametype() so the list gets reshuffled on gametype change.
+// Tracks whether the map list has been shuffled for the current gametype
+// session. Cleared by the gametype transaction so the list gets reshuffled on a
+// gametype change.
 bool g_map_list_shuffled = false;
 
 /*
@@ -772,7 +761,17 @@ static void InitGame() {
 	g_instagib_splash = gi.cvar("g_instagib_splash", "0", CVAR_NOFLAGS);
 	g_owner_auto_join = gi.cvar("g_owner_auto_join", "1", CVAR_NOFLAGS);
 	g_owner_push_scores = gi.cvar("g_owner_push_scores", "0", CVAR_NOFLAGS);
-	g_gametype_cfg = gi.cvar("g_gametype_cfg", "1", CVAR_NOFLAGS);
+	// [MuffMode] Factory presets. g_factory names the selection and is what a
+	// map change carries forward; g_factory_title is published for clients and
+	// is written only by the module. g_factory_file is latched because the
+	// registry is rebuilt at level start.
+	g_factory = gi.cvar("g_factory", "", CVAR_SERVERINFO);
+	g_factory_title = gi.cvar("g_factory_title", "", CVAR_SERVERINFO | CVAR_NOSET);
+	g_factory_file = gi.cvar("g_factory_file", "factories.cfg", CVAR_LATCH);
+	// Pins the selection: an admin command or a passed vote is refused, while
+	// the server console and rcon still get through. For a host who configures
+	// the mode once and does not want it moved.
+	g_gametype_locked = gi.cvar("g_gametype_locked", "0", CVAR_NOFLAGS);
 	g_quadhog = gi.cvar("g_quadhog", "0", CVAR_SERVERINFO | CVAR_LATCH);
 	g_nadefest = gi.cvar("g_nadefest", "0", CVAR_SERVERINFO | CVAR_LATCH);
 	g_frenzy = gi.cvar("g_frenzy", "0", CVAR_SERVERINFO | CVAR_LATCH);
@@ -970,6 +969,7 @@ static void InitGame() {
 	g_maps_random = gi.cvar("g_maps_random", "1", CVAR_NOFLAGS);
 	g_maps_repeat_delay = gi.cvar("g_maps_repeat_delay", "1800", CVAR_NOFLAGS);
 	g_votable_gametypes = gi.cvar("g_votable_gametypes", "", CVAR_NOFLAGS);
+	g_votable_factories = gi.cvar("g_votable_factories", "", CVAR_NOFLAGS);
 	g_votable_rulesets = gi.cvar("g_votable_rulesets", "", CVAR_NOFLAGS);
 	g_match_lock = gi.cvar("g_match_lock", "0", CVAR_SERVERINFO);
 	g_matchstats = gi.cvar("g_matchstats", "0", CVAR_NOFLAGS);
@@ -1114,8 +1114,17 @@ static void InitGame() {
 
 	level.total_player_deaths = 0;
 
-	MM_SyncGametypeTracking();
+	// [MuffMode] Sanitize first, then re-derive the committed selection from the
+	// post-sanitize cvars -- the old order latched the tracking counts against a
+	// value the very next call was about to correct. The factory registry loads
+	// before the rebaseline so an unknown g_factory is caught there, and its
+	// overrides apply last, layering on top of whatever the operator's own
+	// configs left in place on the way into this level.
 	MM_SanitizeCurrentGametype();
+	muffmode::factory::MM_Factory_LoadRegistry();
+	muffmode::gametype::MM_GT_SessionRebaseline();
+	muffmode::factory::MM_Factory_ApplySelection();
+	muffmode::gametype::MM_GT_PublishLive();
 
 	MM_LoadMOTD();
 	MM_ClearLocCache();
@@ -1124,13 +1133,9 @@ static void InitGame() {
 	if (g_dm_exec_level_cfg->integer)
 		gi.AddCommandString(G_Fmt("exec {}\n", level.mapname).data());
 
-	// Note: Gametype cfg execution moved to ChangeGametype() so it only runs
-	// when gametype actually changes, not on every map load. This prevents
-	// cfg files from overriding player votes and map progression.
-
-	// Note: Map list shuffling is handled lazily in Match_End().
-	// ChangeGametype() resets the g_map_list_shuffled flag so the list
-	// gets reshuffled when the next match ends.
+	// Note: Map list shuffling is handled lazily in Match_End(). The gametype
+	// transaction clears g_map_list_shuffled so the list gets reshuffled when
+	// the next match ends.
 }
 
 //===================================================================
@@ -2047,24 +2052,23 @@ void QueueIntermission(const char *msg, bool boo, bool reset) {
 	}
 }
 
+// [MuffMode] Table lookups. Each gametype declares which limit gates it; None
+// means the mode owns its own limit, as MuffMode Arena does with one series per
+// room. Replaces an if/else ladder whose branch order was load-bearing --
+// Capture Strike carries GTF_ROUNDS but is gated by capturelimit, and had to be
+// tested before the rounds branch.
 int GT_ScoreLimit() {
-	if (GT(GT_ARENA))
-		return 0; // each RA2/RA3 arena owns its own series limit
-	if (GT(GT_STRIKE))
-		return capturelimit->integer;
-	if (GTF(GTF_ROUNDS))
-		return roundlimit->integer;
-	if (GT(GT_CTF))
-		return capturelimit->integer;
-	return fraglimit->integer;
+	switch (MM_GTDesc(MM_CurrentGametype()).score_model) {
+	case mm_gt_score_t::Frags:		return fraglimit->integer;
+	case mm_gt_score_t::Captures:	return capturelimit->integer;
+	case mm_gt_score_t::Rounds:		return roundlimit->integer;
+	case mm_gt_score_t::None:		break;
+	}
+	return 0;
 }
 
 const char *GT_ScoreLimitString() {
-	if (GT(GT_STRIKE) || GT(GT_CTF))
-		return "capture";
-	if (GTF(GTF_ROUNDS))
-		return "round";
-	return "frag";
+	return MM_GTScoreWord(MM_GTDesc(MM_CurrentGametype()).score_model);
 }
 
 /*
@@ -2857,9 +2861,20 @@ static inline void G_RunFrame_(bool main_loop) {
 	MM_PlayerStats_RunFrame();
 	MM_ClientProfile_RunFrame();
 	MM_MatchStats_RunFrame();
-	// [MuffMode] Keep structured map sources current even while timeout logic
-	// skips GT_Changes and the rest of the normal cvar polling path.
+	// [MuffMode] Map sources and the gametype resolution stay current even while
+	// timeout logic skips the rest of the cvar polling path. The reconciler only
+	// queues; committing is gated on the timeout inside MM_GT_RunFrame().
 	MM_HandleMapPoolCvarChanges();
+	MM_HandleMapShuffleCvarChange();
+	muffmode::gametype::MM_GT_ValidateLive();
+	muffmode::gametype::MM_GT_Reconcile();
+	// [MuffMode] The published gametype name follows the mutator cvars, which
+	// nothing else polls. Guarded by a fingerprint, so the recompose and the
+	// configstring write only happen when something actually moved.
+	muffmode::gametype::MM_GT_RefreshName();
+#ifdef _DEBUG
+	muffmode::gametype::MM_GT_AssertLivePublished();
+#endif
 
 	if (level.timeout_in_place > 0_ms) {
 		int t = (level.timeout_in_place).seconds<int>() + 1;
@@ -2875,12 +2890,13 @@ static inline void G_RunFrame_(bool main_loop) {
 			TimeoutEnd();
 
 		ClientEndServerFrames();
+		// [MuffMode] The only commit point for a queued gametype/factory
+		// transaction. It self-gates on the timeout, so an admin change still
+		// lands while a vote waits it out.
+		muffmode::gametype::MM_GT_RunFrame();
 		level.in_frame = false;
 		return;
 	} else {
-		// track gametype changes and update accordingly
-		GT_Changes();
-
 		// [MuffMode] Thin vanilla hook for vote lifecycle ticking.
 		MM_CheckVote();
 
@@ -2894,6 +2910,12 @@ static inline void G_RunFrame_(bool main_loop) {
 		Bot_UpdateDebug();
 
 		level.time += FRAME_TIME_MS;
+
+		// [MuffMode] Drain a queued gametype/factory transaction before the two
+		// intermission branches below, both of which return early. MM_CheckVote
+		// runs above them, so a vote that passes on one of those frames would
+		// otherwise queue a request that nothing ever commits.
+		muffmode::gametype::MM_GT_RunFrame();
 
 		if (level.intermission_fading) {
 			if (level.intermission_fade_time > level.time) {
@@ -3064,6 +3086,12 @@ static inline void G_RunFrame_(bool main_loop) {
 		M_ProcessPain(e);
 	}
 
+	// [MuffMode] The only commit point for a queued gametype/factory
+	// transaction on the normal path. Deferring to the frame boundary is what
+	// stops a passing vote from re-teaming every client mid-frame and then
+	// spending the rest of that frame fighting the warmup tick.
+	muffmode::gametype::MM_GT_RunFrame();
+
 	level.in_frame = false;
 }
 
@@ -3081,6 +3109,12 @@ void G_RunFrame(bool main_loop) {
 	const bool any_clients_spawned = G_AnyClientsSpawned();
 
 	if (main_loop && !any_clients_spawned && !level.timeout_in_place && !MM_Ghost_HasActiveReservations()) {
+		// [MuffMode] An empty server is exactly where a host configures one, so
+		// a queued gametype/factory transaction still has to commit here. The
+		// frame skip below is the only other commit point, so without this
+		// `sv factory <id>` from a dedicated console -- the documented setup
+		// path -- was a silent no-op until somebody happened to join.
+		muffmode::gametype::MM_GT_RunFrame();
 		MM_PROFILE_INC(frame_no_client_skips);
 		return;
 	}

@@ -1398,8 +1398,8 @@ void G_SetStats(gentity_t *ent) {
 	item_id_t		power_armor_type;
 	unsigned int	invIndex;
 	bool			minhud = notGT(GT_ARENA) &&
-		((g_instagib->integer || GT(GT_INSTAGIB)) ||
-		 (g_nadefest->integer || GT(GT_NADEFEST)));
+		(g_instagib->integer ||
+		 g_nadefest->integer);
 	//
 	// health
 	//

@@ -18,11 +18,11 @@ inline bool MM_IsAsciiWhitespace(char c) {
 	return c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '\v' || c == '\f';
 }
 
-inline char MM_ToAsciiLower(char c) noexcept {
+inline constexpr char MM_ToAsciiLower(char c) noexcept {
 	return (c >= 'A' && c <= 'Z') ? static_cast<char>(c + ('a' - 'A')) : c;
 }
 
-inline bool MM_EqualsAsciiI(std::string_view lhs, std::string_view rhs) noexcept {
+inline constexpr bool MM_EqualsAsciiI(std::string_view lhs, std::string_view rhs) noexcept {
 	if (lhs.size() != rhs.size())
 		return false;
 

@@ -2389,9 +2389,9 @@ void ClientThink(gentity_t *ent, usercmd_t *ucmd) {
 					gi.LocClient_Print(ent, PRINT_CENTER, "VAMPIRIC DAMAGE\nSurvive by inflicting damage on your foes,\ntheir pain makes you stronger!");
 				} else if (g_frenzy->integer) {
 					gi.LocClient_Print(ent, PRINT_CENTER, "WEAPONS FRENZY\nWeapons fire faster, rockets move faster, ammo regenerates.");
-				} else if (g_nadefest->integer || GT(GT_NADEFEST)) {
+				} else if (g_nadefest->integer) {
 					gi.LocClient_Print(ent, PRINT_CENTER, "NADE FEST\nOnly grenades, nothing else!");
-				} else if (g_instagib->integer || GT(GT_INSTAGIB)) {
+				} else if (g_instagib->integer) {
 					gi.LocClient_Print(ent, PRINT_CENTER, "INSTAGIB\nA rail-y good time!");
 				}
 

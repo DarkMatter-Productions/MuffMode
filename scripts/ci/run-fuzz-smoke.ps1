@@ -3,7 +3,7 @@ param(
     [string]$Executable = "build\fuzz\fuzz_numeric_parsers.exe",
     [string[]]$SeedCorpus = @(
         "docs-dev\test-assets\fuzz-corpus\numeric-parsers",
-        "docs-dev\test-assets\fuzz-corpus\gt-cfg"
+        "docs-dev\test-assets\fuzz-corpus\factory-documents"
     ),
 
     [ValidateRange(1, 1000000)]

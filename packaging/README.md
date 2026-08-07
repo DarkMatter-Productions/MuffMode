@@ -12,9 +12,7 @@ packaging/release-assets/
       CONFIGS_README.md
       muffmode-map-pool.example.json
       muffmode-map-cycle.example.txt
-      gt-FFA.cfg
-      gt-DUEL.cfg
-      gt-LMS.cfg
+      factories.cfg
     bots/
       navigation/
         example.nav
@@ -38,7 +36,7 @@ muffmode-0.22.15-beta/
       CONFIGS_README.md
       muffmode-map-pool.example.json
       muffmode-map-cycle.example.txt
-      gt-*.cfg
+      factories.cfg
     bots/navigation/*.nav
     maps/*.ent
     maps/*.bsp

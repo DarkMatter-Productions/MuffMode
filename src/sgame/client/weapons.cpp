@@ -109,7 +109,7 @@ bool InfiniteAmmoOn(gitem_t *item) {
 	if (GT(GT_ARENA))
 		return false;
 
-	return g_infinite_ammo->integer || (deathmatch->integer && ((g_instagib->integer || GT(GT_INSTAGIB)) || (g_nadefest->integer || GT(GT_NADEFEST))));
+	return g_infinite_ammo->integer || (deathmatch->integer && (g_instagib->integer || g_nadefest->integer));
 }
 
 /*

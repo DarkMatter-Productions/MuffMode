@@ -10,21 +10,25 @@ This guide is for lobby owners, dedicated server hosts, event organizers, and ad
 2. Use the Windows installer when available. It detects Steam, Epic Games Store, GOG, and Xbox app / Microsoft Store installs, while still offering an Other location choice for custom library folders.
 3. If you use the zip instead, extract it into the outer `Quake 2` install folder and allow file replacements.
 4. Start the game or dedicated server normally.
-5. Execute the bundled baseline config with `exec server-base.cfg`, then execute a gametype preset such as `exec gt-FFA.cfg`.
+5. Execute the bundled baseline config with `exec server-base.cfg`, then pick a gameplay preset with `factory <id>` — run `factory list all` to see what is available.
 
-The release package installs `server-base.cfg`, `CONFIGS_README.md`, and per-gametype `gt-*.cfg` presets into `rerelease/baseq2`. For additional community-maintained examples, see the [MuffMode Server Configs repository](https://github.com/ozy24/muffmode-server-configs).
+The release package installs `server-base.cfg`, `factories.cfg`, and `CONFIGS_README.md` into `rerelease/baseq2`. For additional community-maintained examples, see the [MuffMode Server Configs repository](https://github.com/ozy24/muffmode-server-configs).
 
 ## Config Startup Flow
 
-Use the packaged configs as layers:
+Two layers, in this order:
 
 | Step | Command | Purpose |
 | --- | --- | --- |
-| 1 | `exec server-base.cfg` | Loads shared safety, voting, entity override, and player-limit defaults. |
-| 2 | `exec gt-FFA.cfg` or another `gt-*.cfg` | Applies the mode-specific hostname, limits, map list, ruleset, and gameplay toggles. |
+| 1 | `exec server-base.cfg` | Your config: server identity, client capacity, voting and admin policy, and the fallback map rotation. Load it once at server start. Nothing MuffMode does overwrites these. |
+| 2 | `factory <id>` | The gameplay preset: gametype, ruleset, limits, map rotation, player limits and settings. Sets the gametype for you and changes map to start it. |
 | 3 | `doctor` | Checks for risky or inconsistent cvar combinations after your changes. |
 
-When `g_gametype_cfg` is enabled, later gametype changes automatically execute the matching `gt-[GAMETYPE].cfg`.
+From a dedicated console with no client, use `sv factory <id>` in step 2.
+
+Later gametype and factory changes — by admin command or by vote — re-apply the
+same way, and restore what the outgoing factory changed. See
+[Factories](#factories).
 
 ## Choose A Server Style
 
@@ -47,15 +51,16 @@ maxplayers 12
 
 g_gametype 1
 g_ruleset 1
-g_gametype_cfg 1
 g_map_list "q2dm1 q2dm3 q2dm5"
 g_map_list_shuffle 1
 
 g_allow_voting 1
 g_allow_vote_midgame 0
 g_allow_spec_vote 0
-g_votable_gametypes "ffa duel tdm ctf ca ft strike rr lms horde instagib nadefest"
+g_votable_gametypes "ffa duel tdm ctf ca ft strike rr lms horde"
 g_votable_rulesets "q2re mm q2reb"
+g_votable_factories ""
+g_gametype_locked 0
 
 g_dm_do_warmup 1
 g_dm_do_readyup 0
@@ -242,8 +247,8 @@ menus, voting, HUD, administration, and match policies remain authoritative.
 | `g_arena_default_type` | `rocket` | Type inherited when a more specific layer does not set one. |
 | `g_arena_players_per_team` | `1` | Default team size. |
 | `g_arena_rounds` | `1` | Default odd best-of length. |
-| `g_arena_start_health` | `200` (`100` in `gt-ARENA.cfg`) | Shared arena-loadout health; the shipped Arena preset selects the classic value. |
-| `g_arena_start_armor` | `200` (`100` in `gt-ARENA.cfg`) | Shared arena-loadout armor; the preset selects the classic 100-armor value. |
+| `g_arena_start_health` | `200` (`100` in the shipped Arena factories) | Shared arena-loadout health; the shipped Arena factories select the classic value. |
+| `g_arena_start_armor` | `200` (`100` in the shipped Arena factories) | Shared arena-loadout armor; the factories select the classic 100-armor value. |
 | `g_arena_health_protect` | `1` | Protect health from self and team damage. |
 | `g_arena_armor_protect` | `2` | Permit self-armor damage, protect against team armor damage. |
 | `g_arena_falling_damage` | `1` | Enables falling damage during MuffMode Arena rounds. |
@@ -252,9 +257,9 @@ menus, voting, HUD, administration, and match policies remain authoritative.
 | `g_arena_competition` | `0` | Enables per-room competition readiness and timeouts. |
 | `g_arena_unbalanced` | `0` | Allows unequal sides. |
 | `g_arena_lock` / `g_arena_max_players` | `0` / `0` | Default entry lock and player cap (`0` means no explicit cap). |
-| `g_arena_timeouts` | `3` | Competition timeouts per side. Duration and time-in countdown reuse `g_dm_timeout_length` and `g_dm_timeout_resume_countdown`; `gt-ARENA.cfg` selects `60` / `5`. |
+| `g_arena_timeouts` | `3` | Competition timeouts per side. Duration and time-in countdown reuse `g_dm_timeout_length` and `g_dm_timeout_resume_countdown`; the `arena_ra2` factory selects `60` / `5`. |
 
-Load `server-base.cfg` and then `gt-ARENA.cfg` for the shipped MuffMode
+Load `server-base.cfg` and then select the `arena_ra2` factory for the shipped MuffMode
 baseline on an Arena-compatible rotation. Arena map assets are not
 redistributed: install maps you are licensed to host. Tagged multi-room maps
 are preferred; the preset leaves `g_arena_legacy_idmap` at `0` so ordinary
@@ -348,34 +353,113 @@ Voting is menu-driven and console-driven. For casual servers, keep enough voting
 
 See [Vote Commands](configuration-reference.md#vote-commands) for command names and [Vote Flags](configuration-reference.md#vote-flags) for the bitmask.
 
-## Per-Gametype Configs
+## Factories
 
-When `g_gametype_cfg` is `1`, MuffMode automatically executes `gt-[GAMETYPE].cfg` when the gametype changes. This lets hosts keep different map lists, limits, rulesets, and item rules for each mode.
+A factory is a named gameplay preset: one base gametype plus its ruleset,
+limits, map rotation, player limits and settings. **Factories are how you
+configure a MuffMode server for play.** They replaced the per-gametype
+`gt-*.cfg` presets, so nothing runs underneath one — a setting no factory states
+holds whatever `server-base.cfg` left in it.
 
-Examples:
+The shipped `factories.cfg` provides 58 selectable presets. They follow one
+naming scheme, so `factory list all` reads as a structure:
 
-| Gametype | Config filename |
+| Id | What it is |
 | --- | --- |
-| Free for All | `gt-FFA.cfg` |
-| Duel | `gt-DUEL.cfg` |
-| Team Deathmatch | `gt-TDM.cfg` |
-| Capture the Flag | `gt-CTF.cfg` |
-| Clan Arena | `gt-CA.cfg` |
-| Arena Rooms (Rocket Arena) | `gt-ARENA.cfg` |
-| Freeze Tag | `gt-FT.cfg` |
-| Last Man Standing | `gt-LMS.cfg` |
-| Capture Strike | `gt-STRIKE.cfg` |
-| Red Rover | `gt-REDROVER.cfg` |
-| Horde | `gt-HORDE.cfg` |
-| Instagib | `gt-INSTAGIB.cfg` |
-| NadeFest | `gt-NADEFEST.cfg` |
+| `<mode>_classic` | The standard version of the mode — what a public server runs. |
+| `<mode>_comp` | The same mode set up for organised play: everyone readies up, nobody joins or is thrown into a running match, ties go to overtime, teams are force balanced. Available for `ffa`, `duel`, `tdm`, `ctf`, `ca`, `ft` and `strike`. |
+| `insta*` `vamp*` `frenzy*` `nade*` `quad*` | The mutator presets, one per mode where the mutator makes sense. |
+| `_base_<mode>` | Hidden layer holding a mode's baseline; everything visible for that mode inherits it. |
 
-Place these files in the active game directory. The system executes them only when the gametype actually changes.
-When the current session is limited to the four local/splitscreen slots,
-MuffMode loads the file through a bounded filter: every executable command
-segment is checked, `kexmultiplayer` is skipped, and supplied `maxclients`
-assignments outside `1` through `4` (including malformed or dynamic values)
-are rejected. Quoted text and comments are not mistaken for assignments.
+A `_comp` factory changes match *conduct*, not weapon numbers — those belong to
+the ruleset, which a factory selects by name and never overrides.
+
+| Command | Access | Purpose |
+| --- | --- | --- |
+| `factory` | all | Show the active preset and the others that fit the current gametype. |
+| `factory list [gametype\|all]` | all | List ids. `all` shows every one. |
+| `factory info <id>` | all | Show exactly what a preset changes, line by line. |
+| `factory cvars [prefix]` | all | List the cvars a factory may set, optionally filtered by prefix. |
+| `factory diag <cvar>` | all | Show where a setting's current value came from and what it restores to. |
+| `factory <id>` | admin | Select one. Sets the gametype and changes map. |
+| `factory none` | admin | Clear back to your `server-base.cfg` values. |
+| `factory reload` | admin | Re-read `factories.cfg` from disk. |
+| `sv factory <id\|none>` | console | The same, from a dedicated server console. |
+| `callvote factory <id>` | all | Vote for one, subject to `g_votable_factories`. |
+
+Selecting a factory writes everything it carries and then changes map, so map
+rotations, latched mutators and spawn-time settings are all live when the level
+comes up. Switching factories restores every setting the outgoing one changed
+and the incoming one does not — back to the value your own config produced.
+
+### Controlling what players can change
+
+Everything a player can do to the mode is gated by cvars in `server-base.cfg`,
+which no factory and no vote can reach:
+
+| Cvar | Default | Purpose |
+| --- | --- | --- |
+| `g_votable_factories` | empty | Space-separated ids players may vote for. Empty allows every non-hidden factory. |
+| `g_vote_flags` | `0` | Add `131072` to disable factory votes entirely. |
+| `g_votable_gametypes` | empty | Which gametypes may be voted directly. |
+| `g_allow_admin` | `1` | Whether players may authenticate as admin and use `factory <id>`. |
+| `g_gametype_locked` | `0` | `1` pins the gametype and factory: admin commands and passed votes are both refused. The server console and rcon still work, so you cannot lock yourself out. Use it for a server that plays one mode and stays there. |
+
+`hostname`, `maxclients`, admin and vote policy are outside what a factory can
+set, by design — a vote must not be able to rename your server or resize its
+slab.
+
+### Writing your own
+
+Copy `factories.cfg` before editing it: a package update overwrites the shipped
+file. Point `g_factory_file` at your copy, or load both so later files override
+earlier ones by id and you only redefine what you care about:
+
+```text
+set g_factory_file "factories.cfg my-factories.cfg"
+```
+
+```text
+factory scrim_ctf {
+    title    "Scrim CTF"
+    desc     "Locked competitive CTF."
+    base     ctf
+    ruleset  q2reb
+    inherit  _base_ctf
+
+    maps     q2ctf1 q2ctf2 q2ctf4
+    rotation sequential
+    players  8 8
+
+    set capturelimit 8
+    set timelimit 20
+    set g_dm_do_readyup 1
+}
+```
+
+`maps`, `mappool`, `rotation` and `players` are directives rather than `set`
+lines because they carry structure a bare string cannot — map tokens are
+validated the same way the map system validates them anywhere else, and the
+player limits are range-checked against each other. Everything else is a `set`
+against a fixed allowlist of 219 gameplay cvars.
+
+A malformed definition is rejected on its own, named by file, line, id and
+reason; the rest of the file still loads. If the *document* is unusable — a
+missing file, unbalanced braces, a bounds overrun — nothing is published and the
+previously working registry is kept, so a bad edit cannot leave the server with
+no factories. `factory reload` says which of the two happened.
+
+See [Factories](configuration-reference.md#factories) for the full key
+reference, the allowlist categories, and the layering and restore rules.
+
+## Per-Level Configs
+
+When `g_dm_exec_level_cfg` is `1`, MuffMode executes `exec <mapname>` at level
+start. It is off by default.
+
+Per-gametype config files (`gt-FFA.cfg` and friends) no longer exist. If you are
+migrating an older server config, see the migration notes in
+`baseq2/CONFIGS_README.md`.
 
 ## Admin Commands
 
@@ -414,8 +498,10 @@ Logs are written to `muffmode_debug.log` in the game directory. The default is `
 
 - Set `hostname`, connected-slot `maxclients`, active-player `maxplayers`, the separate KEX lobby capacity, and passwords before going public.
 - Add a short MOTD so casual players know what kind of server they joined.
-- Set `g_map_list` and optionally `g_map_pool`.
+- Set the fallback `g_map_list` and optionally `g_map_pool`; per-mode rotations belong in the factory.
+- Pick a starting preset with `factory <id>`, and copy `factories.cfg` before editing it.
 - Decide whether players can vote during matches with `g_allow_vote_midgame`.
-- Restrict votable modes with `g_votable_gametypes` and `g_votable_rulesets` if your server has a focused identity.
+- Restrict votable modes with `g_votable_gametypes`, `g_votable_factories`, and `g_votable_rulesets` if your server has a focused identity.
+- Set `g_gametype_locked 1` if the server should play one mode and stay there.
 - Run `doctor` after config changes.
 - Turn on `g_muffmode_debug 1` only while investigating issues, then turn it off again for normal operation.

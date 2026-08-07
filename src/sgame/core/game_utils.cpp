@@ -1400,7 +1400,7 @@ const char *G_PlaceString(int rank) {
 bool ItemSpawnsEnabled() {
 	if (g_no_items->integer)
 		return false;
-	if ((g_instagib->integer || GT(GT_INSTAGIB)) || (g_nadefest->integer || GT(GT_NADEFEST)))
+	if (g_instagib->integer || g_nadefest->integer)
 		return false;
 	if (GTF(GTF_ARENA))
 		return false;
@@ -1451,10 +1451,8 @@ bool loc_CanSee(gentity_t *targ, gentity_t *inflictor) {
 	return false;
 }
 
-bool Teams() {
-	return GTF(GTF_TEAMS);
-	//return GT(GT_CTF) || GT(GT_TDM) || GT(GT_FREEZE) || GT(GT_CA) || GT(GT_STRIKE) || GT(GT_RR);
-}
+// [MuffMode] Teams() is now inline in g_local.h -- it is a single masked load
+// of the published gametype resolution.
 
 /*
 =============
@@ -1585,14 +1583,13 @@ bool IsScoringDisabled() {
 	return false;
 }
 
+// [MuffMode] Resolves against the descriptor table; still accepts either the
+// short or the long name and still reports GT_NONE for anything unrecognised.
 gametype_t GT_IndexFromString(const char *in) {
-	for (size_t i = 0; i < gametype_t::GT_NUM_GAMETYPES; i++) {
-		if (!Q_strcasecmp(in, gt_short_name[i]))
-			return (gametype_t)i;
-		if (!Q_strcasecmp(in, gt_long_name[i]))
-			return (gametype_t)i;
-	}
-	return gametype_t::GT_NONE;
+	if (!in)
+		return gametype_t::GT_NONE;
+	const mm_gt_lookup_t found = MM_GTFindByAnyName(in);
+	return found.found ? found.gt : gametype_t::GT_NONE;
 }
 
 void TeleportPlayerToRandomSpawnPoint(gentity_t *ent, bool fx) {
@@ -1611,9 +1608,7 @@ void TeleportPlayerToRandomSpawnPoint(gentity_t *ent, bool fx) {
 	//other->s.event = fx ? EV_PLAYER_TELEPORT : EV_OTHER_TELEPORT;
 }
 
-bool InCoopStyle() {
-	return coop->integer || GT(GT_HORDE);
-}
+// [MuffMode] InCoopStyle() is now inline in g_local.h.
 
 /*
 =============

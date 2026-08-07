@@ -662,7 +662,7 @@ void T_Damage(gentity_t *targ, gentity_t *inflictor, gentity_t *attacker, const 
 		arena_nonlethal_hit = damage <= 0;
 
 	if (!arena_nonlethal_hit && notGT(GT_ARENA) &&
-		(g_instagib->integer || GT(GT_INSTAGIB)) && attacker->client && targ->client) {
+		g_instagib->integer && attacker->client && targ->client) {
 		// [Kex] always kill no matter what on instagib
 		damage = 9999;
 	}

@@ -11,6 +11,7 @@
 #include "muffmode/mm_chat.h"
 #include "muffmode/mm_command_contracts.h"
 #include "muffmode/mm_duel.h"
+#include "muffmode/mm_factory.h"
 #include "muffmode/mm_freezetag.h"
 #include "muffmode/mm_ghost.h"
 #include "muffmode/mm_items_rules.h"
@@ -2301,6 +2302,11 @@ static void Cmd_Gametype_f(gentity_t *ent) {
 	MM_CmdGametype(ent);
 }
 
+// [MuffMode] Thin vanilla hook; implementation lives in muffmode/mm_factory.cpp.
+static void Cmd_Factory_f(gentity_t *ent) {
+	MM_CmdFactory(ent);
+}
+
 /*
 =================
 Cmd_Ruleset_f
@@ -2456,6 +2462,7 @@ cmds_t client_cmds[] = {
 	{"endmatch", 		Cmd_EndMatch_f,			CF_ADMIN_ONLY | CF_ALLOW_INT | CF_ALLOW_SPEC},
 	{"enemyskin",		Cmd_EnemySkin_f,		CF_ALLOW_SPEC | CF_ALLOW_DEAD},
 	{"eskin",			Cmd_EnemySkin_f,		CF_ALLOW_SPEC | CF_ALLOW_DEAD},
+	{"factory",			Cmd_Factory_f,			CF_ALLOW_DEAD | CF_ALLOW_INT | CF_ALLOW_SPEC},	// listing is open to all; changing is gated to admins inside the handler
 	{"fm", 				Cmd_FragMessages_f,		CF_ALLOW_SPEC | CF_ALLOW_DEAD},
 	{"follow",			Cmd_Follow_f,			CF_ALLOW_SPEC | CF_ALLOW_DEAD},
 	{"followkiller",	Cmd_FollowKiller_f,		CF_ALLOW_SPEC | CF_ALLOW_DEAD},

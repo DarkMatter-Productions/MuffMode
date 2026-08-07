@@ -92,7 +92,7 @@ foreach ($needle in @("teleport 0 0 64", "spawn monster_soldier spawnflags", "us
 
 foreach ($seed in @(
     "docs-dev\test-assets\fuzz-corpus\numeric-parsers\valid-and-invalid.txt",
-    "docs-dev\test-assets\fuzz-corpus\gt-cfg\maxclients-lines.txt"
+    "docs-dev\test-assets\fuzz-corpus\factory-documents\adversarial-blocks.txt"
 )) {
     $path = Join-Path $repoRoot $seed
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {

@@ -111,9 +111,7 @@ packaging/release-assets/
     baseq2/
       server-base.cfg
       CONFIGS_README.md
-      gt-FFA.cfg
-      gt-DUEL.cfg
-      gt-LMS.cfg
+      factories.cfg
       bots/navigation/*.nav
       maps/*.ent
       maps/*.bsp

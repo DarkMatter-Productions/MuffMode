@@ -2,7 +2,7 @@
 
 [README](../README.md) | [Player Guide](player-guide.md) | [Server Host Guide](server-host-guide.md) | [Gameplay Reference](gameplay-reference.md) | [Rulesets](rulesets.md)
 
-This is the lookup document for MuffMode commands, cvars, vote options, and per-gametype config behavior. It is mainly for server hosts, admins, and competitive organizers who already know what setting they want to change. Players should start with the [Player Guide](player-guide.md); hosts should start with the [Server Host Guide](server-host-guide.md).
+This is the lookup document for MuffMode commands, cvars, vote options, and factory behavior. It is mainly for server hosts, admins, and competitive organizers who already know what setting they want to change. Players should start with the [Player Guide](player-guide.md); hosts should start with the [Server Host Guide](server-host-guide.md).
 
 ## Admin Commands
 
@@ -153,6 +153,7 @@ Use `callvote <command> [arg]` or `cv <command> [arg]`.
 | `techs` | `<0|1>` | Disable or enable techs (FFA/TDM/CTF/Horde only). |
 | `handicap` | `<player> <weapon> <on|off>` | Restrict duel weapons for a player. Weapons: `railgun`, `chaingun`, `rlauncher`, or `all`. |
 | `readyall` | none | Ready all players during ready-up warmup. |
+| `factory` | `<factory>` | Change the active factory preset. See [Factories](#factories). |
 
 ## Vote Flags
 
@@ -177,6 +178,7 @@ Use `callvote <command> [arg]` or `cv <command> [arg]`.
 | `16384` | `handicap` |
 | `32768` | `readyall` |
 | `65536` | `techs` |
+| `131072` | `factory` |
 
 ## Gametype Values
 
@@ -192,11 +194,222 @@ Use `callvote <command> [arg]` or `cv <command> [arg]`.
 | `8` | `rr` | Red Rover |
 | `9` | `lms` | Last Man Standing |
 | `10` | `horde` | Horde Mode |
-| `12` | `instagib` | Instagib |
-| `13` | `nadefest` | NadeFest |
 | `14` | `arena` | Arena Rooms (Rocket Arena) |
 
-Value `11` (`ball`) is reserved or removed in the current build.
+Values `11` (`ball`), `12` (`instagib`) and `13` (`nadefest`) are not selectable
+in the current build; setting one falls back to Deathmatch with a console
+notice. Instagib and NadeFest are modifiers rather than gametypes -- they are
+`g_instagib` and `g_nadefest`, applied on top of whichever mode is running, and
+the shipped `factories.cfg` provides them (and their combinations with the team
+and round modes) as named presets. The ids are retained so `arena` keeps id
+`14` and existing configs do not renumber.
+
+## Factories
+
+A factory is a named gameplay preset: one base gametype plus a set of cvar
+overrides and structured directives. **Factories are how a MuffMode server is
+configured for play.** They replaced the per-gametype `gt-*.cfg` presets the mod
+used to execute automatically, so nothing runs underneath a factory — a setting
+no factory states holds whatever `server-base.cfg` left in it.
+
+Factories exist so one server can offer several flavours of the same gametype —
+classic CTF and Insta CTF, a competition Clan Arena and a casual one —
+selectable by name, by an admin, from the server console, or by vote.
+
+Definitions live in `baseq2/factories.cfg`. The shipped catalogue provides 58
+selectable presets — a classic and a competitive variant of each gametype, plus
+the Instagib, NadeFest, Vampiric, Frenzy and Quad Hog modifier presets for the
+modes where each makes sense (`instagib`, `instactf`, `instaca`, `vampffa`,
+`vampca`, `frenzyctf`, `nadefest`, and so on) — layered on eleven hidden
+`_base_<mode>` factories, one per gametype, that carry each mode's baseline, plus
+two hidden test entries. 71 definitions in all.
+Run `factory list all` to see every id and `factory info <id>` to see exactly
+what one changes. Set `g_factory_file` to load a different file, or several,
+separated by spaces.
+
+Instagib and NadeFest used to be gametypes. They are modifiers now — applied on
+top of whichever mode is running — so they exist as factories rather than as
+`g_gametype` values. That is what makes Insta CTF and NadeFest Clan Arena
+expressible at all.
+
+### Writing a factory
+
+```
+factory ctf_classic {
+    title    "Capture the Flag"
+    desc     "Classic CTF with grapple and techs."
+    base     ctf
+    ruleset  q2re
+    inherit  _base_ctf
+
+    maps     q2ctf1 q2ctf2 q2ctf3 q2ctf4 q2ctf5
+    mappool  q2ctf1 q2ctf2 q2ctf3
+    rotation shuffle-per-gametype
+    players  4 16
+
+    set capturelimit 8
+    set g_allow_grapple 1
+}
+```
+
+| Key | Required | Meaning |
+| --- | --- | --- |
+| `factory <id>` | yes | 1–31 characters of `a-z 0-9 _ -`. An id beginning with `_` is hidden from listings and from the vote menu, but can still be selected by name. The subcommand words (`all`, `clear`, `cvars`, `diag`, `info`, `list`, `none`, `reload`) are rejected, since a factory with one of those ids could never be selected. |
+| `title` | yes | Display name, published in serverinfo. Under 48 characters; no `\`, `;` or `"`. |
+| `desc` (or `description`) | no | One line shown by `factory info`. |
+| `base` (or `basegt`) | yes | Base gametype short name: `ffa duel tdm ctf ca ft strike rr lms horde arena`. |
+| `ruleset` | no | `q2re`, `mm`, `q3a`, `q2reb`, `q` or `qc`. |
+| `inherit` | no | An earlier factory id with the **same** base gametype; its overrides and directives are the starting point. |
+| `maps` | no | The map rotation. Repeat the key to add more; a rotation is usually longer than one line allows. |
+| `mappool` | no | The maps offered to map votes and MyMap. |
+| `rotation` | no | `sequential`, `shuffle-on-wrap` or `shuffle-per-gametype`. |
+| `players` | no | `<min> <max>` active players for this mode. |
+| `set <cvar> <value>` | no | Override an allowlisted cvar. Use `""` to clear one. |
+
+`maps`, `mappool`, `rotation` and `players` are directives rather than plain
+`set` lines because they carry structure a bare string cannot: a map token is
+interpolated straight into a `gamemap` command, so it goes through the same
+validation the structured map system applies everywhere else, and the player
+limits are range-checked against each other. A rotation is also routinely longer
+than the value length a `set` line permits.
+
+When a child factory names its own `maps`, it *replaces* the inherited rotation
+rather than extending it — otherwise an Insta CTF variant would inherit the
+deathmatch rotation it was trying to override. Directives the child does not
+name are inherited.
+
+### Layering
+
+Each authority writes at a different moment, and that ordering *is* the
+precedence — there is no runtime arbiter to disagree with:
+
+| Order | Authority | When it writes |
+| --- | --- | --- |
+| 1 | Compiled defaults | cvar registration at level start |
+| 2 | `server-base.cfg` and your own autoexec | server start |
+| 3 | **Factory overrides and directives** | immediately before the map load that follows a gametype or factory change |
+| 4 | Map worldspawn and Arena room config | map spawn / room setup |
+| 5 | Admin cvar write or a passed vote | immediately, and it stays until something writes the cvar again — a factory only re-asserts its own settings on a gametype or factory change |
+
+`server-base.cfg` keeps ownership of *server scope* — `hostname`, `maxclients`,
+admin and vote policy — and supplies the baseline a factory layers on top of. A
+factory can never reach those, deliberately: a vote must not be able to rename
+your server or resize its slab.
+
+### Restoring on a switch
+
+Every cvar a factory writes is recorded with the value it had beforehand.
+Selecting a different factory restores every setting the outgoing factory
+changed and the incoming one does not re-assert, then applies the incoming
+overrides. Selecting no factory (`factory none`) restores all of them.
+
+Restoration goes back to the value the *server's own configuration* produced —
+what `server-base.cfg` left behind — not to a compiled default, because that is
+the value the operator actually asked for. This is why `server-base.cfg` states
+the mutators explicitly even though they are off by default: stating a value is
+what establishes the value a mutator factory restores to.
+
+### Which cvars a factory may set
+
+Factories may only `set` cvars on a fixed allowlist of 221 names. This is what
+makes the restore exact: the system can only give back settings it knows it
+owns. It also bounds the blast radius of an operator-authored file — server
+identity, the client slot allocation, authentication, and every
+`sv_`/`cl_`/`fs_`/`net_`/`in_`/`bot_` cvar are unreachable, and a factory can
+never create a cvar.
+
+| Category | Count | Covers |
+| --- | --- | --- |
+| Match limits and flow | 12 | `fraglimit`, `timelimit`, `capturelimit`, `roundlimit`, `roundtimelimit`, `mercylimit`, `g_dm_overtime`, `g_match_lock`, `g_round_countdown`, `g_dm_do_warmup`, `g_warmup_countdown`, `g_warmup_ready_percentage` |
+| Mutators | 9 | `g_instagib`, `g_instagib_splash`, `g_nadefest`, `g_quadhog`, `g_frenzy`, and the four `g_vampiric_*` |
+| Loadout, items, damage, movement, teams | 35 | `g_start_items`, `g_starting_health_bonus`, `g_infinite_ammo`, `g_dm_weapons_stay`, `g_weapon_respawn_time`, `g_no_powerups`, `g_knockback_scale`, `g_damage_scale`, `g_dm_no_fall_damage`, `g_friendly_fire`, `g_teamplay_force_balance`, `g_lms_lives`, and similar |
+| CTF and techs | 4 | `g_allow_grapple`, `g_allow_techs`, `g_grapple_damage`, `g_grapple_offhand` |
+| Arena rooms | 30 | every `g_arena_*` |
+| Freeze Tag | 14 | every `g_freezetag_*` |
+| Horde | 117 | every `g_horde_*` |
+
+Weapon damage, spread, pellet counts and projectile speeds are the **ruleset's**
+numbers and are deliberately absent. A factory selects a ruleset by name with
+`ruleset <q2re|mm|q3a|q2reb|q|qc>` and never overrides its numbers. See
+[docs/rulesets.md](rulesets.md). The map rotation and player limits are absent
+for the opposite reason: they are directives, with validation a `set` cannot do.
+
+`factory info <id>` prints exactly which of these a factory sets; a `set` naming
+anything else is rejected by file, line and reason when the registry loads.
+
+### When an override takes effect
+
+Selecting a factory always triggers a map change, and everything it carries is
+written before that map load — so every override lands at a clean boundary
+regardless of its kind. `factory reload` and `sv gt_apply` re-apply only the
+settings that can take effect mid-map, and report how many were deferred:
+
+- **Immediate** — read fresh at the point of use; applies at once.
+- **Map load** — captured during map spawn; applies at the next map load.
+- **Latched** (`g_instagib`, `g_nadefest`, `g_quadhog`, `g_frenzy`,
+  `g_infinite_ammo`, `g_quick_weapon_switch`, and a few others) — these are
+  `CVAR_LATCH` because the world they describe is built at map spawn. Writing
+  one mid-map moves the cvar but not the item layout or loadout it governs, so a
+  factory treats them as map-load settings and says so rather than reporting a
+  change nobody can see.
+
+`factory diag <cvar>` reports an allowlisted cvar's current value, who set it,
+what it will be restored to, and which of the three classes it falls into.
+
+### Failure handling
+
+A factory file is parsed whole before any of it is used, and the new registry
+replaces the old one only if the file parsed — a bad edit leaves the working
+registry in place, so it cannot leave a server with no factories. A malformed
+definition is rejected on its own, named by file, line and reason, and the rest
+of the file still loads. An unknown `g_factory` selects nothing, clears itself,
+and lists what was available; it never guesses. A factory whose `base` does not
+match the configured gametype is discarded with a console notice rather than
+silently switching the mode out from under the operator. A factory file contains
+no console commands, so there is nothing to expand.
+
+### Host permissions
+
+Everything a player can do to the mode is gated by cvars the operator sets in
+`server-base.cfg`, which no factory and no vote can reach:
+
+| Cvar | Effect |
+| --- | --- |
+| `g_votable_factories` | Space-separated ids players may vote for. Empty allows every non-hidden factory. |
+| `g_vote_flags` | Add `131072` to disable factory votes entirely. |
+| `g_votable_gametypes` | Which gametypes may be voted directly. |
+| `g_allow_voting`, `g_allow_vote_midgame` | Whether votes run at all. |
+| `g_allow_admin` | Whether players may authenticate as admin and use `factory <id>`. |
+| `g_gametype_locked` | `1` pins the gametype and factory: admin commands and passed votes are both refused with `selection locked`. The server console and rcon still get through, so an operator cannot lock themselves out. |
+
+### Cvars
+
+| Cvar | Default | Purpose |
+| --- | --- | --- |
+| `g_factory` | `""` | Active factory id. Empty means no factory: the plain gametype runs on your `server-base.cfg` values. Carried across a map change. |
+| `g_factory_title` | `""` | Read-only. The active factory's display title, published in serverinfo. |
+| `g_factory_file` | `factories.cfg` | Space-separated leaf names under `baseq2/` to load the registry from. Latched: a change takes effect at the next server start, or immediately on `factory reload`. Later files override earlier ones by id. |
+| `g_votable_factories` | `""` | Space-separated ids players may vote for. Empty allows every non-hidden factory. |
+| `g_gametype_locked` | `0` | `1` refuses every gametype and factory change from an admin command or a passed vote. The server console is exempt. |
+
+### Commands
+
+| Command | Access | Purpose |
+| --- | --- | --- |
+| `factory` | all | Show the active factory and the ones available for the current gametype. |
+| `factory list [gametype\|all]` | all | List factory ids, optionally for one gametype. |
+| `factory info <id>` | all | Show a factory's title, base gametype, source file and every setting it changes. |
+| `factory cvars [prefix]` | all | List the cvars a factory may set, optionally filtered by prefix (`factory cvars g_arena`). |
+| `factory diag <cvar>` | all | Show where an allowlisted setting's current value came from and what it restores to. |
+| `factory <id>` | admin | Select a factory. Triggers a map change. |
+| `factory none` | admin | Clear the factory and restore everything it changed. |
+| `factory reload` | admin | Rebuild the registry from disk and re-apply what can take effect now. |
+| `sv factory <id\|none>` | console | Select or clear a factory from a dedicated server console. Exempt from `g_gametype_locked`. |
+| `callvote factory <id>` | all | Vote to change factory (vote flag `131072`). |
+| `sv gt_apply` | console | Server-console equivalent of `factory reload`. |
+
+Ids beginning with `_` are hidden from listings and from the vote menu, but can
+still be selected by name.
 
 ## Ruleset Values
 
@@ -261,6 +474,7 @@ MuffMode's supported connected-client ceiling is 128.
 | `g_allow_spec_vote` | `0` | Allows spectators to vote. |
 | `g_allow_techs` | `auto` | Controls tech pickups in FFA/TDM/CTF/Horde. `auto` enables techs by default in CTF and Horde (off in FFA/TDM); votes can force `0` or `1` in any of those modes. |
 | `g_allow_vote_midgame` | `0` | Allows votes during active matches. |
+| `g_gametype_locked` | `0` | Pins the gametype and factory. `1` refuses every gametype or factory change from an admin command or a passed vote; the server console and rcon are exempt so an operator cannot lock themselves out. See [Factories](#factories). |
 | `g_allow_voting` | `1` | Enables voting globally. |
 | `flood_msgs` | `4` | Flood-controlled client actions (including chat, authentication attempts, gestures/pings, `motd`, and `mymap`) allowed within the shared window; values above the ten-entry history capacity are clamped to `10`, and values at or below `0` disable this protection. |
 | `flood_persecond` | `4` | Length of the shared client flood-detection window in seconds. |
@@ -326,8 +540,8 @@ override them by map and room.
 | `g_arena_default_type` | `rocket` | Default room type: `rocket`, `clan`, `rover`, or `practice`. |
 | `g_arena_players_per_team` | `1` | Default team size, clamped from `1` through half of `maxclients`. |
 | `g_arena_rounds` | `1` | Default room best-of length, normalized to an odd value from `1` through `99`. |
-| `g_arena_start_health` | `200` (`100` in `gt-ARENA.cfg`) | Shared arena-loadout starting-health default. The shipped Arena preset selects the classic 100-health value without changing Freeze Tag's default. |
-| `g_arena_start_armor` | `200` (`100` in `gt-ARENA.cfg`) | Shared arena-loadout armor; the shipped Arena preset selects the traditional 100-armor value without changing Freeze Tag's default. |
+| `g_arena_start_health` | `200` (`100` in the shipped Arena factories) | Shared arena-loadout starting-health default. The shipped Arena factories select the classic 100-health value without changing Freeze Tag's default. |
+| `g_arena_start_armor` | `200` (`100` in the shipped Arena factories) | Shared arena-loadout armor; the shipped Arena factories select the traditional 100-armor value without changing Freeze Tag's default. |
 | `g_arena_health_protect` | `1` | Health protection: `0` damages all, `1` protects self and teammates, `2` protects teammates but permits self damage. |
 | `g_arena_armor_protect` | `2` | Armor protection using the same `0`/`1`/`2` modes. The default permits self-armor damage while protecting teammates. |
 | `g_arena_falling_damage` | `1` | Default falling-damage behavior. |
@@ -363,13 +577,14 @@ covers each later round. Both countdowns clamp to 1-30 seconds.
 
 Arena bots choose their own room: they follow players into an occupied room,
 prefer one where somebody is waiting for an opponent, and take an opposing team,
-creating one when a lone player has nobody to fight. Set `bot_minClients` in
-`gt-ARENA.cfg` to populate rooms automatically.
+creating one when a lone player has nobody to fight. To populate rooms
+automatically, set `bot_minClients` in your own server config -- it is an
+engine-owned `bot_` cvar, so a factory cannot set it.
 
 Arena timeouts use the existing `g_dm_timeout_length` duration and
 `g_dm_timeout_resume_countdown` time-in countdown. `g_arena_timeouts` remains
 separate because its per-side allowance is unique to room competition. The
-shipped `gt-ARENA.cfg` selects `60` seconds and a five-second time-in.
+shipped `arena_ra2` factory selects `60` seconds and a five-second time-in.
 
 `g_arena_weapon_mask` is the sum of the enabled weapon bits:
 
@@ -517,7 +732,7 @@ When those weapons are enabled, the spawn reserve is therefore the largest of
 `cells`, `plasma`, and `bfgammo`.
 
 The optional `roundtimelimit` caps a round. Each room evaluates that timer and
-its outcome independently; `gt-ARENA.cfg` leaves it at `0`, so room rounds are
+its outcome independently; the shipped Arena factories leave it at `0`, so room rounds are
 uncapped by default.
 
 ## Map And Rotation Cvars
@@ -533,7 +748,6 @@ uncapped by default.
 | `g_map_pick` | `15` | Seconds the post-scoreboard next-map pick stays open; `0` disables it. Clamped to `5`–`60`. See [Next-Map Pick](#next-map-pick). |
 | `g_match_awards` | `10` | Seconds the post-match awards reel stays up unattended before handing on to the next-map pick; `0` disables it. Clamped to `3`–`30`, and skippable with any key after the first three seconds. Ranked matches only. See [Post-Match Awards](#post-match-awards). |
 | `g_map_pool` | empty | Additional voting map pool. |
-| `g_gametype_cfg` | `1` | Executes `gt-[GAMETYPE].cfg` on gametype changes. |
 | `g_dm_exec_level_cfg` | `0` | Executes level-specific configs when enabled. |
 | `g_loc` | `1` | Enables location-backed teammate callouts, including the `loc` command and Freeze Tag frozen help markers. |
 | `g_loc_items` | `1` | Allows location callouts to derive a fallback location from visible weapons, powerups, or mega health when no map `.loc` file exists. |
@@ -748,7 +962,7 @@ dedicated console can use `sv load_mappool` and `sv load_mapcycle`.
 | Cvar | Default | Purpose |
 | --- | --- | --- |
 | `g_arena_start_armor` | `200` | Global MuffMode Arena starting-armor default; also used by Freeze Tag when `g_freezetag_arena_loadout` is enabled. |
-| `g_arena_start_health` | `200` | Shared arena-loadout starting-health default; also used by Freeze Tag when `g_freezetag_arena_loadout` is enabled. `gt-ARENA.cfg` overrides it to `100` for MuffMode Arena sessions. |
+| `g_arena_start_health` | `200` | Shared arena-loadout starting-health default; also used by Freeze Tag when `g_freezetag_arena_loadout` is enabled. The shipped Arena factories override it to `100`. |
 | `g_arena_dmg_armor` | `0` | Legacy arena-loadout self-armor switch used outside multi-room MuffMode Arena; GT_ARENA uses each room's independent `armorprotect` setting. |
 | `g_coop_health_scaling` | `0` | Scales co-op health by player count. |
 | `g_corpse_sink_time` | `15` | Seconds before corpses sink and disappear. |
@@ -853,37 +1067,19 @@ dedicated console can use `sv load_mappool` and `sv load_mapcycle`.
 
 The default `7` enables all three.
 
-## Per-Gametype Config Files
+## Per-Level Config Files
 
-When `g_gametype_cfg` is enabled, MuffMode executes a config named for the active gametype:
+When `g_dm_exec_level_cfg` is enabled, MuffMode executes a config named for the
+loaded map (`exec <mapname>`) at level start. It is off by default.
 
-| Gametype | Config |
-| --- | --- |
-| Free for All | `gt-FFA.cfg` |
-| Duel | `gt-DUEL.cfg` |
-| Team Deathmatch | `gt-TDM.cfg` |
-| Capture the Flag | `gt-CTF.cfg` |
-| Clan Arena | `gt-CA.cfg` |
-| Arena Rooms (Rocket Arena) | `gt-ARENA.cfg` |
-| Freeze Tag | `gt-FT.cfg` |
-| Last Man Standing | `gt-LMS.cfg` |
-| Capture Strike | `gt-STRIKE.cfg` |
-| Red Rover | `gt-REDROVER.cfg` |
-| Horde Mode | `gt-HORDE.cfg` |
-| Instagib | `gt-INSTAGIB.cfg` |
-| NadeFest | `gt-NADEFEST.cfg` |
+Per-gametype config files (`gt-FFA.cfg` and friends) no longer exist. Everything
+they carried — the mode's ruleset, limits, map rotation, player limits and
+gameplay settings — now lives in a factory. See [Factories](#factories) and the
+migration notes in `baseq2/CONFIGS_README.md`.
 
-These files can contain any server commands, cvar settings, map lists, or other gametype-specific setup. For examples, see the [MuffMode Server Configs repository](https://github.com/ozy24/muffmode-server-configs).
-
-For a session already capped at the four local/splitscreen slots, MuffMode
-uses the already allocated client capacity as authority and loads at most 4,096
-lines / 4 MiB, including bytes drained from an overlong physical line. It skips `kexmultiplayer` and
-rejects every executable `maxclients` assignment whose supplied value is
-malformed, dynamic, below `1`, or above `4`. This applies to direct commands
-and `set`, `seta`, `sets`, `cvar_set`, and `cvar_forceset`, including compound
-semicolon-separated lines; semicolons inside quoted arguments remain data.
-
-Set `roundlimit 0` after loading `gt-HORDE.cfg` to run endless Horde. See [Horde Late-Wave & Endless](#horde-late-wave--endless).
+To run endless Horde, select a factory with `roundlimit 0` — the shipped
+`horde_endless` does exactly that. See
+[Horde Late-Wave & Endless](#horde-late-wave--endless).
 
 ## Horde Wave And Scaling Cvars
 
@@ -1129,7 +1325,7 @@ In Horde, non-weapon items (health, ammo, armor, powerups) respawn slower than i
 effective respawn time is `base × g_dm_item_respawn_rate × g_horde_item_respawn_scale`, where `base`
 is the item's built-in respawn time. **Weapons are exempt** from `g_horde_item_respawn_scale` — they
 respawn at exactly `g_weapon_respawn_time` (× `g_dm_item_respawn_rate`), so the configured value is the
-real in-game time. `gt-HORDE.cfg` ships `g_weapon_respawn_time 60` and `g_horde_item_respawn_scale 4`.
+real in-game time. The shipped Horde factories set `g_weapon_respawn_time 60` and `g_horde_item_respawn_scale 4`.
 Active held powerup and timed-tech deadlines pause from wave end until the next wave starts; Regeneration and
 AutoDoc ticks pause too, so inter-round preparation neither consumes nor exploits their duration.
 

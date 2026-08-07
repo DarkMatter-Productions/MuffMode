@@ -1992,7 +1992,7 @@ void Powerup_ApplyRegeneration(gentity_t *ent) {
 	bool		noise = false;
 	gclient_t	*cl;
 	float		volume = 1.0;
-	bool		mod = (g_instagib->integer || GT(GT_INSTAGIB)) || (g_nadefest->integer || GT(GT_NADEFEST));
+	bool		mod = g_instagib->integer || g_nadefest->integer;
 
 	cl = ent->client;
 	if (!cl)

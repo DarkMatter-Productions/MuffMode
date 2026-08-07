@@ -8,6 +8,8 @@
 #include "muffmode/mm_arena_rules.h"
 #include "muffmode/mm_centerprint.h"
 #include "muffmode/mm_gametype.h"
+#include "muffmode/mm_gametype_state.h"
+#include "muffmode/mm_gametype_table.h"
 #include "muffmode/mm_match_stats_types.h"
 #include "muffmode/mm_maps.h"
 #include "muffmode/mm_vote_types.h"
@@ -16,7 +18,7 @@
 constexpr const char *GAMEVERSION = "baseq2";
 
 constexpr const char *GAMEMOD_TITLE = "Muff Mode";
-constexpr const char *GAMEMOD_VERSION = "0.70.22";
+constexpr const char *GAMEMOD_VERSION = "0.70.27";
 
 //==================================================================
 
@@ -208,109 +210,20 @@ enum team_t {
 	TEAM_NUM_TEAMS
 };
 
-enum gametype_t : int {
-	GT_NONE,
-	GT_FFA,
-	GT_DUEL,
-	GT_TDM,
-	GT_CTF,
-	GT_CA,
-	GT_FREEZE,
-	GT_STRIKE,
-	GT_RR,
-	GT_LMS,
-	GT_HORDE,
-	GT_BALL,
-	GT_INSTAGIB,
-	GT_NADEFEST,
-	GT_ARENA,
-	GT_NUM_GAMETYPES
-};
-constexpr gametype_t GT_FIRST = GT_FFA;
-constexpr gametype_t GT_LAST = GT_ARENA;
+// [MuffMode] gametype_t, gtf_t, gt_short_name, gt_short_name_upper,
+// gt_long_name and _gt all live in muffmode/mm_gametype_table.h now, generated
+// from one descriptor table whose self-consistency is static_asserted.
+// MM_Arena_Active() is an inline read of the published resolution in
+// muffmode/mm_gametype_state.h.
 
-enum gtf_t {
-	GTF_TEAMS	= 0x01,
-	GTF_CTF		= 0x02,
-	GTF_ARENA	= 0x04,
-	GTF_ROUNDS	= 0x08,
-	GTF_ELIMINATION	= 0x10,
-	GTF_FRAGS	= 0x20,
-	// [MuffMode] Independent RA2/RA3 arenas. Unlike GTF_ROUNDS and
-	// GTF_ELIMINATION, this never opts into the singleton match state.
-	GTF_MULTI_ARENA = 0x40
-};
-
-extern int _gt[GT_NUM_GAMETYPES];
-
-// [MuffMode] Selecting MuffMode Arena is not enough to activate its gameplay.
-// Until the current entity lump passes the RA2 map contract, all normal
-// gameplay queries see FFA while registration/configuration code can use
-// GT_RAW to inspect the requested cvar value.
-bool MM_Arena_Active();
+// GT_RAW inspects the requested cvar value, bypassing Arena's fail-closed
+// fallback. Registration and diagnostic code wants the request; gameplay wants
+// the resolution.
 #define GT_RAW( x ) (g_gametype && g_gametype->integer == (int)(x))
-#define MM_GAMETYPE_BOUNDARY() \
-	MM_ResolveGametypeBoundary( \
-		g_gametype ? g_gametype->integer : (int)GT_FFA, \
-		(int)GT_FIRST, (int)GT_LAST, (int)GT_ARENA, (int)GT_FFA, \
-		MM_Arena_Active())
-#define MM_EFFECTIVE_GT \
-	(MM_GAMETYPE_BOUNDARY().effective_index)
-#define GTF( x ) (_gt[MM_EFFECTIVE_GT] & (x))
+#define MM_EFFECTIVE_GT (muffmode::gametype::g_gt_live.effective)
+#define GTF( x ) (muffmode::gametype::g_gt_live.flags & (x))
 #define GT( x ) (MM_EFFECTIVE_GT == (int)(x))
 #define notGT( x ) (!GT(x))
-
-constexpr const char *gt_short_name[GT_NUM_GAMETYPES] = {
-	"cmp",
-	"ffa",
-	"duel",
-	"tdm",
-	"ctf",
-	"ca",
-	"ft",
-	"strike",
-	"rr",
-	"lms",
-	"horde",
-	"ball",
-	"instagib",
-	"nadefest",
-	"arena"
-};
-constexpr const char *gt_short_name_upper[GT_NUM_GAMETYPES] = {
-	"CMP",
-	"FFA",
-	"DUEL",
-	"TDM",
-	"CTF",
-	"CA",
-	"FT",
-	"STRIKE",
-	"REDROVER",
-	"LMS",
-	"HORDE",
-	"BALL",
-	"INSTAGIB",
-	"NADEFEST",
-	"ARENA",
-};
-constexpr const char *gt_long_name[GT_NUM_GAMETYPES] = {
-	"Campaign",
-	"Deathmatch",
-	"Duel",
-	"Team Deathmatch",
-	"Capture the Flag",
-	"Clan Arena",
-	"Freeze Tag",
-	"Capture Strike",
-	"Red Rover",
-	"Last Man Standing",
-	"Horde",
-	"ProBall",
-	"Instagib",
-	"NadeFest",
-	"MuffMode Arena"
-};
 
 enum match_state_t {
 	MATCH_NONE,
@@ -2651,6 +2564,13 @@ extern cvar_t *g_maps_random;
 extern cvar_t *g_maps_repeat_delay;
 extern cvar_t *g_votable_gametypes;
 extern cvar_t *g_votable_rulesets;
+// [MuffMode] Factory presets: the selected id, its published title, the files
+// the registry loads from, and the player-votable subset.
+extern cvar_t *g_factory;
+extern cvar_t *g_gametype_locked;
+extern cvar_t *g_factory_title;
+extern cvar_t *g_factory_file;
+extern cvar_t *g_votable_factories;
 extern cvar_t *g_match_lock;
 extern cvar_t *g_matchstats;
 extern cvar_t *g_maxvelocity;
@@ -2671,7 +2591,6 @@ extern cvar_t *g_mapspawn_no_bfg;
 extern cvar_t *g_mapspawn_no_plasmabeam;
 extern cvar_t *g_owner_auto_join;
 extern cvar_t *g_owner_push_scores;
-extern cvar_t *g_gametype_cfg;
 extern cvar_t *g_quadhog;
 extern cvar_t *g_quick_weapon_switch;
 extern cvar_t *g_rollangle;
@@ -2876,7 +2795,12 @@ void G_PlayerNotifyGoal(gentity_t *player);
 const char *Teams_TeamName(team_t team);
 const char *Teams_OtherTeamName(team_t team);
 team_t Teams_OtherTeam(team_t team);
-bool Teams();
+// [MuffMode] Inline: this is one masked load of the published gametype
+// resolution, and it is asked ~90 times across the module including per-client
+// paths. Body unchanged from the out-of-line definition it replaces.
+inline bool Teams() {
+	return GTF(GTF_TEAMS);
+}
 uint8_t P_EngineTeamIndex(team_t team);
 void G_AdjustPlayerScore(gclient_t *cl, int32_t offset, bool adjust_team, int32_t team_offset);
 void G_SetPlayerScore(gclient_t *cl, int32_t value);
@@ -2895,7 +2819,10 @@ bool IsPickupsDisabled();
 gametype_t GT_IndexFromString(const char *in);
 bool IsScoringDisabled();
 void TeleportPlayerToRandomSpawnPoint(gentity_t *ent, bool fx);
-bool InCoopStyle();
+// [MuffMode] Inline for the same reason as Teams(); body unchanged.
+inline bool InCoopStyle() {
+	return coop->integer || GT(GT_HORDE);
+}
 gentity_t *ClientEntFromString(const char *in);
 ruleset_t RS_IndexFromString(const char *in);
 void TeleporterVelocity(gentity_t *ent, gvec3_t angles);
@@ -3382,8 +3309,6 @@ void Teams_CalcRankings(std::array<uint32_t, MAX_CLIENTS> &player_ranks); // [Pa
 void QueueIntermission(const char *msg, bool boo, bool reset);
 gentity_t *CreateTargetChangeLevel(const char *map);
 bool InAMatch();
-void ChangeGametype(gametype_t gt);
-void GT_Changes();
 void SpawnEntities(const char *mapname, const char *entities, const char *spawnpoint);
 enum class world_entity_reload_result_t : uint8_t {
 	reloaded,

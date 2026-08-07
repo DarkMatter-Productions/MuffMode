@@ -561,7 +561,7 @@ late-wave path past `g_horde_content_peak_wave` (default 12):
 
 | Step | What to verify |
 |------|----------------|
-| Waves 1-12 | Identical to `gt-HORDE.cfg` except Swarm-themed waves are ~7% lighter (1.30× vs 1.40×); no new monsters appear at waves 10-12 |
+| Waves 1-12 | Identical to the shipped Horde factories except Swarm-themed waves are ~7% lighter (1.30× vs 1.40×); no new monsters appear at waves 10-12 |
 | Strict themes | `g_horde_theme_chance 1` from wave 15: every spawn matches the banner; console shows no off-theme fallback on themed waves |
 | Viability gate | Late waves never show a theme banner with < `g_horde_theme_min_monsters` on-theme bodies (silently plays a normal wave instead) |
 | Budget taper | Waves 25 and 35 stay bounded (watch clear time / `g_horde_spawn_points_remaining`); no multi-minute spawn tail |

@@ -58,7 +58,7 @@ $repoSeeds = @(
     @{ Path = "docs-dev/test-assets/save-load/synthetic-minimal-save.json"; Description = "save/load corpus seed" },
     @{ Path = "docs-dev/test-assets/red-rover/0.36.04-regressions.json"; Description = "Red Rover regression corpus seed" },
     @{ Path = "docs-dev/test-assets/fuzz-corpus/numeric-parsers/valid-and-invalid.txt"; Description = "numeric parser fuzz corpus seed" },
-    @{ Path = "docs-dev/test-assets/fuzz-corpus/gt-cfg/maxclients-lines.txt"; Description = "gametype cfg fuzz corpus seed" },
+    @{ Path = "docs-dev/test-assets/fuzz-corpus/factory-documents/adversarial-blocks.txt"; Description = "factory document fuzz corpus seed" },
     @{ Path = "docs-dev/test-assets/manifest.example.json"; Description = "asset manifest example" }
 )
 

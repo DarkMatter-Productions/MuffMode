@@ -1,8 +1,8 @@
 // Copyright (c) ZeniMax Media Inc.
 // Licensed under the GNU General Public License 2.0.
 
+#include "muffmode/mm_factory_rules.h"
 #include "muffmode/mm_parse.h"
-#include "muffmode/mm_gametype_cfg_rules.h"
 #include "muffmode/mm_spawn_rules.h"
 
 #include <array>
@@ -20,8 +20,6 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
 	(void)MM_ParseNonNegativeIntArg(input.c_str());
 	(void)MM_ParseFloatArg(input.c_str());
 	(void)MM_ParseCfgIntArg(input.c_str());
-	(void)muffmode::gametype::MM_GtCfgLineViolatesSlotCap(
-		std::string_view(input.data(), size), 4);
 
 	// Entity-string field values reach the game module straight from a BSP or a
 	// .ent override. Expansion must stay inside the caller's buffer, always
@@ -40,6 +38,30 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
 		std::array<float, 4> components{};
 		std::memcpy(components.data(), data, sizeof(components));
 		(void)MM_PackEntityColorRgba(components);
+	}
+
+	// factories.cfg is operator-authored text the game module parses at level
+	// start. Parsing must terminate on anything, honour its own bounds, and
+	// never emit a factory it would refuse to name -- a rejected document has to
+	// stay rejected rather than half-loading.
+	{
+		using namespace muffmode::factory;
+
+		const factory_parse_result_t parsed =
+			MM_ParseFactoryDocument(input.c_str(), "fuzz.cfg");
+		if (parsed.factories.size() > MM_FACTORY_MAX_FACTORIES)
+			std::abort();
+		for (const parsed_factory_t &factory : parsed.factories) {
+			if (!MM_IsSafeFactoryId(factory.id))
+				std::abort();
+			if (!MM_IsSafeFactoryTitle(factory.title))
+				std::abort();
+			if (factory.overrides.size() > MM_FACTORY_MAX_OVERRIDES)
+				std::abort();
+			if (factory.scope.maps.size() > MM_FACTORY_MAX_MAPS ||
+				factory.scope.mappool.size() > MM_FACTORY_MAX_MAPS)
+				std::abort();
+		}
 	}
 
 	return 0;

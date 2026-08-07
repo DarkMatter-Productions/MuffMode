@@ -333,8 +333,8 @@ void MM_InitStatusbar()
 {
 	statusbar_t sb;
 	bool minhud = notGT(GT_ARENA) &&
-		((g_instagib->integer || GT(GT_INSTAGIB)) ||
-		 (g_nadefest->integer || GT(GT_NADEFEST)));
+		(g_instagib->integer ||
+		 g_nadefest->integer);
 
 	sb.yb(-24);
 

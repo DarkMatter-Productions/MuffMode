@@ -36,6 +36,7 @@ Players can vote with `callvote ruleset <shortname>` when the server allows rule
 - Protection blocks splash damage while active. `q2re` keeps the faithful full direct-damage protection; the other rulesets halve remaining direct damage after armor instead.
 - Q3A deliberately keeps Muff Mode's double-jump behavior. Q3-style knockback is used, but not the Q3 knockback movement lockout that would sever double jumps.
 - Q3A does not add custom assets or entities. It remaps Q3 weapon and ammo names onto existing Quake II/Muff Mode items.
+- Rulesets and factories own different things. A ruleset owns the numbers: weapon damage, spread, pellet counts, fire timing, knockback, armor behavior and ammo rules. A factory owns loadout composition, mutators and match limits, and may *select* a ruleset by name but can never override its numbers. Arena rooms own their own per-room loadout on top of both.
 
 ## Quake II Rerelease (`q2re`)
 
@@ -172,5 +173,5 @@ Good for: faster, more modern arena nights where the opening weapon roll changes
 
 - [Gameplay Reference](gameplay-reference.md) for gametypes, maps, and game modifications.
 - [Player Guide](player-guide.md) for voting and everyday commands.
-- [Server Host Guide](server-host-guide.md) for `g_ruleset`, `g_votable_rulesets`, and per-gametype configs.
+- [Server Host Guide](server-host-guide.md) for `g_ruleset`, `g_votable_rulesets`, and factories.
 - [Configuration Reference](configuration-reference.md) for command and cvar lookup.

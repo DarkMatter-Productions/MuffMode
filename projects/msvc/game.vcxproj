@@ -196,8 +196,14 @@
     <ClInclude Include="..\..\src\sgame\muffmode\mm_ent_respawn_rules.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_freezetag.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_freezetag_rules.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_factory.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_factory_builtin.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_factory_rules.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_factory_table.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_gametype.h" />
-    <ClInclude Include="..\..\src\sgame\muffmode\mm_gametype_cfg_rules.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_gametype_state.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_gametype_table.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_gt_session.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_ghost.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_gibs.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_gibs_rules.h" />
@@ -344,7 +350,9 @@
     <ClCompile Include="..\..\src\sgame\muffmode\mm_duel.cpp" />
     <ClCompile Include="..\..\src\sgame\muffmode\mm_ent_respawn.cpp" />
     <ClCompile Include="..\..\src\sgame\muffmode\mm_freezetag.cpp" />
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_factory.cpp" />
     <ClCompile Include="..\..\src\sgame\muffmode\mm_gametype.cpp" />
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_gt_session.cpp" />
     <ClCompile Include="..\..\src\sgame\muffmode\mm_ghost.cpp" />
     <ClCompile Include="..\..\src\sgame\muffmode\mm_gibs.cpp" />
     <ClCompile Include="..\..\src\sgame\muffmode\mm_horde_ai.cpp" />

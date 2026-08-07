@@ -51,6 +51,6 @@ The checked-in seeds under this directory are safe to redistribute and can be co
 - `save-load/synthetic-minimal-save.json`
 - `red-rover/0.36.04-regressions.json`
 - `fuzz-corpus/numeric-parsers/valid-and-invalid.txt`
-- `fuzz-corpus/gt-cfg/maxclients-lines.txt`
+- `fuzz-corpus/factory-documents/adversarial-blocks.txt`
 
 The checked-in save/load seed is synthetic and is not a real game save. Keep real game-derived saves in the external asset root unless their redistribution status has been reviewed.

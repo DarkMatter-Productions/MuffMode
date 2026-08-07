@@ -1,0 +1,64 @@
+factory ok { title "T" base ffa }
+factory ok {
+factory  {
+factory {
+}
+{ }
+factory ok { title "T" base ffa
+factory ok { title "T" base ffa } }
+factory UPPER { title "T" base ffa }
+factory has space { title "T" base ffa }
+factory ../escape { title "T" base ffa }
+factory _hidden { title "T" base ffa }
+factory none { title "T" base ffa }
+factory list { title "T" base ffa }
+factory cvars { title "T" base ffa }
+factory a-very-long-identifier-well-past-the-thirty-one-character-limit { title "T" base ffa }
+factory ok { title "" base ffa }
+factory ok { title "semi;colon" base ffa }
+factory ok { title "back\slash" base ffa }
+factory ok { title "quote"inside" base ffa }
+factory ok { title "T" base nonesuch }
+factory ok { title "T" base }
+factory ok { title "T" }
+factory ok { base ffa }
+factory ok { title "T" base ffa ruleset nonesuch }
+factory ok { title "T" base ffa inherit missing }
+factory ok { title "T" base ffa inherit ok }
+factory dup { title "T" base ffa }
+factory dup { title "T" base tdm }
+factory ok { title "T" base ffa maps }
+factory ok { title "T" base ffa maps maps/q2dm1 }
+factory ok { title "T" base ffa maps q2dm1.bsp }
+factory ok { title "T" base ffa maps ../q2dm1 }
+factory ok { title "T" base ffa maps CON }
+factory ok { title "T" base ffa maps q2dm1 q2dm2 q2dm3 }
+factory ok { title "T" base ffa mappool q2dm1 }
+factory ok { title "T" base ffa rotation backwards }
+factory ok { title "T" base ffa rotation 2 }
+factory ok { title "T" base ffa rotation shuffle-per-gametype }
+factory ok { title "T" base ffa players 5 2 }
+factory ok { title "T" base ffa players 0 8 }
+factory ok { title "T" base ffa players 2 }
+factory ok { title "T" base ffa players 2 999 }
+factory ok { title "T" base ffa players -1 -1 }
+factory ok { title "T" base ffa set }
+factory ok { title "T" base ffa set fraglimit }
+factory ok { title "T" base ffa set fraglimit 30 }
+factory ok { title "T" base ffa set fraglimit "" }
+factory ok { title "T" base ffa set maxclients 128 }
+factory ok { title "T" base ffa set hostname "pwned" }
+factory ok { title "T" base ffa set rcon_password "x" }
+factory ok { title "T" base ffa set sv_cheats 1 }
+factory ok { title "T" base ffa set g_gametype 3 }
+factory ok { title "T" base ffa set g_factory other }
+factory ok { title "T" base ffa set not_a_cvar 1 }
+factory ok { title "T" base ffa set fraglimit "a value far longer than the sixty-three character override limit allows" }
+exec other.cfg
+alias grow "set fraglimit 99"
+vstr next
+// comment
+# comment
+
+factory ok { title "T" base ffa } // trailing comment
+factory ok { title "T" base ffa } # trailing comment

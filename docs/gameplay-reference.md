@@ -2,13 +2,13 @@
 
 [README](../README.md) | [Player Guide](player-guide.md) | [Server Host Guide](server-host-guide.md) | [Rulesets](rulesets.md) | [Configuration Reference](configuration-reference.md)
 
-This reference helps players and hosts choose what to play. Casual players can use it to find modes that sound fun; competitive players can compare match-focused options; hosts can use it when building rotations and per-gametype configs.
+This reference helps players and hosts choose what to play. Casual players can use it to find modes that sound fun; competitive players can compare match-focused options; hosts can use it when building rotations and factories.
 
 ## Choosing What To Play
 
 | If you want... | Try |
 | --- | --- |
-| A quick public game | Deathmatch, Instagib, NadeFest, or Horde Mode. |
+| A quick public game | Deathmatch or Horde Mode, or one of the modifier factories such as Instagib or NadeFest. |
 | A competitive head-to-head match | Duel or one-player-squad Rocket Arena with a [known ruleset](rulesets.md) and a focused map list. |
 | Organized team play | Team Deathmatch, Capture the Flag, Clan Arena, Rocket Arena with larger squads, Freeze Tag, or Capture Strike. |
 | A different pace for a community night | Red Rover, Capture Strike, Horde, Vampiric Damage, Weapons Frenzy, Quad Hog, or custom [ruleset](rulesets.md)/map combinations. |
@@ -17,7 +17,8 @@ This reference helps players and hosts choose what to play. Casual players can u
 
 - Purpose-built HUD and scoreboard with frag messages, dynamic miniscores, scorelimit context, match state, timer, help text, MOTD support, and a compact scoreboard.
 - Game menu for joining matches, changing or voting on settings, and viewing mod or server info.
-- GUI voting for maps, gametypes, rulesets, server settings, and administrative actions.
+- GUI voting for maps, gametypes, factories, rulesets, server settings, and administrative actions.
+- Factory presets: named gameplay presets layered on a base gametype, so one server can offer several flavours of the same mode.
 - Team captain system with automatic captain assignment, captain transfer, and captain-managed team controls.
 - Match progression with warmups, ready states, countdowns, post-match delays, sudden death, overtime, and round handling.
 - Enhanced teamplay with auto-balancing, forced balance rules, improved team messaging, major item pickup notices, weapon drop points of interest, and friendly fire warnings.
@@ -71,10 +72,31 @@ Muff Mode maintains a curated set of final `mm-*` remasters and ports, plus a se
 | `strike` | Capture Strike | Threewave-inspired attack/defend mode: teams alternate offense and defense on CTF maps with a single life per turn and a full arena loadout (100 health / 100 armor). Offense earns 1 team point for the first enemy-flag touch and 2 more for a capture or defender wipe; defense earns no team points. Match ends at `capturelimit` (default 15) after both teams have attacked in the current round-pair. |
 | `rr` | Red Rover | Two teams with the Clan Arena loadout; on death you defect to the opposing team and respawn instantly. An arena mode like CA: each round ends on a team wipe (everyone forced onto one team) or `roundtimelimit`, announces that round's top fragger, and reshuffles for the next one. The match ends on `roundlimit` (primary) or `timelimit` (backstop) and the player with the most frags wins. Scored by individual frags; `fraglimit` is disabled, as in CA. |
 | `horde` | Horde Mode | Fight monster waves and stay on top of the scoreboard through a finite or endless run. Good for casual groups; packaged presets use limited lives and slower non-weapon item respawns. |
-| `instagib` | Instagib | Rail-focused instant-kill combat. |
-| `nadefest` | NadeFest | Grenade-only combat. |
 
 `ball` is reserved or removed in the current build and is not exposed as a supported play choice.
+
+Instagib and NadeFest are **modifiers**, not gametypes. They are applied on top
+of whichever mode is running -- Instagib CTF, NadeFest Clan Arena and so on --
+and the shipped factory catalogue offers the useful combinations by name. See
+[Game Modifications](#game-modifications) and [Factories](#factories).
+
+### Factories
+
+A gametype says what the rules of engagement are; a **factory** says which
+flavour of that gametype is being played. It names a base gametype and a set of
+gameplay overrides on top of it, so a single server can offer `ctf_classic`
+(eight captures, twenty minutes, techs on) and `instactf` (railgun only, five
+captures) as separate, selectable presets rather than as two different servers.
+
+Run `factory` to see which one is active and what else is on offer, and
+`factory info <id>` to see exactly which settings it changes. Where the server
+allows it, `callvote factory <id>` switches between them.
+
+Factories are how a server is configured for play -- they replaced the
+per-gametype config files the mod used to execute, so nothing runs underneath
+one, and switching away from a factory restores everything it changed. The full
+model, the settings a factory is allowed to touch, and the file format are in
+[Factories](configuration-reference.md#factories).
 
 ### Arena Rooms Flow
 
@@ -119,6 +141,7 @@ Freeze Tag's original Quake II concept and lineage are credited to [Darrell "Doo
 
 | Modification | Description |
 | --- | --- |
+| Instagib | Railgun only, one shot one kill. |
 | Vampiric Damage | Gain health by damaging enemies. No health pickups and draining health keep pressure high. |
 | NadeFest | Grenade-only rules. |
 | Weapons Frenzy | Faster fire rates, faster rockets, regenerating ammo, and faster weapon switching. |

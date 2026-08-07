@@ -4,6 +4,7 @@
 #pragma once
 
 #include "muffmode/mm_arena_rules.h"
+#include "muffmode/mm_gametype_state.h"
 
 #include <cstdint>
 
@@ -42,7 +43,10 @@ struct mm_arena_loadout_t {
 // resets map-local activation and enables Arena only for a complete RA2 map
 // contract; Init then builds the live room state from the spawned entities.
 void MM_Arena_PreflightMap(const char *mapname, const char *entity_lump);
-bool MM_Arena_Active();
+// MM_Arena_Active() is an inline read of the published gametype resolution in
+// muffmode/mm_gametype_state.h. This is the raw map-contract half of it, which
+// the resolution itself is built from.
+bool MM_Arena_MapActiveRaw();
 void MM_Arena_Init();
 void MM_Arena_OnMatchStart();
 void MM_Arena_OnMatchReset();

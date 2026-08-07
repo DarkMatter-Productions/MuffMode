@@ -4421,9 +4421,24 @@ void PopulateMenu(gentity_t *ent, menu_t *entries, MenuState &state)
 
 namespace arena = muffmode::arena;
 
+// [MuffMode] The published gametype resolution folds Arena activation into it,
+// so every write of the map-contract flag must republish. Routing all of them
+// through one setter is what makes that guaranteed rather than remembered; a CI
+// grep asserts `s_map_active =` appears nowhere else.
+static void SetArenaMapActive(bool active)
+{
+	arena::s_map_active = active;
+	muffmode::gametype::MM_GT_PublishLive();
+}
+
+bool MM_Arena_MapActiveRaw()
+{
+	return arena::s_map_active;
+}
+
 void MM_Arena_PreflightMap(const char *mapname, const char *entity_lump)
 {
-	arena::s_map_active = false;
+	SetArenaMapActive(false);
 	arena::s_map_contract = {};
 	arena::s_map_validation = {
 		mm_arena_map_error_t::MissingArenaKey, 0
@@ -4444,7 +4459,7 @@ void MM_Arena_PreflightMap(const char *mapname, const char *entity_lump)
 		MM_ArenaValidateMapContract(arena::s_map_contract,
 			allow_untagged_idmap);
 	arena::s_map_profile = arena::s_map_validation.profile;
-	arena::s_map_active = static_cast<bool>(arena::s_map_validation);
+	SetArenaMapActive(static_cast<bool>(arena::s_map_validation));
 
 	if (arena::s_map_active) {
 		if (arena::IsLegacyIdmap()) {
@@ -4472,11 +4487,6 @@ void MM_Arena_PreflightMap(const char *mapname, const char *entity_lump)
 			: "Load an Arena-compatible map with a valid worldspawn contract.");
 }
 
-bool MM_Arena_Active()
-{
-	return GT_RAW(GT_ARENA) && arena::s_map_active;
-}
-
 void MM_Arena_Init()
 {
 	arena::s_arenas.fill({});
@@ -4496,7 +4506,9 @@ void MM_Arena_Init()
 		return;
 
 	if (!world || world->arena != arena::s_map_contract.declared_rooms) {
-		arena::s_map_active = false;
+		// Publish before erroring out, so the cache can never be left holding
+		// the pre-error value if the host survives the error.
+		SetArenaMapActive(false);
 		gi.Com_ErrorFmt(
 			"MuffMode Arena: live worldspawn disagrees with the validated map "
 			"contract for {}.\n", level.mapname);
@@ -4506,7 +4518,7 @@ void MM_Arena_Init()
 		arena::LiveMapContract(), g_arena_legacy_idmap &&
 			g_arena_legacy_idmap->integer != 0);
 	if (!live_validation || live_validation.profile != arena::s_map_profile) {
-		arena::s_map_active = false;
+		SetArenaMapActive(false);
 		const std::string problem = !live_validation
 			? std::string(MM_ArenaMapErrorText(live_validation.error))
 			: "map profile disagrees with preflight";

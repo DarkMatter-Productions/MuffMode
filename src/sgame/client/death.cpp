@@ -567,9 +567,9 @@ static void TossClientItemsInternal(gentity_t *self, bool drop_weapon) {
 	// drop weapon
 	wp = drop_weapon ? self->client->pers.weapon : nullptr;
 	if (wp) {
-		if (g_instagib->integer || GT(GT_INSTAGIB))
+		if (g_instagib->integer)
 			wp = nullptr;
-		else if (g_nadefest->integer || GT(GT_NADEFEST))
+		else if (g_nadefest->integer)
 			wp = nullptr;
 		else if (!self->client->pers.inventory[self->client->pers.weapon->ammo])
 			wp = nullptr;
@@ -886,14 +886,15 @@ DIE(player_die) (gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
 			MM_Horde_OnPlayerDeath(self);
 		if (GT(GT_LMS))
 			MM_LMS_OnPlayerDeath(self);
-		if ((GT(GT_HORDE) || GT(GT_LMS)) && self->client->eliminated)
+		// [MuffMode] GTF_LIVES: the life-counter modes, from the gametype table.
+		if (GTF(GTF_LIVES) && self->client->eliminated)
 			self->client->respawn_time = level.time + 1_sec;
 
 		CTF_ScoreBonuses(self, inflictor, attacker);
 		// Arena loadout modes (Horde/LMS) don't scatter a full kit when the fighter is
 		// eliminated; they keep spectating until the next round/wave.
 		if (notGT(GT_ARENA) &&
-			!((GT(GT_HORDE) || GT(GT_LMS)) && self->client->eliminated))
+			!(GTF(GTF_LIVES) && self->client->eliminated))
 			TossClientItems(self);
 		Weapon_Grapple_DoReset(self->client);
 

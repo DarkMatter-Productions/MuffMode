@@ -1347,7 +1347,7 @@ void fire_rail(gentity_t *self, const vec3_t &start, const vec3_t &aimdir, int d
 		if (binary_positional_search(org, start, args.tr.endpos, gi.inPHS, 3)) {
 			gi.WriteByte(svc_temp_entity);
 			gi.WriteByte((notGT(GT_ARENA) && deathmatch->integer &&
-				(g_instagib->integer || GT(GT_INSTAGIB)))
+				g_instagib->integer)
 					? TE_RAILTRAIL2 : TE_RAILTRAIL);
 			gi.WritePosition(start);
 			gi.WritePosition(args.tr.endpos);
@@ -1356,7 +1356,7 @@ void fire_rail(gentity_t *self, const vec3_t &start, const vec3_t &aimdir, int d
 	}
 
 	if (notGT(GT_ARENA) &&
-		(g_instagib->integer || GT(GT_INSTAGIB)) &&
+		g_instagib->integer &&
 		g_instagib_splash->integer) {
 		gentity_t *exp;
 

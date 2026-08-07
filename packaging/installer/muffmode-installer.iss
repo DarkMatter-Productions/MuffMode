@@ -113,44 +113,8 @@
 #if FileExists(PackageRoot + "\rerelease\baseq2\server-base.cfg") == 0
   #error PackageRoot is missing rerelease\baseq2\server-base.cfg.
 #endif
-#if FileExists(PackageRoot + "\rerelease\baseq2\gt-FFA.cfg") == 0
-  #error PackageRoot is missing rerelease\baseq2\gt-FFA.cfg.
-#endif
-#if FileExists(PackageRoot + "\rerelease\baseq2\gt-DUEL.cfg") == 0
-  #error PackageRoot is missing rerelease\baseq2\gt-DUEL.cfg.
-#endif
-#if FileExists(PackageRoot + "\rerelease\baseq2\gt-TDM.cfg") == 0
-  #error PackageRoot is missing rerelease\baseq2\gt-TDM.cfg.
-#endif
-#if FileExists(PackageRoot + "\rerelease\baseq2\gt-CTF.cfg") == 0
-  #error PackageRoot is missing rerelease\baseq2\gt-CTF.cfg.
-#endif
-#if FileExists(PackageRoot + "\rerelease\baseq2\gt-CA.cfg") == 0
-  #error PackageRoot is missing rerelease\baseq2\gt-CA.cfg.
-#endif
-#if FileExists(PackageRoot + "\rerelease\baseq2\gt-ARENA.cfg") == 0
-  #error PackageRoot is missing rerelease\baseq2\gt-ARENA.cfg.
-#endif
-#if FileExists(PackageRoot + "\rerelease\baseq2\gt-FT.cfg") == 0
-  #error PackageRoot is missing rerelease\baseq2\gt-FT.cfg.
-#endif
-#if FileExists(PackageRoot + "\rerelease\baseq2\gt-LMS.cfg") == 0
-  #error PackageRoot is missing rerelease\baseq2\gt-LMS.cfg.
-#endif
-#if FileExists(PackageRoot + "\rerelease\baseq2\gt-REDROVER.cfg") == 0
-  #error PackageRoot is missing rerelease\baseq2\gt-REDROVER.cfg.
-#endif
-#if FileExists(PackageRoot + "\rerelease\baseq2\gt-HORDE.cfg") == 0
-  #error PackageRoot is missing rerelease\baseq2\gt-HORDE.cfg.
-#endif
-#if FileExists(PackageRoot + "\rerelease\baseq2\gt-INSTAGIB.cfg") == 0
-  #error PackageRoot is missing rerelease\baseq2\gt-INSTAGIB.cfg.
-#endif
-#if FileExists(PackageRoot + "\rerelease\baseq2\gt-NADEFEST.cfg") == 0
-  #error PackageRoot is missing rerelease\baseq2\gt-NADEFEST.cfg.
-#endif
-#if FileExists(PackageRoot + "\rerelease\baseq2\gt-STRIKE.cfg") == 0
-  #error PackageRoot is missing rerelease\baseq2\gt-STRIKE.cfg.
+#if FileExists(PackageRoot + "\rerelease\baseq2\factories.cfg") == 0
+  #error PackageRoot is missing rerelease\baseq2\factories.cfg.
 #endif
 #if FileExists(PackageRoot + "\" + MapsRelativePath + "\mm-aerow.bsp") == 0
   #error PackageRoot is missing rerelease\maps\mm-aerow.bsp.
@@ -241,19 +205,7 @@
 #define PackageMapCycleExampleHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\muffmode-map-cycle.example.txt")
 #define PackageMapPoolExampleHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\muffmode-map-pool.example.json")
 #define PackageServerBaseHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\server-base.cfg")
-#define PackageGtFfaHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\gt-FFA.cfg")
-#define PackageGtDuelHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\gt-DUEL.cfg")
-#define PackageGtTdmHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\gt-TDM.cfg")
-#define PackageGtCtfHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\gt-CTF.cfg")
-#define PackageGtCaHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\gt-CA.cfg")
-#define PackageGtArenaHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\gt-ARENA.cfg")
-#define PackageGtFtHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\gt-FT.cfg")
-#define PackageGtLmsHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\gt-LMS.cfg")
-#define PackageGtRedRoverHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\gt-REDROVER.cfg")
-#define PackageGtHordeHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\gt-HORDE.cfg")
-#define PackageGtInstagibHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\gt-INSTAGIB.cfg")
-#define PackageGtNadefestHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\gt-NADEFEST.cfg")
-#define PackageGtStrikeHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\gt-STRIKE.cfg")
+#define PackageFactoriesHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\factories.cfg")
 #define PackageMapAerowalkHash GetSHA256OfFile(PackageRoot + "\" + MapsRelativePath + "\mm-aerow.bsp")
 #define PackageMapColdzeroHash GetSHA256OfFile(PackageRoot + "\" + MapsRelativePath + "\mm-coldzero.bsp")
 #define PackageMapCrucibleHash GetSHA256OfFile(PackageRoot + "\" + MapsRelativePath + "\mm-crucible.bsp")
@@ -617,7 +569,7 @@ begin
     Result :=
       'The selected Quake II installation contains more than 128 server configs selected for automatic backup.' +
       #13#10#13#10 +
-      'Archive old gt-*.cfg files manually, then run this installer again.';
+      'Archive old server config files manually, then run this installer again.';
     Exit;
   end;
 
@@ -627,7 +579,7 @@ begin
     Result :=
       'The existing server configs selected for automatic backup exceed the safe 16 MiB limit.' +
       #13#10#13#10 +
-      'Archive large or obsolete gt-*.cfg files manually, then run this installer again.';
+      'Archive large or obsolete server config files manually, then run this installer again.';
     Exit;
   end;
 
@@ -637,7 +589,6 @@ end;
 
 function ValidateServerConfigBackupSources(Baseq2Dir: String): String;
 var
-  FindRec: TFindRec;
   ConfigPath: String;
   ConfigCount: Integer;
   TotalBytes: Int64;
@@ -654,29 +605,20 @@ begin
       Exit;
   end;
 
-  if not FindFirst(AddBackslash(Baseq2Dir) + 'gt-*.cfg', FindRec) then
-    Exit;
+  ConfigPath := AddBackslash(Baseq2Dir) + 'factories.cfg';
+  if FileExists(ConfigPath) then
+  begin
+    if IsExistingReparsePoint(ConfigPath) then
+    begin
+      Result :=
+        'The existing factories.cfg is a reparse point and cannot be read safely:' +
+        #13#10#13#10 + ConfigPath;
+      Exit;
+    end;
 
-  try
-    repeat
-      if (FindRec.Attributes and FILE_ATTRIBUTE_DIRECTORY) = 0 then
-      begin
-        ConfigPath := AddBackslash(Baseq2Dir) + FindRec.Name;
-        if (FindRec.Attributes and FILE_ATTRIBUTE_REPARSE_POINT) <> 0 then
-        begin
-          Result :=
-            'An existing gametype config selected for backup is a reparse point and cannot be read safely:' +
-            #13#10#13#10 + ConfigPath;
-          Exit;
-        end;
-
-        Result := AddServerConfigToBackupBudget(ConfigPath, ConfigCount, TotalBytes);
-        if Result <> '' then
-          Exit;
-      end;
-    until not FindNext(FindRec);
-  finally
-    FindClose(FindRec);
+    Result := AddServerConfigToBackupBudget(ConfigPath, ConfigCount, TotalBytes);
+    if Result <> '' then
+      Exit;
   end;
 end;
 
@@ -781,31 +723,7 @@ begin
   if Result <> '' then Exit;
   Result := ValidatePayloadFileIsNotReparsePoint(AddBackslash(Baseq2Dir) + 'server-base.cfg');
   if Result <> '' then Exit;
-  Result := ValidatePayloadFileIsNotReparsePoint(AddBackslash(Baseq2Dir) + 'gt-FFA.cfg');
-  if Result <> '' then Exit;
-  Result := ValidatePayloadFileIsNotReparsePoint(AddBackslash(Baseq2Dir) + 'gt-DUEL.cfg');
-  if Result <> '' then Exit;
-  Result := ValidatePayloadFileIsNotReparsePoint(AddBackslash(Baseq2Dir) + 'gt-TDM.cfg');
-  if Result <> '' then Exit;
-  Result := ValidatePayloadFileIsNotReparsePoint(AddBackslash(Baseq2Dir) + 'gt-CTF.cfg');
-  if Result <> '' then Exit;
-  Result := ValidatePayloadFileIsNotReparsePoint(AddBackslash(Baseq2Dir) + 'gt-CA.cfg');
-  if Result <> '' then Exit;
-  Result := ValidatePayloadFileIsNotReparsePoint(AddBackslash(Baseq2Dir) + 'gt-ARENA.cfg');
-  if Result <> '' then Exit;
-  Result := ValidatePayloadFileIsNotReparsePoint(AddBackslash(Baseq2Dir) + 'gt-FT.cfg');
-  if Result <> '' then Exit;
-  Result := ValidatePayloadFileIsNotReparsePoint(AddBackslash(Baseq2Dir) + 'gt-LMS.cfg');
-  if Result <> '' then Exit;
-  Result := ValidatePayloadFileIsNotReparsePoint(AddBackslash(Baseq2Dir) + 'gt-REDROVER.cfg');
-  if Result <> '' then Exit;
-  Result := ValidatePayloadFileIsNotReparsePoint(AddBackslash(Baseq2Dir) + 'gt-HORDE.cfg');
-  if Result <> '' then Exit;
-  Result := ValidatePayloadFileIsNotReparsePoint(AddBackslash(Baseq2Dir) + 'gt-INSTAGIB.cfg');
-  if Result <> '' then Exit;
-  Result := ValidatePayloadFileIsNotReparsePoint(AddBackslash(Baseq2Dir) + 'gt-NADEFEST.cfg');
-  if Result <> '' then Exit;
-  Result := ValidatePayloadFileIsNotReparsePoint(AddBackslash(Baseq2Dir) + 'gt-STRIKE.cfg');
+  Result := ValidatePayloadFileIsNotReparsePoint(AddBackslash(Baseq2Dir) + 'factories.cfg');
   if Result <> '' then Exit;
 
   Result := ValidateServerConfigBackupSources(Baseq2Dir);
@@ -1707,7 +1625,6 @@ var
   BackupDir: String;
   SourceFile: String;
   BackupFile: String;
-  FindRec: TFindRec;
   HasConfigFiles: Boolean;
   BackupCount: Integer;
   BackupBytes: Int64;
@@ -1715,22 +1632,9 @@ var
 begin
   Result := '';
   Baseq2Dir := AddBackslash(GetBaseq2Dir(WizardDirValue));
-  HasConfigFiles := FileExists(Baseq2Dir + 'server-base.cfg');
-
-  if not HasConfigFiles then
-  begin
-    if FindFirst(Baseq2Dir + 'gt-*.cfg', FindRec) then
-    begin
-      try
-        repeat
-          if (FindRec.Attributes and FILE_ATTRIBUTE_DIRECTORY) = 0 then
-            HasConfigFiles := True;
-        until not FindNext(FindRec);
-      finally
-        FindClose(FindRec);
-      end;
-    end;
-  end;
+  HasConfigFiles :=
+    FileExists(Baseq2Dir + 'server-base.cfg') or
+    FileExists(Baseq2Dir + 'factories.cfg');
 
   if not HasConfigFiles then
     Exit;
@@ -1789,39 +1693,29 @@ begin
     end;
   end;
 
-  if FindFirst(Baseq2Dir + 'gt-*.cfg', FindRec) then
+  SourceFile := Baseq2Dir + 'factories.cfg';
+  if FileExists(SourceFile) then
   begin
-    try
-      repeat
-        if (FindRec.Attributes and FILE_ATTRIBUTE_DIRECTORY) = 0 then
-        begin
-          SourceFile := Baseq2Dir + FindRec.Name;
-          if IsExistingReparsePoint(SourceFile) then
-          begin
-            Result := 'An existing gametype config became a reparse point before backup:' + #13#10#13#10 + SourceFile;
-            Exit;
-          end;
-          BudgetError := AddServerConfigToBackupBudget(SourceFile, BackupCount, BackupBytes);
-          if BudgetError <> '' then
-          begin
-            Result := BudgetError;
-            Exit;
-          end;
+    if IsExistingReparsePoint(SourceFile) then
+    begin
+      Result := 'The existing factories.cfg became a reparse point before backup:' + #13#10#13#10 + SourceFile;
+      Exit;
+    end;
+    BudgetError := AddServerConfigToBackupBudget(SourceFile, BackupCount, BackupBytes);
+    if BudgetError <> '' then
+    begin
+      Result := BudgetError;
+      Exit;
+    end;
 
-          BackupFile := AddBackslash(BackupDir) + FindRec.Name;
-          if not CopyServerConfigBackup(SourceFile, BackupFile) then
-          begin
-            Result :=
-              'Could not back up an existing gametype config before installing Muff Mode.' + #13#10#13#10 +
-              'Close any tools using this file, check folder permissions, then run this installer again.' + #13#10#13#10 +
-              'Source:' + #13#10 + SourceFile + #13#10#13#10 +
-              'Backup target:' + #13#10 + BackupFile;
-            Exit;
-          end;
-        end;
-      until not FindNext(FindRec);
-    finally
-      FindClose(FindRec);
+    BackupFile := AddBackslash(BackupDir) + 'factories.cfg';
+    if not CopyServerConfigBackup(SourceFile, BackupFile) then
+    begin
+      Result :=
+        'Could not back up the existing factories.cfg before installing Muff Mode.' + #13#10#13#10 +
+        'Close any tools using this file, check folder permissions, then run this installer again.' + #13#10#13#10 +
+        'Backup target:' + #13#10 + BackupFile;
+      Exit;
     end;
   end;
 
@@ -2227,31 +2121,11 @@ begin
   if Result <> '' then
     Exit;
 
-  Result := VerifyInstalledFileHash(Baseq2Dir + 'gt-FFA.cfg', '{#PackageGtFfaHash}', 'FFA gametype config');
-  if Result <> '' then Exit;
-  Result := VerifyInstalledFileHash(Baseq2Dir + 'gt-DUEL.cfg', '{#PackageGtDuelHash}', 'Duel gametype config');
-  if Result <> '' then Exit;
-  Result := VerifyInstalledFileHash(Baseq2Dir + 'gt-TDM.cfg', '{#PackageGtTdmHash}', 'TDM gametype config');
-  if Result <> '' then Exit;
-  Result := VerifyInstalledFileHash(Baseq2Dir + 'gt-CTF.cfg', '{#PackageGtCtfHash}', 'CTF gametype config');
-  if Result <> '' then Exit;
-  Result := VerifyInstalledFileHash(Baseq2Dir + 'gt-CA.cfg', '{#PackageGtCaHash}', 'Clan Arena gametype config');
-  if Result <> '' then Exit;
-  Result := VerifyInstalledFileHash(Baseq2Dir + 'gt-ARENA.cfg', '{#PackageGtArenaHash}', 'MuffMode Arena gametype config');
-  if Result <> '' then Exit;
-  Result := VerifyInstalledFileHash(Baseq2Dir + 'gt-FT.cfg', '{#PackageGtFtHash}', 'Freeze Tag gametype config');
-  if Result <> '' then Exit;
-  Result := VerifyInstalledFileHash(Baseq2Dir + 'gt-LMS.cfg', '{#PackageGtLmsHash}', 'Last Man Standing gametype config');
-  if Result <> '' then Exit;
-  Result := VerifyInstalledFileHash(Baseq2Dir + 'gt-REDROVER.cfg', '{#PackageGtRedRoverHash}', 'Red Rover gametype config');
-  if Result <> '' then Exit;
-  Result := VerifyInstalledFileHash(Baseq2Dir + 'gt-HORDE.cfg', '{#PackageGtHordeHash}', 'Horde gametype config');
-  if Result <> '' then Exit;
-  Result := VerifyInstalledFileHash(Baseq2Dir + 'gt-INSTAGIB.cfg', '{#PackageGtInstagibHash}', 'Instagib gametype config');
-  if Result <> '' then Exit;
-  Result := VerifyInstalledFileHash(Baseq2Dir + 'gt-NADEFEST.cfg', '{#PackageGtNadefestHash}', 'Nadefest gametype config');
-  if Result <> '' then Exit;
-  Result := VerifyInstalledFileHash(Baseq2Dir + 'gt-STRIKE.cfg', '{#PackageGtStrikeHash}', 'Strike gametype config');
+  Result := VerifyInstalledFileHash(
+    Baseq2Dir + 'factories.cfg',
+    '{#PackageFactoriesHash}',
+    'factory registry');
+
 end;
 
 function ValidateOriginalMapReadmeBundle(): String;
@@ -2588,19 +2462,7 @@ begin
     'MapCycleExampleSHA256: {#PackageMapCycleExampleHash}' + #13#10 +
     'MapPoolExampleSHA256: {#PackageMapPoolExampleHash}' + #13#10 +
     'ServerBaseConfigSHA256: {#PackageServerBaseHash}' + #13#10 +
-    'GtFfaConfigSHA256: {#PackageGtFfaHash}' + #13#10 +
-    'GtDuelConfigSHA256: {#PackageGtDuelHash}' + #13#10 +
-    'GtTdmConfigSHA256: {#PackageGtTdmHash}' + #13#10 +
-    'GtCtfConfigSHA256: {#PackageGtCtfHash}' + #13#10 +
-    'GtCaConfigSHA256: {#PackageGtCaHash}' + #13#10 +
-    'GtArenaConfigSHA256: {#PackageGtArenaHash}' + #13#10 +
-    'GtFtConfigSHA256: {#PackageGtFtHash}' + #13#10 +
-    'GtLmsConfigSHA256: {#PackageGtLmsHash}' + #13#10 +
-    'GtRedRoverConfigSHA256: {#PackageGtRedRoverHash}' + #13#10 +
-    'GtHordeConfigSHA256: {#PackageGtHordeHash}' + #13#10 +
-    'GtInstagibConfigSHA256: {#PackageGtInstagibHash}' + #13#10 +
-    'GtNadefestConfigSHA256: {#PackageGtNadefestHash}' + #13#10 +
-    'GtStrikeConfigSHA256: {#PackageGtStrikeHash}' + #13#10;
+    'FactoriesConfigSHA256: {#PackageFactoriesHash}' + #13#10;
 
   if LastBackupFile <> '' then
     ReceiptText := ReceiptText + 'PreviousGameDllBackup: ' + LastBackupFile + #13#10
@@ -2696,7 +2558,7 @@ begin
         BackupMessage := '';
         if LastConfigBackupDir <> '' then
           BackupMessage :=
-            'Existing server-base.cfg and gt-*.cfg files were backed up before the packaged configs were installed:' +
+            'Existing server-base.cfg and factories.cfg files were backed up before the packaged configs were installed:' +
             #13#10#13#10 + LastConfigBackupDir;
 
         if LastBackupFile <> '' then

@@ -449,8 +449,8 @@ void Tech_ApplyAutoDoc(gentity_t *ent)
 
 	const bool global_modifiers = notGT(GT_ARENA);
 	const bool mod_regen = global_modifiers &&
-		((g_instagib->integer || GT(GT_INSTAGIB)) ||
-		 (g_nadefest->integer || GT(GT_NADEFEST)));
+		(g_instagib->integer ||
+		 g_nadefest->integer);
 	const bool no_health = mod_regen || MM_GametypeHasFlag(GTF_ARENA) || g_no_health->integer;
 	const bool vampiric = global_modifiers && g_vampiric_damage->integer;
 	const int max_value = vampiric
@@ -505,6 +505,6 @@ bool Tech_HasRegeneration(gentity_t *ent)
 
 	return ent->client->pers.inventory[IT_TECH_AUTODOC] ||
 		(notGT(GT_ARENA) &&
-			(g_instagib->integer || GT(GT_INSTAGIB) ||
-			 g_nadefest->integer || GT(GT_NADEFEST)));
+			(g_instagib->integer ||
+			 g_nadefest->integer));
 }

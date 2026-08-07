@@ -7,7 +7,9 @@
 #include "muffmode/mm_arena.h"
 #include "muffmode/mm_awards.h"
 #include "muffmode/mm_captain.h"
+#include "muffmode/mm_factory.h"
 #include "muffmode/mm_gametype.h"
+#include "muffmode/mm_gt_session.h"
 #include "muffmode/mm_map_pick.h"
 #include "muffmode/mm_map_pool.h"
 #include "muffmode/mm_maps.h"
@@ -376,27 +378,29 @@ void MM_VotePassGametype()
 		return;
 	}
 
-	// Re-check votability at execution time in case g_votable_gametypes changed
-	// during the 3-second PASSED->EXECUTING window (the value is validated at
-	// callvote time, but could have changed by the time the vote executes).
-	if (!MM_IsGametypeVotable(gt))
+	// [MuffMode] Votability, availability and reload safety are all re-checked
+	// inside the transaction when it is drained, so the hand-rolled re-check
+	// that used to live here (and covered only votability) is gone. The map
+	// reload belongs to the transaction too: queueing it separately is what let
+	// two independent writers each request one in the same frame.
+	namespace session = muffmode::gametype;
+
+	session::mm_gt_request_t request;
+	request.source = session::gt_source_t::Vote;
+	request.gametype = (int)gt;
+
+	const session::gt_reject_t reject = session::MM_GT_Submit(request);
+	if (reject != session::gt_reject_t::None)
 	{
-		gi.LocBroadcast_Print(PRINT_HIGH, "Gametype vote rejected: gametype is no longer votable.\n");
-		MuffModeLog("VOTE", "Vote_Pass_Gametype: gametype %d rejected by IsGametypeVotable at execution", (int)gt);
+		gi.LocBroadcast_Print(PRINT_HIGH, "Gametype vote failed: {}.\n",
+			session::MM_GT_RejectText(reject));
+		MuffModeLog("VOTE", "Vote_Pass_Gametype: rejected (%s)",
+			session::MM_GT_RejectText(reject));
 		vote::MM_MarkExecutingVoteFailed();
 		return;
 	}
 
-	// Change the gametype (this sets cvars and queues config exec)
-	MuffModeLog("DEBUG", "Vote_Pass_Gametype: calling ChangeGametype(%d)", (int)gt);
-	ChangeGametype(gt);
-	MuffModeLog("DEBUG", "Vote_Pass_Gametype: ChangeGametype returned, queuing sv gt_changemap_first");
-
-	// Queue a special server command that will execute AFTER the gametype config
-	// This command will read the NEW g_map_list and change to the first map in it
-	// Note: "sv" prefix is required to invoke ServerCommand() handler
-	gi.AddCommandString("sv gt_changemap_first\n");
-	MuffModeLog("DEBUG", "Vote_Pass_Gametype: done");
+	MuffModeLog("DEBUG", "Vote_Pass_Gametype: queued gametype %d", (int)gt);
 }
 
 bool MM_VoteValGametype(gentity_t *ent)
@@ -429,6 +433,16 @@ bool MM_VoteValGametype(gentity_t *ent)
 		std::string votable_list = MM_GetVotableGametypesList();
 		if (!votable_list.empty())
 			gi.LocClient_Print(ent, PRINT_HIGH, "Valid gametypes are: {}\n", votable_list.c_str());
+		return false;
+	}
+
+	// [MuffMode] Reject a vote for the gametype that is already running, the way
+	// the ruleset vote already does. Without this, a same-gametype vote is a
+	// disguised map-change vote: it passes, changes nothing, and still reloads.
+	if ((int)gt == muffmode::gametype::MM_GT_Committed().configured)
+	{
+		gi.LocClient_Print(ent, PRINT_HIGH, "{} is already the current gametype.\n",
+			gt_long_name[(int)gt]);
 		return false;
 	}
 
@@ -482,6 +496,129 @@ std::string MM_GetVotableGametypesList()
 	}
 
 	return result;
+}
+
+// [MuffMode] Factory votes. These live here with the other validators because
+// the vote argument accessors are private to this translation unit; the
+// registry lookups they need are the factory module's public API.
+std::string MM_GetVotableFactoriesList()
+{
+	namespace factory = muffmode::factory;
+
+	std::string result;
+	const std::string all = factory::MM_Factory_List(GT_NONE);
+	std::string_view remaining(all);
+	while (!remaining.empty())
+	{
+		const size_t end = remaining.find(' ');
+		const std::string_view id = remaining.substr(0,
+			end == std::string_view::npos ? remaining.size() : end);
+		// The list a player is shown has to be the list callvote will accept, so
+		// it applies the gametype gate the validator applies.
+		const int base = factory::MM_Factory_BaseGametype(id);
+		const bool gametype_ok = base < 0 ||
+			base == muffmode::gametype::MM_GT_Committed().configured ||
+			MM_IsGametypeVotable((gametype_t)base);
+		if (gametype_ok && factory::MM_Factory_IsVotable(id))
+		{
+			if (!result.empty())
+				result += "|";
+			result.append(id);
+		}
+		if (end == std::string_view::npos)
+			break;
+		remaining.remove_prefix(end + 1);
+	}
+	return result;
+}
+
+bool MM_VoteValFactory(gentity_t *ent)
+{
+	namespace factory = muffmode::factory;
+
+	const auto print_valid = [ent]() {
+		const std::string list = MM_GetVotableFactoriesList();
+		if (!list.empty())
+			gi.LocClient_Print(ent, PRINT_HIGH, "Valid factories are: {}\n", list.c_str());
+	};
+
+	if (vote::MM_VoteArgc() != 3)
+	{
+		gi.LocClient_Print(ent, PRINT_HIGH, "Usage: callvote factory <factory>\n");
+		print_valid();
+		return false;
+	}
+
+	const char *id = vote::MM_VoteArgv(2);
+	const factory::mm_factory_t *entry = factory::MM_Factory_Find(id);
+	if (!entry)
+	{
+		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid factory: '{}'\n", id);
+		print_valid();
+		return false;
+	}
+
+	if (!factory::MM_Factory_IsVotable(entry->id))
+	{
+		gi.LocClient_Print(ent, PRINT_HIGH, "This factory is not available for voting.\n");
+		print_valid();
+		return false;
+	}
+
+	// [MuffMode] Selecting a factory sets its base gametype, so a factory vote
+	// that crosses gametypes is a gametype vote and has to clear the same gate.
+	// Without this, a host who narrowed g_votable_gametypes still had every
+	// gametype reachable through the factory vote -- which is how the shipped
+	// server-base.cfg, excluding CTF from voting, still let players vote
+	// `ctf_classic` and move the server to CTF.
+	if ((int)entry->base != muffmode::gametype::MM_GT_Committed().configured &&
+		!MM_IsGametypeVotable(entry->base))
+	{
+		gi.LocClient_Print(ent, PRINT_HIGH,
+			"{} runs {}, which is not available for voting on this server.\n",
+			entry->id.c_str(), gt_long_name[(int)entry->base]);
+		print_valid();
+		return false;
+	}
+
+	const factory::mm_factory_t *active = factory::MM_Factory_Active();
+	if (active && active->id == entry->id)
+	{
+		gi.LocClient_Print(ent, PRINT_HIGH, "{} is already the current factory.\n",
+			entry->id.c_str());
+		return false;
+	}
+
+	return true;
+}
+
+void MM_VotePassFactory()
+{
+	namespace factory = muffmode::factory;
+	namespace session = muffmode::gametype;
+
+	const factory::mm_factory_t *entry =
+		factory::MM_Factory_Find(level.vote_state.arg.data());
+	if (!entry)
+	{
+		gi.LocBroadcast_Print(PRINT_HIGH, "Factory vote failed: stored vote argument is invalid.\n");
+		vote::MM_MarkExecutingVoteFailed();
+		return;
+	}
+
+	session::mm_gt_request_t request;
+	request.source = session::gt_source_t::Vote;
+	request.has_factory = true;
+	session::session_detail::CopyId(request.factory_id, entry->id.c_str());
+	request.gametype = (int)entry->base;
+
+	const session::gt_reject_t reject = session::MM_GT_Submit(request);
+	if (reject != session::gt_reject_t::None)
+	{
+		gi.LocBroadcast_Print(PRINT_HIGH, "Factory vote failed: {}.\n",
+			session::MM_GT_RejectText(reject));
+		vote::MM_MarkExecutingVoteFailed();
+	}
 }
 
 bool MM_IsRulesetVotable(ruleset_t rs)
@@ -845,7 +982,9 @@ void MM_VotePassTechs()
 
 bool MM_VoteValTechs(gentity_t *ent)
 {
-	if (notGT(GT_FFA) && notGT(GT_TDM) && notGT(GT_CTF) && notGT(GT_HORDE))
+	// [MuffMode] GTF_TECHS: the same four gametypes the vote menu lists, from
+	// the descriptor table so the two cannot drift apart.
+	if (!GTF(GTF_TECHS))
 	{
 		gi.LocClient_Print(ent, PRINT_HIGH, "Techs can only be changed in FFA, TDM, CTF or Horde gametypes.\n");
 		return false;
@@ -1374,6 +1513,10 @@ vcmds_t vote_cmds[] = {
 	{"friendlyfire",		MM_VoteValFriendlyFire,		MM_VotePassFriendlyFire,	8192,	2,	"<0/1>",							"enables or disables friendly fire (team modes only)"},
 	{"techs",				MM_VoteValTechs,			MM_VotePassTechs,			65536,	2,	"<0/1>",							"enables or disables techs (FFA/TDM/CTF/Horde only)"},
 	{"readyall",			MM_VoteValReadyAll,			MM_VotePassReadyAll,		32768,	1,	"",									"ready all players (during ready-up warmup)"},
+	// [MuffMode] g_vote_flags is a DISABLE mask, so like every vote type before
+	// it this one is enabled by default and an operator turns it off by adding
+	// its bit. 16384 is already handicap, so this takes the next free bit.
+	{"factory",				MM_VoteValFactory,			MM_VotePassFactory,			131072,	2,	"<factory>",						"changes the current factory preset"},
 	{nullptr,				nullptr,					nullptr,					0,		0,	nullptr,								nullptr},
 };
 

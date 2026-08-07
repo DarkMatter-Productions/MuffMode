@@ -1223,8 +1223,8 @@ static void ApplyItemInhibitModes(const item_inhibit_modes_t &modes) {
 
 static bool ShouldPrecacheBlaster() {
 	return GT(GT_ARENA) ||
-		(!(g_instagib->integer || GT(GT_INSTAGIB)) &&
-		 !(g_nadefest->integer || GT(GT_NADEFEST)));
+		(!g_instagib->integer &&
+		 !g_nadefest->integer);
 }
 
 static bool ShouldPrecacheHordeChainfist() {

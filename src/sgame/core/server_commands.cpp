@@ -3,6 +3,7 @@
 
 #include "g_local.h"
 #include "debug_log.h"
+#include "muffmode/mm_factory.h"
 #include "muffmode/mm_ghost.h"
 #include "muffmode/mm_map_pool.h"
 #include "muffmode/mm_maps.h"
@@ -32,6 +33,42 @@ of the parameters
 static void SVCmd_GametypeChangeMapFirst_f() {
 	// [MuffMode] Thin vanilla hook; implementation lives in muffmode/mm_maps.cpp.
 	MM_GametypeChangeMapFirst();
+}
+
+// [MuffMode] Re-apply the active factory's immediate-effect overrides without a
+// map change. Dedicated servers have no client to run `factory reload` from.
+static void SVCmd_FactoryApply_f() {
+	if (gi.argc() != 2) {
+		gi.LocClient_Print(nullptr, PRINT_HIGH, "Usage: sv gt_apply\n");
+		return;
+	}
+	if (!muffmode::factory::MM_Factory_LoadRegistry()) {
+		gi.Com_Print("factories: reload failed; the previous registry is still "
+			"in force.\n");
+		return;
+	}
+	muffmode::factory::MM_Factory_ReapplyImmediate();
+}
+
+// [MuffMode] Apply the selected factory in full. The gametype session queues
+// this ahead of the map command, which is what gets the overrides applied at
+// all: the engine calls the game's Init once when the game starts, not per
+// level, so an apply that waited for InitGame would never run for any selection
+// made after the server came up.
+static void SVCmd_FactoryApplyFull_f() {
+	muffmode::factory::MM_Factory_ApplySelection();
+}
+
+// [MuffMode] Select a factory from a dedicated server console, where there is
+// no client to run the `factory` command from.
+static void SVCmd_Factory_f() {
+	if (gi.argc() != 3) {
+		gi.LocClient_Print(nullptr, PRINT_HIGH,
+			"Usage: sv factory <id|none>\nAvailable: {}\n",
+			muffmode::factory::MM_Factory_List(GT_NONE).c_str());
+		return;
+	}
+	MM_ServerSelectFactory(gi.argv(2));
 }
 
 static void SVCmd_LoadMapPool_f() {
@@ -88,6 +125,12 @@ void ServerCommand() {
 		SVCmd_NextMap_f();
 	else if (Q_strcasecmp(cmd, "gt_changemap_first") == 0)
 		SVCmd_GametypeChangeMapFirst_f();
+	else if (Q_strcasecmp(cmd, "gt_apply") == 0)
+		SVCmd_FactoryApply_f();
+	else if (Q_strcasecmp(cmd, "gt_factory") == 0)
+		SVCmd_FactoryApplyFull_f();
+	else if (Q_strcasecmp(cmd, "factory") == 0)
+		SVCmd_Factory_f();
 	else if (Q_strcasecmp(cmd, "load_mapcycle") == 0)
 		SVCmd_LoadMapCycle_f();
 	else if (Q_strcasecmp(cmd, "load_mappool") == 0)

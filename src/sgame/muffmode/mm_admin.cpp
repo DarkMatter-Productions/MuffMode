@@ -328,12 +328,15 @@ void MM_CmdGametype(gentity_t *ent)
 	if (admin::MM_AdminCvarString(g_votable_gametypes)[0] && !MM_IsGametypeVotable(gt))
 		gi.LocClient_Print(ent, PRINT_HIGH, "Warning: This gametype is not in the votable list, but setting it anyway (admin override).\n");
 
-	// force_cfg = true: admin gametype changes always (re-)exec the gt-cfg, even
-	// when selecting the gametype that's already active, so admins get a reliable
-	// "apply this preset" command. (Player votes go through ChangeGametype() with
-	// force_cfg = false and never re-exec on a same-gametype vote.)
+	// force_reapply = true: an admin selecting the gametype that is already
+	// active still gets the factory re-applied, so `gametype <current>` is a
+	// reliable "apply this preset again" command. Player votes submit with
+	// force_reapply = false and so do nothing on a same-gametype vote.
+	//
+	// [MuffMode] The reload belongs to the transaction now. Queueing
+	// `sv gt_changemap_first` here as well is what made an admin re-applying the
+	// current gametype jump maps even when the change was a complete no-op.
 	MM_ChangeGametype(gt, true);
-	gi.AddCommandString("sv gt_changemap_first\n");
 }
 
 void MM_CmdRuleset(gentity_t *ent)

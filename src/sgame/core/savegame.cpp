@@ -2789,6 +2789,11 @@ void ReadLevelJson(const char *jsonString) {
 	cached_imageindex::reset_all();
 
 	G_LoadShadowLights();
+
+	// [MuffMode] A restored level rebuilds its entities without re-running the
+	// Arena map preflight, so republish the gametype resolution rather than
+	// leaving it holding whatever the last live spawn decided.
+	muffmode::gametype::MM_GT_PublishLive();
 }
 
 // [Paril-KEX]

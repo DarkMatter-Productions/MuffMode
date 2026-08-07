@@ -893,7 +893,7 @@ static void CheckLastManStanding() {
 	// so the "last one standing" is the final fighter still in the round. Count fighters who
 	// have not been eliminated (out of lives) rather than current health - a fighter who is
 	// briefly dead but still has lives will respawn, so they are not yet the last survivor.
-	if (GT(GT_HORDE) || GT(GT_LMS)) {
+	if (GTF(GTF_LIVES)) {
 		gentity_t *survivor = nullptr;
 		int count = 0;
 

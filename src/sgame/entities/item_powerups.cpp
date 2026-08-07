@@ -307,7 +307,7 @@ bool AllowTechs() {
 		// [MuffMode] "auto" enables techs in the modes built around them: CTF and Horde.
 		if (GT(GT_HORDE))
 			return ItemSpawnsEnabled();
-		return !!(GT(GT_CTF) && !(g_instagib->integer || GT(GT_INSTAGIB)) && !(g_nadefest->integer || GT(GT_NADEFEST)));
+		return !!(GT(GT_CTF) && !g_instagib->integer && !g_nadefest->integer);
 	} else
 		return !!(g_allow_techs->integer && ItemSpawnsEnabled());
 }

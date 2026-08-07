@@ -14,9 +14,12 @@
 #include "muffmode/mm_command_contracts.h"
 #include "muffmode/mm_duel.h"
 #include "muffmode/mm_ent_respawn_rules.h"
+#include "muffmode/mm_factory_rules.h"
+#include "muffmode/mm_factory_table.h"
 #include "muffmode/mm_freezetag_rules.h"
 #include "muffmode/mm_gametype.h"
-#include "muffmode/mm_gametype_cfg_rules.h"
+#include "muffmode/mm_gametype_table.h"
+#include "muffmode/mm_gt_session.h"
 #include "muffmode/mm_ghost.h"
 #include "muffmode/mm_gibs_rules.h"
 #include "muffmode/mm_hud_stat_contracts.h"
@@ -608,81 +611,6 @@ MM_TEST(packed_powerup_stats_use_ammo_padding_without_moving_key_stat) {
 	MM_CHECK_EQ(G_GetPowerupStat(
 		ammo, powerups, static_cast<uint8_t>(POWERUP_MAX)), uint16_t { 0 });
 	MM_CHECK(words == snapshot);
-}
-
-MM_TEST(capped_gametype_cfg_filters_every_maxclients_assignment) {
-	using muffmode::gametype::MM_GtCfgLineViolatesSlotCap;
-	using muffmode::gametype::MM_IsSlotCappedCapacity;
-
-	MM_CHECK(MM_IsSlotCappedCapacity(4, 64, 4));
-	MM_CHECK_FALSE(MM_IsSlotCappedCapacity(16, 4, 4));
-	MM_CHECK(MM_IsSlotCappedCapacity(0, 4, 4));
-	MM_CHECK_FALSE(MM_IsSlotCappedCapacity(0, 16, 4));
-	MM_CHECK_FALSE(MM_IsSlotCappedCapacity(0, 0, 4));
-
-	constexpr std::array<std::string_view, 17> allowed = {
-		"maxclients",
-		"maxclients 4",
-		"set maxclients 4",
-		"seta \"maxclients\" \"4\"",
-		"setu maxclients 4",
-		"set foo \"quoted; maxclients 64\"",
-		"echo \"maxclients 64; still quoted\"",
-		"echo \"alias grow 'set maxclients 64'\"",
-		"echo safe",
-		"wait; set maxclients 4",
-		"fraglimit 20",
-		"set fraglimit 20",
-		"toggle g_friendly_fire",
-		"inc timelimit 5",
-		"reset fraglimit",
-		"// maxclients 64",
-		"set maxclients"
-	};
-	for (const std::string_view line : allowed)
-		MM_CHECK_FALSE(MM_GtCfgLineViolatesSlotCap(line, 4));
-
-	constexpr std::array<std::string_view, 37> rejected = {
-		"maxclients 16",
-		"set maxclients 16",
-		"seta maxclients 16",
-		"setu maxclients 16",
-		"sets maxclients 16",
-		"cvar_set maxclients 16",
-		"cvar_forceset maxclients 16",
-		"set maxclients nope",
-		"set \"maxclients\" \"$dynamic\"",
-		"echo safe; maxclients 16",
-		"set foo bar; cvar_forceset \"maxclients\" \"64\"",
-		"echo safe // comment; seta maxclients 16",
-		"echo ok; kexmultiplayer 1",
-		"MAXCLIENTS 5",
-		"SeTa MAXCLIENTS 5",
-		"maxclients 0",
-		"maxclients -1",
-		"toggle maxclients",
-		"inc maxclients 1",
-		"add maxclients 1",
-		"reset maxclients",
-		"cvar_toggle maxclients",
-		"cvar_inc maxclients 1",
-		"cvar_add maxclients 1",
-		"cvar_reset maxclients",
-		"exec gt-FFA.cfg",
-		"EXECQ gt-FFA.cfg",
-		"alias grow \"set maxclients 16\"",
-		"vstr next_gametype",
-		"if 1 \"set maxclients 16\"",
-		"ifnot 0 \"set maxclients 16\"",
-		"delay 1 \"set maxclients 16\"",
-		"defer \"set maxclients 16\"",
-		"cvar_restart",
-		"echo safe; exec gt-FFA.cfg",
-		"echo safe; vstr next_gametype",
-		"\"exec"
-	};
-	for (const std::string_view line : rejected)
-		MM_CHECK(MM_GtCfgLineViolatesSlotCap(line, 4));
 }
 
 MM_TEST(mymap_queue_entries_keep_their_own_modifiers) {
@@ -5605,6 +5533,1079 @@ MM_TEST(gib_water_drag_is_tick_rate_independent) {
 	MM_CHECK_EQ(MM_GibsWaterDrag(0.0f, 0.025f), 0.0f);
 	MM_CHECK_EQ(MM_GibsWaterDrag(1.0f, 0.025f), 1.0f);
 	MM_CHECK_EQ(MM_GibsWaterDrag(-1.0f, 0.025f), 0.0f);
+}
+
+
+// ---------------------------------------------------------------------------
+// [MuffMode] Gametype descriptor table, resolution, transactions and factories.
+// ---------------------------------------------------------------------------
+
+MM_TEST(gametype_table_is_self_consistent) {
+	// Each predicate is also a static_assert in the header; calling them here
+	// names which invariant broke instead of failing the whole translation unit.
+	MM_CHECK(MM_GTIdsMatchIndices());
+	MM_CHECK(MM_GTShortNamesUnique());
+	MM_CHECK(MM_GTUpperNamesUnique());
+	MM_CHECK(MM_GTLongNamesUnique());
+	MM_CHECK(MM_GTSpawnTokensUnique());
+	MM_CHECK(MM_GTUpperNamesCfgSafe());
+	MM_CHECK(MM_GTFlagsCoherent());
+	MM_CHECK(MM_GTScoreModelsCoherent());
+	MM_CHECK(MM_GTLegacyAliasesCoherent());
+	MM_CHECK(MM_GTMultiArenaIsUnique());
+	MM_CHECK_EQ(MM_GT_TABLE.size(), static_cast<size_t>(GT_NUM_GAMETYPES));
+}
+
+MM_TEST(gametype_table_projections_match_the_legacy_arrays) {
+	// The generated projections must reproduce the exact strings the old raw
+	// arrays held: gt_short_name_upper feeds gt-<UPPER>.cfg filenames and a
+	// persisted stats key, so a tidier spelling would be a silent break.
+	constexpr const char *expect_short[GT_NUM_GAMETYPES] = {
+		"cmp", "ffa", "duel", "tdm", "ctf", "ca", "ft", "strike",
+		"rr", "lms", "horde", "ball", "instagib", "nadefest", "arena"
+	};
+	constexpr const char *expect_upper[GT_NUM_GAMETYPES] = {
+		"CMP", "FFA", "DUEL", "TDM", "CTF", "CA", "FT", "STRIKE",
+		"REDROVER", "LMS", "HORDE", "BALL", "INSTAGIB", "NADEFEST", "ARENA"
+	};
+	constexpr const char *expect_long[GT_NUM_GAMETYPES] = {
+		"Campaign", "Deathmatch", "Duel", "Team Deathmatch", "Capture the Flag",
+		"Clan Arena", "Freeze Tag", "Capture Strike", "Red Rover",
+		"Last Man Standing", "Horde", "ProBall", "Instagib", "NadeFest",
+		"MuffMode Arena"
+	};
+
+	for (int i = 0; i < GT_NUM_GAMETYPES; i++) {
+		MM_CHECK_EQ(std::string(gt_short_name[i]), std::string(expect_short[i]));
+		MM_CHECK_EQ(std::string(gt_short_name_upper[i]), std::string(expect_upper[i]));
+		MM_CHECK_EQ(std::string(gt_long_name[i]), std::string(expect_long[i]));
+	}
+
+	// The capability masks the old _gt[] table carried, unchanged.
+	MM_CHECK_EQ(_gt[GT_NONE], 0);
+	MM_CHECK_EQ(_gt[GT_BALL], 0);
+	MM_CHECK_EQ(_gt[GT_ARENA], GTF_ARENA | GTF_MULTI_ARENA);
+	MM_CHECK_EQ(_gt[GT_FFA] & GTF_FRAGS, (int)GTF_FRAGS);
+	MM_CHECK_EQ(_gt[GT_CTF] & (GTF_TEAMS | GTF_CTF), GTF_TEAMS | GTF_CTF);
+	MM_CHECK_EQ(_gt[GT_CA] & (GTF_TEAMS | GTF_ARENA | GTF_ROUNDS | GTF_ELIMINATION),
+		GTF_TEAMS | GTF_ARENA | GTF_ROUNDS | GTF_ELIMINATION);
+	MM_CHECK_EQ(_gt[GT_STRIKE] & (GTF_TEAMS | GTF_ARENA | GTF_ROUNDS | GTF_CTF | GTF_ELIMINATION),
+		GTF_TEAMS | GTF_ARENA | GTF_ROUNDS | GTF_CTF | GTF_ELIMINATION);
+	MM_CHECK_EQ(_gt[GT_RR] & (GTF_TEAMS | GTF_ARENA | GTF_ROUNDS | GTF_FRAGS),
+		GTF_TEAMS | GTF_ARENA | GTF_ROUNDS | GTF_FRAGS);
+	MM_CHECK_EQ(_gt[GT_LMS] & (GTF_ARENA | GTF_ROUNDS | GTF_ELIMINATION),
+		GTF_ARENA | GTF_ROUNDS | GTF_ELIMINATION);
+	MM_CHECK_EQ(_gt[GT_HORDE] & GTF_ROUNDS, (int)GTF_ROUNDS);
+	MM_CHECK_EQ(_gt[GT_FREEZE] & (GTF_TEAMS | GTF_ROUNDS), GTF_TEAMS | GTF_ROUNDS);
+	MM_CHECK_EQ(_gt[GT_TDM] & (GTF_TEAMS | GTF_FRAGS), GTF_TEAMS | GTF_FRAGS);
+}
+
+MM_TEST(gametype_flag_bits_keep_their_published_values) {
+	// MM_CurrentGametypeFlags() is serialised in the statusbar dump, so the
+	// original bit values are frozen and the new ones only append.
+	MM_CHECK_EQ((int)GTF_TEAMS, 0x01);
+	MM_CHECK_EQ((int)GTF_CTF, 0x02);
+	MM_CHECK_EQ((int)GTF_ARENA, 0x04);
+	MM_CHECK_EQ((int)GTF_ROUNDS, 0x08);
+	MM_CHECK_EQ((int)GTF_ELIMINATION, 0x10);
+	MM_CHECK_EQ((int)GTF_FRAGS, 0x20);
+	MM_CHECK_EQ((int)GTF_MULTI_ARENA, 0x40);
+	MM_CHECK_EQ((int)GTF_LIVES, 0x80);
+	MM_CHECK_EQ((int)GTF_TECHS, 0x100);
+}
+
+MM_TEST(gametype_capability_flags_match_the_lists_they_replace) {
+	// Each added flag exists to replace a gametype list that was written out by
+	// hand in more than one place. Pin the membership so the flag and the
+	// behaviour cannot drift apart.
+
+	// GTF_TECHS: the techs vote validator and the vote menu both used to spell
+	// out FFA/TDM/CTF/Horde separately.
+	for (const gametype_t gt : { GT_FFA, GT_TDM, GT_CTF, GT_HORDE })
+		MM_CHECK((MM_GTFlags(gt) & GTF_TECHS) != 0);
+	for (const gametype_t gt : { GT_DUEL, GT_CA, GT_FREEZE, GT_STRIKE, GT_RR,
+			GT_LMS, GT_ARENA })
+		MM_CHECK((MM_GTFlags(gt) & GTF_TECHS) == 0);
+
+	// GTF_LIVES: four sites spelled this pairing as "GT(GT_HORDE) || GT(GT_LMS)".
+	for (const gametype_t gt : { GT_HORDE, GT_LMS })
+		MM_CHECK((MM_GTFlags(gt) & GTF_LIVES) != 0);
+	for (const gametype_t gt : { GT_FFA, GT_DUEL, GT_TDM, GT_CTF, GT_CA,
+			GT_FREEZE, GT_STRIKE, GT_RR, GT_ARENA })
+		MM_CHECK((MM_GTFlags(gt) & GTF_LIVES) == 0);
+}
+
+MM_TEST(gametype_lookup_accepts_short_and_long_names_case_insensitively) {
+	MM_CHECK_EQ(MM_GTFindByShortName("ctf").gt, GT_CTF);
+	MM_CHECK_EQ(MM_GTFindByShortName("CTF").gt, GT_CTF);
+	MM_CHECK_EQ(MM_GTFindByAnyName("Capture the Flag").gt, GT_CTF);
+	MM_CHECK_EQ(MM_GTFindByAnyName("last man standing").gt, GT_LMS);
+	MM_CHECK_FALSE(MM_GTFindByAnyName("").found);
+	MM_CHECK_FALSE(MM_GTFindByAnyName("not_a_gametype").found);
+	// GT_NONE is reachable by name but is rejected downstream by availability.
+	MM_CHECK(MM_GTFindByShortName("cmp").found);
+	MM_CHECK_EQ(MM_GTFindByShortName("cmp").gt, GT_NONE);
+}
+
+MM_TEST(gametype_resolution_fails_closed_at_both_range_ends) {
+	// The old clamp landed high on GT_LAST, which is GT_ARENA and is Enabled,
+	// so a typo silently selected MuffMode Arena instead of Deathmatch.
+	for (const bool arena_active : { false, true }) {
+		for (const int bad : { -1, 0, 9999, INT32_MIN, INT32_MAX,
+				(int)GT_NUM_GAMETYPES }) {
+			const mm_gametype_resolution_t r =
+				MM_ResolveGametypeState(bad, arena_active);
+			MM_CHECK_EQ(r.configured, (int)GT_FFA);
+			MM_CHECK_EQ(r.effective, (int)GT_FFA);
+			MM_CHECK_EQ(r.flags, MM_GT_TABLE[(size_t)GT_FFA].flags);
+		}
+	}
+}
+
+MM_TEST(gametype_resolution_rejects_removed_gametypes_immediately) {
+	// GT_BALL used to survive the clamp, so GTF() read a zero flag mask -- no
+	// frags, no teams, no rounds -- until the next poller tick, which never
+	// runs during a timeout.
+	const mm_gametype_resolution_t ball =
+		MM_ResolveGametypeState((int)GT_BALL, false);
+	MM_CHECK_EQ(ball.configured, (int)GT_FFA);
+	MM_CHECK(ball.requested_in_range);
+	MM_CHECK_FALSE(ball.requested_available);
+	MM_CHECK(ball.flags != 0);
+}
+
+MM_TEST(gametype_resolution_fails_arena_closed_until_the_map_validates) {
+	const mm_gametype_resolution_t inactive =
+		MM_ResolveGametypeState((int)GT_ARENA, false);
+	MM_CHECK_EQ(inactive.configured, (int)GT_ARENA);
+	MM_CHECK_EQ(inactive.effective, (int)GT_FFA);
+
+	const mm_gametype_resolution_t active =
+		MM_ResolveGametypeState((int)GT_ARENA, true);
+	MM_CHECK_EQ(active.configured, (int)GT_ARENA);
+	MM_CHECK_EQ(active.effective, (int)GT_ARENA);
+	MM_CHECK_EQ(active.flags, MM_GT_TABLE[(size_t)GT_ARENA].flags);
+}
+
+MM_TEST(gametype_resolution_is_idempotent_for_every_enabled_gametype) {
+	for (int i = (int)GT_FIRST; i <= (int)GT_LAST; i++) {
+		if (MM_GT_TABLE[(size_t)i].availability != gametype_avail_t::Enabled)
+			continue;
+		const mm_gametype_resolution_t once = MM_ResolveGametypeState(i, true);
+		const mm_gametype_resolution_t twice =
+			MM_ResolveGametypeState(once.configured, true);
+		MM_CHECK_EQ(once.configured, i);
+		MM_CHECK_EQ(twice.configured, once.configured);
+	}
+}
+
+MM_TEST(gametype_alias_projection_round_trips_for_every_gametype) {
+	for (int i = 0; i < GT_NUM_GAMETYPES; i++) {
+		const gametype_t gt = (gametype_t)i;
+		const mm_gt_alias_projection_t aliases = MM_GTAliasesFor(gt);
+		MM_CHECK_FALSE(aliases.ctf && aliases.teamplay);
+		MM_CHECK_EQ(MM_GTGametypeFromAliases(gt, aliases.ctf, aliases.teamplay), gt);
+	}
+	MM_CHECK(MM_GTAliasesFor(GT_CTF).ctf);
+	MM_CHECK(MM_GTAliasesFor(GT_TDM).teamplay);
+	MM_CHECK(MM_GTAliasesFor(GT_FREEZE).teamplay);
+}
+
+MM_TEST(gametype_alias_inverse_keeps_modes_that_never_set_the_alias) {
+	// Clearing `ctf` used to map unconditionally to Team Deathmatch, silently
+	// converting a Clan Arena, Horde or Arena server and reloading the map.
+	for (const gametype_t gt : { GT_FFA, GT_DUEL, GT_CA, GT_STRIKE, GT_RR,
+			GT_LMS, GT_HORDE, GT_ARENA }) {
+		MM_CHECK_EQ(MM_GTGametypeFromAliases(gt, false, false), gt);
+	}
+	// The modes that really do own an alias still follow it.
+	MM_CHECK_EQ(MM_GTGametypeFromAliases(GT_CTF, false, false), GT_FFA);
+	MM_CHECK_EQ(MM_GTGametypeFromAliases(GT_TDM, false, false), GT_FFA);
+	MM_CHECK_EQ(MM_GTGametypeFromAliases(GT_FFA, true, false), GT_CTF);
+	MM_CHECK_EQ(MM_GTGametypeFromAliases(GT_FFA, false, true), GT_TDM);
+	// Freeze Tag and TDM share teamplay 1; setting it must not move Freeze.
+	MM_CHECK_EQ(MM_GTGametypeFromAliases(GT_FREEZE, false, true), GT_FREEZE);
+}
+
+static std::string ComposedGametypeName(int gametype, mm_mutator_t mutator,
+	const char *factory_title = nullptr, bool arena_selected = false,
+	bool arena_active = false) {
+	mm_gametype_name_input_t input;
+	input.effective_gametype = gametype;
+	input.deathmatch = true;
+	input.arena_selected = arena_selected;
+	input.arena_active = arena_active;
+	input.mutator = mutator;
+	input.factory_title = factory_title;
+	return std::string(MM_ComposeGametypeName(input).view());
+}
+
+MM_TEST(gametype_name_composition_keeps_the_base_mode_under_every_mutator) {
+	MM_CHECK_EQ(ComposedGametypeName(GT_CTF, mm_mutator_t::None),
+		std::string("Capture the Flag"));
+	MM_CHECK_EQ(ComposedGametypeName(GT_CTF, mm_mutator_t::Instagib),
+		std::string("Insta-CTF"));
+	MM_CHECK_EQ(ComposedGametypeName(GT_CA, mm_mutator_t::Vampiric),
+		std::string("Vampiric CA"));
+	MM_CHECK_EQ(ComposedGametypeName(GT_RR, mm_mutator_t::Frenzy),
+		std::string("Frenzy RR"));
+	MM_CHECK_EQ(ComposedGametypeName(GT_DUEL, mm_mutator_t::QuadHog),
+		std::string("Quad Hog Duel"));
+	// Plain Deathmatch keeps its full name under a prefix, as the old ladder's
+	// generic arm did -- not the compact label used for the longer mode names.
+	MM_CHECK_EQ(ComposedGametypeName(GT_FFA, mm_mutator_t::Vampiric),
+		std::string("Vampiric Deathmatch"));
+	MM_CHECK_EQ(ComposedGametypeName(GT_FFA, mm_mutator_t::Frenzy),
+		std::string("Frenzy Deathmatch"));
+	MM_CHECK_EQ(ComposedGametypeName(GT_FFA, mm_mutator_t::QuadHog),
+		std::string("Quad Hog Deathmatch"));
+	// The old ladder had no Freeze Tag branch, so every mutator on Freeze fell
+	// through to the generic arm and NadeFest discarded the base mode entirely.
+	MM_CHECK_EQ(ComposedGametypeName(GT_FREEZE, mm_mutator_t::NadeFest),
+		std::string("NadeFest Freeze Tag"));
+	MM_CHECK_EQ(ComposedGametypeName(GT_LMS, mm_mutator_t::NadeFest),
+		std::string("NadeFest LMS"));
+}
+
+MM_TEST(gametype_name_composition_uses_a_modifiers_own_name_on_deathmatch) {
+	// Instagib and NadeFest name themselves on plain Deathmatch, which is both
+	// what the old naming ladder produced and what they now are: modifiers with
+	// no gametype of their own.
+	MM_CHECK_EQ(ComposedGametypeName(GT_FFA, mm_mutator_t::Instagib),
+		std::string("Instagib"));
+	MM_CHECK_EQ(ComposedGametypeName(GT_FFA, mm_mutator_t::NadeFest),
+		std::string("NadeFest"));
+	// Modifiers without a name of their own keep the mode they modify.
+	MM_CHECK_EQ(ComposedGametypeName(GT_FFA, mm_mutator_t::Vampiric),
+		std::string("Vampiric Deathmatch"));
+	// On any other mode, every modifier keeps the mode it is modifying.
+	MM_CHECK_EQ(ComposedGametypeName(GT_CTF, mm_mutator_t::Instagib),
+		std::string("Insta-CTF"));
+	MM_CHECK_EQ(ComposedGametypeName(GT_CA, mm_mutator_t::NadeFest),
+		std::string("NadeFest CA"));
+}
+
+MM_TEST(instagib_and_nadefest_are_modifiers_not_gametypes) {
+	// Their enumerators are retained so GT_ARENA keeps id 14 and no operator
+	// config renumbers, but neither is selectable and neither carries rules.
+	MM_CHECK_EQ((int)GT_ARENA, 14);
+	for (const gametype_t gt : { GT_INSTAGIB, GT_NADEFEST }) {
+		MM_CHECK(MM_GTDesc(gt).availability == gametype_avail_t::Removed);
+		MM_CHECK_EQ(MM_GTFlags(gt), 0);
+		MM_CHECK(MM_GTDesc(gt).score_model == mm_gt_score_t::None);
+		// Asking for one resolves to Deathmatch rather than taking effect.
+		const mm_gametype_resolution_t resolved =
+			MM_ResolveGametypeState((int)gt, false);
+		MM_CHECK_EQ(resolved.configured, (int)GT_FFA);
+		MM_CHECK(resolved.requested_in_range);
+		MM_CHECK_FALSE(resolved.requested_available);
+	}
+}
+
+MM_TEST(gametype_name_composition_prefers_factory_title_and_arena_state) {
+	MM_CHECK_EQ(ComposedGametypeName(GT_CTF, mm_mutator_t::Instagib, "Ironman CTF"),
+		std::string("Ironman CTF"));
+	MM_CHECK_EQ(ComposedGametypeName(GT_CTF, mm_mutator_t::Instagib, ""),
+		std::string("Insta-CTF"));
+	// A per-room mutator must never rename a whole multi-arena session.
+	MM_CHECK_EQ(ComposedGametypeName(GT_FFA, mm_mutator_t::Instagib, nullptr, true, true),
+		std::string("MuffMode Arena"));
+	MM_CHECK_EQ(ComposedGametypeName(GT_FFA, mm_mutator_t::Instagib, nullptr, true, false),
+		std::string("MuffMode Arena (inactive)"));
+
+	mm_gametype_name_input_t campaign;
+	campaign.deathmatch = false;
+	MM_CHECK_EQ(std::string(MM_ComposeGametypeName(campaign).view()),
+		std::string("Single Player"));
+	campaign.coop = true;
+	MM_CHECK_EQ(std::string(MM_ComposeGametypeName(campaign).view()),
+		std::string("Co-op"));
+}
+
+MM_TEST(gametype_name_composition_truncates_inside_its_buffer) {
+	const std::string oversized(300, 'x');
+	const std::string composed =
+		ComposedGametypeName(GT_FFA, mm_mutator_t::None, oversized.c_str());
+	MM_CHECK_EQ(composed.size(), MM_GAMETYPE_NAME_MAX - 1);
+
+	mm_gametype_name_input_t input;
+	input.factory_title = oversized.c_str();
+	const mm_gametype_name_t name = MM_ComposeGametypeName(input);
+	MM_CHECK_EQ(name.text[MM_GAMETYPE_NAME_MAX - 1], '\0');
+	MM_CHECK(name.length < MM_GAMETYPE_NAME_MAX);
+}
+
+MM_TEST(gametype_score_model_matches_the_previous_branch_ladder) {
+	// The lookup replaces if/else branches whose order mattered: Capture Strike
+	// carries GTF_ROUNDS but is gated by capturelimit, not roundlimit.
+	const auto model = [](gametype_t gt) { return MM_GTDesc(gt).score_model; };
+	MM_CHECK(model(GT_STRIKE) == mm_gt_score_t::Captures);
+	MM_CHECK(model(GT_CTF) == mm_gt_score_t::Captures);
+	MM_CHECK(model(GT_CA) == mm_gt_score_t::Rounds);
+	MM_CHECK(model(GT_FREEZE) == mm_gt_score_t::Rounds);
+	MM_CHECK(model(GT_LMS) == mm_gt_score_t::Rounds);
+	MM_CHECK(model(GT_HORDE) == mm_gt_score_t::Rounds);
+	MM_CHECK(model(GT_RR) == mm_gt_score_t::Rounds);
+	MM_CHECK(model(GT_FFA) == mm_gt_score_t::Frags);
+	MM_CHECK(model(GT_TDM) == mm_gt_score_t::Frags);
+	MM_CHECK(model(GT_DUEL) == mm_gt_score_t::Frags);
+	// Each Arena room owns its own series limit.
+	MM_CHECK(model(GT_ARENA) == mm_gt_score_t::None);
+
+	// The noun shown to players comes from the same field as the limit read.
+	MM_CHECK_EQ(std::string(MM_GTScoreWord(model(GT_CTF))), std::string("capture"));
+	MM_CHECK_EQ(std::string(MM_GTScoreWord(model(GT_STRIKE))), std::string("capture"));
+	MM_CHECK_EQ(std::string(MM_GTScoreWord(model(GT_CA))), std::string("round"));
+	MM_CHECK_EQ(std::string(MM_GTScoreWord(model(GT_FFA))), std::string("frag"));
+	// Arena reported "frag" before this rewrite and still does.
+	MM_CHECK_EQ(std::string(MM_GTScoreWord(model(GT_ARENA))), std::string("frag"));
+}
+
+// ---------------------------------------------------------------------------
+// Transaction planning.
+// ---------------------------------------------------------------------------
+
+namespace gt_session_test {
+
+using namespace muffmode::gametype;
+
+mm_gt_request_t Request(gt_source_t source, int gametype = -1) {
+	mm_gt_request_t request;
+	request.source = source;
+	request.gametype = gametype;
+	return request;
+}
+
+mm_gt_selection_t Selection(int gametype, const char *factory = nullptr) {
+	mm_gt_selection_t selection;
+	selection.configured = gametype;
+	selection.effective = gametype;
+	selection.has_factory = factory != nullptr;
+	session_detail::CopyId(selection.factory_id, factory ? factory : "");
+	return selection;
+}
+
+mm_gt_plan_t Plan(const mm_gt_request_t &request,
+	const mm_gt_selection_t &current, const mm_gt_selection_t &next,
+	bool clients = true, bool teams_flipped = false) {
+	mm_gt_plan_input_t input;
+	input.clients_allocated = clients;
+	input.teams_model_flipped = teams_flipped;
+	return MM_GT_Plan(request, current, next, gt_reject_t::None, input);
+}
+
+} // namespace gt_session_test
+
+MM_TEST(gametype_resolve_prefers_an_explicit_gametype_over_the_factory_base) {
+	using namespace muffmode::gametype;
+	using namespace gt_session_test;
+
+	// Naming a factory alone adopts its base gametype.
+	mm_gt_request_t pick_factory = Request(gt_source_t::Admin);
+	pick_factory.has_factory = true;
+	session_detail::CopyId(pick_factory.factory_id, "ctf_insta");
+	const mm_gt_selection_t from_factory = MM_GT_Resolve(
+		pick_factory, Selection((int)GT_FFA), (int)GT_CTF, false);
+	MM_CHECK_EQ(from_factory.configured, (int)GT_CTF);
+	MM_CHECK(from_factory.has_factory);
+
+	// Naming a gametype alone keeps a factory that belongs to it...
+	const mm_gt_selection_t kept = MM_GT_Resolve(
+		Request(gt_source_t::Admin, (int)GT_CTF),
+		Selection((int)GT_CTF, "ctf_insta"), (int)GT_CTF, false);
+	MM_CHECK(kept.has_factory);
+
+	// ...and drops one that belongs to a different mode, rather than leaving a
+	// CTF preset applied to a Clan Arena server.
+	const mm_gt_selection_t dropped = MM_GT_Resolve(
+		Request(gt_source_t::Admin, (int)GT_CA),
+		Selection((int)GT_CTF, "ctf_insta"), (int)GT_CTF, false);
+	MM_CHECK_EQ(dropped.configured, (int)GT_CA);
+	MM_CHECK_FALSE(dropped.has_factory);
+}
+
+MM_TEST(gametype_resolve_sanitizes_through_the_same_resolver_as_gameplay) {
+	using namespace muffmode::gametype;
+	using namespace gt_session_test;
+
+	const mm_gt_selection_t removed = MM_GT_Resolve(
+		Request(gt_source_t::Admin, (int)GT_BALL), Selection((int)GT_FFA), -1, false);
+	MM_CHECK_EQ(removed.configured, (int)GT_FFA);
+
+	const mm_gt_selection_t arena = MM_GT_Resolve(
+		Request(gt_source_t::Admin, (int)GT_ARENA), Selection((int)GT_FFA), -1, false);
+	MM_CHECK_EQ(arena.configured, (int)GT_ARENA);
+	MM_CHECK_EQ(arena.effective, (int)GT_FFA);
+}
+
+MM_TEST(gametype_validate_rejects_everything_illegal_before_any_write) {
+	using namespace muffmode::gametype;
+	using namespace gt_session_test;
+
+	const mm_gt_selection_t next = Selection((int)GT_CTF);
+
+	mm_gt_validate_input_t ok;
+	MM_CHECK_EQ(MM_GT_Validate(next, ok), gt_reject_t::None);
+
+	mm_gt_validate_input_t out_of_range = ok;
+	out_of_range.requested_in_range = false;
+	MM_CHECK_EQ(MM_GT_Validate(next, out_of_range), gt_reject_t::UnknownGametype);
+
+	mm_gt_validate_input_t removed = ok;
+	removed.availability = gametype_avail_t::Removed;
+	MM_CHECK_EQ(MM_GT_Validate(next, removed), gt_reject_t::GametypeRemoved);
+
+	mm_gt_validate_input_t disabled = ok;
+	disabled.availability = gametype_avail_t::Disabled;
+	MM_CHECK_EQ(MM_GT_Validate(next, disabled), gt_reject_t::GametypeDisabled);
+
+	// Votability gates votes only; an admin override is still allowed.
+	mm_gt_validate_input_t not_votable = ok;
+	not_votable.votable = false;
+	not_votable.source = gt_source_t::Vote;
+	MM_CHECK_EQ(MM_GT_Validate(next, not_votable), gt_reject_t::NotVotable);
+	not_votable.source = gt_source_t::Admin;
+	MM_CHECK_EQ(MM_GT_Validate(next, not_votable), gt_reject_t::None);
+
+	mm_gt_validate_input_t unknown_factory = ok;
+	unknown_factory.factory_required = true;
+	unknown_factory.factory_known = false;
+	MM_CHECK_EQ(MM_GT_Validate(next, unknown_factory), gt_reject_t::UnknownFactory);
+
+	mm_gt_validate_input_t mismatch = ok;
+	mismatch.factory_required = true;
+	mismatch.factory_known = true;
+	mismatch.factory_basegt = (int)GT_CA;
+	MM_CHECK_EQ(MM_GT_Validate(next, mismatch), gt_reject_t::FactoryBaseMismatch);
+
+	// The reload target is checked up front. Previously the cvars were written
+	// and every client frozen before this was discovered, and the transaction
+	// then returned with no reload to undo it.
+	mm_gt_validate_input_t unsafe_map = ok;
+	unsafe_map.reload_target_safe = false;
+	MM_CHECK_EQ(MM_GT_Validate(next, unsafe_map), gt_reject_t::UnsafeReloadTarget);
+
+	mm_gt_validate_input_t long_map = ok;
+	long_map.reload_target_fits = false;
+	MM_CHECK_EQ(MM_GT_Validate(next, long_map), gt_reject_t::ReloadTargetTooLong);
+
+	mm_gt_validate_input_t full_ledger = ok;
+	full_ledger.ledger_has_room = false;
+	MM_CHECK_EQ(MM_GT_Validate(next, full_ledger), gt_reject_t::LedgerExhausted);
+
+	mm_gt_validate_input_t idle = ok;
+	idle.changes_anything = false;
+	MM_CHECK_EQ(MM_GT_Validate(next, idle), gt_reject_t::NoChange);
+}
+
+MM_TEST(gametype_plan_emits_the_legacy_aliases_unconditionally) {
+	using namespace muffmode::gametype;
+	using namespace gt_session_test;
+
+	// Writing the aliases only inside the changed branch, while latching their
+	// modified counts there too, is how an admin re-applying the active
+	// gametype used to bump ctf->modified_count and have the next poller tick
+	// read ctf-off as "become Team Deathmatch".
+	mm_gt_request_t reapply = Request(gt_source_t::Admin, (int)GT_FFA);
+	reapply.force_reapply = true;
+	const mm_gt_plan_t same = Plan(reapply, Selection((int)GT_FFA), Selection((int)GT_FFA));
+	MM_CHECK(same.valid);
+	MM_CHECK_FALSE(same.gametype_changed);
+	MM_CHECK_FALSE(same.aliases.ctf);
+	MM_CHECK_FALSE(same.aliases.teamplay);
+	// Nothing to re-apply without a factory, so nothing reloads either.
+	MM_CHECK_FALSE(same.reapply_factory);
+	MM_CHECK_FALSE(same.requires_reload);
+
+	// With a factory selected, the same request re-applies it, and that has to
+	// happen at a map boundary for its map-load settings to take effect.
+	mm_gt_request_t reapply_factory = Request(gt_source_t::Admin, (int)GT_FFA);
+	reapply_factory.force_reapply = true;
+	const mm_gt_plan_t with_factory = Plan(reapply_factory,
+		Selection((int)GT_FFA, "ffa_classic"), Selection((int)GT_FFA, "ffa_classic"));
+	MM_CHECK(with_factory.reapply_factory);
+	MM_CHECK(with_factory.requires_reload);
+
+	const mm_gt_plan_t to_ctf = Plan(Request(gt_source_t::Admin, (int)GT_CTF),
+		Selection((int)GT_FFA), Selection((int)GT_CTF));
+	MM_CHECK(to_ctf.aliases.ctf);
+	MM_CHECK_FALSE(to_ctf.aliases.teamplay);
+	MM_CHECK(to_ctf.requires_reload);
+}
+
+MM_TEST(gametype_plan_requires_exactly_one_reload_and_skips_doomed_client_work) {
+	using namespace muffmode::gametype;
+	using namespace gt_session_test;
+
+	// client->sess survives the map change, so the session reset has to happen
+	// whether or not a reload follows -- otherwise every player arrives in the
+	// new gametype still holding the team they had in the old one.
+	const mm_gt_plan_t reloading = Plan(Request(gt_source_t::Admin, (int)GT_TDM),
+		Selection((int)GT_FFA), Selection((int)GT_TDM), true, true);
+	MM_CHECK(reloading.requires_reload);
+	MM_CHECK(reloading.reset_client_sessions);
+
+	mm_gt_request_t no_reload = Request(gt_source_t::Admin, (int)GT_TDM);
+	no_reload.allow_reload = false;
+	const mm_gt_plan_t in_place = Plan(no_reload,
+		Selection((int)GT_FFA), Selection((int)GT_TDM), true, true);
+	MM_CHECK_FALSE(in_place.requires_reload);
+	MM_CHECK(in_place.reset_client_sessions);
+}
+
+MM_TEST(gametype_plan_never_touches_clients_or_the_preset_while_booting) {
+	using namespace muffmode::gametype;
+	using namespace gt_session_test;
+
+	// PreInitGame runs before game.clients and g_entities are allocated.
+	const mm_gt_plan_t boot = Plan(Request(gt_source_t::Boot, (int)GT_CTF),
+		Selection((int)GT_FFA), Selection((int)GT_CTF, "ctf_classic"), false, true);
+	MM_CHECK(boot.valid);
+	MM_CHECK_FALSE(boot.reset_client_sessions);
+	MM_CHECK_FALSE(boot.reapply_factory);
+
+	// Even with clients allocated, Boot stays inert.
+	const mm_gt_plan_t boot_late = Plan(Request(gt_source_t::Boot, (int)GT_CTF),
+		Selection((int)GT_FFA), Selection((int)GT_CTF, "ctf_classic"), true, true);
+	MM_CHECK_FALSE(boot_late.reset_client_sessions);
+	MM_CHECK_FALSE(boot_late.reapply_factory);
+}
+
+MM_TEST(gametype_plan_clears_the_arena_self_armour_preset_on_the_way_out) {
+	using namespace muffmode::gametype;
+	using namespace gt_session_test;
+
+	// The Arena preset enables self-armour damage; it must not leak into
+	// CA/Strike/Red Rover when leaving Arena.
+	const mm_gt_plan_t leaving_arena = Plan(Request(gt_source_t::Admin, (int)GT_CA),
+		Selection((int)GT_ARENA), Selection((int)GT_CA));
+	MM_CHECK_EQ(leaving_arena.arena_dmg_armor, 0);
+
+	const mm_gt_plan_t unrelated = Plan(Request(gt_source_t::Admin, (int)GT_CTF),
+		Selection((int)GT_FFA), Selection((int)GT_CTF));
+	MM_CHECK_EQ(unrelated.arena_dmg_armor, -1);
+}
+
+MM_TEST(gametype_plan_detects_a_factory_only_change) {
+	using namespace muffmode::gametype;
+	using namespace gt_session_test;
+
+	mm_gt_request_t swap = Request(gt_source_t::Admin, (int)GT_CTF);
+	swap.has_factory = true;
+	session_detail::CopyId(swap.factory_id, "ctf_insta");
+
+	const mm_gt_plan_t plan = Plan(swap, Selection((int)GT_CTF, "ctf_classic"),
+		Selection((int)GT_CTF, "ctf_insta"));
+	MM_CHECK_FALSE(plan.gametype_changed);
+	MM_CHECK(plan.factory_changed);
+	MM_CHECK(plan.requires_reload);
+	MM_CHECK(plan.reset_client_sessions);
+	// A factory move always re-applies, so its map-load settings land.
+	MM_CHECK(plan.reapply_factory);
+}
+
+MM_TEST(gametype_commit_waits_out_a_timeout_except_for_admin_and_boot) {
+	using namespace muffmode::gametype;
+
+	MM_CHECK(MM_GT_CommitAllowedNow(false, gt_source_t::Vote));
+	MM_CHECK(MM_GT_CommitAllowedNow(false, gt_source_t::ExternalCvar));
+	MM_CHECK_FALSE(MM_GT_CommitAllowedNow(true, gt_source_t::Vote));
+	MM_CHECK_FALSE(MM_GT_CommitAllowedNow(true, gt_source_t::ExternalCvar));
+	MM_CHECK(MM_GT_CommitAllowedNow(true, gt_source_t::Admin));
+	MM_CHECK(MM_GT_CommitAllowedNow(true, gt_source_t::ServerConsole));
+	MM_CHECK(MM_GT_CommitAllowedNow(true, gt_source_t::Boot));
+}
+
+MM_TEST(gametype_pending_requests_are_displaced_only_by_stronger_sources) {
+	using namespace muffmode::gametype;
+
+	MM_CHECK(MM_GT_SourcePriority(gt_source_t::Boot) >
+		MM_GT_SourcePriority(gt_source_t::ServerConsole));
+	MM_CHECK(MM_GT_SourcePriority(gt_source_t::ServerConsole) >
+		MM_GT_SourcePriority(gt_source_t::Admin));
+	MM_CHECK(MM_GT_SourcePriority(gt_source_t::Admin) >
+		MM_GT_SourcePriority(gt_source_t::Vote));
+	MM_CHECK(MM_GT_SourcePriority(gt_source_t::Vote) >
+		MM_GT_SourcePriority(gt_source_t::ExternalCvar));
+	MM_CHECK(MM_GT_SourcePriority(gt_source_t::Vote) >
+		MM_GT_SourcePriority(gt_source_t::ExternalCvar));
+}
+
+// ---------------------------------------------------------------------------
+// Factory documents.
+// ---------------------------------------------------------------------------
+
+MM_TEST(factory_cvar_allowlist_is_sorted_and_excludes_protected_names) {
+	using namespace muffmode::factory;
+
+	MM_CHECK(MM_FactoryCvarsSortedUnique());
+	MM_CHECK(MM_FactoryCvarsExcludeProtected());
+
+	// A factory can never reach server identity, the client slab, the gametype
+	// itself, or an engine-owned namespace.
+	for (const char *forbidden : { "maxclients", "g_gametype", "deathmatch",
+			"teamplay", "ctf", "coop", "hostname", "rcon_password",
+			"sv_cheats", "cl_maxfps", "fs_game", "g_factory",
+			"g_map_list", "g_map_pool", "g_ruleset", "minplayers",
+			"maxplayers" }) {
+		MM_CHECK(MM_FindFactoryCvar(forbidden) == nullptr);
+	}
+
+	// ...but the gameplay knobs it exists to set are present, with the apply
+	// class that says when they can actually take effect.
+	MM_CHECK(MM_FindFactoryCvar("capturelimit") != nullptr);
+	MM_CHECK_EQ(MM_FindFactoryCvar("capturelimit")->apply,
+		mm_factory_apply_t::Immediate);
+	MM_CHECK_EQ(MM_FindFactoryCvar("g_instagib")->apply,
+		mm_factory_apply_t::Latched);
+	MM_CHECK_EQ(MM_FindFactoryCvar("g_quadhog")->apply,
+		mm_factory_apply_t::Latched);
+	MM_CHECK_EQ(MM_FindFactoryCvar("g_start_items")->apply,
+		mm_factory_apply_t::MapLoad);
+}
+
+MM_TEST(factory_safety_predicates_reject_what_the_engine_would_drop) {
+	using namespace muffmode::factory;
+
+	MM_CHECK(MM_IsSafeFactoryId("ctf_insta"));
+	MM_CHECK(MM_IsSafeFactoryId("_dev-sandbox"));
+	MM_CHECK_FALSE(MM_IsSafeFactoryId(""));
+	MM_CHECK_FALSE(MM_IsSafeFactoryId("Insta CTF"));
+	MM_CHECK_FALSE(MM_IsSafeFactoryId("CTF"));
+	MM_CHECK_FALSE(MM_IsSafeFactoryId(std::string(MM_FACTORY_ID_MAX + 1, 'a')));
+	MM_CHECK(MM_IsHiddenFactoryId("_dev"));
+	MM_CHECK_FALSE(MM_IsHiddenFactoryId("dev"));
+
+	// The exact bytes info-string validation drops before the write happens.
+	MM_CHECK(MM_IsSafeFactoryValue(""));
+	MM_CHECK(MM_IsSafeFactoryValue("1"));
+	MM_CHECK_FALSE(MM_IsSafeFactoryValue("a\\b"));
+	MM_CHECK_FALSE(MM_IsSafeFactoryValue("a;b"));
+	MM_CHECK_FALSE(MM_IsSafeFactoryValue("a\"b"));
+	MM_CHECK_FALSE(MM_IsSafeFactoryValue("a\nb"));
+	MM_CHECK_FALSE(MM_IsSafeFactoryValue(std::string(MM_FACTORY_VALUE_MAX + 1, 'x')));
+
+	MM_CHECK(MM_IsSafeFactoryTitle("Insta-CTF"));
+	MM_CHECK_FALSE(MM_IsSafeFactoryTitle(""));
+	MM_CHECK_FALSE(MM_IsSafeFactoryTitle("Bad\\Title"));
+	MM_CHECK_FALSE(MM_IsSafeFactoryTitle(std::string(MM_FACTORY_TITLE_MAX + 1, 'x')));
+
+	// A description is only ever printed to a client, never published in an
+	// info string, so ordinary punctuation is allowed where a title's is not.
+	MM_CHECK(MM_IsSafeFactoryDesc("Independent rooms; each owns its settings."));
+	MM_CHECK(MM_IsSafeFactoryDesc(""));
+	MM_CHECK_FALSE(MM_IsSafeFactoryDesc("line\nbreak"));
+	MM_CHECK_FALSE(MM_IsSafeFactoryDesc("smuggled \" quote"));
+	MM_CHECK_FALSE(MM_IsSafeFactoryDesc(std::string(MM_FACTORY_DESC_MAX + 1, 'x')));
+}
+
+MM_TEST(factory_parser_accepts_a_well_formed_document) {
+	using namespace muffmode::factory;
+
+	const char *document =
+		"// header comment\n"
+		"factory ctf_classic {\n"
+		"    title    \"Classic CTF\"\n"
+		"    desc     \"Eight captures.\"\n"
+		"    base     ctf\n"
+		"    ruleset  q2re\n"
+		"    set capturelimit 8\n"
+		"    set timelimit    20   // trailing comment\n"
+		"}\n"
+		"\n"
+		"factory ctf_insta\n"
+		"{\n"
+		"    title   \"Insta-CTF\"\n"
+		"    base    ctf\n"
+		"    inherit ctf_classic\n"
+		"    set g_instagib   1\n"
+		"    set capturelimit 5\n"
+		"}\n";
+
+	const factory_parse_result_t parsed =
+		MM_ParseFactoryDocument(document, "factories.cfg");
+	MM_CHECK(parsed.valid);
+	MM_CHECK_EQ(parsed.rejected_blocks, static_cast<size_t>(0));
+	MM_CHECK_EQ(parsed.factories.size(), static_cast<size_t>(2));
+
+	MM_CHECK_EQ(parsed.factories[0].id, std::string("ctf_classic"));
+	MM_CHECK_EQ(parsed.factories[0].title, std::string("Classic CTF"));
+	MM_CHECK_EQ(parsed.factories[0].base_token, std::string("ctf"));
+	MM_CHECK_EQ(parsed.factories[0].ruleset_token, std::string("q2re"));
+	MM_CHECK_EQ(parsed.factories[0].overrides.size(), static_cast<size_t>(2));
+	MM_CHECK_EQ(parsed.factories[0].overrides[1].value, std::string("20"));
+
+	MM_CHECK_EQ(parsed.factories[1].inherit, std::string("ctf_classic"));
+	MM_CHECK_EQ(parsed.factories[1].overrides.size(), static_cast<size_t>(2));
+}
+
+MM_TEST(factory_parser_rejects_a_bad_block_and_keeps_the_rest) {
+	using namespace muffmode::factory;
+
+	// QuakeLive-SRP silently drops every definition after a mid-file error;
+	// this rejects the one bad block, names it, and carries on.
+	const char *document =
+		"factory good_one {\n"
+		"    title \"Good\"\n"
+		"    base  ffa\n"
+		"    set fraglimit 25\n"
+		"}\n"
+		"factory bad_cvar {\n"
+		"    title \"Bad\"\n"
+		"    base  ffa\n"
+		"    set sv_cheats 1\n"
+		"}\n"
+		"factory also_good {\n"
+		"    title \"Also Good\"\n"
+		"    base  tdm\n"
+		"}\n";
+
+	const factory_parse_result_t parsed =
+		MM_ParseFactoryDocument(document, "factories.cfg");
+	MM_CHECK(parsed.valid);
+	MM_CHECK_EQ(parsed.rejected_blocks, static_cast<size_t>(1));
+	MM_CHECK_EQ(parsed.factories.size(), static_cast<size_t>(2));
+	MM_CHECK_EQ(parsed.factories[0].id, std::string("good_one"));
+	MM_CHECK_EQ(parsed.factories[1].id, std::string("also_good"));
+	MM_CHECK_EQ(parsed.errors.size(), static_cast<size_t>(1));
+	MM_CHECK(parsed.errors[0].find("sv_cheats") != std::string::npos);
+	MM_CHECK(parsed.errors[0].find("factories.cfg:9") != std::string::npos);
+}
+
+MM_TEST(factory_parser_rejects_ids_that_spell_a_factory_subcommand) {
+	using namespace muffmode::factory;
+
+	// `factory <id>` shares its argument slot with the subcommands, so an id
+	// spelling one would register a factory nobody could ever select --
+	// `factory none` clears, `factory list` lists. Say so instead.
+	for (const char *reserved : { "none", "clear", "list", "info", "diag",
+			"cvars", "reload", "all" }) {
+		const std::string document =
+			std::string("factory ") + reserved +
+			" {\n title \"T\"\n base ffa\n}\n";
+		const factory_parse_result_t parsed =
+			MM_ParseFactoryDocument(document, "f.cfg");
+		MM_CHECK(parsed.valid);
+		MM_CHECK(parsed.factories.empty());
+		MM_CHECK_EQ(parsed.rejected_blocks, static_cast<size_t>(1));
+		MM_CHECK(MM_IsReservedFactoryId(reserved));
+	}
+
+	// An id that merely contains one is fine.
+	MM_CHECK_FALSE(MM_IsReservedFactoryId("listed"));
+	MM_CHECK_FALSE(MM_IsReservedFactoryId("_none"));
+	const factory_parse_result_t ok = MM_ParseFactoryDocument(
+		"factory nonstop {\n title \"T\"\n base ffa\n}\n", "f.cfg");
+	MM_CHECK_EQ(ok.factories.size(), static_cast<size_t>(1));
+}
+
+MM_TEST(factory_parser_rejects_incomplete_blocks_by_name) {
+	using namespace muffmode::factory;
+
+	const char *missing_title =
+		"factory no_title {\n"
+		"    base ffa\n"
+		"}\n";
+	const factory_parse_result_t no_title =
+		MM_ParseFactoryDocument(missing_title, "f.cfg");
+	MM_CHECK(no_title.valid);
+	MM_CHECK(no_title.factories.empty());
+	MM_CHECK_EQ(no_title.rejected_blocks, static_cast<size_t>(1));
+	MM_CHECK(no_title.errors[0].find("title") != std::string::npos);
+
+	const char *missing_base =
+		"factory no_base {\n"
+		"    title \"No Base\"\n"
+		"}\n";
+	const factory_parse_result_t no_base =
+		MM_ParseFactoryDocument(missing_base, "f.cfg");
+	MM_CHECK(no_base.factories.empty());
+	MM_CHECK(no_base.errors[0].find("base gametype") != std::string::npos);
+
+	// A missing brace is reported against the block that lost it, and the next
+	// definition still loads.
+	const char *unclosed =
+		"factory first {\n"
+		"    title \"First\"\n"
+		"    base  ffa\n"
+		"factory second {\n"
+		"    title \"Second\"\n"
+		"    base  ffa\n"
+		"}\n";
+	const factory_parse_result_t recovered =
+		MM_ParseFactoryDocument(unclosed, "f.cfg");
+	MM_CHECK(recovered.valid);
+	MM_CHECK_EQ(recovered.factories.size(), static_cast<size_t>(1));
+	MM_CHECK_EQ(recovered.factories[0].id, std::string("second"));
+	MM_CHECK_EQ(recovered.rejected_blocks, static_cast<size_t>(1));
+}
+
+MM_TEST(factory_parser_is_bounded_and_fails_the_whole_document_when_exceeded) {
+	using namespace muffmode::factory;
+
+	const factory_parse_result_t oversized = MM_ParseFactoryDocument(
+		std::string(MM_FACTORY_MAX_BYTES + 1, ' '), "f.cfg");
+	MM_CHECK_FALSE(oversized.valid);
+
+	std::string long_line = "factory x {\ntitle \"";
+	long_line.append(MM_FACTORY_MAX_LINE_LEN + 8, 'y');
+	long_line += "\"\n}\n";
+	const factory_parse_result_t overlong =
+		MM_ParseFactoryDocument(long_line, "f.cfg");
+	MM_CHECK_FALSE(overlong.valid);
+
+	std::string too_many;
+	for (size_t i = 0; i <= MM_FACTORY_MAX_FACTORIES; i++) {
+		too_many += "factory f" + std::to_string(i) +
+			" {\ntitle \"T\"\nbase ffa\n}\n";
+	}
+	const factory_parse_result_t crowded =
+		MM_ParseFactoryDocument(too_many, "f.cfg");
+	MM_CHECK_FALSE(crowded.valid);
+
+	// An unterminated quote is a document error, not a block error: everything
+	// after it would be misparsed.
+	const factory_parse_result_t unterminated = MM_ParseFactoryDocument(
+		"factory x {\ntitle \"open\nbase ffa\n}\n", "f.cfg");
+	MM_CHECK_FALSE(unterminated.valid);
+}
+
+MM_TEST(factory_parser_preserves_quoted_and_multiword_values) {
+	using namespace muffmode::factory;
+
+	const char *document =
+		"factory loadout {\n"
+		"    title \"Loadout // not a comment\"\n"
+		"    base  ffa\n"
+		"    set g_start_items item_bandolier item_pack\n"
+		"    set g_start_items \"\"\n"
+		"}\n";
+
+	const factory_parse_result_t parsed =
+		MM_ParseFactoryDocument(document, "f.cfg");
+	MM_CHECK(parsed.valid);
+	MM_CHECK_EQ(parsed.factories.size(), static_cast<size_t>(1));
+	MM_CHECK_EQ(parsed.factories[0].title,
+		std::string("Loadout // not a comment"));
+	// The same cvar set twice keeps the last value rather than duplicating it,
+	// so the ledger records exactly one entry for it.
+	MM_CHECK_EQ(parsed.factories[0].overrides.size(), static_cast<size_t>(1));
+	MM_CHECK_EQ(parsed.factories[0].overrides[0].value, std::string(""));
+}
+
+MM_TEST(factory_parser_requires_an_explicit_empty_value_to_clear_a_cvar) {
+	using namespace muffmode::factory;
+
+	// A value that is missing -- or swallowed whole by a comment -- reads as 0
+	// in every numeric consumer, so it is a typo rather than a request to clear.
+	const char *const missing_value[] = {
+		"factory f {\n title \"T\"\n base ffa\n set timelimit\n}\n",
+		"factory f {\n title \"T\"\n base ffa\n set fraglimit # was 25\n}\n",
+		"factory f {\n title \"T\"\n base ffa\n set fraglimit // was 25\n}\n"
+	};
+	for (const char *document : missing_value) {
+		const factory_parse_result_t parsed =
+			MM_ParseFactoryDocument(document, "f.cfg");
+		MM_CHECK(parsed.valid);
+		MM_CHECK(parsed.factories.empty());
+		MM_CHECK_EQ(parsed.rejected_blocks, static_cast<size_t>(1));
+	}
+
+	// The explicit form still works, and still means "clear it".
+	const factory_parse_result_t explicit_clear = MM_ParseFactoryDocument(
+		"factory f {\n title \"T\"\n base ffa\n set g_start_items \"\"\n}\n",
+		"f.cfg");
+	MM_CHECK(explicit_clear.valid);
+	MM_CHECK_EQ(explicit_clear.factories.size(), static_cast<size_t>(1));
+	MM_CHECK_EQ(explicit_clear.factories[0].overrides.size(),
+		static_cast<size_t>(1));
+	MM_CHECK_EQ(explicit_clear.factories[0].overrides[0].value, std::string(""));
+}
+
+MM_TEST(factory_rotation_names_round_trip_through_the_word_an_author_writes) {
+	using namespace muffmode::factory;
+
+	// `factory info` echoes the rotation back, and it has to echo the spelling a
+	// factory file uses rather than the enum's number.
+	for (const char *word : { "sequential", "shuffle-on-wrap",
+			"shuffle-per-gametype" }) {
+		MM_CHECK_EQ(std::string(MM_FactoryRotationName(
+			MM_ParseFactoryRotation(word))), std::string(word));
+	}
+	MM_CHECK_EQ(std::string(MM_FactoryRotationName(
+		mm_factory_rotation_t::Inherit)), std::string("inherit"));
+	// An unparseable word falls back to Inherit, which reads as "not stated".
+	MM_CHECK_EQ(std::string(MM_FactoryRotationName(
+		MM_ParseFactoryRotation("backwards"))), std::string("inherit"));
+}
+
+MM_TEST(factory_scope_is_reported_as_defining_something_even_with_no_set_lines) {
+	using namespace muffmode::factory;
+
+	// A factory that carries only a rotation still changes the server, so
+	// `factory info` must not describe it as changing nothing.
+	const char *document =
+		"factory rotation_only {\n"
+		"    title    \"Rotation Only\"\n"
+		"    base     ffa\n"
+		"    maps     q2dm1 q2dm2\n"
+		"}\n";
+	const factory_parse_result_t parsed =
+		MM_ParseFactoryDocument(document, "f.cfg");
+	MM_CHECK_EQ(parsed.factories.size(), static_cast<size_t>(1));
+	MM_CHECK(parsed.factories[0].overrides.empty());
+	MM_CHECK_FALSE(parsed.factories[0].scope.Empty());
+}
+
+MM_TEST(factory_directives_carry_the_structure_a_set_line_cannot) {
+	using namespace muffmode::factory;
+
+	const char *document =
+		"factory rotation_demo {\n"
+		"    title    \"Rotation Demo\"\n"
+		"    base     ctf\n"
+		"    maps     lfctf4 lfctf4z lfctf10\n"
+		"    maps     q2ctf1 as2m7\n"
+		"    mappool  lfctf4 q2ctf1\n"
+		"    rotation shuffle-per-gametype\n"
+		"    players  2 10\n"
+		"}\n";
+
+	const factory_parse_result_t parsed =
+		MM_ParseFactoryDocument(document, "f.cfg");
+	MM_CHECK(parsed.valid);
+	MM_CHECK_EQ(parsed.rejected_blocks, static_cast<size_t>(0));
+	MM_CHECK_EQ(parsed.factories.size(), static_cast<size_t>(1));
+
+	const mm_factory_scope_t &scope = parsed.factories[0].scope;
+	// A rotation is longer than one line allows, so `maps` accumulates.
+	MM_CHECK_EQ(scope.maps.size(), static_cast<size_t>(5));
+	MM_CHECK_EQ(scope.maps[0], std::string("lfctf4"));
+	MM_CHECK_EQ(scope.maps[4], std::string("as2m7"));
+	MM_CHECK_EQ(scope.mappool.size(), static_cast<size_t>(2));
+	MM_CHECK(scope.rotation == mm_factory_rotation_t::ShufflePerGametype);
+	MM_CHECK_EQ(scope.min_players, 2);
+	MM_CHECK_EQ(scope.max_players, 10);
+	MM_CHECK_FALSE(scope.Empty());
+}
+
+MM_TEST(factory_directives_reject_unusable_maps_rotations_and_limits) {
+	using namespace muffmode::factory;
+
+	// A map token is interpolated straight into a `gamemap` command, so it goes
+	// through the same validation the structured map system already applies.
+	const char *const bad_maps[] = {
+		"factory f {\n title \"T\"\n base ffa\n maps maps/q2dm1\n}\n",
+		"factory f {\n title \"T\"\n base ffa\n maps q2dm1.bsp\n}\n",
+		"factory f {\n title \"T\"\n base ffa\n maps ../q2dm1\n}\n",
+		"factory f {\n title \"T\"\n base ffa\n maps CON\n}\n",
+		"factory f {\n title \"T\"\n base ffa\n maps\n}\n"
+	};
+	for (const char *document : bad_maps) {
+		const factory_parse_result_t parsed =
+			MM_ParseFactoryDocument(document, "f.cfg");
+		MM_CHECK(parsed.valid);
+		MM_CHECK(parsed.factories.empty());
+		MM_CHECK_EQ(parsed.rejected_blocks, static_cast<size_t>(1));
+	}
+
+	// A rotation is named, never numeric: "2" tells an author nothing.
+	MM_CHECK(MM_ParseFactoryRotation("sequential") == mm_factory_rotation_t::Sequential);
+	MM_CHECK(MM_ParseFactoryRotation("shuffle-on-wrap") == mm_factory_rotation_t::ShuffleOnWrap);
+	MM_CHECK(MM_ParseFactoryRotation("shuffle-per-gametype") == mm_factory_rotation_t::ShufflePerGametype);
+	MM_CHECK(MM_ParseFactoryRotation("2") == mm_factory_rotation_t::Inherit);
+	MM_CHECK(MM_ParseFactoryRotation("random") == mm_factory_rotation_t::Inherit);
+
+	const char *const bad_limits[] = {
+		"factory f {\n title \"T\"\n base ffa\n players 5 2\n}\n",
+		"factory f {\n title \"T\"\n base ffa\n players 0 8\n}\n",
+		"factory f {\n title \"T\"\n base ffa\n players 2\n}\n",
+		"factory f {\n title \"T\"\n base ffa\n players 2 999\n}\n",
+		"factory f {\n title \"T\"\n base ffa\n rotation backwards\n}\n"
+	};
+	for (const char *document : bad_limits) {
+		const factory_parse_result_t parsed =
+			MM_ParseFactoryDocument(document, "f.cfg");
+		MM_CHECK(parsed.valid);
+		MM_CHECK(parsed.factories.empty());
+		MM_CHECK_EQ(parsed.rejected_blocks, static_cast<size_t>(1));
+	}
+}
+
+MM_TEST(factory_scope_merge_lets_a_child_replace_a_rotation_not_extend_it) {
+	using namespace muffmode::factory;
+
+	mm_factory_scope_t parent;
+	parent.maps = { "q2dm1", "q2dm2", "q2dm3" };
+	parent.mappool = { "q2dm1" };
+	parent.rotation = mm_factory_rotation_t::Sequential;
+	parent.min_players = 2;
+	parent.max_players = 12;
+
+	// A variant that names its own rotation means "play these", not "these as
+	// well as those" -- otherwise an Insta CTF variant would inherit the
+	// deathmatch rotation it was trying to override.
+	mm_factory_scope_t child;
+	child.maps = { "lfctf4" };
+	child.max_players = 10;
+
+	const mm_factory_scope_t merged = MM_MergeScope(parent, child);
+	MM_CHECK_EQ(merged.maps.size(), static_cast<size_t>(1));
+	MM_CHECK_EQ(merged.maps[0], std::string("lfctf4"));
+	// Unstated fields inherit.
+	MM_CHECK_EQ(merged.mappool.size(), static_cast<size_t>(1));
+	MM_CHECK(merged.rotation == mm_factory_rotation_t::Sequential);
+	MM_CHECK_EQ(merged.min_players, 2);
+	MM_CHECK_EQ(merged.max_players, 10);
+}
+
+MM_TEST(gametype_selection_lock_stops_players_and_admins_not_the_console) {
+	using namespace muffmode::gametype;
+	using namespace gt_session_test;
+
+	const mm_gt_selection_t next = Selection((int)GT_CTF);
+	mm_gt_validate_input_t locked;
+	locked.selection_locked = true;
+
+	// A host who pins the mode wants it to stay pinned against the in-game
+	// levers...
+	locked.source = gt_source_t::Admin;
+	MM_CHECK_EQ(MM_GT_Validate(next, locked), gt_reject_t::SelectionLocked);
+	locked.source = gt_source_t::Vote;
+	MM_CHECK_EQ(MM_GT_Validate(next, locked), gt_reject_t::SelectionLocked);
+
+	// ...but must never be locked out of their own server console, and the
+	// configured selection still has to be establishable at boot.
+	locked.source = gt_source_t::ServerConsole;
+	MM_CHECK_EQ(MM_GT_Validate(next, locked), gt_reject_t::None);
+	locked.source = gt_source_t::Boot;
+	MM_CHECK_EQ(MM_GT_Validate(next, locked), gt_reject_t::None);
+
+	// A bad token still reports what is actually wrong with it.
+	locked.source = gt_source_t::Admin;
+	locked.availability = gametype_avail_t::Removed;
+	MM_CHECK_EQ(MM_GT_Validate(next, locked), gt_reject_t::GametypeRemoved);
+}
+
+MM_TEST(factory_override_merge_lets_the_child_win_in_declaration_order) {
+	using namespace muffmode::factory;
+
+	const std::vector<parsed_override_t> parent = {
+		{ "capturelimit", "8" }, { "timelimit", "20" }
+	};
+	const std::vector<parsed_override_t> child = {
+		{ "capturelimit", "5" }, { "g_instagib", "1" }
+	};
+
+	const std::vector<parsed_override_t> merged = MM_MergeOverrides(parent, child);
+	MM_CHECK_EQ(merged.size(), static_cast<size_t>(3));
+	MM_CHECK_EQ(merged[0].name, std::string("capturelimit"));
+	MM_CHECK_EQ(merged[0].value, std::string("5"));
+	MM_CHECK_EQ(merged[1].name, std::string("timelimit"));
+	MM_CHECK_EQ(merged[1].value, std::string("20"));
+	MM_CHECK_EQ(merged[2].name, std::string("g_instagib"));
+	MM_CHECK(MM_FindOverride(merged, "timelimit") != nullptr);
+	MM_CHECK(MM_FindOverride(merged, "fraglimit") == nullptr);
 }
 
 int main() {

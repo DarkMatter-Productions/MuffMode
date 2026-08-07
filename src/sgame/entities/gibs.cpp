@@ -44,7 +44,7 @@ void EmitExplosion(gentity_t *self, temp_event_t event) {
 }
 
 gtime_t GibLifetime() {
-	if (notGT(GT_ARENA) && (g_instagib->integer || GT(GT_INSTAGIB)))
+	if (notGT(GT_ARENA) && g_instagib->integer)
 		return random_time(1_sec, 5_sec);
 
 	return random_time(10_sec, 20_sec);

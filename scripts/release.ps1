@@ -1223,8 +1223,8 @@ function New-DeterministicHtmlReadme {
         </article>
         <article class="card">
           <h3>Choose A Preset</h3>
-          <p>Run a mode config such as <code>exec gt-FFA.cfg</code>, <code>exec gt-DUEL.cfg</code>, <code>exec gt-LMS.cfg</code>, <code>exec gt-ARENA.cfg</code>, or another packaged <code>gt-*.cfg</code>.</p>
-          <p><code>gt-ARENA.cfg</code> supports separately installed RA2-compatible maps through MuffMode Arena Rooms; RA2 assets are not bundled.</p>
+          <p>Pick a gameplay preset with <code>factory &lt;id&gt;</code>; run <code>factory list all</code> to see what is available.</p>
+          <p>The <code>arena_ra2</code> factory supports separately installed RA2-compatible maps through MuffMode Arena Rooms; RA2 assets are not bundled.</p>
         </article>
         <article class="card">
           <h3>Check Your Setup</h3>
@@ -2116,13 +2116,9 @@ function Assert-TranslatedHtmlReadme {
         "game_x64.dll",
         "MuffModeUpdater.exe",
         "server-base.cfg",
-        "gt-*.cfg",
-        "gt-FFA.cfg",
-        "gt-DUEL.cfg",
-        "gt-LMS.cfg",
-        "gt-ARENA.cfg",
-        "gt-HORDE.cfg",
-        "g_gametype_cfg",
+        "factories.cfg",
+        "g_factory",
+        "g_factory_file",
         "g_muffmode_debug",
         "Q3A",
         "BFG"
@@ -2202,7 +2198,7 @@ Critical preservation rules:
 - Set the root <html> lang attribute to "$($language.HtmlLang)".
 - Translate visible human prose and human-readable title/alt/aria text.
 - Do not translate or alter text inside <code>, <pre>, <kbd>, <samp>, <style>, or <script>.
-- Do not translate command names, cvar names, config names, ruleset tokens, gametype tokens, map filenames, DLL/EXE names, path fragments, aliases, binds, URLs, or file extensions. Examples include server-base.cfg, gt-*.cfg, gt-FFA.cfg, gt-DUEL.cfg, gt-LMS.cfg, gt-ARENA.cfg, g_gametype_cfg, g_muffmode_debug, team auto, arena create, readyup, callvote, vote yes, vote no, alias +hook hook, alias -hook unhook, bind mouse2 +hook, doctor, q2re, mm, q3a, q2reb, q, qc, game_x64.dll, and MuffModeUpdater.exe.
+- Do not translate command names, cvar names, config names, ruleset tokens, gametype tokens, map filenames, DLL/EXE names, path fragments, aliases, binds, URLs, or file extensions. Examples include server-base.cfg, factories.cfg, g_factory, g_factory_file, g_votable_factories, g_muffmode_debug, team auto, arena create, readyup, callvote, vote yes, vote no, alias +hook hook, alias -hook unhook, bind mouse2 +hook, doctor, q2re, mm, q3a, q2reb, q, qc, game_x64.dll, and MuffModeUpdater.exe.
 - Preserve product and project names such as MuffMode, Muff Mode, Quake II, Quake II Rerelease, GitHub, Ko-fi, Steam, Epic Games Store, GOG, Xbox app, and Microsoft Store.
 - Keep the tone practical, concise, and friendly.
 
@@ -2259,13 +2255,13 @@ Audience and scope:
 - Primary audience: Quake II Rerelease players and server hosts installing this release.
 - This project is currently in $Channel channel. Make that release state visible but not alarming.
 - Include installation, first-use guidance, player usage, voting, common host setup, packaged server config usage, gametype overview, a player-focused ruleset guide, offhand hook bind, debugging pointer, package contents, and the changelog.
-- Explain that hosts should load server-base.cfg first, then a packaged gt-*.cfg preset such as gt-FFA.cfg, gt-DUEL.cfg, or gt-ARENA.cfg; g_gametype_cfg then auto-executes matching gametype configs on later mode changes.
-- Explain that gt-ARENA.cfg supports separately installed RA2-compatible maps through MuffMode Arena Rooms, and that RA2 assets are not bundled.
+- Explain that hosts should load server-base.cfg first, then pick a factory with `factory <id>`; factories.cfg carries the per-mode presets and a factory re-applies itself on every gametype or factory change.
+- Explain that the arena_ra2 factory supports separately installed RA2-compatible maps through MuffMode Arena Rooms, and that RA2 assets are not bundled.
 - Use docs/rulesets.md as the authoritative ruleset source. Make every ruleset's unique feel and tradeoffs clear, including Q3A's existing-asset weapon mappings, preserved double jumps, Super Shotgun removal, regular Shotgun Q3 specs, and shared-cell BFG ammo cost.
 - Include a compact "Included Custom Maps" section using the source map guide. Show map title, filename, release status, and good gametype fits, and link to the full Muff Mode Map Guide for history, original release dates, preserved original readmes/BSPs, separate remaster source-map links, and item registers.
 - Explain that original map readmes are included in the main installer/manual zip under rerelease/baseq2/docs/muffmode/maps/original-readmes, while source maps and original BSPs are published as separate supplemental release archives.
 - Explain that most Windows users can use the installer. Keep this concise: it detects Steam, Epic Games Store, GOG, and Xbox app / Microsoft Store installs, keeps an other-location choice available, verifies installed files, writes an install receipt, backs up existing server configs and the Muff Mode DLL before replacing them, and offers useful shortcuts. Also include the zip/manual extraction path for users who prefer it.
-- Describe Last Man Standing as an available round-based free-for-all elimination mode and mention its packaged gt-LMS.cfg preset.
+- Describe Last Man Standing as an available round-based free-for-all elimination mode and mention its packaged lms_classic factory.
 - Include elegant support buttons near the top for the authors: themuffinator at https://github.com/sponsors/themuffinator and ozy at https://ko-fi.com/ozy24. Frame donations as optional support that helps promote future development and offsets the real time, testing, tooling, and release costs involved in maintaining the mod.
 - Do not include build instructions, source compilation steps, contributor notes, GitHub badges, or repository development workflow.
 - Keep it polished, friendly, and practical. Avoid marketing fluff.
@@ -2434,22 +2430,10 @@ function Assert-ReleasePackageContents {
         "rerelease\baseq2\muffmode-version.json",
         "rerelease\baseq2\muffmode.version",
         "rerelease\baseq2\CONFIGS_README.md",
+        "rerelease\baseq2\factories.cfg",
         "rerelease\baseq2\muffmode-map-cycle.example.txt",
         "rerelease\baseq2\muffmode-map-pool.example.json",
         "rerelease\baseq2\server-base.cfg",
-        "rerelease\baseq2\gt-FFA.cfg",
-        "rerelease\baseq2\gt-DUEL.cfg",
-        "rerelease\baseq2\gt-TDM.cfg",
-        "rerelease\baseq2\gt-CTF.cfg",
-        "rerelease\baseq2\gt-CA.cfg",
-        "rerelease\baseq2\gt-ARENA.cfg",
-        "rerelease\baseq2\gt-FT.cfg",
-        "rerelease\baseq2\gt-LMS.cfg",
-        "rerelease\baseq2\gt-REDROVER.cfg",
-        "rerelease\baseq2\gt-HORDE.cfg",
-        "rerelease\baseq2\gt-INSTAGIB.cfg",
-        "rerelease\baseq2\gt-NADEFEST.cfg",
-        "rerelease\baseq2\gt-STRIKE.cfg",
         "rerelease\baseq2\docs\muffmode\maps\original-readmes\README.md",
         "rerelease\baseq2\docs\muffmode\maps\original-readmes\2box4-readme.txt",
         "rerelease\baseq2\docs\muffmode\maps\original-readmes\aerowalk-readme.txt",

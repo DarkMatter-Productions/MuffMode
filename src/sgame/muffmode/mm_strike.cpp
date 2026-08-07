@@ -126,6 +126,11 @@ void MM_Strike_Init()
 
 	bool changed = false;
 
+	// [MuffMode] These stay direct writes. Routing them through the override
+	// ledger would file them under the factory owner, and the ledger is only
+	// unwound when the *factory* changes -- so it would advertise a restore that
+	// leaving Capture Strike never performs. A mode default that outlives its
+	// mode is a separate problem from factory ownership.
 	if (g_arena_start_health && g_arena_start_health->integer == 200) {
 		gi.cvar_forceset("g_arena_start_health", "100");
 		changed = true;

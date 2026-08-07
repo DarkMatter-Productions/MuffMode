@@ -21,23 +21,8 @@ struct LiteralClassnameRemap {
 	const char *to = nullptr;
 };
 
-constexpr std::array<const char *, GT_NUM_GAMETYPES> k_gametype_spawn_tokens = {
-	"campaign",
-	"ffa",
-	"tournament",
-	"team",
-	"ctf",
-	"ca",
-	"freeze",
-	"strike",
-	"rr",
-	"lms",
-	"horde",
-	"ball",
-	"instagib",
-	"nadefest",
-	"arena"
-};
+// [MuffMode] Spawn tokens live on the gametype descriptor table now, alongside
+// every other per-gametype name, so they cannot drift out of step with it.
 
 constexpr std::array<ItemClassnameRemap, 8> k_q3a_item_remaps = {{
 	{ "weapon_gauntlet", IT_WEAPON_CHAINFIST },
@@ -105,18 +90,17 @@ bool TokenInList(const char *list, const char *token)
 	return false;
 }
 
+// [MuffMode] The published resolution is already in range and available, so the
+// re-clamp these carried -- to a range wider than the resolver can produce --
+// is gone along with the separate spawn-token table.
 const char *CurrentSpawnGametypeToken()
 {
-	const int gt = clamp(g_gametype ? MM_EFFECTIVE_GT : (int)GT_FFA,
-		(int)GT_NONE, (int)GT_NUM_GAMETYPES - 1);
-	return k_gametype_spawn_tokens[gt];
+	return MM_GTDesc(MM_CurrentGametype()).spawn_token;
 }
 
 int CurrentSpawnGametypeFlags()
 {
-	const int gt = clamp(g_gametype ? MM_EFFECTIVE_GT : (int)GT_FFA,
-		(int)GT_NONE, (int)GT_NUM_GAMETYPES - 1);
-	return _gt[gt];
+	return MM_CurrentGametypeFlags();
 }
 
 const char *CurrentSpawnRulesetToken()

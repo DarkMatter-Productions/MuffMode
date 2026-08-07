@@ -1206,7 +1206,7 @@ void UpdateServer(gentity_t *ent)
 		i++;
 	}
 
-	if (global_modifiers && (g_instagib->integer || GT(GT_INSTAGIB))) {
+	if (global_modifiers && g_instagib->integer) {
 		if (i >= content_limit) return;
 		if (g_instagib_splash->integer) {
 			menu::SetText(entries[i], "InstaGib + Rail Splash");
@@ -1225,7 +1225,7 @@ void UpdateServer(gentity_t *ent)
 		menu::SetText(entries[i], "Weapons Frenzy");
 		i++;
 	}
-	if (global_modifiers && (g_nadefest->integer || GT(GT_NADEFEST))) {
+	if (global_modifiers && g_nadefest->integer) {
 		if (i >= content_limit) return;
 		menu::SetText(entries[i], "Nade Fest");
 		i++;

@@ -154,6 +154,7 @@ In Freeze Tag, dying during a live round freezes you in place instead of sending
 | `mappool [filter]` | List the first 32 matching maps in the structured voting/MyMap catalog, optionally filtered by name, title, episode, mode, `popular`, or `custom`. |
 | `mapcycle [filter]` | List the first 32 matches in the active structured automatic-rotation cycle with the same optional filters. |
 | `mappick [1-3]` | Choose the next map during the post-scoreboard pick, or list the current candidates and their tallies when given no number. |
+| `factory` | Show the gameplay preset the server is running and the other presets available for this gametype. `factory list all` shows every one, and `factory info <id>` lists exactly what a preset changes. Instagib, NadeFest, Vampiric, Frenzy and Quad Hog are presets rather than gametypes, so this is where you find them, and a `<mode>_comp` preset is the match-rules version of a mode. Admins can switch with `factory <id>`. |
 | `motd` | Print the message of the day. |
 | `forfeit` | Forfeit a duel when `g_allow_forfeit` is enabled. |
 | `sr` | Show your current singleton gametype's skill rating, its latest change, and the average rating of profile-ready active human players. Arena Rooms, non-Duel matches with a departure, matches containing a player whose profile could not be loaded, and matches whose complete rating result cannot be admitted to the bounded persistence queue are unranked. Your rating is also shown on the centerprint you receive when you join the match, whenever the session is ranked. |
@@ -208,12 +209,13 @@ Use `callvote <command> <argument>` from the console, or use the voting menu whe
 ```text
 callvote map q2dm1
 callvote gametype duel
+callvote factory instactf
 callvote ruleset mm
 callvote timelimit 15
 callvote scorelimit 50
 ```
 
-Servers can restrict voting, spectator voting, mid-match voting, available gametypes, and available rulesets. If a vote option is missing, it is probably a host choice rather than a client problem. Use the [Rulesets](rulesets.md) guide when you want to know what a ruleset vote changes, and see [Vote Commands](configuration-reference.md#vote-commands) for the full command list.
+Servers can restrict voting, spectator voting, mid-match voting, available gametypes, available factories, and available rulesets. If a vote option is missing, it is probably a host choice rather than a client problem. Use the [Rulesets](rulesets.md) guide when you want to know what a ruleset vote changes, and see [Vote Commands](configuration-reference.md#vote-commands) for the full command list.
 
 ## Offhand Hook
 

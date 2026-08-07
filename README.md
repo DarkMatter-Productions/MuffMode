@@ -60,7 +60,7 @@
 1. Download the [latest Muff Mode release](https://github.com/DarkMatter-Productions/MuffMode/releases/latest).
 2. Use the **Windows installer** when available. It detects **Steam**, **Epic Games Store**, **GOG**, and **Xbox app / Microsoft Store** installs, and also offers an **Other location** option for custom library folders.
 3. If you use the zip instead, extract it into the outer **`Quake 2`** folder and allow file replacements.
-4. Launch the game normally. Server hosts can load the bundled baseline config with **`exec server-base.cfg`**, then execute a gametype preset such as **`exec gt-FFA.cfg`** or **`exec gt-ARENA.cfg`**. Arena uses separately installed Arena-compatible maps: tagged multi-room maps are preferred, while classic RA2 idmaps remain available through the compatibility profile. Those map assets are not bundled.
+4. Launch the game normally. Server hosts can load the bundled baseline config with **`exec server-base.cfg`**, then pick a gameplay preset with **`factory <id>`** — run **`factory list all`** to see what is available. Arena uses separately installed Arena-compatible maps: tagged multi-room maps are preferred, while classic RA2 idmaps remain available through the compatibility profile. Those map assets are not bundled.
 
 For a more careful walkthrough, use the [Player Guide](docs/player-guide.md) or [Server Host Guide](docs/server-host-guide.md).
 
@@ -75,7 +75,7 @@ For a more careful walkthrough, use the [Player Guide](docs/player-guide.md) or 
  - **Fast, accessible voting** — use **GUI or console voting** for maps, gametypes, rulesets, server settings, and administrative actions, with host-side controls to keep votes focused.
  - **Stronger teamplay tools** — captains, captain transfer, team locking, auto-balance, forced balance, and team item-drop notices make coordinated play easier to run.
  - **Quality-of-life touches players notice** — **kill beeps**, **offhand hook support**, **EyeCam spectating**, **MyMap queueing**, and smarter auto-switch behavior all help matches feel smoother.
- - **Host controls that scale up** — tune the packaged `server-base.cfg`, per-gametype `gt-*.cfg` files, map lists and pools, votable options, MOTDs, debug logging, and server diagnostics without needing separate builds for different communities.
+ - **Host controls that scale up** — tune the packaged `server-base.cfg`, the `factories.cfg` gameplay presets, map lists and pools, votable options, MOTDs, debug logging, and server diagnostics without needing separate builds for different communities.
  - **Modding and map support** — Muff Mode also adds **custom maps**, **entity overrides**, **item replacement**, conditional entity spawning, and new mapper-focused entities for more tailored server content.
 
 <h2 align="center">Included Content</h2>

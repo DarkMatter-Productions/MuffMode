@@ -231,10 +231,10 @@ void MM_ApplySpawnLoadout(gentity_t *ent, gclient_t *client, bool taken_loadout)
 		const bool resolved_arena =
 			MM_Arena_GetSpawnLoadout(client, arena_loadout);
 
-		if (notGT(GT_ARENA) && (g_instagib->integer || GT(GT_INSTAGIB))) {
+		if (notGT(GT_ARENA) && g_instagib->integer) {
 			client->pers.inventory[IT_WEAPON_RAILGUN] = 1;
 			client->pers.inventory[IT_AMMO_SLUGS] = AMMO_INFINITE;
-		} else if (notGT(GT_ARENA) && (g_nadefest->integer || GT(GT_NADEFEST))) {
+		} else if (notGT(GT_ARENA) && g_nadefest->integer) {
 			client->pers.inventory[IT_AMMO_GRENADES] = AMMO_INFINITE;
 		} else if (resolved_arena) {
 			muffmode::spawn_loadout::ApplyResolvedArenaLoadout(

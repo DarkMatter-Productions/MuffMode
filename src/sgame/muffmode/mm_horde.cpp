@@ -1810,6 +1810,9 @@ void MM_Horde_Init()
 	if (!roundlimit_defaulted) {
 		roundlimit_defaulted = true;
 		if (roundlimit->integer == 8) {
+			// [MuffMode] A direct write: the override ledger is unwound only on
+			// a factory change, so filing this under the factory owner would
+			// promise a restore that leaving Horde never performs.
 			gi.cvar_forceset("roundlimit", "12");
 			gi.Com_PrintFmt("MM_Horde: roundlimit at global default (8), using horde default of 12.\n");
 		}
