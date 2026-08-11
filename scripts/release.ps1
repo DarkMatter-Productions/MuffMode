@@ -40,18 +40,10 @@ $ErrorActionPreference = "Stop"
 
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $ReleaseRepo = "DarkMatter-Productions/MuffMode"
-$script:ChangelogRequiredColumns = @("Release", "Category", "Magnitude", "Summary", "Details")
-$script:ChangelogCategories = @(
-    "Player Experience",
-    "Competitive Play",
-    "Server Hosting",
-    "Gameplay and Balance",
-    "Maps and Content",
-    "Fixes",
-    "Documentation and Packaging",
-    "Internal Maintenance"
-)
-$script:ChangelogMagnitudes = @("major", "minor", "patch")
+. (Join-Path $PSScriptRoot "ci/changelog-common.ps1")
+$script:ChangelogRequiredColumns = Get-ChangelogRequiredColumns
+$script:ChangelogCategories = Get-ChangelogAllowedCategories
+$script:ChangelogMagnitudes = Get-ChangelogAllowedMagnitudes
 $script:ReadmeLanguageEntries = @(
     [pscustomobject]@{
         Code = "en"
@@ -280,22 +272,6 @@ function Limit-Text {
     return "$($Text.Substring(0, $MaxCharacters).TrimEnd())`n`n[Context truncated after $MaxCharacters characters.]"
 }
 
-function Split-MarkdownTableRow {
-    param([string]$Line)
-
-    $inner = $Line.Trim()
-    if ($inner.StartsWith("|")) {
-        $inner = $inner.Substring(1)
-    }
-    if ($inner.EndsWith("|")) {
-        $inner = $inner.Substring(0, $inner.Length - 1)
-    }
-
-    return @([regex]::Split($inner, '(?<!\\)\|') | ForEach-Object {
-        ($_ -replace '\\\|', '|').Trim()
-    })
-}
-
 function ConvertTo-ChangelogTableCell {
     param([AllowNull()][string]$Text)
 
@@ -304,16 +280,6 @@ function ConvertTo-ChangelogTableCell {
     }
 
     return (($Text -replace '\r?\n', "<br>").Trim() -replace '\|', '\|')
-}
-
-function ConvertFrom-ChangelogTableCell {
-    param([AllowNull()][string]$Text)
-
-    if ($null -eq $Text) {
-        return ""
-    }
-
-    return (($Text -replace '<br\s*/?>', ' ') -replace '\s+', ' ').Trim()
 }
 
 function Get-CanonicalChangelogRelease {
@@ -399,9 +365,7 @@ function ConvertFrom-ChangelogLedger {
         }
 
         $cells = Split-MarkdownTableRow $line
-        if ($cells.Count -ne $headers.Count) {
-            throw "Changelog row $($i + 1) has $($cells.Count) columns, but the table header has $($headers.Count). Escape any literal pipe inside a cell as \|, including one inside a code span."
-        }
+        Assert-ChangelogRowShape -Cells $cells -Headers $headers -LineNumber ($i + 1)
 
         $summary = ConvertFrom-ChangelogTableCell $cells[$columnIndex["Summary"]]
         $details = ConvertFrom-ChangelogTableCell $cells[$columnIndex["Details"]]
@@ -489,9 +453,7 @@ function Update-ChangelogReleaseVersions {
         }
 
         $cells = Split-MarkdownTableRow $line
-        if ($cells.Count -ne $headers.Count) {
-            throw "Changelog row $($i + 1) has $($cells.Count) columns, but the table header has $($headers.Count). Escape any literal pipe inside a cell as \|, including one inside a code span."
-        }
+        Assert-ChangelogRowShape -Cells $cells -Headers $headers -LineNumber ($i + 1)
 
         $release = Get-CanonicalChangelogRelease $cells[$releaseColumn]
         if ($release -eq "Unreleased") {

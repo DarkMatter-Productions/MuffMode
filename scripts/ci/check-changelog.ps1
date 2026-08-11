@@ -9,45 +9,12 @@ Set-StrictMode -Version Latest
 $repoRoot = (git rev-parse --show-toplevel).Trim()
 Set-Location -LiteralPath $repoRoot
 
+. (Join-Path $PSScriptRoot "changelog-common.ps1")
+
 $ledgerPath = Join-Path $repoRoot "docs/changelog.md"
-$requiredColumns = @("Release", "Category", "Magnitude", "Summary", "Details")
-$allowedCategories = @(
-    "Player Experience",
-    "Competitive Play",
-    "Server Hosting",
-    "Gameplay and Balance",
-    "Maps and Content",
-    "Fixes",
-    "Documentation and Packaging",
-    "Internal Maintenance"
-)
-$allowedMagnitudes = @("major", "minor", "patch")
-
-function Split-MarkdownTableRow {
-    param([string]$Line)
-
-    $inner = $Line.Trim()
-    if ($inner.StartsWith("|")) {
-        $inner = $inner.Substring(1)
-    }
-    if ($inner.EndsWith("|")) {
-        $inner = $inner.Substring(0, $inner.Length - 1)
-    }
-
-    return @([regex]::Split($inner, '(?<!\\)\|') | ForEach-Object {
-        ($_ -replace '\\\|', '|').Trim()
-    })
-}
-
-function ConvertFrom-ChangelogCell {
-    param([AllowNull()][string]$Text)
-
-    if ($null -eq $Text) {
-        return ""
-    }
-
-    return (($Text -replace '<br\s*/?>', ' ') -replace '\s+', ' ').Trim()
-}
+$requiredColumns = Get-ChangelogRequiredColumns
+$allowedCategories = Get-ChangelogAllowedCategories
+$allowedMagnitudes = Get-ChangelogAllowedMagnitudes
 
 function Test-ImplementationPath {
     param([string]$Path)
@@ -107,9 +74,7 @@ for ($i = $headerIndex + 2; $i -lt $lines.Count; $i++) {
     }
 
     $cells = Split-MarkdownTableRow $line
-    if ($cells.Count -ne $headers.Count) {
-        throw "Changelog row $($i + 1) has $($cells.Count) columns, but the table header has $($headers.Count). Escape any literal pipe inside a cell as \|, including one inside a code span."
-    }
+    Assert-ChangelogRowShape -Cells $cells -Headers $headers -LineNumber ($i + 1)
 
     $release = ConvertFrom-ChangelogCell $cells[$columnIndex["Release"]]
     $category = ConvertFrom-ChangelogCell $cells[$columnIndex["Category"]]
