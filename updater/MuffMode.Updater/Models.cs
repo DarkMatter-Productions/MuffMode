@@ -79,11 +79,27 @@ internal readonly partial record struct SemanticVersion(int Major, int Minor, in
         }
 
         var match = VersionRegex().Match(value);
-        if (!match.Success)
+        return match.Success && TryReadComponents(match, out version);
+    }
+
+    // Release tags name download URLs and staged install paths, so a tag has to be the
+    // whole version and nothing else. TryParse scans free-form release titles, so it also
+    // matches a version embedded in surrounding text and is too loose for a tag.
+    public static bool TryParseExact(string? value, out SemanticVersion version)
+    {
+        version = default;
+        if (string.IsNullOrWhiteSpace(value))
         {
             return false;
         }
 
+        var match = ExactVersionRegex().Match(value);
+        return match.Success && TryReadComponents(match, out version);
+    }
+
+    private static bool TryReadComponents(Match match, out SemanticVersion version)
+    {
+        version = default;
         if (!int.TryParse(match.Groups["major"].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var major)
             || !int.TryParse(match.Groups["minor"].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var minor)
             || !int.TryParse(match.Groups["patch"].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var patch))
@@ -116,6 +132,12 @@ internal readonly partial record struct SemanticVersion(int Major, int Minor, in
 
     [GeneratedRegex(@"v?(?<major>\d+)\.(?<minor>\d+)\.(?<patch>\d+)(?:[-+][0-9A-Za-z.-]+)?", RegexOptions.IgnoreCase)]
     private static partial Regex VersionRegex();
+
+    // \A and \z rather than ^ and $ so a trailing newline cannot smuggle text past the anchor.
+    // Components accept leading zeros because MuffMode shipped zero-padded tags (v0.22.00),
+    // and are capped at nine digits so int.TryParse cannot overflow.
+    [GeneratedRegex(@"\Av?(?<major>\d{1,9})\.(?<minor>\d{1,9})\.(?<patch>\d{1,9})\z", RegexOptions.IgnoreCase)]
+    private static partial Regex ExactVersionRegex();
 }
 
 internal sealed class GitHubReleaseDto

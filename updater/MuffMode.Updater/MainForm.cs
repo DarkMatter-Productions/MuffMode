@@ -63,6 +63,8 @@ internal sealed class MainForm : Form
             AutoSize = false,
             Dock = DockStyle.Fill,
             Text = "Muff Mode Updater & Launcher",
+            // Without this the ampersand is read as a mnemonic and renders as "Updater _Launcher".
+            UseMnemonic = false,
             Font = new Font("Segoe UI Semibold", 21F),
             ForeColor = Color.FromArgb(238, 189, 87)
         };
@@ -72,6 +74,8 @@ internal sealed class MainForm : Form
             AutoSize = false,
             Dock = DockStyle.Fill,
             Text = "Ready.",
+            // Status text quotes install paths and release titles, which may contain an ampersand.
+            UseMnemonic = false,
             ForeColor = Color.FromArgb(198, 211, 196)
         };
 
@@ -319,6 +323,8 @@ internal sealed class MainForm : Form
         AutoSize = false,
         Dock = DockStyle.Fill,
         Text = text,
+        // These labels report install paths and release titles, which may contain an ampersand.
+        UseMnemonic = false,
         ForeColor = Color.FromArgb(207, 216, 205),
         TextAlign = ContentAlignment.MiddleLeft
     };

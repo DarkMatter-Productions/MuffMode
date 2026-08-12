@@ -840,23 +840,24 @@ internal sealed class GitHubReleaseClient : IDisposable
 
     private static ReleaseInfo? TryCreateReleaseInfo(GitHubReleaseDto release)
     {
-        var tagVersion = TryParseOptionalReleaseVersion(release.TagName);
-        var nameVersion = TryParseOptionalReleaseVersion(release.Name);
-        if (tagVersion is not null
-            && nameVersion is not null
-            && tagVersion.Value.CompareTo(nameVersion.Value) != 0)
-        {
-            throw new InvalidOperationException($"Release tag {release.TagName} and title {release.Name} disagree on the version.");
-        }
-
-        var version = tagVersion ?? nameVersion;
-        if (version is null)
+        // The tag is the authoritative version: it is immutable and it names the download URL.
+        // Release titles are free-form ("MuffMode v0.60.0 Beta"), so a title on its own must not
+        // promote an unversioned release into a candidate. The repository's rolling "latest" tag
+        // is titled "v0.18.5 BETA", and treating that title as the version made every release
+        // lookup fail on a tag that can never validate.
+        if (!SemanticVersion.TryParseExact(release.TagName?.Trim(), out var version))
         {
             return null;
         }
 
+        var nameVersion = TryParseOptionalReleaseVersion(release.Name);
+        if (nameVersion is not null && version.CompareTo(nameVersion.Value) != 0)
+        {
+            throw new InvalidOperationException($"Release tag {release.TagName} and title {release.Name} disagree on the version.");
+        }
+
         var releaseId = GetRequiredGitHubId(release.Id, "release");
-        var releaseTag = ValidateReleaseTag(release.TagName, version.Value);
+        var releaseTag = ValidateReleaseTag(release.TagName, version);
         if (release.PublishedAt is null)
         {
             throw new InvalidOperationException($"GitHub release {releaseTag} did not include a published timestamp.");
@@ -873,7 +874,7 @@ internal sealed class GitHubReleaseClient : IDisposable
 
         var matchingAssets = assets
             .Where(IsReleasePackageZip)
-            .Where(asset => AssetNameMatchesRelease(asset.Name!, version.Value, release.Prerelease))
+            .Where(asset => AssetNameMatchesRelease(asset.Name!, version, release.Prerelease))
             .OrderBy(asset => asset.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
         if (matchingAssets.Count == 0)
@@ -883,14 +884,14 @@ internal sealed class GitHubReleaseClient : IDisposable
 
         if (matchingAssets.Count > 1)
         {
-            throw new InvalidOperationException($"Release {version.Value} has multiple matching MuffMode package zip assets. Keep exactly one package asset for this channel.");
+            throw new InvalidOperationException($"Release {version} has multiple matching MuffMode package zip assets. Keep exactly one package asset for this channel.");
         }
 
         var asset = matchingAssets[0];
         _ = GetSafeAssetFileName(asset.Name!);
         var downloadUri = CreateDownloadUri(asset.BrowserDownloadUrl!, asset.Name!, releaseTag);
         var assetId = GetRequiredGitHubId(asset.Id, "release asset");
-        var assetChannel = GetAssetChannel(asset.Name!, version.Value)
+        var assetChannel = GetAssetChannel(asset.Name!, version)
             ?? throw new InvalidOperationException($"GitHub release {releaseTag} had an unexpected package asset name: {asset.Name}");
         if (asset.UpdatedAt is null)
         {
@@ -901,11 +902,11 @@ internal sealed class GitHubReleaseClient : IDisposable
         ValidateGitHubAssetDigestMetadata(asset.Digest, asset.Name!);
         var htmlUrl = GetTrustedReleaseHtmlUrl(release.HtmlUrl, releaseTag);
         return new ReleaseInfo(
-            version.Value,
+            version,
             releaseId,
             releaseTag,
             assetChannel,
-            string.IsNullOrWhiteSpace(release.Name) ? $"MuffMode v{version.Value}" : release.Name!,
+            string.IsNullOrWhiteSpace(release.Name) ? $"MuffMode v{version}" : release.Name!,
             release.Body ?? "",
             htmlUrl,
             release.Prerelease,
@@ -995,16 +996,18 @@ internal sealed class GitHubReleaseClient : IDisposable
             throw new InvalidOperationException($"GitHub release {version} used an unsafe tag name.");
         }
 
-        if (!SemanticVersion.TryParse(tag, out var tagVersion)
-            || tagVersion.CompareTo(version) != 0)
+        // The tag must be a bare version so it cannot carry a path or query fragment into a
+        // download URL. It is compared numerically rather than by string, because zero-padded
+        // tags such as v0.22.00 are legitimate MuffMode releases that never round-trip
+        // through SemanticVersion.ToString().
+        if (!SemanticVersion.TryParseExact(tag, out var tagVersion))
         {
-            throw new InvalidOperationException($"GitHub release tag {tag} does not match release version {version}.");
+            throw new InvalidOperationException($"GitHub release tag {tag} must be a bare {version} or v{version} tag.");
         }
 
-        if (!tag.Equals(version.ToString(), StringComparison.Ordinal)
-            && !tag.Equals($"v{version}", StringComparison.Ordinal))
+        if (tagVersion.CompareTo(version) != 0)
         {
-            throw new InvalidOperationException($"GitHub release tag {tag} must be exactly {version} or v{version}.");
+            throw new InvalidOperationException($"GitHub release tag {tag} does not match release version {version}.");
         }
 
         return tag;

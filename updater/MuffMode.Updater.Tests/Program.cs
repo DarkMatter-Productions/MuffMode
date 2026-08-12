@@ -34,6 +34,10 @@ internal static class Program
         Run("file reparse point is preserved", PreservesFileReparsePoint);
         Run("reparse-point parent cannot redirect cleanup outside the install root", PreservesReparseParentTarget);
         Run("deferred self-update always attempts obsolete-file cleanup", VerifiesDeferredCleanupWiring);
+        Run("zero-padded release tags are accepted", AcceptsZeroPaddedReleaseTags);
+        Run("a release tag must be a bare version", RejectsTagsThatAreNotBareVersions);
+        Run("an unversioned release tag is skipped, not fatal", SkipsReleaseWithUnversionedTag);
+        Run("a release title cannot override the release tag", PrefersTagOverTitleForReleaseVersion);
 
         Console.WriteLine($"Updater cleanup tests: {passed} passed, {skipped} skipped, {failed} failed.");
         return failed == 0 ? 0 : 1;
@@ -413,6 +417,139 @@ internal static class Program
     {
         Assert(File.Exists(path), $"Expected preserved file is missing: {path}");
         Assert(File.ReadAllBytes(path).SequenceEqual(expected), $"Preserved file changed: {path}");
+    }
+
+    // MuffMode shipped v0.21.07, v0.21.09 and v0.22.00. Requiring a tag to round-trip through
+    // SemanticVersion.ToString() rejected all three, and one rejected release aborted the whole
+    // release lookup, so the updater could not check for updates at all.
+    private static void AcceptsZeroPaddedReleaseTags()
+    {
+        (string Tag, SemanticVersion Expected)[] cases =
+        {
+            ("v0.22.00", new SemanticVersion(0, 22, 0)),
+            ("v0.21.07", new SemanticVersion(0, 21, 7)),
+            ("v0.21.09", new SemanticVersion(0, 21, 9)),
+            ("v0.70.30", new SemanticVersion(0, 70, 30)),
+            ("0.70.30", new SemanticVersion(0, 70, 30)),
+        };
+
+        foreach (var (tag, expected) in cases)
+        {
+            Assert(SemanticVersion.TryParseExact(tag, out var actual), $"Release tag {tag} was rejected.");
+            AssertEqual(expected, actual);
+            Assert(
+                InvokeValidateReleaseTag(tag, expected) == tag,
+                $"Release tag {tag} did not survive validation.");
+        }
+    }
+
+    // The tag names a download URL and a staged install path, so it must carry nothing else.
+    private static void RejectsTagsThatAreNotBareVersions()
+    {
+        string[] tags =
+        {
+            "latest",
+            "release-1.2.3-final",
+            "1.2.3-evil",
+            "v1.2.3/../../etc",
+            "v1.2.3?x=1",
+            "v1.2.3#frag",
+            "v1.2.3-alpha",
+            "v1.2.3+build",
+            "v1.2.3.4",
+            "1.2",
+            "v1.2.3\nv9.9.9",
+            "v9999999999.0.0",
+            "",
+        };
+
+        foreach (var tag in tags)
+        {
+            Assert(
+                !SemanticVersion.TryParseExact(tag, out _),
+                $"Tag {tag.Replace("\n", "\\n")} was accepted as a bare version.");
+        }
+    }
+
+    // The repository carries a rolling "latest" tag titled "v0.18.5 BETA". Deriving the version
+    // from that title made it a candidate whose tag could never validate, which threw and took
+    // the entire release lookup down with it.
+    private static void SkipsReleaseWithUnversionedTag()
+    {
+        var release = new GitHubReleaseDto
+        {
+            Id = 1,
+            TagName = "latest",
+            Name = "v0.18.5 BETA",
+            PublishedAt = DateTimeOffset.UtcNow.AddDays(-1),
+            Assets =
+            [
+                new GitHubAssetDto
+                {
+                    Id = 2,
+                    Name = "muffmode-0.18.5-beta.zip",
+                    BrowserDownloadUrl = "https://github.com/DarkMatter-Productions/MuffMode/releases/download/latest/muffmode-0.18.5-beta.zip",
+                    Size = 2 * 1024 * 1024,
+                    ContentType = "application/zip",
+                    State = "uploaded",
+                }
+            ],
+        };
+
+        Assert(InvokeTryCreateReleaseInfo(release) is null, "An unversioned release tag was not skipped.");
+    }
+
+    private static void PrefersTagOverTitleForReleaseVersion()
+    {
+        var release = new GitHubReleaseDto
+        {
+            Id = 1,
+            TagName = "not-a-version",
+            Name = "MuffMode v9.9.9",
+            PublishedAt = DateTimeOffset.UtcNow.AddDays(-1),
+            Assets =
+            [
+                new GitHubAssetDto
+                {
+                    Id = 2,
+                    Name = "muffmode-9.9.9.zip",
+                    BrowserDownloadUrl = "https://github.com/DarkMatter-Productions/MuffMode/releases/download/not-a-version/muffmode-9.9.9.zip",
+                    Size = 2 * 1024 * 1024,
+                    ContentType = "application/zip",
+                    State = "uploaded",
+                }
+            ],
+        };
+
+        Assert(
+            InvokeTryCreateReleaseInfo(release) is null,
+            "A release title promoted an unversioned tag into an update candidate.");
+    }
+
+    private static object? InvokeTryCreateReleaseInfo(GitHubReleaseDto release)
+    {
+        return InvokeReleaseClientMethod("TryCreateReleaseInfo", release);
+    }
+
+    private static string InvokeValidateReleaseTag(string tag, SemanticVersion version)
+    {
+        return (string)InvokeReleaseClientMethod("ValidateReleaseTag", tag, version)!;
+    }
+
+    private static object? InvokeReleaseClientMethod(string name, params object?[] arguments)
+    {
+        var method = typeof(GitHubReleaseClient)
+            .GetMethod(name, BindingFlags.NonPublic | BindingFlags.Static)
+            ?? throw new InvalidOperationException($"{name} is missing from GitHubReleaseClient.");
+
+        try
+        {
+            return method.Invoke(null, arguments);
+        }
+        catch (TargetInvocationException ex)
+        {
+            throw new InvalidOperationException(ex.InnerException!.Message, ex.InnerException);
+        }
     }
 
     private static void Assert(bool condition, string message)
