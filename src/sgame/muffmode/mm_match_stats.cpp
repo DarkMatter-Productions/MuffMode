@@ -166,9 +166,16 @@ std::string PlayerName(const gclient_t *client)
 {
 	if (!client)
 		return {};
-	if (client->pers.netname[0])
-		return client->pers.netname;
-	return client->resp.netname;
+	// pers.netname holds the client-resolved "##P<n>" cross-play token (see
+	// EncodedPlayerName in userinfo.cpp) for every non-bot player -- it only
+	// renders correctly through gi.LocClient_Print/LocBroadcast_Print's own
+	// player-name substitution, not when copied into award/report/layout text
+	// built server-side. resp.netname is the actual submitted name and is
+	// always populated (for bots and humans alike), so it's the right value
+	// for text that doesn't go through that substitution.
+	if (client->resp.netname[0])
+		return client->resp.netname;
+	return client->pers.netname;
 }
 
 std::string PlayerSocialId(const gclient_t *client)
