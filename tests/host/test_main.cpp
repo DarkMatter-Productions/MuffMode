@@ -1188,6 +1188,38 @@ MM_TEST(map_vote_snapshot_refreshes_only_for_source_revision_changes) {
 		true, original, { &list_a, 7, &pool_a, 11, 24 }));
 }
 
+MM_TEST(factory_vote_snapshot_refreshes_only_for_source_revision_changes) {
+	using muffmode::vote_menu::FactoryMenuSnapshotNeedsRefresh;
+	using muffmode::vote_menu::FactoryMenuSourceRevision;
+
+	int factories_a = 0;
+	int factories_b = 0;
+	int gametypes_a = 0;
+	int gametypes_b = 0;
+	const FactoryMenuSourceRevision original {
+		&factories_a, 3, &gametypes_a, 5, 1, 71 };
+
+	MM_CHECK(FactoryMenuSnapshotNeedsRefresh(false, original, original));
+	MM_CHECK_FALSE(FactoryMenuSnapshotNeedsRefresh(true, original, original));
+	// g_votable_factories edited.
+	MM_CHECK(FactoryMenuSnapshotNeedsRefresh(
+		true, original, { &factories_a, 4, &gametypes_a, 5, 1, 71 }));
+	// g_votable_gametypes edited: it gates the cross-gametype rule.
+	MM_CHECK(FactoryMenuSnapshotNeedsRefresh(
+		true, original, { &factories_a, 3, &gametypes_a, 6, 1, 71 }));
+	// Either cvar re-registered under a new address.
+	MM_CHECK(FactoryMenuSnapshotNeedsRefresh(
+		true, original, { &factories_b, 3, &gametypes_a, 5, 1, 71 }));
+	MM_CHECK(FactoryMenuSnapshotNeedsRefresh(
+		true, original, { &factories_a, 3, &gametypes_b, 5, 1, 71 }));
+	// The gametype moved, so which factories are cross-gametype changed.
+	MM_CHECK(FactoryMenuSnapshotNeedsRefresh(
+		true, original, { &factories_a, 3, &gametypes_a, 5, 4, 71 }));
+	// `factory reload` republished the registry.
+	MM_CHECK(FactoryMenuSnapshotNeedsRefresh(
+		true, original, { &factories_a, 3, &gametypes_a, 5, 1, 58 }));
+}
+
 MM_TEST(motd_filenames_reject_paths_devices_and_shell_metacharacters) {
 	using muffmode::motd::IsSafeFilenameText;
 

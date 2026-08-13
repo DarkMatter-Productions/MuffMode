@@ -215,6 +215,8 @@ callvote timelimit 15
 callvote scorelimit 50
 ```
 
+The voting menu carries a **Factory** row alongside Gametype and Ruleset. It shows the active preset's id, or `none`, and opens a paged list of every preset you may vote for — including presets belonging to another mode, where the host allows that mode to be voted. Selecting one is the same as typing `callvote factory <id>`.
+
 Servers can restrict voting, spectator voting, mid-match voting, available gametypes, available factories, and available rulesets. If a vote option is missing, it is probably a host choice rather than a client problem. Use the [Rulesets](rulesets.md) guide when you want to know what a ruleset vote changes, and see [Vote Commands](configuration-reference.md#vote-commands) for the full command list.
 
 ## Offhand Hook

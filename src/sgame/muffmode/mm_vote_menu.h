@@ -31,6 +31,33 @@ inline constexpr bool MapMenuSnapshotNeedsRefresh(
 		cached.structured_pool_revision != current.structured_pool_revision;
 }
 
+// [MuffMode] The factory submenu's list is rebuilt from a string join plus a
+// COM_Parse scan per id, on every redraw for every client in the menu. Snapshot
+// it on the same terms the map list uses. Lifted here, like the map predicate,
+// so the refresh contract is host-testable without the game.
+struct FactoryMenuSourceRevision {
+	const void *votable_factories_source = nullptr;
+	std::int32_t votable_factories_modified = 0;
+	const void *votable_gametypes_source = nullptr;
+	std::int32_t votable_gametypes_modified = 0;
+	std::int32_t committed_gametype = 0;
+	std::uint64_t registry_count = 0;
+};
+
+inline constexpr bool FactoryMenuSnapshotNeedsRefresh(
+	bool initialized,
+	const FactoryMenuSourceRevision &cached,
+	const FactoryMenuSourceRevision &current) noexcept
+{
+	return !initialized ||
+		cached.votable_factories_source != current.votable_factories_source ||
+		cached.votable_factories_modified != current.votable_factories_modified ||
+		cached.votable_gametypes_source != current.votable_gametypes_source ||
+		cached.votable_gametypes_modified != current.votable_gametypes_modified ||
+		cached.committed_gametype != current.committed_gametype ||
+		cached.registry_count != current.registry_count;
+}
+
 } // namespace muffmode::vote_menu
 
 // [MuffMode] Vote menu entry points. Implemented in muffmode/mm_vote_menu.cpp.

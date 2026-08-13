@@ -3,7 +3,9 @@
 
 #include "g_local.h"
 #include "core/debug_log.h"
+#include "muffmode/mm_factory.h"
 #include "muffmode/mm_gametype.h"
+#include "muffmode/mm_gt_session.h"
 #include "muffmode/mm_map_pool.h"
 #include "muffmode/mm_maps.h"
 #include "muffmode/mm_menu.h"
@@ -23,7 +25,37 @@
 namespace muffmode::vote_menu {
 constexpr int cvmenu_map = 3;
 
+// [MuffMode] Call-a-vote row layout, chained so inserting a row shifts every
+// later row instead of colliding with it. This used to be a chain of local
+// `= previous + 1` variables with `readyall_index` hardcoded to 14 alongside
+// them: the moment a row was inserted anywhere above it, the chain moved Ready
+// All's neighbour onto row 14 and the Ready All block overwrote it, silently
+// losing a row with nothing to catch it. The static_assert below is what makes
+// the next insertion a build failure rather than a missing menu entry.
+constexpr int kCallVoteGametypeRow		= cvmenu_map;
+constexpr int kCallVoteFactoryRow		= kCallVoteGametypeRow + 1;
+constexpr int kCallVoteRulesetRow		= kCallVoteFactoryRow + 1;
+constexpr int kCallVoteMapRow			= kCallVoteRulesetRow + 1;
+constexpr int kCallVoteBlank1Row		= kCallVoteMapRow + 1;
+constexpr int kCallVoteScorelimitRow	= kCallVoteBlank1Row + 1;
+constexpr int kCallVoteTimelimitRow		= kCallVoteScorelimitRow + 1;
+constexpr int kCallVoteBlank2Row		= kCallVoteTimelimitRow + 1;
+constexpr int kCallVotePowerupsRow		= kCallVoteBlank2Row + 1;
+constexpr int kCallVoteTechsRow			= kCallVotePowerupsRow + 1;
+constexpr int kCallVoteFriendlyFireRow	= kCallVoteTechsRow + 1;
+constexpr int kCallVoteShuffleRow		= kCallVoteFriendlyFireRow + 1;
+constexpr int kCallVoteReadyAllRow		= kCallVoteShuffleRow + 1;
+constexpr int kCallVoteLastRow			= kCallVoteReadyAllRow;
+
+// The final template row carries the "return" entry, so the content rows must
+// stop short of it.
+static_assert(kCallVoteLastRow < MENU_MAX_ROWS - 1,
+	"call-a-vote content rows must leave the final row for the return entry");
+
 void OpenMap(gentity_t *ent, menu_hnd_t *p);
+void OpenFactory(gentity_t *ent, menu_hnd_t *p);
+void UpdateFactory(gentity_t *ent);
+void SelectFactory(gentity_t *ent, menu_hnd_t *p);
 void OpenGameType(gentity_t *ent, menu_hnd_t *p);
 void UpdateGameType(gentity_t *ent);
 void SelectGameType(gentity_t *ent, menu_hnd_t *p);
@@ -100,6 +132,31 @@ const menu_t kMapMenuTemplate[] = {
 	{ "", MENU_ALIGN_LEFT, SelectMap },
 	{ "", MENU_ALIGN_LEFT, SelectMap },
 	{ "", MENU_ALIGN_LEFT, SelectMap },
+	{ "", MENU_ALIGN_LEFT, nullptr },
+	{ "$g_pc_return", MENU_ALIGN_LEFT, G_Menu_ReturnToCallVote }
+};
+
+// [MuffMode] Paged like the map menu rather than fixed like the gametype menu:
+// the shipped catalogue carries 58 selectable factories, and a fixed-choice
+// submenu fills rows 2..content_limit and silently drops everything past the
+// fifteenth.
+const menu_t kFactoryMenuTemplate[] = {
+	{ "", MENU_ALIGN_CENTER, nullptr },
+	{ "", MENU_ALIGN_CENTER, nullptr },
+	{ "", MENU_ALIGN_LEFT, SelectFactory },
+	{ "", MENU_ALIGN_LEFT, SelectFactory },
+	{ "", MENU_ALIGN_LEFT, SelectFactory },
+	{ "", MENU_ALIGN_LEFT, SelectFactory },
+	{ "", MENU_ALIGN_LEFT, SelectFactory },
+	{ "", MENU_ALIGN_LEFT, SelectFactory },
+	{ "", MENU_ALIGN_LEFT, SelectFactory },
+	{ "", MENU_ALIGN_LEFT, SelectFactory },
+	{ "", MENU_ALIGN_LEFT, SelectFactory },
+	{ "", MENU_ALIGN_LEFT, SelectFactory },
+	{ "", MENU_ALIGN_LEFT, SelectFactory },
+	{ "", MENU_ALIGN_LEFT, SelectFactory },
+	{ "", MENU_ALIGN_LEFT, SelectFactory },
+	{ "", MENU_ALIGN_LEFT, SelectFactory },
 	{ "", MENU_ALIGN_LEFT, nullptr },
 	{ "$g_pc_return", MENU_ALIGN_LEFT, G_Menu_ReturnToCallVote }
 };
@@ -253,6 +310,7 @@ const menu_t kScoreLimitMenuTemplate[] = {
 
 static_assert(std::size(kCallVoteMenuTemplate) == MENU_MAX_ROWS);
 static_assert(std::size(kMapMenuTemplate) == MENU_MAX_ROWS);
+static_assert(std::size(kFactoryMenuTemplate) == MENU_MAX_ROWS);
 static_assert(std::size(kGameTypeMenuTemplate) == MENU_MAX_ROWS);
 static_assert(std::size(kRulesetMenuTemplate) == MENU_MAX_ROWS);
 static_assert(std::size(kPowerupsMenuTemplate) == MENU_MAX_ROWS);
@@ -722,6 +780,196 @@ void OpenMap(gentity_t *ent, menu_hnd_t *)
 		gi.TagFree(page);
 }
 
+// [MuffMode] Factory submenu.
+//
+// MapPageSize/MapPrevIndex/MapNextIndex/ClampMapPageOffset above are pure
+// functions of the template's row count, not of anything map-specific, so this
+// menu reuses them rather than restating the same arithmetic. The two paged
+// menus then cannot drift apart.
+
+struct FactoryMenuPage {
+	int offset = 0;
+};
+
+struct FactoryMenuSnapshot {
+	bool initialized = false;
+	FactoryMenuSourceRevision revision;
+	std::vector<std::string> values;
+};
+
+static FactoryMenuSnapshot s_factory_menu_snapshot;
+
+static FactoryMenuSourceRevision CurrentFactoryMenuSourceRevision()
+{
+	return {
+		g_votable_factories,
+		g_votable_factories ? g_votable_factories->modified_count : 0,
+		g_votable_gametypes,
+		g_votable_gametypes ? g_votable_gametypes->modified_count : 0,
+		static_cast<std::int32_t>(muffmode::gametype::MM_GT_Committed().configured),
+		static_cast<std::uint64_t>(muffmode::factory::MM_Factory_Count())
+	};
+}
+
+static const std::vector<std::string> &FactoryMenuValues()
+{
+	const FactoryMenuSourceRevision current = CurrentFactoryMenuSourceRevision();
+	if (!FactoryMenuSnapshotNeedsRefresh(
+			s_factory_menu_snapshot.initialized,
+			s_factory_menu_snapshot.revision,
+			current)) {
+		return s_factory_menu_snapshot.values;
+	}
+
+	// MM_GetVotableFactoriesList applies exactly the gates MM_VoteValFactory
+	// applies -- hidden, g_votable_factories, and the cross-gametype rule -- so
+	// the menu cannot offer an id the validator would then refuse. It joins
+	// with '|' rather than spaces.
+	std::vector<std::string> values;
+	const std::string all = MM_GetVotableFactoriesList();
+	std::string_view remaining(all);
+	while (!remaining.empty())
+	{
+		const size_t end = remaining.find('|');
+		const std::string_view id = remaining.substr(0,
+			end == std::string_view::npos ? remaining.size() : end);
+		if (!id.empty())
+			values.emplace_back(id);
+		if (end == std::string_view::npos)
+			break;
+		remaining.remove_prefix(end + 1);
+	}
+
+	s_factory_menu_snapshot.values = std::move(values);
+	s_factory_menu_snapshot.revision = current;
+	s_factory_menu_snapshot.initialized = true;
+	return s_factory_menu_snapshot.values;
+}
+
+void SelectFactory(gentity_t *ent, menu_hnd_t *p)
+{
+	// No pre-check here: MM_VoteValFactory rejects an unknown, non-votable,
+	// cross-gametype-blocked or already-active id and prints the reason, and
+	// MenuVote_InitiateSelection routes through it. Duplicating the rules would
+	// only create a second copy to drift.
+	MenuVote_InitiateSelection(ent, p, "factory");
+}
+
+void PreviousFactoryPage(gentity_t *ent, menu_hnd_t *p)
+{
+	if (!ent || !ent->client || !p)
+		return;
+
+	const int page_size = MapPageSize(p->num);
+	if (page_size <= 0)
+		return;
+
+	FactoryMenuPage *page = static_cast<FactoryMenuPage *>(p->arg);
+	if (page && page->offset > 0)
+	{
+		page->offset -= page_size;
+		page->offset = max(0, page->offset);
+	}
+	P_Menu_Update(ent);
+}
+
+void NextFactoryPage(gentity_t *ent, menu_hnd_t *p)
+{
+	if (!ent || !ent->client || !p)
+		return;
+
+	const int page_size = MapPageSize(p->num);
+	if (page_size <= 0)
+		return;
+
+	FactoryMenuPage *page = static_cast<FactoryMenuPage *>(p->arg);
+	if (page)
+		page->offset += page_size;
+	P_Menu_Update(ent);
+}
+
+void UpdateFactory(gentity_t *ent)
+{
+	MenuVoteView view;
+	if (!MenuVote_View(ent, view) || !MenuVote_HasIndex(view, 0) || !MenuVote_HasIndex(view, 1))
+		return;
+
+	menu_t *entries = view.entries;
+	const int page_size = MapPageSize(view.num);
+	const int prev_index = MapPrevIndex(view.num);
+	const int next_index = MapNextIndex(view.num);
+	const int content_limit = MenuVote_ContentLimit(view);
+	if (page_size <= 0 || prev_index >= content_limit || next_index >= content_limit)
+		return;
+
+	MenuVote_ClearEntry(entries[1]);
+
+	const std::vector<std::string> &values = FactoryMenuValues();
+
+	FactoryMenuPage *page = static_cast<FactoryMenuPage *>(ent->client->menu->arg);
+	int offset = page ? page->offset : 0;
+	const int total_factories = static_cast<int>(values.size());
+
+	offset = ClampMapPageOffset(offset, total_factories, page_size);
+	if (page)
+		page->offset = offset;
+
+	int total_pages = (total_factories + page_size - 1) / page_size;
+	if (total_pages < 1)
+		total_pages = 1;
+	const int current_page = (offset / page_size) + 1;
+
+	if (total_pages > 1)
+		MenuVote_SetText(entries[0], G_Fmt("Select Factory ({}/{})", current_page, total_pages).data());
+	else
+		MenuVote_SetText(entries[0], "Select Factory");
+
+	MenuVote_ClearRange(view, kMapMenuFirstItem, content_limit);
+
+	if (total_factories <= 0)
+	{
+		// Reachable with a g_votable_factories list that names nothing valid.
+		MenuVote_SetText(entries[kMapMenuFirstItem], "None available");
+		return;
+	}
+
+	int menu_index = kMapMenuFirstItem;
+	for (int i = offset; i < total_factories && menu_index < (kMapMenuFirstItem + page_size); i++)
+	{
+		MenuVote_SetArg(entries[menu_index], values[i]);
+		MenuVote_SetText(entries[menu_index], values[i]);
+		entries[menu_index].SelectFunc = SelectFactory;
+		menu_index++;
+	}
+
+	if (offset > 0)
+	{
+		MenuVote_SetText(entries[prev_index], "< Prev Page");
+		entries[prev_index].SelectFunc = PreviousFactoryPage;
+	}
+
+	if (offset + page_size < total_factories)
+	{
+		MenuVote_SetText(entries[next_index], "> Next Page");
+		entries[next_index].SelectFunc = NextFactoryPage;
+	}
+}
+
+void OpenFactory(gentity_t *ent, menu_hnd_t *)
+{
+	if (!ent || !ent->client)
+		return;
+
+	FactoryMenuPage *page = static_cast<FactoryMenuPage *>(gi.TagMalloc(sizeof(FactoryMenuPage), TAG_LEVEL));
+	if (!page)
+		return;
+
+	*page = {};
+	if (!MenuVote_OpenMenu(ent, kFactoryMenuTemplate,
+		muffmode::CountAsInt(kFactoryMenuTemplate), page, UpdateFactory))
+		gi.TagFree(page);
+}
+
 void UpdateGameType(gentity_t *ent)
 {
 	MenuVoteView view;
@@ -891,106 +1139,114 @@ void UpdateCallVote(gentity_t *ent)
 
 	menu_t *entries = view.entries;
 	const int content_limit = MenuVote_ContentLimit(view);
-	const int readyall_index = 14;
-	if (content_limit <= readyall_index)
+	if (content_limit <= kCallVoteLastRow)
 		return;
 
 	MenuVote_ClearRange(view, 0, content_limit);
 
 	MenuVote_SetText(entries[0], "Call a Vote");
 
-	int gametype_index = cvmenu_map;
-	entries[gametype_index].SelectFunc = OpenGameType;
-	MenuVote_SetText(entries[gametype_index], G_Fmt("Gametype: {}", level.gametype_name).data());
+	entries[kCallVoteGametypeRow].SelectFunc = OpenGameType;
+	MenuVote_SetText(entries[kCallVoteGametypeRow], G_Fmt("Gametype: {}", level.gametype_name).data());
 
-	int ruleset_index = gametype_index + 1;
-	entries[ruleset_index].SelectFunc = OpenRuleset;
-	MenuVote_SetText(entries[ruleset_index], G_Fmt("Ruleset: {}", CurrentRulesetName()).data());
-
-	int map_index = ruleset_index + 1;
-	entries[map_index].SelectFunc = OpenMap;
-	if (level.mapname[0])
-		MenuVote_SetText(entries[map_index], G_Fmt("Map:\t\t {}", level.mapname).data());
+	// [MuffMode] The gametype row already carries an active factory's *title*,
+	// composed into level.gametype_name, so this row shows the id instead of
+	// repeating it. The id is also the actionable half: it is what
+	// `callvote factory <id>` and `factory info <id>` take.
+	const std::vector<std::string> &votable_factories = FactoryMenuValues();
+	if (votable_factories.empty())
+	{
+		entries[kCallVoteFactoryRow].SelectFunc = nullptr;
+		MenuVote_SetText(entries[kCallVoteFactoryRow], "Factory: N/A");
+	}
 	else
-		MenuVote_SetText(entries[map_index], "Map");
+	{
+		entries[kCallVoteFactoryRow].SelectFunc = OpenFactory;
+		const muffmode::factory::mm_factory_t *active = muffmode::factory::MM_Factory_Active();
+		if (active && !active->id.empty())
+			MenuVote_SetText(entries[kCallVoteFactoryRow], G_Fmt("Factory: {}", active->id.c_str()).data());
+		else
+			MenuVote_SetText(entries[kCallVoteFactoryRow], "Factory: none");
+	}
 
-	int blank1_index = map_index + 1;
-	entries[blank1_index].SelectFunc = nullptr;
-	MenuVote_SetText(entries[blank1_index], "");
+	entries[kCallVoteRulesetRow].SelectFunc = OpenRuleset;
+	MenuVote_SetText(entries[kCallVoteRulesetRow], G_Fmt("Ruleset: {}", CurrentRulesetName()).data());
 
-	int scorelimit_index = blank1_index + 1;
-	entries[scorelimit_index].SelectFunc = OpenScoreLimit;
+	entries[kCallVoteMapRow].SelectFunc = OpenMap;
+	if (level.mapname[0])
+		MenuVote_SetText(entries[kCallVoteMapRow], G_Fmt("Map:\t\t {}", level.mapname).data());
+	else
+		MenuVote_SetText(entries[kCallVoteMapRow], "Map");
+
+	entries[kCallVoteBlank1Row].SelectFunc = nullptr;
+	MenuVote_SetText(entries[kCallVoteBlank1Row], "");
+
+	entries[kCallVoteScorelimitRow].SelectFunc = OpenScoreLimit;
 	int current_scorelimit = GT_ScoreLimit();
 	if (current_scorelimit > 0)
-		MenuVote_SetText(entries[scorelimit_index], G_Fmt("Scorelimit: {}", current_scorelimit).data());
+		MenuVote_SetText(entries[kCallVoteScorelimitRow], G_Fmt("Scorelimit: {}", current_scorelimit).data());
 	else
-		MenuVote_SetText(entries[scorelimit_index], "Scorelimit: 0");
+		MenuVote_SetText(entries[kCallVoteScorelimitRow], "Scorelimit: 0");
 
-	int timelimit_index = scorelimit_index + 1;
-	entries[timelimit_index].SelectFunc = OpenTimeLimit;
+	entries[kCallVoteTimelimitRow].SelectFunc = OpenTimeLimit;
 	int current_timelimit = (int)timelimit->value;
 	if (current_timelimit > 0)
-		MenuVote_SetText(entries[timelimit_index], G_Fmt("Timelimit: {} min", current_timelimit).data());
+		MenuVote_SetText(entries[kCallVoteTimelimitRow], G_Fmt("Timelimit: {} min", current_timelimit).data());
 	else
-		MenuVote_SetText(entries[timelimit_index], "Timelimit: 0");
+		MenuVote_SetText(entries[kCallVoteTimelimitRow], "Timelimit: 0");
 
-	int blank2_index = timelimit_index + 1;
-	entries[blank2_index].SelectFunc = nullptr;
-	MenuVote_SetText(entries[blank2_index], "");
+	entries[kCallVoteBlank2Row].SelectFunc = nullptr;
+	MenuVote_SetText(entries[kCallVoteBlank2Row], "");
 
-	int powerups_index = blank2_index + 1;
-	entries[powerups_index].SelectFunc = OpenPowerups;
-	MenuVote_SetText(entries[powerups_index], G_Fmt("Powerups: {}", PowerupsEnabled() ? "ON" : "OFF").data());
+	entries[kCallVotePowerupsRow].SelectFunc = OpenPowerups;
+	MenuVote_SetText(entries[kCallVotePowerupsRow], G_Fmt("Powerups: {}", PowerupsEnabled() ? "ON" : "OFF").data());
 
-	int techs_index = powerups_index + 1;
 	// [MuffMode] GTF_TECHS, shared with the techs vote validator.
 	if (GTF(GTF_TECHS))
 	{
-		entries[techs_index].SelectFunc = OpenTechs;
-		MenuVote_SetText(entries[techs_index], G_Fmt("Techs: {}", TechsEnabled() ? "ON" : "OFF").data());
+		entries[kCallVoteTechsRow].SelectFunc = OpenTechs;
+		MenuVote_SetText(entries[kCallVoteTechsRow], G_Fmt("Techs: {}", TechsEnabled() ? "ON" : "OFF").data());
 	}
 	else
 	{
-		entries[techs_index].SelectFunc = nullptr;
-		MenuVote_SetText(entries[techs_index], "Techs: N/A");
+		entries[kCallVoteTechsRow].SelectFunc = nullptr;
+		MenuVote_SetText(entries[kCallVoteTechsRow], "Techs: N/A");
 	}
 
-	int friendlyfire_index = techs_index + 1;
 	if (Teams())
 	{
-		entries[friendlyfire_index].SelectFunc = OpenFriendlyFire;
-		MenuVote_SetText(entries[friendlyfire_index], G_Fmt("Friendly Fire: {}", FriendlyFireEnabled() ? "ON" : "OFF").data());
+		entries[kCallVoteFriendlyFireRow].SelectFunc = OpenFriendlyFire;
+		MenuVote_SetText(entries[kCallVoteFriendlyFireRow], G_Fmt("Friendly Fire: {}", FriendlyFireEnabled() ? "ON" : "OFF").data());
 	}
 	else
 	{
-		entries[friendlyfire_index].SelectFunc = nullptr;
-		MenuVote_SetText(entries[friendlyfire_index], "Friendly Fire: N/A");
+		entries[kCallVoteFriendlyFireRow].SelectFunc = nullptr;
+		MenuVote_SetText(entries[kCallVoteFriendlyFireRow], "Friendly Fire: N/A");
 	}
 
-	int shuffle_index = friendlyfire_index + 1;
 	if (Teams())
 	{
-		entries[shuffle_index].SelectFunc = StartShuffleTeamsVote;
-		MenuVote_SetText(entries[shuffle_index], "Shuffle Teams");
+		entries[kCallVoteShuffleRow].SelectFunc = StartShuffleTeamsVote;
+		MenuVote_SetText(entries[kCallVoteShuffleRow], "Shuffle Teams");
 	}
 	else
 	{
-		entries[shuffle_index].SelectFunc = nullptr;
-		MenuVote_SetText(entries[shuffle_index], "Shuffle Teams: N/A");
+		entries[kCallVoteShuffleRow].SelectFunc = nullptr;
+		MenuVote_SetText(entries[kCallVoteShuffleRow], "Shuffle Teams: N/A");
 	}
 
 	if (g_dm_do_readyup->integer && level.match_state == match_state_t::MATCH_WARMUP_READYUP)
 	{
-		entries[readyall_index].SelectFunc = StartReadyAllVote;
-		MenuVote_SetText(entries[readyall_index], "Ready All");
+		entries[kCallVoteReadyAllRow].SelectFunc = StartReadyAllVote;
+		MenuVote_SetText(entries[kCallVoteReadyAllRow], "Ready All");
 	}
 	else
 	{
-		entries[readyall_index].SelectFunc = nullptr;
-		MenuVote_SetText(entries[readyall_index], "Ready All: N/A");
+		entries[kCallVoteReadyAllRow].SelectFunc = nullptr;
+		MenuVote_SetText(entries[kCallVoteReadyAllRow], "Ready All: N/A");
 	}
 
-	MenuVote_ClearRange(view, readyall_index + 1, content_limit);
+	MenuVote_ClearRange(view, kCallVoteLastRow + 1, content_limit);
 }
 
 void UpdatePowerups(gentity_t *ent)
