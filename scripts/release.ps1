@@ -1160,6 +1160,7 @@ function New-DeterministicHtmlReadme {
         <article class="card">
           <h3>Zip Package</h3>
           <p>Extract the zip into the outer <code>Quake 2</code> folder, not directly into <code>rerelease</code> or <code>baseq2</code>. Allow file replacement when prompted.</p>
+          <p><strong>Updating from v0.60.20?</strong> Its updater cannot replace itself and installs legacy compatibility filenames without backing them up. Preserve customized <code>gt-*.cfg</code> files, close that updater, then use the current Windows installer once or replace <code>MuffModeUpdater.exe</code> manually while it is closed.</p>
         </article>
         <article class="card">
           <h3>What Gets Installed</h3>
@@ -1180,17 +1181,17 @@ function New-DeterministicHtmlReadme {
       <h2>Server Hosting</h2>
       <div class="grid">
         <article class="card">
-          <h3>Load The Baseline</h3>
-          <p>Run <code>exec server-base.cfg</code> for shared safety, voting, entity override, and player-limit defaults.</p>
+          <h3>Lobby Quick Start</h3>
+          <p>Before creating a KEX lobby, run one complete preset: <code>exec lobby-casual.cfg</code>, <code>exec lobby-competitive.cfg</code>, <code>exec lobby-party.cfg</code>, or <code>exec lobby-horde.cfg</code>.</p>
         </article>
         <article class="card">
-          <h3>Choose A Preset</h3>
-          <p>Pick a gameplay preset with <code>factory &lt;id&gt;</code>; run <code>factory list all</code> to see what is available.</p>
+          <h3>Dedicated Or Hand-Built</h3>
+          <p>Run <code>exec server-base.cfg</code>, then pick gameplay with <code>factory &lt;id&gt;</code>; run <code>factory list all</code> to see what is available. Production rotation uses <code>muffmode-map-pool.json</code> and <code>muffmode-map-cycle.txt</code>.</p>
           <p>The <code>arena_ra2</code> factory supports separately installed RA2-compatible maps through MuffMode Arena Rooms; RA2 assets are not bundled.</p>
         </article>
         <article class="card">
-          <h3>Check Your Setup</h3>
-          <p>Run <code>doctor</code> after changing cvars. Use <code>g_muffmode_debug 1</code> only while investigating a server issue, then turn it back off.</p>
+          <h3>Copy Before Editing</h3>
+          <p>The shipped host files are package-owned. Copy the baseline, chosen lobby, pool, and cycle; update the copied lobby's references; then customize. Leave the singleton <code>mapdb.json</code> in place. Run <code>doctor</code> after changes.</p>
         </article>
       </div>
     </section>
@@ -1222,35 +1223,21 @@ function New-DeterministicHtmlReadme {
     </section>
     <section id="maps">
       <h2>Included Custom Maps</h2>
-      <p>The <a href="https://github.com/DarkMatter-Productions/MuffMode/blob/main/docs/maps/index.md">Muff Mode Map Guide</a> tracks the current final <code>mm-*</code> remaster and port set. Original map readmes are included in this package under <code>rerelease/baseq2/docs/muffmode/maps/original-readmes</code>; source maps and original BSPs are published as separate supplemental release archives.</p>
+      <p>These are the nine MuffMode BSPs installed by this release. The <a href="https://github.com/DarkMatter-Productions/MuffMode/blob/main/docs/maps/index.md">Muff Mode Map Guide</a> also documents a broader supplemental source archive; those source entries are not installed maps. This table uses runtime map IDs, while supplemental source archives retain their historical source filenames where those differ. Original map readmes are included in this package under <code>rerelease/baseq2/docs/muffmode/maps/original-readmes</code>; source maps and original BSPs are published as separate supplemental release archives.</p>
       <div class="table-wrap"><table>
         <thead>
           <tr><th>Map</th><th>File</th><th>Status</th><th>Good fits</th></tr>
         </thead>
         <tbody>
           <tr><td>Aerowalk</td><td><code>mm-aerow</code></td><td>Final</td><td>Duel, small FFA, 2v2, Clan Arena</td></tr>
-          <tr><td>Bio Rust</td><td><code>mm-biorust</code></td><td>Final</td><td>Duel, small FFA, 2v2</td></tr>
-          <tr><td>Conventional</td><td><code>mm-conven</code></td><td>Final</td><td>FFA, 2v2, TDM, Quad Hog</td></tr>
-          <tr><td>The Crucible</td><td><code>mm-crucible</code></td><td>Final</td><td>Duel, FFA, 2v2</td></tr>
           <tr><td>Cold Zero</td><td><code>mm-czero</code></td><td>Final</td><td>FFA, 2v2, TDM, Instagib</td></tr>
-          <tr><td>Degeneration</td><td><code>mm-degen</code></td><td>Final</td><td>FFA, 2v2, TDM</td></tr>
-          <tr><td>The Flesh Refinery</td><td><code>mm-fleshref</code></td><td>Final</td><td>Duel, small FFA, Power Screen experiment</td></tr>
-          <tr><td>Grind</td><td><code>mm-grind</code></td><td>Final</td><td>Duel, 2v2, FFA</td></tr>
-          <tr><td>Iron Oxide</td><td><code>mm-ironox</code></td><td>Final</td><td>Duel, small FFA, 2v2</td></tr>
+          <tr><td>The Crucible</td><td><code>mm-crucible</code></td><td>Final</td><td>Duel, FFA, 2v2</td></tr>
           <tr><td>The Killing Machine</td><td><code>mm-kmach</code></td><td>Final</td><td>FFA, 2v2, casual Duel</td></tr>
-          <tr><td>Lava Lamp</td><td><code>mm-llamp</code></td><td>Final</td><td>FFA, TDM, party server</td></tr>
-          <tr><td>The Longest Yard</td><td><code>mm-longyd</code></td><td>Final</td><td>FFA, Instagib, Clan Arena, jump-pad chaos</td></tr>
-          <tr><td>Mortal Coil</td><td><code>mm-mcoil</code></td><td>Final</td><td>Duel, small FFA, 2v2</td></tr>
-          <tr><td>Negative Impulse</td><td><code>mm-negimp</code></td><td>Final</td><td>FFA, 2v2, TDM</td></tr>
-          <tr><td>The Oppressor</td><td><code>mm-oppress</code></td><td>Final</td><td>FFA, TDM, 2v2</td></tr>
-          <tr><td>Painkiller</td><td><code>mm-pkill</code></td><td>Final</td><td>Duel, small FFA, Clan Arena</td></tr>
+          <tr><td>Powertrip</td><td><code>mm-powertrip</code></td><td>Final</td><td>Duel, small FFA</td></tr>
           <tr><td>The Rage</td><td><code>mm-rage</code></td><td>Final</td><td>Duel, FFA, 2v2</td></tr>
           <tr><td>Railgun 101</td><td><code>mm-rail101</code></td><td>Final</td><td>Instagib, rail practice, aim warmups</td></tr>
           <tr><td>Reclamation</td><td><code>mm-reclam</code></td><td>Final</td><td>Duel, small FFA</td></tr>
-          <tr><td>Thunderstruck</td><td><code>mm-thunders</code></td><td>Final</td><td>Duel, Clan Arena, Instagib, rail/rocket practice</td></tr>
-          <tr><td>Unknown Domain</td><td><code>mm-undom</code></td><td>Final</td><td>FFA, TDM, large public play</td></tr>
-          <tr><td>Wicked</td><td><code>mm-wicked</code></td><td>Final</td><td>Duel, Clan Arena, small FFA</td></tr>
-          <tr><td>Window Pain</td><td><code>mm-winpain</code></td><td>Final</td><td>Clan Arena, Instagib, FFA warmups</td></tr>
+          <tr><td>Recycler</td><td><code>mm-recycler</code></td><td>Final</td><td>Duel, small FFA</td></tr>
         </tbody>
       </table></div>
     </section>
@@ -2079,8 +2066,17 @@ function Assert-TranslatedHtmlReadme {
         "MuffModeUpdater.exe",
         "server-base.cfg",
         "factories.cfg",
+        "lobby-casual.cfg",
+        "lobby-competitive.cfg",
+        "lobby-party.cfg",
+        "lobby-horde.cfg",
+        "mapdb.json",
+        "muffmode-map-pool.json",
+        "muffmode-map-cycle.txt",
         "g_factory",
         "g_factory_file",
+        "g_maps_pool_file",
+        "g_maps_cycle_file",
         "g_muffmode_debug",
         "Q3A",
         "BFG"
@@ -2160,9 +2156,10 @@ Critical preservation rules:
 - Set the root <html> lang attribute to "$($language.HtmlLang)".
 - Translate visible human prose and human-readable title/alt/aria text.
 - Do not translate or alter text inside <code>, <pre>, <kbd>, <samp>, <style>, or <script>.
-- Do not translate command names, cvar names, config names, ruleset tokens, gametype tokens, map filenames, DLL/EXE names, path fragments, aliases, binds, URLs, or file extensions. Examples include server-base.cfg, factories.cfg, g_factory, g_factory_file, g_votable_factories, g_muffmode_debug, team auto, arena create, readyup, callvote, vote yes, vote no, alias +hook hook, alias -hook unhook, bind mouse2 +hook, doctor, q2re, mm, q3a, q2reb, q, qc, game_x64.dll, and MuffModeUpdater.exe.
+- Do not translate command names, cvar names, config names, ruleset tokens, gametype tokens, map filenames, DLL/EXE names, path fragments, aliases, binds, URLs, or file extensions. Examples include server-base.cfg, factories.cfg, lobby-casual.cfg, lobby-competitive.cfg, lobby-party.cfg, lobby-horde.cfg, mapdb.json, muffmode-map-pool.json, muffmode-map-cycle.txt, g_factory, g_factory_file, g_maps_pool_file, g_maps_cycle_file, g_votable_factories, g_muffmode_debug, team auto, arena create, readyup, callvote, vote yes, vote no, alias +hook hook, alias -hook unhook, bind mouse2 +hook, doctor, q2re, mm, q3a, q2reb, q, qc, game_x64.dll, and MuffModeUpdater.exe.
 - Preserve product and project names such as MuffMode, Muff Mode, Quake II, Quake II Rerelease, GitHub, Ko-fi, Steam, Epic Games Store, GOG, Xbox app, and Microsoft Store.
 - Keep the tone practical, concise, and friendly.
+- Preserve the visible v0.60.20 updater warning and its instruction to protect customized gt-*.cfg files before using the installer or replacing the closed updater.
 
 SOURCE HTML:
 $sourceHtml
@@ -2217,12 +2214,15 @@ Audience and scope:
 - Primary audience: Quake II Rerelease players and server hosts installing this release.
 - This project is currently in $Channel channel. Make that release state visible but not alarming.
 - Include installation, first-use guidance, player usage, voting, common host setup, packaged server config usage, gametype overview, a player-focused ruleset guide, offhand hook bind, debugging pointer, package contents, and the changelog.
-- Explain that hosts should load server-base.cfg first, then pick a factory with `factory <id>`; factories.cfg carries the per-mode presets and a factory re-applies itself on every gametype or factory change.
+- Give lobby hosts a quick start with the four complete presets: lobby-casual.cfg, lobby-competitive.cfg, lobby-party.cfg, and lobby-horde.cfg, loaded before creating the KEX lobby. For dedicated or hand-built servers, explain the server-base.cfg then `factory <id>` path.
+- Explain that factories.cfg carries the per-mode presets and a factory re-applies itself on every gametype or factory change. Mention the production muffmode-map-pool.json and muffmode-map-cycle.txt and keep mapdb.json distinct as the KEX/UI database.
+- Warn that shipped host files are package-owned: a customized lobby should copy server-base.cfg, the chosen lobby, pool, and cycle, then update the copied lobby's exec and map references. mapdb.json remains the engine's singleton filename.
 - Explain that the arena_ra2 factory supports separately installed RA2-compatible maps through MuffMode Arena Rooms, and that RA2 assets are not bundled.
 - Use docs/rulesets.md as the authoritative ruleset source. Make every ruleset's unique feel and tradeoffs clear, including Q3A's existing-asset weapon mappings, preserved double jumps, Super Shotgun removal, regular Shotgun Q3 specs, and shared-cell BFG ammo cost.
-- Include a compact "Included Custom Maps" section using the source map guide. Show map title, filename, release status, and good gametype fits, and link to the full Muff Mode Map Guide for history, original release dates, preserved original readmes/BSPs, separate remaster source-map links, and item registers.
+- Include a compact "Included Custom Maps" section containing exactly the nine installed BSPs: mm-aerow, mm-czero, mm-crucible, mm-kmach, mm-powertrip, mm-rage, mm-rail101, mm-reclam, and mm-recycler. Show map title, runtime filename, release status, and good gametype fits. Explain that the linked Muff Mode Map Guide also covers a broader supplemental source archive whose other entries are not installed maps. Preserve these short map-bundle IDs exactly.
 - Explain that original map readmes are included in the main installer/manual zip under rerelease/baseq2/docs/muffmode/maps/original-readmes, while source maps and original BSPs are published as separate supplemental release archives.
 - Explain that most Windows users can use the installer. Keep this concise: it detects Steam, Epic Games Store, GOG, and Xbox app / Microsoft Store installs, keeps an other-location choice available, verifies installed files, writes an install receipt, backs up existing server configs and the Muff Mode DLL before replacing them, and offers useful shortcuts. Also include the zip/manual extraction path for users who prefer it.
+- Add a visible warning for users updating from v0.60.20: preserve customized gt-*.cfg files, close the old updater, and use the current Windows installer once or replace MuffModeUpdater.exe manually while it is closed, because that old updater neither self-updates nor backs up its compatibility filenames.
 - Describe Last Man Standing as an available round-based free-for-all elimination mode and mention its packaged lms_classic factory.
 - Include elegant support buttons near the top for the authors: themuffinator at https://github.com/sponsors/themuffinator and ozy at https://ko-fi.com/ozy24. Frame donations as optional support that helps promote future development and offsets the real time, testing, tooling, and release costs involved in maintaining the mod.
 - Do not include build instructions, source compilation steps, contributor notes, GitHub badges, or repository development workflow.
@@ -2327,7 +2327,9 @@ function Test-AllowedPackageRelativePath {
     }
 
     $extension = [System.IO.Path]::GetExtension($normalized).ToLowerInvariant()
-    if ([string]::Equals($segments[1], "maps", [System.StringComparison]::OrdinalIgnoreCase)) {
+    if ([string]::Equals($segments[1], "baseq2", [System.StringComparison]::OrdinalIgnoreCase) -and
+        $segments.Count -ge 4 -and
+        [string]::Equals($segments[2], "maps", [System.StringComparison]::OrdinalIgnoreCase)) {
         return $extension -in @(".bsp", ".ent")
     }
 
@@ -2361,7 +2363,7 @@ function Test-AllowedPackageRelativeDirectory {
         return $true
     }
 
-    return $segments[1] -in @("baseq2", "bots", "maps")
+    return $segments[1] -in @("baseq2", "bots")
 }
 
 function Assert-ReleasePackageContents {
@@ -2393,8 +2395,23 @@ function Assert-ReleasePackageContents {
         "rerelease\baseq2\muffmode.version",
         "rerelease\baseq2\CONFIGS_README.md",
         "rerelease\baseq2\factories.cfg",
-        "rerelease\baseq2\muffmode-map-cycle.example.txt",
-        "rerelease\baseq2\muffmode-map-pool.example.json",
+        "rerelease\baseq2\gt-CA.cfg",
+        "rerelease\baseq2\gt-CTF.cfg",
+        "rerelease\baseq2\gt-DUEL.cfg",
+        "rerelease\baseq2\gt-FFA.cfg",
+        "rerelease\baseq2\gt-HORDE.cfg",
+        "rerelease\baseq2\gt-INSTAGIB.cfg",
+        "rerelease\baseq2\gt-NADEFEST.cfg",
+        "rerelease\baseq2\gt-REDROVER.cfg",
+        "rerelease\baseq2\gt-STRIKE.cfg",
+        "rerelease\baseq2\gt-TDM.cfg",
+        "rerelease\baseq2\lobby-casual.cfg",
+        "rerelease\baseq2\lobby-competitive.cfg",
+        "rerelease\baseq2\lobby-horde.cfg",
+        "rerelease\baseq2\lobby-party.cfg",
+        "rerelease\baseq2\mapdb.json",
+        "rerelease\baseq2\muffmode-map-cycle.txt",
+        "rerelease\baseq2\muffmode-map-pool.json",
         "rerelease\baseq2\server-base.cfg",
         "rerelease\baseq2\docs\muffmode\maps\original-readmes\README.md",
         "rerelease\baseq2\docs\muffmode\maps\original-readmes\2box4-readme.txt",
@@ -2406,25 +2423,25 @@ function Assert-ReleasePackageContents {
         "rerelease\baseq2\docs\muffmode\maps\original-readmes\ztn2dm2-readme.txt",
         "rerelease\baseq2\docs\muffmode\maps\original-readmes\ztn2dm3-readme.txt",
         "rerelease\baseq2\docs\muffmode\maps\original-readmes\ztn2dm5-readme.txt",
-        "rerelease\maps\mm-aerow.bsp",
-        "rerelease\maps\mm-coldzero.bsp",
-        "rerelease\maps\mm-crucible.bsp",
-        "rerelease\maps\mm-kmachine.bsp",
-        "rerelease\maps\mm-powertrip.bsp",
-        "rerelease\maps\mm-rage.bsp",
-        "rerelease\maps\mm-railgun101.bsp",
-        "rerelease\maps\mm-reclamation.bsp",
-        "rerelease\maps\mm-recycler.bsp",
-        "rerelease\maps\2box4.ent",
-        "rerelease\maps\aerowalk.ent",
-        "rerelease\maps\grom_dm3.ent",
-        "rerelease\maps\kmachine.ent",
-        "rerelease\maps\koldduel1.ent",
-        "rerelease\maps\paradm4.ent",
-        "rerelease\maps\trdm04a.ent",
-        "rerelease\maps\vd6dm2.ent",
-        "rerelease\maps\ven_dm2.ent",
-        "rerelease\maps\ztn2dm5.ent"
+        "rerelease\baseq2\maps\mm-aerow.bsp",
+        "rerelease\baseq2\maps\mm-czero.bsp",
+        "rerelease\baseq2\maps\mm-crucible.bsp",
+        "rerelease\baseq2\maps\mm-kmach.bsp",
+        "rerelease\baseq2\maps\mm-powertrip.bsp",
+        "rerelease\baseq2\maps\mm-rage.bsp",
+        "rerelease\baseq2\maps\mm-rail101.bsp",
+        "rerelease\baseq2\maps\mm-reclam.bsp",
+        "rerelease\baseq2\maps\mm-recycler.bsp",
+        "rerelease\baseq2\maps\2box4.ent",
+        "rerelease\baseq2\maps\aerowalk.ent",
+        "rerelease\baseq2\maps\grom_dm3.ent",
+        "rerelease\baseq2\maps\kmachine.ent",
+        "rerelease\baseq2\maps\koldduel1.ent",
+        "rerelease\baseq2\maps\paradm4.ent",
+        "rerelease\baseq2\maps\trdm04a.ent",
+        "rerelease\baseq2\maps\vd6dm2.ent",
+        "rerelease\baseq2\maps\ven_dm2.ent",
+        "rerelease\baseq2\maps\ztn2dm5.ent"
     )
 
     if ($RequireLocalizedReadmes) {
@@ -2495,8 +2512,8 @@ function Remove-EmptyReleaseAssetPlaceholders {
     # Keep them in source history, but do not put zero-byte files into update
     # ZIPs because already-installed updater builds reject empty entries.
     foreach ($relativePath in @(
-        "rerelease\maps\rdemo1.dm2.ent",
-        "rerelease\maps\xdemo3.dm2.ent"
+        "rerelease\baseq2\maps\rdemo1.dm2.ent",
+        "rerelease\baseq2\maps\xdemo3.dm2.ent"
     )) {
         $path = Join-Path $PackageRoot $relativePath
         if ((Test-Path -LiteralPath $path -PathType Leaf) -and
@@ -2520,6 +2537,36 @@ function Copy-ReleaseAssets {
 
     foreach ($item in $items) {
         Copy-Item -LiteralPath $item.FullName -Destination $PackageRoot -Recurse -Force
+    }
+}
+
+function Add-LegacyUpdaterCompatibilityFiles {
+    param([string]$PackageRoot)
+
+    # MuffModeUpdater v0.60.20 validates these retired config names before it
+    # can install a release. Keep inert, non-empty markers in update ZIPs as a
+    # compatibility bridge. Current updater builds and the installer skip them.
+    $legacyConfigNames = @(
+        "gt-CA.cfg",
+        "gt-CTF.cfg",
+        "gt-DUEL.cfg",
+        "gt-FFA.cfg",
+        "gt-HORDE.cfg",
+        "gt-INSTAGIB.cfg",
+        "gt-NADEFEST.cfg",
+        "gt-REDROVER.cfg",
+        "gt-STRIKE.cfg",
+        "gt-TDM.cfg"
+    )
+    $baseq2 = Join-Path $PackageRoot "rerelease/baseq2"
+    New-Item -ItemType Directory -Force -Path $baseq2 | Out-Null
+    $contents = @(
+        "// MuffMode legacy-updater compatibility marker.",
+        "// This retired gt-*.cfg file is not executed by MuffMode.",
+        "// Use a lobby-*.cfg preset or factory <id>; see CONFIGS_README.md."
+    )
+    foreach ($fileName in $legacyConfigNames) {
+        Set-Content -LiteralPath (Join-Path $baseq2 $fileName) -Value $contents -Encoding utf8
     }
 }
 
@@ -2569,6 +2616,29 @@ function Assert-ExistingUpdaterCompatiblePackageRoot {
         }
         elseif ($allowedRootFiles -notcontains $entry.Name) {
             throw "The updater package root contains an unsupported file for existing updater builds: $($entry.Name)"
+        }
+    }
+
+    # The last public pre-self-update updater (v0.60.20) also hard-requires
+    # these nested files and rejects the archive before examining its updater.
+    foreach ($relativePath in @(
+        "rerelease\baseq2\CONFIGS_README.md",
+        "rerelease\baseq2\gt-CA.cfg",
+        "rerelease\baseq2\gt-CTF.cfg",
+        "rerelease\baseq2\gt-DUEL.cfg",
+        "rerelease\baseq2\gt-FFA.cfg",
+        "rerelease\baseq2\gt-HORDE.cfg",
+        "rerelease\baseq2\gt-INSTAGIB.cfg",
+        "rerelease\baseq2\gt-NADEFEST.cfg",
+        "rerelease\baseq2\gt-REDROVER.cfg",
+        "rerelease\baseq2\gt-STRIKE.cfg",
+        "rerelease\baseq2\gt-TDM.cfg",
+        "rerelease\baseq2\server-base.cfg"
+    )) {
+        $path = Join-Path $PackageRoot $relativePath
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf) -or
+            (Get-Item -LiteralPath $path -Force).Length -eq 0) {
+            throw "The updater package is missing a non-empty v0.60.20 compatibility file: $relativePath"
         }
     }
 }
@@ -2647,7 +2717,7 @@ This archive is a supplemental release asset for Muff Mode v$TargetVersion.
 - `original-readmes` preserves original map readmes where they were located.
 - `MAP_GUIDE.md` is a snapshot of the source-side map guide.
 
-These files are for reference and map authors. They are intentionally not installed into the playable `rerelease/maps` folder.
+These files are for reference and map authors. They are intentionally not installed into the playable `rerelease/baseq2/maps` folder.
 "@
 
     Copy-DirectoryContents -SourcePath $originalBspsRoot -DestinationPath (Join-Path $originalArchiveRoot "original-bsps")
@@ -2708,6 +2778,8 @@ function New-ReleasePackage {
     Copy-ReleaseAssets -AssetRoot $AssetRoot -PackageRoot $packageRoot
     Remove-EmptyReleaseAssetPlaceholders -PackageRoot $packageRoot
 
+    Add-LegacyUpdaterCompatibilityFiles -PackageRoot $packageRoot
+
     $baseq2 = Join-Path $packageRoot "rerelease/baseq2"
     New-Item -ItemType Directory -Force -Path $baseq2 | Out-Null
 
@@ -2752,6 +2824,10 @@ function New-ReleasePackage {
 
     Write-Step "Validating staged map-pool and BSP assets"
     & (Resolve-RepoPath "scripts/ci/check-map-pool-examples.ps1") `
+        -PackageRoot $packageRoot
+
+    Write-Step "Validating staged lobby-host bundle"
+    & (Resolve-RepoPath "scripts/ci/check-host-bundle.ps1") `
         -PackageRoot $packageRoot
 
     $zipPath = Join-Path $outputRootAbs "$packageName.zip"

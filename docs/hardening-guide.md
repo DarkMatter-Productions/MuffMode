@@ -37,6 +37,7 @@ Use `-IncludeAnalysis` and `-IncludeSanitizers` for slower local parity with the
 ./scripts/ci/check-tooling-contracts.ps1
 ./scripts/ci/check-generated-artifacts.ps1
 ./scripts/ci/check-map-pool-examples.ps1
+./scripts/ci/check-host-bundle.ps1
 ./scripts/ci/check-changelog.ps1
 ./scripts/ci/check-test-assets.ps1 -RepoOnly
 ./scripts/ci/check-dependency-inventory.ps1

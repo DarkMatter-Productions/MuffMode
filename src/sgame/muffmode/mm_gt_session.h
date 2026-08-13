@@ -102,12 +102,57 @@ struct mm_gt_plan_t {
 	bool						factory_changed = false;
 	bool						requires_reload = false;
 	bool						reapply_factory = false;
+	bool						adopt_reasserted_factory_baselines = false;
 	mm_gt_alias_projection_t	aliases;
 	int							arena_dmg_armor = -1;	// -1 leave, 0 clear
 	bool						reset_client_sessions = false;
 };
 
 namespace session_detail {
+
+inline constexpr bool FactoryWasReasserted(
+	bool value_changed,
+	bool committed_has_factory,
+	int current_modified_count,
+	int baseline_modified_count) noexcept
+{
+	return !value_changed && committed_has_factory &&
+		current_modified_count != baseline_modified_count;
+}
+
+inline constexpr bool SelectionRequiresReload(
+	const mm_gt_request_t &request,
+	bool gametype_changed,
+	bool factory_changed,
+	bool next_has_factory) noexcept
+{
+	const bool reapply_factory = request.source != gt_source_t::Boot &&
+		next_has_factory &&
+		(gametype_changed || factory_changed || request.force_reapply);
+	return request.allow_reload &&
+		(gametype_changed || factory_changed || reapply_factory);
+}
+
+struct reasserted_factory_baseline_t {
+	bool		adopt = false;
+	const char *value = nullptr;
+};
+
+inline constexpr reasserted_factory_baseline_t ResolveReassertedFactoryBaseline(
+	int observed_modified_count,
+	int current_modified_count,
+	const char *current_value,
+	const char *latched_value) noexcept
+{
+	if (current_modified_count == observed_modified_count)
+		return {};
+
+	const char *current = current_value ? current_value : "";
+	const bool has_latched = latched_value && latched_value[0] != '\0';
+	if (has_latched)
+		return { true, latched_value };
+	return { true, current };
+}
 
 inline constexpr void CopyId(char (&dest)[MM_GT_FACTORY_ID_SIZE],
 	const char *source) noexcept
@@ -272,12 +317,16 @@ inline constexpr mm_gt_plan_t MM_GT_Plan(
 	plan.reapply_factory = request.source != gt_source_t::Boot &&
 		next.has_factory &&
 		(plan.gametype_changed || plan.factory_changed || request.force_reapply);
+	plan.adopt_reasserted_factory_baselines =
+		request.source == gt_source_t::ExternalCvar &&
+		request.force_reapply && next.has_factory &&
+		!plan.gametype_changed && !plan.factory_changed;
 
 	// A re-apply restores the ledger and writes the overrides again, which has
 	// to happen at a map boundary for the map-load and latched settings to take
 	// effect, so it implies the reload.
-	plan.requires_reload = request.allow_reload &&
-		(plan.gametype_changed || plan.factory_changed || plan.reapply_factory);
+	plan.requires_reload = session_detail::SelectionRequiresReload(
+		request, plan.gametype_changed, plan.factory_changed, next.has_factory);
 
 	// Emitted unconditionally, not only on a change. Writing the aliases while
 	// latching their modified counts only inside the changed branch is how an

@@ -1,27 +1,60 @@
 # Muff Mode Server Config Guide
 
-This folder contains the server config bundle shipped with Muff Mode. Use it as
-a working starting point, then trim map lists, player limits, rulesets, voting
-and hostnames for your own community.
+This folder contains the package-owned server config bundle shipped with Muff
+Mode. The files are ready to run as defaults, but a later package update may
+replace them. Copy any config, map pool, or cycle to your own leaf filename and
+point your server at that copy before customizing it.
+
+For a customized lobby, copy the whole chain: copy `server-base.cfg`, the
+chosen `lobby-*.cfg`, the pool, and the cycle; then change the copied lobby's
+first `exec` and its two map filenames to point at those operator-owned copies.
+`mapdb.json` is different: KEX requires that exact singleton name, so leave it
+package-owned and merge any private UI rows back into the new version after an
+update.
 
 ## Files
 
 | File | Purpose |
 | --- | --- |
-| `server-base.cfg` | **Your config.** Server identity, client capacity, voting and admin policy, and the fallback map rotation. Load it once at server start. Nothing MuffMode does will overwrite these. |
+| `server-base.cfg` | Baseline server identity, client capacity, voting and admin policy, and the legacy fallback rotation. Every lobby preset executes it. Copy it before customizing it. |
 | `factories.cfg` | **The gameplay presets.** One entry per playable flavour — `ffa_classic`, `duel_comp`, `instactf`, `vampca`, `horde_endless`, and 50-odd more — each carrying its mode's ruleset, limits, map rotation and settings. Loaded automatically via `g_factory_file`. Copy it before editing. |
-| `muffmode-map-pool.example.json` | Extensive opt-in structured catalog covering rerelease multiplayer maps and the maps included with MuffMode. Copy it to a new filename before customizing it. |
-| `muffmode-map-cycle.example.txt` | Matching opt-in automatic-rotation example. Copy it to a new filename before customizing it. |
+| `mapdb.json` | Full stock-derived KEX/UI map database with the nine bundled MuffMode maps appended. This is engine metadata, not a MuffMode structured pool. Leave it package-owned and never use it as `g_maps_pool_file`. |
+| `muffmode-map-pool.json` | Production MuffMode catalog covering rerelease multiplayer maps and all nine bundled maps, with strict mode tags and active-human player bounds. |
+| `muffmode-map-cycle.txt` | Production automatic cycle shared across supported gametypes; MuffMode filters it by mode, active-human load, repeat delay, and current map. |
+| `lobby-casual.cfg` | Flexible 16-slot public/friends lobby; random rotation, House Deathmatch start, direct map votes and MyMap enabled. |
+| `lobby-competitive.cfg` | Ranked 16-slot pickup/scrim lobby; ordered rotation, Duel Competition start, direct map votes and MyMap disabled. |
+| `lobby-party.cfg` | Unranked 16-slot mutator lobby; random rotation, Instagib Jump start, curated factory voting and direct map choice enabled. |
+| `lobby-horde.cfg` | Focused 8-slot Horde lobby; random rotation, Classic Horde start, direct map votes and MyMap disabled. |
 
-## Quick Start
+## Lobby Quick Start
 
 1. Install Muff Mode into the outer `Quake 2` folder.
-2. Start Quake II Rerelease or your dedicated server.
-3. `exec server-base.cfg`
-4. `factory list all` to see what is available, then pick one — `factory ctf_classic`,
-   `factory instagib`, `factory horde_endless`. That sets the gametype, the limits
-   and the map rotation together, and changes map to start it.
-5. `doctor` to check for risky cvar combinations.
+2. Start Quake II Rerelease and open the console before creating the lobby.
+3. Execute one complete host preset:
+
+   ```text
+   exec lobby-casual.cfg
+   exec lobby-competitive.cfg
+   exec lobby-party.cfg
+   exec lobby-horde.cfg
+   ```
+
+   Run only the one you want.
+4. Create the lobby through the normal KEX menu. Loading the preset first lets
+   its `maxclients` and `kexmultiplayer maxplayers` request take effect together.
+5. Run `doctor` after joining to check for risky cvar combinations.
+
+Each lobby preset executes `server-base.cfg`, enables the production structured
+pool and cycle, and selects its starting factory. It can also be used as a
+dedicated-server startup config. Copy the chosen `lobby-*.cfg` before changing
+capacity, voting, ranking, factory choices, or startup mode. If you customize
+it, also copy the baseline, pool, and cycle and update the copied lobby's
+references; otherwise it will still load package-owned files on every run.
+
+For a hand-built or legacy-map-list server, execute `server-base.cfg`, run
+`factory list all`, then select a factory such as `factory ctf_classic`,
+`factory instagib`, or `factory horde_endless`. A factory sets the gametype,
+limits, legacy map rotation, and gameplay settings together and changes map.
 
 To become an admin: connect on the first client slot, or set an admin password in
 your config and run `admin <password>`.
@@ -85,30 +118,87 @@ of it is published and the previously working registry is kept — a bad edit
 cannot leave the server with no factories. `factory reload` tells you which
 happened.
 
-## Structured Map Pools
+## Map Databases And Rotation
 
-For the optional structured map system, copy the two `muffmode-map-*.example`
-files to new leaf filenames in this folder, then set `g_maps_pool_file` and
-`g_maps_cycle_file` to those copies. Keeping the operator-owned copies separate
-prevents a later package update from replacing local map choices. Without these
-cvars, safe BSP-stem entries in `g_map_pool` and `g_map_list` — including the
-ones a factory's `maps` and `mappool` directives set — remain the active source.
+`mapdb.json` and `muffmode-map-pool.json` are intentionally different formats:
+
+- `mapdb.json` is the full stock-derived KEX engine/UI database. Its root has
+  `episodes` and `maps`, and its mode metadata uses the KEX schema. The loose
+  file preserves the stock campaigns and menus while adding the nine bundled
+  MuffMode maps. Never point `g_maps_pool_file` at it.
+- `muffmode-map-pool.json` is MuffMode's strict multiplayer catalog. Its root
+  contains only `maps`; entries can add `min`, `max`, `duel`, `arena`,
+  `popular`, and custom-resource policy. Unsupported root or entry keys fail
+  closed instead of being ignored.
+- `muffmode-map-cycle.txt` is the shared automatic sequence. With a valid pool
+  and cycle, structured selection supersedes a factory's `maps` rotation for
+  normal automatic transitions and factory/gametype changes. Factory rotations
+  remain the legacy fallback when structured selection is disabled, invalid,
+  or cannot find a compatible map.
+
+The production lobby presets already select the pool and cycle. To customize
+them, copy both files to operator-owned leaf names and change
+`g_maps_pool_file` and `g_maps_cycle_file` in your copied lobby config.
+
+Pool `min` and `max` bounds count active human players only, not bots,
+spectators, or spare connected slots. Automatic rotation and the post-match
+next-map pick apply mode tags and those bounds. A direct map vote or MyMap
+request validates that the map belongs to the active catalog, but deliberately
+does not enforce its mode tag or player bounds. Casual and Party leave that
+freedom enabled; Competitive and Horde disable both paths so their rotation
+policy cannot be bypassed.
+
+`mm-rail101` is a specialist rail/Instagib practice map with no weapon
+pickups. The schema cannot express an Instagib-only factory requirement, so the
+production cycle deliberately excludes it. It remains in the pool and KEX map
+database for an explicit map choice when the selected factory supplies the
+intended weapon.
+
+## Updates And Backups
+
+The installer and current updater treat the exact package filenames above as
+replaceable release assets. Before replacing an existing one, they preserve
+server/map-policy files under `rerelease/baseq2/MuffModeBackups`; the updater
+backs up files whose bytes differ from the incoming release, while the installer
+backs up existing package-named files. Operator-owned leaf filenames are not in
+the install plan and are left alone. If a current-updater copy fails partway
+through, it restores the previous mutually-referencing host bundle before
+reporting the failure.
+
+After an update, keep using your operator copies and merge any wanted upstream
+changes from the new templates. To restore a package-named customization, copy
+the matching file back from the newest `server-configs-before-muffmode-*`
+backup directory. For `mapdb.json`, merge custom rows into the newly shipped
+full database rather than renaming it or pointing MuffMode's pool cvar at it.
+Older upgrades may leave the retired
+`muffmode-map-pool.example.json` and
+`muffmode-map-cycle.example.txt` files on disk because installers do not delete
+unrelated files. MuffMode does not reference them; after preserving any edits,
+remove or archive them so they are not mistaken for the production pool/cycle.
 
 ## MuffMode Arena
 
-Before using or making `arena` votable, install Arena-compatible maps you are
-licensed to host and give the `arena_ra2` factory (or your own copy of it) a
-`maps` rotation of them. Tagged multi-room maps are the native path. The shipped
-factory leaves `g_arena_legacy_idmap` at its fail-closed default of `0`; set it
-to `1` only for a known rotation of untagged classic RA2 idmaps. Ordinary maps do
-not activate Arena by default.
+No bundled map is Arena-compatible, so the production pool has no `arena: true`
+entry and all four lobby presets keep Arena out of their votable modes and
+factories. Before enabling it, install maps you are licensed to host, add them
+to operator-owned pool/cycle copies with the correct Arena metadata, and give
+the `arena_ra2` factory (or your own copy) a matching rotation. Tagged
+multi-room maps are the native path. The shipped factory leaves
+`g_arena_legacy_idmap` at its fail-closed default of `0`; set it to `1` only for
+a known rotation of untagged classic RA2 idmaps.
 
 ## Migrating From `gt-*.cfg`
 
-Earlier releases shipped eleven per-gametype config files that the mod executed
-automatically on a gametype change. They are gone; factories replaced them.
+Earlier releases shipped twelve per-gametype config files that the mod executed
+automatically on a gametype change. Factories replaced them. Generated update
+ZIPs may temporarily contain inert `gt-*.cfg` marker files so the v0.60.20
+updater accepts the archive; current updaters skip those markers and the Windows
+installer does not install them. That older updater cannot replace its own
+running executable and installs every accepted config name, so preserve any
+custom legacy files and use the current Windows installer once (or replace the
+closed updater manually) to move onto the self-updating path.
 
-- `exec gt-FFA.cfg` and friends no longer work. Replace them with
+- The compatibility markers do nothing. Replace `exec gt-FFA.cfg` and friends with
   `exec server-base.cfg` followed by `factory <id>`.
 - A custom `gt-*.cfg` of your own is no longer executed automatically on a
   gametype change. You can still `exec` it by hand, but the settings in it will

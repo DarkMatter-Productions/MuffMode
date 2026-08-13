@@ -1087,6 +1087,35 @@ MM_TEST(map_pool_mode_preferences_and_relaxation_order_are_explicit) {
 	MM_CHECK_FALSE(SELECTION_RELAXATIONS[2].enforce_cooldown);
 }
 
+MM_TEST(map_pool_cycle_start_sizes_for_the_target_factory) {
+	using muffmode::map_pool::ResolveSelectionPlayerCount;
+
+	MM_CHECK_EQ(ResolveSelectionPlayerCount(0, 2, 12, true), 2);
+	MM_CHECK_EQ(ResolveSelectionPlayerCount(10, 2, 2, true), 2);
+	MM_CHECK_EQ(ResolveSelectionPlayerCount(2, 4, 10, true), 4);
+	MM_CHECK_EQ(ResolveSelectionPlayerCount(6, 1, 6, true), 6);
+	MM_CHECK_EQ(ResolveSelectionPlayerCount(3, 2, 12, true), 3);
+	MM_CHECK_EQ(ResolveSelectionPlayerCount(10, 2, 2, false), 10);
+	MM_CHECK_EQ(ResolveSelectionPlayerCount(-1, 2, 12, false), 0);
+	MM_CHECK_EQ(ResolveSelectionPlayerCount(0, 4, 2, true), 4);
+}
+
+MM_TEST(map_pick_does_not_drop_player_bounds_to_fill_a_ballot) {
+	using muffmode::map_pool::SELECTION_RELAXATIONS;
+	using muffmode::map_pool::ShouldContinueMapPickRelaxation;
+
+	MM_CHECK(ShouldContinueMapPickRelaxation(0, SELECTION_RELAXATIONS[0]));
+	MM_CHECK(ShouldContinueMapPickRelaxation(1, SELECTION_RELAXATIONS[0]));
+	MM_CHECK_FALSE(ShouldContinueMapPickRelaxation(2, SELECTION_RELAXATIONS[0]));
+
+	MM_CHECK(ShouldContinueMapPickRelaxation(0, SELECTION_RELAXATIONS[1]));
+	MM_CHECK_FALSE(ShouldContinueMapPickRelaxation(1, SELECTION_RELAXATIONS[1]));
+	MM_CHECK_FALSE(ShouldContinueMapPickRelaxation(2, SELECTION_RELAXATIONS[1]));
+
+	MM_CHECK_FALSE(ShouldContinueMapPickRelaxation(0, SELECTION_RELAXATIONS[2]));
+	MM_CHECK_FALSE(ShouldContinueMapPickRelaxation(1, SELECTION_RELAXATIONS[2]));
+}
+
 MM_TEST(map_pool_reload_action_prioritizes_pending_full_transactions) {
 	using muffmode::map_pool::reload_action_t;
 	using muffmode::map_pool::reload_context_t;
@@ -6031,6 +6060,52 @@ MM_TEST(gametype_plan_emits_the_legacy_aliases_unconditionally) {
 	MM_CHECK(to_ctf.aliases.ctf);
 	MM_CHECK_FALSE(to_ctf.aliases.teamplay);
 	MM_CHECK(to_ctf.requires_reload);
+}
+
+MM_TEST(gametype_reconciler_detects_a_same_factory_config_reassertion) {
+	using namespace muffmode::gametype;
+	using muffmode::gametype::session_detail::FactoryWasReasserted;
+	using muffmode::gametype::session_detail::ResolveReassertedFactoryBaseline;
+	using muffmode::gametype::session_detail::SelectionRequiresReload;
+
+	MM_CHECK(FactoryWasReasserted(false, true, 12, 10));
+	MM_CHECK_FALSE(FactoryWasReasserted(true, true, 12, 10));
+	MM_CHECK_FALSE(FactoryWasReasserted(false, false, 12, 10));
+	MM_CHECK_FALSE(FactoryWasReasserted(false, true, 10, 10));
+
+	// A same-factory reassertion reloads, so BuildPlan must validate the current
+	// map token before it writes cvars or freezes clients.
+	mm_gt_request_t reassert = {};
+	reassert.source = gt_source_t::ExternalCvar;
+	reassert.force_reapply = true;
+	MM_CHECK(SelectionRequiresReload(reassert, false, false, true));
+	MM_CHECK_FALSE(SelectionRequiresReload(reassert, false, false, false));
+	reassert.allow_reload = false;
+	MM_CHECK_FALSE(SelectionRequiresReload(reassert, false, false, true));
+
+	// The reassertion adopts only values the complete config changed underneath
+	// the active factory. Untouched overrides still restore their original
+	// baseline, while a pending latch wins as the latest operator request.
+	const auto direct = ResolveReassertedFactoryBaseline(10, 11, "edited", nullptr);
+	MM_CHECK(direct.adopt);
+	MM_CHECK_EQ(std::string(direct.value), std::string("edited"));
+	const auto same_value_touch = ResolveReassertedFactoryBaseline(
+		10, 11, "factory", nullptr);
+	MM_CHECK(same_value_touch.adopt);
+	MM_CHECK_EQ(std::string(same_value_touch.value), std::string("factory"));
+	const auto latched = ResolveReassertedFactoryBaseline(
+		10, 11, "factory", "edited-latched");
+	MM_CHECK(latched.adopt);
+	MM_CHECK_EQ(std::string(latched.value), std::string("edited-latched"));
+	MM_CHECK_FALSE(ResolveReassertedFactoryBaseline(
+		10, 10, "engine-drift", "pending").adopt);
+
+	using namespace gt_session_test;
+	const mm_gt_plan_t plan = Plan(reassert,
+		Selection((int)GT_FFA, "ffa_classic"),
+		Selection((int)GT_FFA, "ffa_classic"));
+	MM_CHECK(plan.reapply_factory);
+	MM_CHECK(plan.adopt_reasserted_factory_baselines);
 }
 
 MM_TEST(gametype_plan_requires_exactly_one_reload_and_skips_doomed_client_work) {

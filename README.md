@@ -35,7 +35,7 @@
 | --- | --- |
 | Casual players | **Clearer HUD information**, **menu-driven voting**, approachable team joining, and extra modes such as **Horde**, **Instagib**, and **NadeFest**. |
 | Competitive players | **Ready-up flow**, **countdowns**, **timeouts**, **overtime**, support for **Duel / Arena Rooms / TDM / CA / CTF**, flexible rulesets, and captain-led team control. |
-| Server hosts | **Packaged server configs**, per-gametype presets, curated map rotations, voting limits, admin tools, team management, **debug logging**, and built-in diagnostics like `doctor`. |
+| Server hosts | **Four ready-to-run lobby presets**, per-gametype factories, a production map catalog and cycle, voting limits, admin tools, team management, **debug logging**, and built-in diagnostics like `doctor`. |
 
 <h2 align="center">Start Here</h2>
 
@@ -60,7 +60,14 @@
 1. Download the [latest Muff Mode release](https://github.com/DarkMatter-Productions/MuffMode/releases/latest).
 2. Use the **Windows installer** when available. It detects **Steam**, **Epic Games Store**, **GOG**, and **Xbox app / Microsoft Store** installs, and also offers an **Other location** option for custom library folders.
 3. If you use the zip instead, extract it into the outer **`Quake 2`** folder and allow file replacements.
-4. Launch the game normally. Server hosts can load the bundled baseline config with **`exec server-base.cfg`**, then pick a gameplay preset with **`factory <id>`** — run **`factory list all`** to see what is available. Arena uses separately installed Arena-compatible maps: tagged multi-room maps are preferred, while classic RA2 idmaps remain available through the compatibility profile. Those map assets are not bundled.
+4. Launch the game normally. Before creating a KEX lobby, hosts can run
+   **`exec lobby-casual.cfg`**, **`exec lobby-competitive.cfg`**,
+   **`exec lobby-party.cfg`**, or **`exec lobby-horde.cfg`**. Dedicated and
+   hand-built servers can instead start with **`exec server-base.cfg`**, then
+   select **`factory <id>`**. The shipped files are package-owned templates, so
+   a customized lobby should copy its baseline, lobby, pool, and cycle and
+   update the copied lobby's references. Arena requires separately installed
+   Arena-compatible maps; none is bundled.
 
 For a more careful walkthrough, use the [Player Guide](docs/player-guide.md) or [Server Host Guide](docs/server-host-guide.md).
 
@@ -75,7 +82,7 @@ For a more careful walkthrough, use the [Player Guide](docs/player-guide.md) or 
  - **Fast, accessible voting** — use **GUI or console voting** for maps, gametypes, rulesets, server settings, and administrative actions, with host-side controls to keep votes focused.
  - **Stronger teamplay tools** — captains, captain transfer, team locking, auto-balance, forced balance, and team item-drop notices make coordinated play easier to run.
  - **Quality-of-life touches players notice** — **kill beeps**, **offhand hook support**, **EyeCam spectating**, **MyMap queueing**, and smarter auto-switch behavior all help matches feel smoother.
- - **Host controls that scale up** — tune the packaged `server-base.cfg`, the `factories.cfg` gameplay presets, map lists and pools, votable options, MOTDs, debug logging, and server diagnostics without needing separate builds for different communities.
+ - **Host controls that scale up** — start from Casual, Competitive, Party, or Horde lobby templates, then tune `server-base.cfg`, factories, the structured map pool and cycle, votable options, MOTDs, debug logging, and server diagnostics without needing separate builds for different communities.
  - **Modding and map support** — Muff Mode also adds **custom maps**, **entity overrides**, **item replacement**, conditional entity spawning, and new mapper-focused entities for more tailored server content.
 
 <h2 align="center">Included Content</h2>

@@ -29,7 +29,7 @@ This reference helps players and hosts choose what to play. Casual players can u
 
 ## Muff Maps
 
-Muff Mode maintains a curated set of final `mm-*` remasters and ports, plus a separate work-in-progress source appendix. The full [Muff Mode Map Guide](maps/index.md) includes per-map history, original release dates where found, preserved original readmes/BSPs, source-map links, recommended gametypes, and item registers taken from the final BSP entity data.
+Muff Mode maintains a curated set of final `mm-*` remasters and ports, plus a separate work-in-progress source appendix. The filenames in this player-facing table use the runtime map IDs; the supplemental source archive preserves its historical source filenames where those differ. The full [Muff Mode Map Guide](maps/index.md) includes per-map history, original release dates where found, preserved original readmes/BSPs, source-map links, recommended gametypes, and item registers taken from the final BSP entity data.
 
 | Map | File | Status | Good fits |
 | --- | --- | --- | --- |

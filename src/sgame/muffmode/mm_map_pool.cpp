@@ -1531,8 +1531,11 @@ static bool MM_SelectStructuredMap(
 	const int repeat_delay = clamp(
 		g_maps_repeat_delay ? g_maps_repeat_delay->integer : 1800,
 		0, 86400);
-	const int player_count =
-		static_cast<int>(level.num_playing_human_clients);
+	const int player_count = map_pool::ResolveSelectionPlayerCount(
+		static_cast<int>(level.num_playing_human_clients),
+		minplayers ? minplayers->integer : 0,
+		maxplayers ? maxplayers->integer : 0,
+		cycle_start);
 	const bool random_selection =
 		g_maps_random && g_maps_random->integer != 0;
 	const std::string current_key = current_map_safe
@@ -1624,9 +1627,9 @@ std::vector<map_pool::map_choice_t> MM_CollectStructuredMapChoices(
 	const map_pool::mode_selection_t modes =
 		map_pool::ModesForGametype(gametype);
 
-	// Relax in the same order the automatic selection does, but keep going until
-	// there are at least two offers: a one-map "choice" is not worth an
-	// intermission pause, so the caller drops the pick instead.
+	// Relax cooldown first. If any player-count-valid map remains after that,
+	// keep the bounds: a one-map "choice" is not worth an intermission pause,
+	// and the caller drops the pick instead of padding it with unsuitable maps.
 	std::vector<size_t> candidates;
 	for (const map_pool::selection_relaxation_t relaxation :
 		map_pool::SELECTION_RELAXATIONS) {
@@ -1635,7 +1638,8 @@ std::vector<map_pool::map_choice_t> MM_CollectStructuredMapChoices(
 			relaxation.enforce_player_bounds,
 			relaxation.enforce_cooldown,
 			true);
-		if (candidates.size() > 1)
+		if (!map_pool::ShouldContinueMapPickRelaxation(
+			candidates.size(), relaxation))
 			break;
 	}
 	if (candidates.empty())

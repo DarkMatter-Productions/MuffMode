@@ -36,6 +36,9 @@ internal static partial class InstallationManager
     private const string MarkerJsonFileName = "muffmode-version.json";
     private const string MarkerTextFileName = "muffmode.version";
     private const string UpdaterExecutableFileName = "MuffModeUpdater.exe";
+    // v0.60.20 placed this obsolete payload in the old outer maps directory.
+    // New playable assets live under rerelease/baseq2/maps, but cleanup must
+    // continue targeting the exact legacy location rather than an operator file.
     private const string ObsoleteAerowalkMapRelativePath = @"rerelease\maps\mm-aerowalk.bsp";
     private const long ObsoleteAerowalkMapLength = 761_416;
     private const string ObsoleteAerowalkMapSha256 =
@@ -77,6 +80,11 @@ internal static partial class InstallationManager
         string DestinationPath,
         long ExpectedLength,
         string ExpectedSha256);
+    private sealed record ServerConfigRollbackFile(
+        PackageInstallFile InstallFile,
+        bool Existed,
+        bool BackupRequired,
+        FileAttributes? OriginalAttributes);
     private sealed record PendingSelfUpdate(
         string InstallRoot,
         string TargetPath,
@@ -136,22 +144,11 @@ internal static partial class InstallationManager
 
     private static readonly HashSet<string> RequiredPackageFiles = new(StringComparer.OrdinalIgnoreCase)
     {
+        // Keep this bootstrap contract deliberately stable. Release CI validates
+        // the version-specific lobby/map bundle; a deployed updater must not
+        // reject a future package before it can update itself because an
+        // operator-facing asset was renamed or retired.
         Path.Combine("rerelease", "baseq2", "CONFIGS_README.md"),
-        Path.Combine("rerelease", "baseq2", "muffmode-map-cycle.example.txt"),
-        Path.Combine("rerelease", "baseq2", "muffmode-map-pool.example.json"),
-        Path.Combine("rerelease", "baseq2", "gt-ARENA.cfg"),
-        Path.Combine("rerelease", "baseq2", "gt-CA.cfg"),
-        Path.Combine("rerelease", "baseq2", "gt-CTF.cfg"),
-        Path.Combine("rerelease", "baseq2", "gt-DUEL.cfg"),
-        Path.Combine("rerelease", "baseq2", "gt-FFA.cfg"),
-        Path.Combine("rerelease", "baseq2", "gt-FT.cfg"),
-        Path.Combine("rerelease", "baseq2", "gt-HORDE.cfg"),
-        Path.Combine("rerelease", "baseq2", "gt-INSTAGIB.cfg"),
-        Path.Combine("rerelease", "baseq2", "gt-LMS.cfg"),
-        Path.Combine("rerelease", "baseq2", "gt-NADEFEST.cfg"),
-        Path.Combine("rerelease", "baseq2", "gt-REDROVER.cfg"),
-        Path.Combine("rerelease", "baseq2", "gt-STRIKE.cfg"),
-        Path.Combine("rerelease", "baseq2", "gt-TDM.cfg"),
         Path.Combine("rerelease", "baseq2", "docs", "muffmode", "maps", "original-readmes", "README.md"),
         Path.Combine("rerelease", "baseq2", MarkerJsonFileName),
         Path.Combine("rerelease", "baseq2", MarkerTextFileName),
@@ -169,25 +166,24 @@ internal static partial class InstallationManager
         "VERSION",
         Path.Combine("rerelease", "baseq2", "CONFIGS_README.md"),
         Path.Combine("rerelease", "baseq2", "game_x64.dll"),
-        Path.Combine("rerelease", "baseq2", "muffmode-map-cycle.example.txt"),
-        Path.Combine("rerelease", "baseq2", "muffmode-map-pool.example.json"),
-        Path.Combine("rerelease", "baseq2", "gt-ARENA.cfg"),
-        Path.Combine("rerelease", "baseq2", "gt-CA.cfg"),
-        Path.Combine("rerelease", "baseq2", "gt-CTF.cfg"),
-        Path.Combine("rerelease", "baseq2", "gt-DUEL.cfg"),
-        Path.Combine("rerelease", "baseq2", "gt-FFA.cfg"),
-        Path.Combine("rerelease", "baseq2", "gt-FT.cfg"),
-        Path.Combine("rerelease", "baseq2", "gt-HORDE.cfg"),
-        Path.Combine("rerelease", "baseq2", "gt-INSTAGIB.cfg"),
-        Path.Combine("rerelease", "baseq2", "gt-LMS.cfg"),
-        Path.Combine("rerelease", "baseq2", "gt-NADEFEST.cfg"),
-        Path.Combine("rerelease", "baseq2", "gt-REDROVER.cfg"),
-        Path.Combine("rerelease", "baseq2", "gt-STRIKE.cfg"),
-        Path.Combine("rerelease", "baseq2", "gt-TDM.cfg"),
         Path.Combine("rerelease", "baseq2", "docs", "muffmode", "maps", "original-readmes", "README.md"),
         Path.Combine("rerelease", "baseq2", MarkerJsonFileName),
         Path.Combine("rerelease", "baseq2", MarkerTextFileName),
         Path.Combine("rerelease", "baseq2", "server-base.cfg")
+    };
+
+    private static readonly HashSet<string> LegacyUpdaterCompatibilityFiles = new(StringComparer.OrdinalIgnoreCase)
+    {
+        Path.Combine("rerelease", "baseq2", "gt-CA.cfg"),
+        Path.Combine("rerelease", "baseq2", "gt-CTF.cfg"),
+        Path.Combine("rerelease", "baseq2", "gt-DUEL.cfg"),
+        Path.Combine("rerelease", "baseq2", "gt-FFA.cfg"),
+        Path.Combine("rerelease", "baseq2", "gt-HORDE.cfg"),
+        Path.Combine("rerelease", "baseq2", "gt-INSTAGIB.cfg"),
+        Path.Combine("rerelease", "baseq2", "gt-NADEFEST.cfg"),
+        Path.Combine("rerelease", "baseq2", "gt-REDROVER.cfg"),
+        Path.Combine("rerelease", "baseq2", "gt-STRIKE.cfg"),
+        Path.Combine("rerelease", "baseq2", "gt-TDM.cfg")
     };
 
     private static readonly HashSet<string> AllowedRereleaseTopLevelDirectories = new(StringComparer.OrdinalIgnoreCase)
@@ -506,35 +502,69 @@ internal static partial class InstallationManager
                 deferredUpdaterFile,
                 runningUpdaterPath,
                 progress);
-            var configBackupDirectory = BackupCurrentServerConfigs(normalizedInstallPath, installPlan, progress);
+            var serverConfigRollbackFiles = CaptureServerConfigRollbackFiles(installPlan);
+            var configBackupDirectory = BackupCurrentServerConfigs(
+                normalizedInstallPath,
+                serverConfigRollbackFiles,
+                progress);
             var backupFileName = BackupCurrentGameDll(normalizedInstallPath, progress);
 
-            for (var index = 0; index < installPlan.Count; index++)
+            try
             {
-                var installFile = installPlan[index];
-                CopyFileAtomically(
-                    normalizedInstallPath,
-                    installFile.SourcePath,
-                    installFile.DestinationPath,
-                    installFile.RelativePath,
-                    installFile.ExpectedLength,
-                    installFile.ExpectedSha256);
+                for (var index = 0; index < installPlan.Count; index++)
+                {
+                    var installFile = installPlan[index];
+                    CopyFileAtomically(
+                        normalizedInstallPath,
+                        installFile.SourcePath,
+                        installFile.DestinationPath,
+                        installFile.RelativePath,
+                        installFile.ExpectedLength,
+                        installFile.ExpectedSha256);
 
-                var percentage = 50 + (int)Math.Round((double)(index + 1) / installPlan.Count * 45);
-                progress?.Report(new UpdaterProgress($"Syncing {installFile.RelativePath}...", Math.Clamp(percentage, 50, 95), CanCancel: false));
+                    var percentage = 50 + (int)Math.Round((double)(index + 1) / installPlan.Count * 45);
+                    progress?.Report(new UpdaterProgress($"Syncing {installFile.RelativePath}...", Math.Clamp(percentage, 50, 95), CanCancel: false));
+                }
+
+                VerifyInstallPlanApplied(installPlan);
+            }
+            catch (Exception installError)
+            {
+                progress?.Report(new UpdaterProgress(
+                    "Install did not complete; restoring the previous lobby-host bundle...",
+                    null,
+                    CanCancel: false));
+                try
+                {
+                    RollbackServerConfigs(
+                        normalizedInstallPath,
+                        serverConfigRollbackFiles,
+                        configBackupDirectory);
+                }
+                catch (Exception rollbackError)
+                {
+                    throw new AggregateException(
+                        "The update failed and the previous lobby-host bundle could not be fully restored.",
+                        installError,
+                        rollbackError);
+                }
+
+                throw;
             }
 
-            VerifyInstallPlanApplied(installPlan);
-            WriteInstalledMarker(normalizedInstallPath, release, packageMarker, packageSha256, installPlan, backupFileName);
-            VerifyInstalledMarker(normalizedInstallPath, release, packageMarker, packageSha256, installPlan);
+            WriteInstalledMarker(normalizedInstallPath, release, packageMarker, packageSha256, installPlan, backupFileName, configBackupDirectory);
+            VerifyInstalledMarker(normalizedInstallPath, release, packageMarker, packageSha256, installPlan, configBackupDirectory);
             CleanupObsoleteAerowalkMapBestEffort(normalizedInstallPath);
 
             if (pendingSelfUpdate is not null)
             {
                 LaunchPendingSelfUpdate(pendingSelfUpdate);
                 selfUpdateHandoffStarted = true;
+                var backupMessage = configBackupDirectory is null
+                    ? string.Empty
+                    : $" Previous server configs are in {configBackupDirectory}.";
                 progress?.Report(new UpdaterProgress(
-                    $"MuffMode {release.Version} installed. Restarting with the updated updater...",
+                    $"MuffMode {release.Version} installed.{backupMessage} Restarting with the updated updater...",
                     100,
                     CanCancel: false));
                 return new InstallSyncResult(SelfUpdateHandoffStarted: true);
@@ -1397,6 +1427,18 @@ internal static partial class InstallationManager
             if (!trustedPackageFiles.TryGetValue(sourceKey, out var trustedFile))
             {
                 throw new InvalidOperationException($"The install plan contains a file that was not derived from the trusted archive: {relativePath}");
+            }
+
+            // Update ZIPs retain inert filenames required by v0.60.20's
+            // pre-install validator. Modern updaters must not recreate or
+            // overwrite those retired operator configs.
+            if (LegacyUpdaterCompatibilityFiles.Contains(relativePath))
+            {
+                progress?.Report(new UpdaterProgress(
+                    $"Skipping legacy updater compatibility marker: {relativePath}.",
+                    null,
+                    CanCancel: false));
+                continue;
             }
 
             var destinationPath = ResolveDestinationPath(installPath, relativePath);
@@ -2561,6 +2603,7 @@ internal static partial class InstallationManager
             || packageMarker.InstalledBytes != 0
             || !string.IsNullOrWhiteSpace(packageMarker.BackupFileName)
             || !string.IsNullOrWhiteSpace(packageMarker.BackupGameDllSha256)
+            || !string.IsNullOrWhiteSpace(packageMarker.ConfigBackupDirectoryName)
             || !string.IsNullOrWhiteSpace(packageMarker.InstalledGameDllSha256)
             || !string.IsNullOrWhiteSpace(packageMarker.InstalledManifestSha256)
             || !string.IsNullOrWhiteSpace(packageMarker.InstalledDestinationManifestSha256)
@@ -3799,6 +3842,48 @@ internal static partial class InstallationManager
         string? expectedSha256 = null)
     {
         ValidatePackageSourceFile(sourcePath, relativePath);
+        CopyVerifiedFileAtomically(
+            installPath,
+            sourcePath,
+            destinationPath,
+            relativePath,
+            expectedLength,
+            expectedSha256);
+    }
+
+    private static void CopyRollbackFileAtomically(
+        string installPath,
+        string sourcePath,
+        string destinationPath,
+        string relativePath)
+    {
+        // Operator-owned configs can legitimately be empty. Package files cannot,
+        // so rollback uses its own source validation before sharing the verified
+        // atomic-copy implementation.
+        EnsureSafeInstallWritePath(
+            installPath,
+            sourcePath,
+            $"The server-config rollback source was unsafe: {relativePath}");
+        if (!File.Exists(sourcePath) || IsReparsePoint(sourcePath))
+        {
+            throw new IOException($"The server-config rollback source was missing or unsafe: {relativePath}");
+        }
+
+        CopyVerifiedFileAtomically(
+            installPath,
+            sourcePath,
+            destinationPath,
+            relativePath);
+    }
+
+    private static void CopyVerifiedFileAtomically(
+        string installPath,
+        string sourcePath,
+        string destinationPath,
+        string relativePath,
+        long? expectedLength = null,
+        string? expectedSha256 = null)
+    {
         var destinationDirectory = Path.GetDirectoryName(destinationPath);
         if (!string.IsNullOrWhiteSpace(destinationDirectory))
         {
@@ -4080,18 +4165,38 @@ internal static partial class InstallationManager
         }
     }
 
+    private static IReadOnlyList<ServerConfigRollbackFile> CaptureServerConfigRollbackFiles(
+        IReadOnlyList<PackageInstallFile> installPlan)
+    {
+        return installPlan
+            .Where(IsServerConfigInstallFile)
+            .Select(installFile =>
+            {
+                var existed = File.Exists(installFile.DestinationPath);
+                var attributes = existed
+                    ? File.GetAttributes(installFile.DestinationPath)
+                    : (FileAttributes?)null;
+                var backupRequired = existed && !FileMatchesTrustedSnapshot(
+                    installFile.DestinationPath,
+                    installFile.ExpectedLength,
+                    installFile.ExpectedSha256);
+                return new ServerConfigRollbackFile(
+                    installFile,
+                    existed,
+                    backupRequired,
+                    attributes);
+            })
+            .ToList();
+    }
+
     private static string? BackupCurrentServerConfigs(
         string installPath,
-        IReadOnlyList<PackageInstallFile> installPlan,
+        IReadOnlyList<ServerConfigRollbackFile> rollbackFiles,
         IProgress<UpdaterProgress>? progress)
     {
-        var configsToBackup = installPlan
-            .Where(IsServerConfigInstallFile)
-            .Where(installFile => File.Exists(installFile.DestinationPath))
-            .Where(installFile => !FileMatchesTrustedSnapshot(
-                installFile.DestinationPath,
-                installFile.ExpectedLength,
-                installFile.ExpectedSha256))
+        var configsToBackup = rollbackFiles
+            .Where(rollbackFile => rollbackFile.BackupRequired)
+            .Select(rollbackFile => rollbackFile.InstallFile)
             .ToList();
         if (configsToBackup.Count == 0)
         {
@@ -4133,6 +4238,85 @@ internal static partial class InstallationManager
         return backupDirectory;
     }
 
+    private static void RollbackServerConfigs(
+        string installPath,
+        IReadOnlyList<ServerConfigRollbackFile> rollbackFiles,
+        string? backupDirectory)
+    {
+        foreach (var rollbackFile in rollbackFiles)
+        {
+            var installFile = rollbackFile.InstallFile;
+            if (!rollbackFile.Existed)
+            {
+                if (!File.Exists(installFile.DestinationPath))
+                {
+                    continue;
+                }
+                EnsureSafeInstallWritePath(
+                    installPath,
+                    installFile.DestinationPath,
+                    $"A newly installed server config could not be rolled back safely: {installFile.RelativePath}");
+                if (IsReparsePoint(installFile.DestinationPath)
+                    || !FileMatchesTrustedSnapshot(
+                        installFile.DestinationPath,
+                        installFile.ExpectedLength,
+                        installFile.ExpectedSha256))
+                {
+                    throw new IOException(
+                        $"A newly installed server config changed before rollback: {installFile.RelativePath}");
+                }
+                File.Delete(installFile.DestinationPath);
+                continue;
+            }
+
+            if (!rollbackFile.BackupRequired)
+            {
+                if (!FileMatchesTrustedSnapshot(
+                    installFile.DestinationPath,
+                    installFile.ExpectedLength,
+                    installFile.ExpectedSha256))
+                {
+                    CopyFileAtomically(
+                        installPath,
+                        installFile.SourcePath,
+                        installFile.DestinationPath,
+                        $"rollback copy for {installFile.RelativePath}",
+                        installFile.ExpectedLength,
+                        installFile.ExpectedSha256);
+                }
+                if (rollbackFile.OriginalAttributes is { } unchangedAttributes)
+                {
+                    File.SetAttributes(installFile.DestinationPath, unchangedAttributes);
+                }
+                continue;
+            }
+            if (string.IsNullOrWhiteSpace(backupDirectory))
+            {
+                throw new IOException(
+                    $"The server-config rollback backup is missing: {installFile.RelativePath}");
+            }
+
+            var backupPath = Path.Combine(
+                backupDirectory,
+                Path.GetFileName(installFile.DestinationPath));
+            if (!File.Exists(backupPath) || IsReparsePoint(backupPath))
+            {
+                throw new IOException(
+                    $"The server-config rollback copy is missing or unsafe: {installFile.RelativePath}");
+            }
+
+            CopyRollbackFileAtomically(
+                installPath,
+                backupPath,
+                installFile.DestinationPath,
+                $"rollback copy for {installFile.RelativePath}");
+            if (rollbackFile.OriginalAttributes is { } attributes)
+            {
+                File.SetAttributes(installFile.DestinationPath, attributes);
+            }
+        }
+    }
+
     private static bool IsServerConfigInstallFile(PackageInstallFile installFile)
     {
         var relativeDirectory = Path.GetDirectoryName(installFile.RelativePath);
@@ -4145,9 +4329,15 @@ internal static partial class InstallationManager
         }
 
         var fileName = Path.GetFileName(installFile.RelativePath);
-        return string.Equals(fileName, "server-base.cfg", StringComparison.OrdinalIgnoreCase)
-            || (fileName.StartsWith("gt-", StringComparison.OrdinalIgnoreCase)
-                && fileName.EndsWith(".cfg", StringComparison.OrdinalIgnoreCase));
+        return fileName.Equals("factories.cfg", StringComparison.OrdinalIgnoreCase)
+            || fileName.Equals("lobby-casual.cfg", StringComparison.OrdinalIgnoreCase)
+            || fileName.Equals("lobby-competitive.cfg", StringComparison.OrdinalIgnoreCase)
+            || fileName.Equals("lobby-horde.cfg", StringComparison.OrdinalIgnoreCase)
+            || fileName.Equals("lobby-party.cfg", StringComparison.OrdinalIgnoreCase)
+            || fileName.Equals("mapdb.json", StringComparison.OrdinalIgnoreCase)
+            || fileName.Equals("muffmode-map-cycle.txt", StringComparison.OrdinalIgnoreCase)
+            || fileName.Equals("muffmode-map-pool.json", StringComparison.OrdinalIgnoreCase)
+            || fileName.Equals("server-base.cfg", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool FileMatchesTrustedSnapshot(string path, long expectedLength, string expectedSha256)
@@ -4303,7 +4493,7 @@ internal static partial class InstallationManager
 
     private static string GetUniqueConfigBackupDirectory(string backupRoot, string timestamp)
     {
-        var backupDirectory = Path.Combine(backupRoot, $"server-configs.before-muffmode-{timestamp}");
+        var backupDirectory = Path.Combine(backupRoot, $"server-configs-before-muffmode-{timestamp}");
         if (!PathExists(backupDirectory))
         {
             return backupDirectory;
@@ -4313,7 +4503,7 @@ internal static partial class InstallationManager
         {
             var indexedBackupDirectory = Path.Combine(
                 backupRoot,
-                $"server-configs.before-muffmode-{timestamp}-{index}");
+                $"server-configs-before-muffmode-{timestamp}-{index}");
             if (!PathExists(indexedBackupDirectory))
             {
                 return indexedBackupDirectory;
@@ -4324,7 +4514,7 @@ internal static partial class InstallationManager
         {
             var randomBackupDirectory = Path.Combine(
                 backupRoot,
-                $"server-configs.before-muffmode-{timestamp}-{Guid.NewGuid():N}");
+                $"server-configs-before-muffmode-{timestamp}-{Guid.NewGuid():N}");
             if (!PathExists(randomBackupDirectory))
             {
                 return randomBackupDirectory;
@@ -4443,7 +4633,8 @@ internal static partial class InstallationManager
         InstalledVersionMarker packageMarker,
         string packageSha256,
         IReadOnlyList<PackageInstallFile> installPlan,
-        string? backupFileName)
+        string? backupFileName,
+        string? configBackupDirectory)
     {
         var baseq2 = GetBaseq2Path(installPath);
         EnsureSafeInstallWritePath(
@@ -4473,6 +4664,7 @@ internal static partial class InstallationManager
             PackageRootName = Path.GetFileNameWithoutExtension(release.AssetName),
             BackupFileName = backupFileName,
             BackupGameDllSha256 = ComputeBackupGameDllSha256(installPath, backupFileName),
+            ConfigBackupDirectoryName = GetConfigBackupDirectoryName(installPath, configBackupDirectory),
             PackageSha256 = packageSha256,
             PackagedAtUtc = packageMarker.PackagedAtUtc,
             InstalledGameDllSha256 = ComputeInstalledGameDllSha256(installPath),
@@ -4494,7 +4686,8 @@ internal static partial class InstallationManager
         ReleaseInfo release,
         InstalledVersionMarker packageMarker,
         string packageSha256,
-        IReadOnlyList<PackageInstallFile> installPlan)
+        IReadOnlyList<PackageInstallFile> installPlan,
+        string? configBackupDirectory)
     {
         var baseq2 = GetBaseq2Path(installPath);
         var markerPath = Path.Combine(baseq2, MarkerJsonFileName);
@@ -4522,6 +4715,7 @@ internal static partial class InstallationManager
             || !string.Equals(marker.AssetDigest, release.AssetDigest, StringComparison.OrdinalIgnoreCase)
             || !string.Equals(marker.PackageRootName, Path.GetFileNameWithoutExtension(release.AssetName), StringComparison.OrdinalIgnoreCase)
             || !string.Equals(marker.BackupGameDllSha256, ComputeBackupGameDllSha256(installPath, marker.BackupFileName), StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(marker.ConfigBackupDirectoryName, GetConfigBackupDirectoryName(installPath, configBackupDirectory), StringComparison.OrdinalIgnoreCase)
             || !string.Equals(marker.PackageSha256, packageSha256, StringComparison.OrdinalIgnoreCase)
             || marker.PackagedAtUtc != packageMarker.PackagedAtUtc
             || !string.Equals(marker.InstalledGameDllSha256, ComputeInstalledGameDllSha256(installPath), StringComparison.OrdinalIgnoreCase)
@@ -4604,6 +4798,45 @@ internal static partial class InstallationManager
         return ComputeFileSha256(backupPath);
     }
 
+    private static string? GetConfigBackupDirectoryName(
+        string installPath,
+        string? configBackupDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(configBackupDirectory))
+        {
+            return null;
+        }
+
+        var normalizedDirectory = Path.TrimEndingDirectorySeparator(
+            Path.GetFullPath(configBackupDirectory));
+        var directoryName = Path.GetFileName(normalizedDirectory);
+        var hasCurrentPrefix = directoryName?.StartsWith(
+            "server-configs-before-muffmode-",
+            StringComparison.OrdinalIgnoreCase) == true;
+        var hasLegacyPrefix = directoryName?.StartsWith(
+            "server-configs.before-muffmode-",
+            StringComparison.OrdinalIgnoreCase) == true;
+        if (string.IsNullOrWhiteSpace(directoryName)
+            || !string.Equals(Path.GetFileName(directoryName), directoryName, StringComparison.Ordinal)
+            || (!hasCurrentPrefix && !hasLegacyPrefix))
+        {
+            throw new IOException("The MuffMode server-config backup marker contained an unsafe directory name.");
+        }
+
+        var expectedDirectory = Path.Combine(
+            GetBaseq2Path(installPath),
+            "MuffModeBackups",
+            directoryName);
+        if (!AreSameFullPaths(normalizedDirectory, expectedDirectory)
+            || !Directory.Exists(normalizedDirectory)
+            || IsReparsePoint(normalizedDirectory))
+        {
+            throw new IOException("The MuffMode server-config backup directory could not be verified.");
+        }
+
+        return directoryName;
+    }
+
     private static string ComputeInstalledGameDllSha256(string installPath)
     {
         var dllPath = Path.Combine(GetBaseq2Path(installPath), "game_x64.dll");
@@ -4650,6 +4883,15 @@ internal static partial class InstallationManager
         var manifest = new StringBuilder();
         foreach (var installFile in installPlan.OrderBy(file => file.RelativePath, StringComparer.OrdinalIgnoreCase))
         {
+            // The package copies these two release markers, then WriteInstalledMarker
+            // deliberately turns them into the local install receipt. Their contents
+            // are verified separately and cannot be part of an immutable destination
+            // manifest computed both before and after that rewrite.
+            if (IsMutableInstalledReceiptPath(installFile.RelativePath))
+            {
+                continue;
+            }
+
             if (!File.Exists(installFile.DestinationPath) || IsReparsePoint(installFile.DestinationPath))
             {
                 throw new IOException($"The installed manifest could not hash installed file: {installFile.RelativePath}");
@@ -4667,6 +4909,17 @@ internal static partial class InstallationManager
         }
 
         return Convert.ToHexString(SHA256.HashData(StrictUtf8Encoding.GetBytes(manifest.ToString()))).ToLowerInvariant();
+    }
+
+    internal static bool IsMutableInstalledReceiptPath(string relativePath)
+    {
+        var normalizedRelativePath = relativePath.Replace('\\', '/');
+        return normalizedRelativePath.Equals(
+                $"rerelease/baseq2/{MarkerJsonFileName}",
+                StringComparison.OrdinalIgnoreCase)
+            || normalizedRelativePath.Equals(
+                $"rerelease/baseq2/{MarkerTextFileName}",
+                StringComparison.OrdinalIgnoreCase);
     }
 
     private static string GetUpdaterVersion()

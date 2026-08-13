@@ -44,6 +44,20 @@ Pass `-RequireCopilot` when you intentionally want the release to fail unless Co
 It also writes `rerelease/baseq2/muffmode-version.json` and `rerelease/baseq2/muffmode.version` so the Windows updater and launcher can compare the installed version with GitHub releases.
 The package also includes the published Windows updater and launcher executable at the package root.
 
+The staged ZIP must remain acceptable to the last public pre-self-update
+updater. Release packaging therefore generates inert legacy `gt-*.cfg` markers
+required by v0.60.20 and validates that exact nested bridge inventory. Modern
+updaters and the installer skip those files. Do not remove the bridge until the
+supported-upgrade floor no longer includes that updater generation; adding a
+new package-owned host filename must not expand the deployed updater's stable
+bootstrap-required set.
+
+This bridge makes the mod payload installable through v0.60.20, but that build
+cannot replace its own running executable and predates server-config backups.
+Release notes must direct those users to preserve customized `gt-*.cfg` files
+and bootstrap the current updater once with the Windows installer or a manual
+replacement while the old updater is closed.
+
 ## Changelog Ledger
 
 [docs/changelog.md](changelog.md) is the source of truth for release notes, release highlights, package `CHANGELOG.md`, GitHub release notes, and the Discord announcement summary.
@@ -112,9 +126,16 @@ packaging/release-assets/
       server-base.cfg
       CONFIGS_README.md
       factories.cfg
-      bots/navigation/*.nav
+      mapdb.json
+      muffmode-map-pool.json
+      muffmode-map-cycle.txt
+      lobby-casual.cfg
+      lobby-competitive.cfg
+      lobby-party.cfg
+      lobby-horde.cfg
       maps/*.ent
       maps/*.bsp
+    bots/navigation/*.nav
 ```
 
 The script copies these files into the generated package, then overwrites/adds the built DLL, `README.html`, localized `README.<language>.html` guides, `CHANGELOG.md`, `LICENSE`, and `THIRD_PARTY_NOTICES.md`.

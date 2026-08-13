@@ -395,6 +395,45 @@ constexpr std::array<selection_relaxation_t, 3> SELECTION_RELAXATIONS = {{
 	{ false, false }
 }};
 
+inline int ResolveSelectionPlayerCount(
+	int active_humans,
+	int target_min_players,
+	int target_max_players,
+	bool cycle_start) noexcept
+{
+	if (active_humans < 0)
+		active_humans = 0;
+	if (!cycle_start)
+		return active_humans;
+
+	// A factory change selects its first map before the new match has populated.
+	// Size that map for the target factory instead of the outgoing match (or the
+	// empty server seen during boot).
+	if (target_min_players < 0)
+		target_min_players = 0;
+	if (target_max_players < target_min_players)
+		target_max_players = target_min_players;
+	if (active_humans < target_min_players)
+		return target_min_players;
+	if (active_humans > target_max_players)
+		return target_max_players;
+	return active_humans;
+}
+
+inline bool ShouldContinueMapPickRelaxation(
+	size_t candidate_count,
+	selection_relaxation_t relaxation) noexcept
+{
+	if (candidate_count > 1)
+		return false;
+	if (relaxation.enforce_cooldown)
+		return true;
+
+	// Once at least one player-count-valid map exists, do not add unsuitable
+	// maps merely to fill a ballot. The caller suppresses a one-map "pick".
+	return relaxation.enforce_player_bounds && candidate_count == 0;
+}
+
 enum class reload_action_t : uint8_t {
 	none,
 	pool,

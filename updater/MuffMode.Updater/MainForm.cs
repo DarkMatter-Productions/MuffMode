@@ -20,7 +20,7 @@ internal sealed class MainForm : Form
     private readonly Label _statusLabel;
     private readonly Label _latestVersionLabel;
     private readonly Label _localVersionLabel;
-    private readonly TextBox _changelogTextBox;
+    private readonly RichTextBox _changelogTextBox;
     private readonly CheckBox _autoLaunchCheckBox;
     private readonly CheckBox _includePrereleaseCheckBox;
     private readonly ProgressBar _progressBar;
@@ -109,18 +109,20 @@ internal sealed class MainForm : Form
         _latestVersionLabel = CreateInfoLabel("Latest: not checked");
         _localVersionLabel = CreateInfoLabel("Local: not checked");
 
-        _changelogTextBox = new TextBox
+        _changelogTextBox = new RichTextBox
         {
             Dock = DockStyle.Fill,
-            Multiline = true,
             ReadOnly = true,
-            ScrollBars = ScrollBars.Vertical,
+            DetectUrls = true,
+            WordWrap = true,
+            ScrollBars = RichTextBoxScrollBars.Vertical,
             BackColor = Color.FromArgb(18, 20, 21),
             ForeColor = Color.FromArgb(229, 232, 225),
             BorderStyle = BorderStyle.FixedSingle,
-            Font = new Font("Consolas", 9.5F),
+            Font = new Font("Segoe UI", 9.5F),
             Text = "Release notes will appear here after the GitHub check completes."
         };
+        _changelogTextBox.LinkClicked += (_, eventArgs) => OpenReleaseNotesLink(eventArgs.LinkText ?? "");
 
         _autoLaunchCheckBox = new CheckBox
         {
@@ -542,7 +544,13 @@ internal sealed class MainForm : Form
         try
         {
             _latestRelease = await _releaseClient.GetLatestReleaseAsync(includePrereleases, cancellationToken);
-            _changelogTextBox.Text = BuildChangelogText(_latestRelease);
+            var markdown = string.IsNullOrWhiteSpace(_latestRelease.Changelog)
+                ? "No changelog text was published with this release."
+                : TruncateForDisplay(
+                    _latestRelease.Changelog.Trim(),
+                    MaxDisplayedChangelogCharacters,
+                    "[Release notes truncated for display.]");
+            ReleaseNotesRenderer.Render(_changelogTextBox, _latestRelease, markdown);
             UpdateLocalInstallState();
             UpdateVersionLabels();
             SetStatus(GetReleaseStatusText());
@@ -728,6 +736,31 @@ internal sealed class MainForm : Form
         {
             UpdaterLog.WriteException("Could not open release page.", ex);
             ShowMessage(ex.Message, "Could not open release page", MessageBoxIcon.Error);
+        }
+    }
+
+    private void OpenReleaseNotesLink(string linkText)
+    {
+        if (!Uri.TryCreate(linkText, UriKind.Absolute, out var uri)
+            || (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp))
+        {
+            SetStatus("The selected release-note link is not a supported web address.");
+            return;
+        }
+
+        try
+        {
+            Process.Start(new ProcessStartInfo(uri.AbsoluteUri)
+            {
+                UseShellExecute = true
+            });
+            SetStatus("Opened release-note link.");
+            UpdaterLog.WriteInfo($"Opened release-note link: {uri.AbsoluteUri}");
+        }
+        catch (Exception ex)
+        {
+            UpdaterLog.WriteException("Could not open release-note link.", ex);
+            ShowMessage(ex.Message, "Could not open link", MessageBoxIcon.Error);
         }
     }
 
@@ -968,30 +1001,6 @@ internal sealed class MainForm : Form
         Close();
     }
 
-    private static string BuildChangelogText(ReleaseInfo release)
-    {
-        var changelog = string.IsNullOrWhiteSpace(release.Changelog)
-            ? "No changelog text was published with this release."
-            : TruncateForDisplay(
-                release.Changelog.Trim(),
-                MaxDisplayedChangelogCharacters,
-                "[Release notes truncated for display.]");
-        var lines = new List<string>
-        {
-            release.Name,
-            release.HtmlUrl,
-            $"Channel: {release.Channel}{(release.IsPrerelease ? " prerelease" : "")}",
-            release.PublishedAt is null ? "" : $"Published: {release.PublishedAt:yyyy-MM-dd HH:mm} UTC",
-            $"Package: {release.AssetName}{(release.AssetSize is > 0 ? $" ({FormatByteCount(release.AssetSize.Value)})" : "")}",
-            release.AssetUpdatedAt is null ? "" : $"Package updated: {release.AssetUpdatedAt:yyyy-MM-dd HH:mm} UTC",
-            string.IsNullOrWhiteSpace(release.AssetDigest) ? "" : $"Package digest: {release.AssetDigest}",
-            "",
-            changelog
-        };
-
-        return string.Join(Environment.NewLine, lines.Where(line => line is not null));
-    }
-
     private static string BuildErrorText(string heading, string message)
     {
         var detail = string.IsNullOrWhiteSpace(message)
@@ -1071,22 +1080,6 @@ internal sealed class MainForm : Form
         return text.Length <= maxCharacters
             ? text
             : $"{text[..maxCharacters]}{Environment.NewLine}{Environment.NewLine}{truncationNotice}";
-    }
-
-    private static string FormatByteCount(long bytes)
-    {
-        var units = new[] { "bytes", "KB", "MB", "GB" };
-        var value = (double)bytes;
-        var unitIndex = 0;
-        while (value >= 1024 && unitIndex < units.Length - 1)
-        {
-            value /= 1024;
-            unitIndex++;
-        }
-
-        return unitIndex == 0
-            ? $"{bytes:N0} {units[unitIndex]}"
-            : $"{value:N1} {units[unitIndex]}";
     }
 
     private static string CollapseWhitespace(string text)

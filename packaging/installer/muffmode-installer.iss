@@ -20,7 +20,8 @@
   #define LauncherIconFile "..\..\updater\MuffMode.Updater\Assets\MuffModeLauncher.ico"
 #endif
 #define Baseq2RelativePath "rerelease\baseq2"
-#define MapsRelativePath "rerelease\maps"
+#define MapsRelativePath "rerelease\baseq2\maps"
+#define LegacyMapsRelativePath "rerelease\maps"
 #define GameDllRelativePath Baseq2RelativePath + "\game_x64.dll"
 #define OriginalReadmesRelativePath Baseq2RelativePath + "\docs\muffmode\maps\original-readmes"
 
@@ -104,11 +105,26 @@
 #if FileExists(PackageRoot + "\rerelease\baseq2\CONFIGS_README.md") == 0
   #error PackageRoot is missing rerelease\baseq2\CONFIGS_README.md.
 #endif
-#if FileExists(PackageRoot + "\rerelease\baseq2\muffmode-map-cycle.example.txt") == 0
-  #error PackageRoot is missing rerelease\baseq2\muffmode-map-cycle.example.txt.
+#if FileExists(PackageRoot + "\rerelease\baseq2\mapdb.json") == 0
+  #error PackageRoot is missing rerelease\baseq2\mapdb.json.
 #endif
-#if FileExists(PackageRoot + "\rerelease\baseq2\muffmode-map-pool.example.json") == 0
-  #error PackageRoot is missing rerelease\baseq2\muffmode-map-pool.example.json.
+#if FileExists(PackageRoot + "\rerelease\baseq2\muffmode-map-cycle.txt") == 0
+  #error PackageRoot is missing rerelease\baseq2\muffmode-map-cycle.txt.
+#endif
+#if FileExists(PackageRoot + "\rerelease\baseq2\muffmode-map-pool.json") == 0
+  #error PackageRoot is missing rerelease\baseq2\muffmode-map-pool.json.
+#endif
+#if FileExists(PackageRoot + "\rerelease\baseq2\lobby-casual.cfg") == 0
+  #error PackageRoot is missing rerelease\baseq2\lobby-casual.cfg.
+#endif
+#if FileExists(PackageRoot + "\rerelease\baseq2\lobby-competitive.cfg") == 0
+  #error PackageRoot is missing rerelease\baseq2\lobby-competitive.cfg.
+#endif
+#if FileExists(PackageRoot + "\rerelease\baseq2\lobby-horde.cfg") == 0
+  #error PackageRoot is missing rerelease\baseq2\lobby-horde.cfg.
+#endif
+#if FileExists(PackageRoot + "\rerelease\baseq2\lobby-party.cfg") == 0
+  #error PackageRoot is missing rerelease\baseq2\lobby-party.cfg.
 #endif
 #if FileExists(PackageRoot + "\rerelease\baseq2\server-base.cfg") == 0
   #error PackageRoot is missing rerelease\baseq2\server-base.cfg.
@@ -117,61 +133,61 @@
   #error PackageRoot is missing rerelease\baseq2\factories.cfg.
 #endif
 #if FileExists(PackageRoot + "\" + MapsRelativePath + "\mm-aerow.bsp") == 0
-  #error PackageRoot is missing rerelease\maps\mm-aerow.bsp.
+  #error PackageRoot is missing rerelease\baseq2\maps\mm-aerow.bsp.
 #endif
-#if FileExists(PackageRoot + "\" + MapsRelativePath + "\mm-coldzero.bsp") == 0
-  #error PackageRoot is missing rerelease\maps\mm-coldzero.bsp.
+#if FileExists(PackageRoot + "\" + MapsRelativePath + "\mm-czero.bsp") == 0
+  #error PackageRoot is missing rerelease\baseq2\maps\mm-czero.bsp.
 #endif
 #if FileExists(PackageRoot + "\" + MapsRelativePath + "\mm-crucible.bsp") == 0
-  #error PackageRoot is missing rerelease\maps\mm-crucible.bsp.
+  #error PackageRoot is missing rerelease\baseq2\maps\mm-crucible.bsp.
 #endif
-#if FileExists(PackageRoot + "\" + MapsRelativePath + "\mm-kmachine.bsp") == 0
-  #error PackageRoot is missing rerelease\maps\mm-kmachine.bsp.
+#if FileExists(PackageRoot + "\" + MapsRelativePath + "\mm-kmach.bsp") == 0
+  #error PackageRoot is missing rerelease\baseq2\maps\mm-kmach.bsp.
 #endif
 #if FileExists(PackageRoot + "\" + MapsRelativePath + "\mm-powertrip.bsp") == 0
-  #error PackageRoot is missing rerelease\maps\mm-powertrip.bsp.
+  #error PackageRoot is missing rerelease\baseq2\maps\mm-powertrip.bsp.
 #endif
 #if FileExists(PackageRoot + "\" + MapsRelativePath + "\mm-rage.bsp") == 0
-  #error PackageRoot is missing rerelease\maps\mm-rage.bsp.
+  #error PackageRoot is missing rerelease\baseq2\maps\mm-rage.bsp.
 #endif
-#if FileExists(PackageRoot + "\" + MapsRelativePath + "\mm-railgun101.bsp") == 0
-  #error PackageRoot is missing rerelease\maps\mm-railgun101.bsp.
+#if FileExists(PackageRoot + "\" + MapsRelativePath + "\mm-rail101.bsp") == 0
+  #error PackageRoot is missing rerelease\baseq2\maps\mm-rail101.bsp.
 #endif
-#if FileExists(PackageRoot + "\" + MapsRelativePath + "\mm-reclamation.bsp") == 0
-  #error PackageRoot is missing rerelease\maps\mm-reclamation.bsp.
+#if FileExists(PackageRoot + "\" + MapsRelativePath + "\mm-reclam.bsp") == 0
+  #error PackageRoot is missing rerelease\baseq2\maps\mm-reclam.bsp.
 #endif
 #if FileExists(PackageRoot + "\" + MapsRelativePath + "\mm-recycler.bsp") == 0
-  #error PackageRoot is missing rerelease\maps\mm-recycler.bsp.
+  #error PackageRoot is missing rerelease\baseq2\maps\mm-recycler.bsp.
 #endif
 #if FileExists(PackageRoot + "\" + MapsRelativePath + "\2box4.ent") == 0
-  #error PackageRoot is missing rerelease\maps\2box4.ent.
+  #error PackageRoot is missing rerelease\baseq2\maps\2box4.ent.
 #endif
 #if FileExists(PackageRoot + "\" + MapsRelativePath + "\aerowalk.ent") == 0
-  #error PackageRoot is missing rerelease\maps\aerowalk.ent.
+  #error PackageRoot is missing rerelease\baseq2\maps\aerowalk.ent.
 #endif
 #if FileExists(PackageRoot + "\" + MapsRelativePath + "\grom_dm3.ent") == 0
-  #error PackageRoot is missing rerelease\maps\grom_dm3.ent.
+  #error PackageRoot is missing rerelease\baseq2\maps\grom_dm3.ent.
 #endif
 #if FileExists(PackageRoot + "\" + MapsRelativePath + "\kmachine.ent") == 0
-  #error PackageRoot is missing rerelease\maps\kmachine.ent.
+  #error PackageRoot is missing rerelease\baseq2\maps\kmachine.ent.
 #endif
 #if FileExists(PackageRoot + "\" + MapsRelativePath + "\koldduel1.ent") == 0
-  #error PackageRoot is missing rerelease\maps\koldduel1.ent.
+  #error PackageRoot is missing rerelease\baseq2\maps\koldduel1.ent.
 #endif
 #if FileExists(PackageRoot + "\" + MapsRelativePath + "\paradm4.ent") == 0
-  #error PackageRoot is missing rerelease\maps\paradm4.ent.
+  #error PackageRoot is missing rerelease\baseq2\maps\paradm4.ent.
 #endif
 #if FileExists(PackageRoot + "\" + MapsRelativePath + "\trdm04a.ent") == 0
-  #error PackageRoot is missing rerelease\maps\trdm04a.ent.
+  #error PackageRoot is missing rerelease\baseq2\maps\trdm04a.ent.
 #endif
 #if FileExists(PackageRoot + "\" + MapsRelativePath + "\vd6dm2.ent") == 0
-  #error PackageRoot is missing rerelease\maps\vd6dm2.ent.
+  #error PackageRoot is missing rerelease\baseq2\maps\vd6dm2.ent.
 #endif
 #if FileExists(PackageRoot + "\" + MapsRelativePath + "\ven_dm2.ent") == 0
-  #error PackageRoot is missing rerelease\maps\ven_dm2.ent.
+  #error PackageRoot is missing rerelease\baseq2\maps\ven_dm2.ent.
 #endif
 #if FileExists(PackageRoot + "\" + MapsRelativePath + "\ztn2dm5.ent") == 0
-  #error PackageRoot is missing rerelease\maps\ztn2dm5.ent.
+  #error PackageRoot is missing rerelease\baseq2\maps\ztn2dm5.ent.
 #endif
 #if FileExists(LauncherIconFile) == 0
   #error LauncherIconFile must point at an existing .ico file.
@@ -202,18 +218,23 @@
 #define PackageOriginalReadmeZtn2dm3Hash GetSHA256OfFile(PackageRoot + "\" + OriginalReadmesRelativePath + "\ztn2dm3-readme.txt")
 #define PackageOriginalReadmeZtn2dm5Hash GetSHA256OfFile(PackageRoot + "\" + OriginalReadmesRelativePath + "\ztn2dm5-readme.txt")
 #define PackageConfigReadmeHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\CONFIGS_README.md")
-#define PackageMapCycleExampleHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\muffmode-map-cycle.example.txt")
-#define PackageMapPoolExampleHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\muffmode-map-pool.example.json")
+#define PackageMapDbHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\mapdb.json")
+#define PackageMapCycleHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\muffmode-map-cycle.txt")
+#define PackageMapPoolHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\muffmode-map-pool.json")
+#define PackageLobbyCasualHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\lobby-casual.cfg")
+#define PackageLobbyCompetitiveHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\lobby-competitive.cfg")
+#define PackageLobbyHordeHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\lobby-horde.cfg")
+#define PackageLobbyPartyHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\lobby-party.cfg")
 #define PackageServerBaseHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\server-base.cfg")
 #define PackageFactoriesHash GetSHA256OfFile(PackageRoot + "\rerelease\baseq2\factories.cfg")
 #define PackageMapAerowalkHash GetSHA256OfFile(PackageRoot + "\" + MapsRelativePath + "\mm-aerow.bsp")
-#define PackageMapColdzeroHash GetSHA256OfFile(PackageRoot + "\" + MapsRelativePath + "\mm-coldzero.bsp")
+#define PackageMapColdzeroHash GetSHA256OfFile(PackageRoot + "\" + MapsRelativePath + "\mm-czero.bsp")
 #define PackageMapCrucibleHash GetSHA256OfFile(PackageRoot + "\" + MapsRelativePath + "\mm-crucible.bsp")
-#define PackageMapKmachineHash GetSHA256OfFile(PackageRoot + "\" + MapsRelativePath + "\mm-kmachine.bsp")
+#define PackageMapKmachineHash GetSHA256OfFile(PackageRoot + "\" + MapsRelativePath + "\mm-kmach.bsp")
 #define PackageMapPowertripHash GetSHA256OfFile(PackageRoot + "\" + MapsRelativePath + "\mm-powertrip.bsp")
 #define PackageMapRageHash GetSHA256OfFile(PackageRoot + "\" + MapsRelativePath + "\mm-rage.bsp")
-#define PackageMapRailgun101Hash GetSHA256OfFile(PackageRoot + "\" + MapsRelativePath + "\mm-railgun101.bsp")
-#define PackageMapReclamationHash GetSHA256OfFile(PackageRoot + "\" + MapsRelativePath + "\mm-reclamation.bsp")
+#define PackageMapRailgun101Hash GetSHA256OfFile(PackageRoot + "\" + MapsRelativePath + "\mm-rail101.bsp")
+#define PackageMapReclamationHash GetSHA256OfFile(PackageRoot + "\" + MapsRelativePath + "\mm-reclam.bsp")
 #define PackageMapRecyclerHash GetSHA256OfFile(PackageRoot + "\" + MapsRelativePath + "\mm-recycler.bsp")
 #define PackageEntity2Box4Hash GetSHA256OfFile(PackageRoot + "\" + MapsRelativePath + "\2box4.ent")
 #define PackageEntityAerowalkHash GetSHA256OfFile(PackageRoot + "\" + MapsRelativePath + "\aerowalk.ent")
@@ -275,7 +296,7 @@ VersionInfoProductVersion={#AppVersion}
 VersionInfoVersion={#AppVersion}
 
 [Files]
-Source: "{#PackageRoot}\*"; DestDir: "{app}"; Excludes: "rerelease\baseq2\MuffModeBackups\*,rerelease\baseq2\muffmode-installer-write-test-*.tmp,rerelease\baseq2\muffmode-install-receipt.txt"; Flags: ignoreversion recursesubdirs createallsubdirs; BeforeInstall: ValidateCurrentPayloadDestination
+Source: "{#PackageRoot}\*"; DestDir: "{app}"; Excludes: "rerelease\baseq2\MuffModeBackups\*,rerelease\baseq2\gt-*.cfg,rerelease\baseq2\muffmode-installer-write-test-*.tmp,rerelease\baseq2\muffmode-install-receipt.txt"; Flags: ignoreversion recursesubdirs createallsubdirs; BeforeInstall: ValidateCurrentPayloadDestination
 
 [Tasks]
 Name: "desktopshortcut"; Description: "Create a desktop shortcut for Muff Mode Updater & Launcher"; GroupDescription: "Shortcuts:"; Flags: unchecked
@@ -587,9 +608,32 @@ begin
   TotalBytes := TotalBytes + ConfigBytes;
 end;
 
-function ValidateServerConfigBackupSources(Baseq2Dir: String): String;
+function ValidateServerConfigBackupSource(
+  Baseq2Dir: String;
+  FileName: String;
+  var ConfigCount: Integer;
+  var TotalBytes: Int64): String;
 var
   ConfigPath: String;
+begin
+  Result := '';
+  ConfigPath := AddBackslash(Baseq2Dir) + FileName;
+  if not FileExists(ConfigPath) then
+    Exit;
+
+  if IsExistingReparsePoint(ConfigPath) then
+  begin
+    Result :=
+      'An existing Muff Mode server config is a reparse point and cannot be read safely:' +
+      #13#10#13#10 + ConfigPath;
+    Exit;
+  end;
+
+  Result := AddServerConfigToBackupBudget(ConfigPath, ConfigCount, TotalBytes);
+end;
+
+function ValidateServerConfigBackupSources(Baseq2Dir: String): String;
+var
   ConfigCount: Integer;
   TotalBytes: Int64;
 begin
@@ -597,29 +641,23 @@ begin
   ConfigCount := 0;
   TotalBytes := 0;
 
-  ConfigPath := AddBackslash(Baseq2Dir) + 'server-base.cfg';
-  if FileExists(ConfigPath) then
-  begin
-    Result := AddServerConfigToBackupBudget(ConfigPath, ConfigCount, TotalBytes);
-    if Result <> '' then
-      Exit;
-  end;
-
-  ConfigPath := AddBackslash(Baseq2Dir) + 'factories.cfg';
-  if FileExists(ConfigPath) then
-  begin
-    if IsExistingReparsePoint(ConfigPath) then
-    begin
-      Result :=
-        'The existing factories.cfg is a reparse point and cannot be read safely:' +
-        #13#10#13#10 + ConfigPath;
-      Exit;
-    end;
-
-    Result := AddServerConfigToBackupBudget(ConfigPath, ConfigCount, TotalBytes);
-    if Result <> '' then
-      Exit;
-  end;
+  Result := ValidateServerConfigBackupSource(Baseq2Dir, 'server-base.cfg', ConfigCount, TotalBytes);
+  if Result <> '' then Exit;
+  Result := ValidateServerConfigBackupSource(Baseq2Dir, 'factories.cfg', ConfigCount, TotalBytes);
+  if Result <> '' then Exit;
+  Result := ValidateServerConfigBackupSource(Baseq2Dir, 'mapdb.json', ConfigCount, TotalBytes);
+  if Result <> '' then Exit;
+  Result := ValidateServerConfigBackupSource(Baseq2Dir, 'muffmode-map-pool.json', ConfigCount, TotalBytes);
+  if Result <> '' then Exit;
+  Result := ValidateServerConfigBackupSource(Baseq2Dir, 'muffmode-map-cycle.txt', ConfigCount, TotalBytes);
+  if Result <> '' then Exit;
+  Result := ValidateServerConfigBackupSource(Baseq2Dir, 'lobby-casual.cfg', ConfigCount, TotalBytes);
+  if Result <> '' then Exit;
+  Result := ValidateServerConfigBackupSource(Baseq2Dir, 'lobby-competitive.cfg', ConfigCount, TotalBytes);
+  if Result <> '' then Exit;
+  Result := ValidateServerConfigBackupSource(Baseq2Dir, 'lobby-horde.cfg', ConfigCount, TotalBytes);
+  if Result <> '' then Exit;
+  Result := ValidateServerConfigBackupSource(Baseq2Dir, 'lobby-party.cfg', ConfigCount, TotalBytes);
 end;
 
 function ValidateBackupFileSize(
@@ -717,9 +755,19 @@ begin
   if Result <> '' then Exit;
   Result := ValidatePayloadFileIsNotReparsePoint(AddBackslash(Baseq2Dir) + 'CONFIGS_README.md');
   if Result <> '' then Exit;
-  Result := ValidatePayloadFileIsNotReparsePoint(AddBackslash(Baseq2Dir) + 'muffmode-map-cycle.example.txt');
+  Result := ValidatePayloadFileIsNotReparsePoint(AddBackslash(Baseq2Dir) + 'mapdb.json');
   if Result <> '' then Exit;
-  Result := ValidatePayloadFileIsNotReparsePoint(AddBackslash(Baseq2Dir) + 'muffmode-map-pool.example.json');
+  Result := ValidatePayloadFileIsNotReparsePoint(AddBackslash(Baseq2Dir) + 'muffmode-map-cycle.txt');
+  if Result <> '' then Exit;
+  Result := ValidatePayloadFileIsNotReparsePoint(AddBackslash(Baseq2Dir) + 'muffmode-map-pool.json');
+  if Result <> '' then Exit;
+  Result := ValidatePayloadFileIsNotReparsePoint(AddBackslash(Baseq2Dir) + 'lobby-casual.cfg');
+  if Result <> '' then Exit;
+  Result := ValidatePayloadFileIsNotReparsePoint(AddBackslash(Baseq2Dir) + 'lobby-competitive.cfg');
+  if Result <> '' then Exit;
+  Result := ValidatePayloadFileIsNotReparsePoint(AddBackslash(Baseq2Dir) + 'lobby-horde.cfg');
+  if Result <> '' then Exit;
+  Result := ValidatePayloadFileIsNotReparsePoint(AddBackslash(Baseq2Dir) + 'lobby-party.cfg');
   if Result <> '' then Exit;
   Result := ValidatePayloadFileIsNotReparsePoint(AddBackslash(Baseq2Dir) + 'server-base.cfg');
   if Result <> '' then Exit;
@@ -831,7 +879,7 @@ var
   Size: Int64;
   ActualHash: String;
 begin
-  ObsoleteFile := AddBackslash(WizardDirValue) + '{#MapsRelativePath}\mm-aerowalk.bsp';
+  ObsoleteFile := AddBackslash(WizardDirValue) + '{#LegacyMapsRelativePath}\mm-aerowalk.bsp';
 
   try
     Attributes := GetFileAttributesW(ObsoleteFile);
@@ -1618,23 +1666,67 @@ begin
     DeleteFile(BackupFile);
 end;
 
+function BackupServerConfigFile(
+  Baseq2Dir: String;
+  BackupDir: String;
+  FileName: String;
+  var BackupCount: Integer;
+  var BackupBytes: Int64): String;
+var
+  SourceFile: String;
+  BackupFile: String;
+begin
+  Result := '';
+  SourceFile := Baseq2Dir + FileName;
+  if not FileExists(SourceFile) then
+    Exit;
+
+  if IsExistingReparsePoint(SourceFile) then
+  begin
+    Result :=
+      'An existing Muff Mode server config became a reparse point before backup:' +
+      #13#10#13#10 + SourceFile;
+    Exit;
+  end;
+
+  Result := AddServerConfigToBackupBudget(SourceFile, BackupCount, BackupBytes);
+  if Result <> '' then
+    Exit;
+
+  BackupFile := AddBackslash(BackupDir) + FileName;
+  if not CopyServerConfigBackup(SourceFile, BackupFile) then
+  begin
+    Result :=
+      'Could not back up an existing Muff Mode server config before installing.' +
+      #13#10#13#10 +
+      'Close any tools using this file, check folder permissions, then run this installer again.' +
+      #13#10#13#10 +
+      'Source:' + #13#10 + SourceFile + #13#10#13#10 +
+      'Backup target:' + #13#10 + BackupFile;
+  end;
+end;
+
 function BackupExistingServerConfigs(): String;
 var
   Baseq2Dir: String;
   BackupRoot: String;
   BackupDir: String;
-  SourceFile: String;
-  BackupFile: String;
   HasConfigFiles: Boolean;
   BackupCount: Integer;
   BackupBytes: Int64;
-  BudgetError: String;
 begin
   Result := '';
   Baseq2Dir := AddBackslash(GetBaseq2Dir(WizardDirValue));
   HasConfigFiles :=
     FileExists(Baseq2Dir + 'server-base.cfg') or
-    FileExists(Baseq2Dir + 'factories.cfg');
+    FileExists(Baseq2Dir + 'factories.cfg') or
+    FileExists(Baseq2Dir + 'mapdb.json') or
+    FileExists(Baseq2Dir + 'muffmode-map-pool.json') or
+    FileExists(Baseq2Dir + 'muffmode-map-cycle.txt') or
+    FileExists(Baseq2Dir + 'lobby-casual.cfg') or
+    FileExists(Baseq2Dir + 'lobby-competitive.cfg') or
+    FileExists(Baseq2Dir + 'lobby-horde.cfg') or
+    FileExists(Baseq2Dir + 'lobby-party.cfg');
 
   if not HasConfigFiles then
     Exit;
@@ -1667,57 +1759,24 @@ begin
 
   BackupCount := 0;
   BackupBytes := 0;
-  SourceFile := Baseq2Dir + 'server-base.cfg';
-  if FileExists(SourceFile) then
-  begin
-    if IsExistingReparsePoint(SourceFile) then
-    begin
-      Result := 'The existing server-base.cfg became a reparse point before backup:' + #13#10#13#10 + SourceFile;
-      Exit;
-    end;
-    BudgetError := AddServerConfigToBackupBudget(SourceFile, BackupCount, BackupBytes);
-    if BudgetError <> '' then
-    begin
-      Result := BudgetError;
-      Exit;
-    end;
-
-    BackupFile := AddBackslash(BackupDir) + 'server-base.cfg';
-    if not CopyServerConfigBackup(SourceFile, BackupFile) then
-    begin
-      Result :=
-        'Could not back up the existing server-base.cfg before installing Muff Mode.' + #13#10#13#10 +
-        'Close any tools using this file, check folder permissions, then run this installer again.' + #13#10#13#10 +
-        'Backup target:' + #13#10 + BackupFile;
-      Exit;
-    end;
-  end;
-
-  SourceFile := Baseq2Dir + 'factories.cfg';
-  if FileExists(SourceFile) then
-  begin
-    if IsExistingReparsePoint(SourceFile) then
-    begin
-      Result := 'The existing factories.cfg became a reparse point before backup:' + #13#10#13#10 + SourceFile;
-      Exit;
-    end;
-    BudgetError := AddServerConfigToBackupBudget(SourceFile, BackupCount, BackupBytes);
-    if BudgetError <> '' then
-    begin
-      Result := BudgetError;
-      Exit;
-    end;
-
-    BackupFile := AddBackslash(BackupDir) + 'factories.cfg';
-    if not CopyServerConfigBackup(SourceFile, BackupFile) then
-    begin
-      Result :=
-        'Could not back up the existing factories.cfg before installing Muff Mode.' + #13#10#13#10 +
-        'Close any tools using this file, check folder permissions, then run this installer again.' + #13#10#13#10 +
-        'Backup target:' + #13#10 + BackupFile;
-      Exit;
-    end;
-  end;
+  Result := BackupServerConfigFile(Baseq2Dir, BackupDir, 'server-base.cfg', BackupCount, BackupBytes);
+  if Result <> '' then Exit;
+  Result := BackupServerConfigFile(Baseq2Dir, BackupDir, 'factories.cfg', BackupCount, BackupBytes);
+  if Result <> '' then Exit;
+  Result := BackupServerConfigFile(Baseq2Dir, BackupDir, 'mapdb.json', BackupCount, BackupBytes);
+  if Result <> '' then Exit;
+  Result := BackupServerConfigFile(Baseq2Dir, BackupDir, 'muffmode-map-pool.json', BackupCount, BackupBytes);
+  if Result <> '' then Exit;
+  Result := BackupServerConfigFile(Baseq2Dir, BackupDir, 'muffmode-map-cycle.txt', BackupCount, BackupBytes);
+  if Result <> '' then Exit;
+  Result := BackupServerConfigFile(Baseq2Dir, BackupDir, 'lobby-casual.cfg', BackupCount, BackupBytes);
+  if Result <> '' then Exit;
+  Result := BackupServerConfigFile(Baseq2Dir, BackupDir, 'lobby-competitive.cfg', BackupCount, BackupBytes);
+  if Result <> '' then Exit;
+  Result := BackupServerConfigFile(Baseq2Dir, BackupDir, 'lobby-horde.cfg', BackupCount, BackupBytes);
+  if Result <> '' then Exit;
+  Result := BackupServerConfigFile(Baseq2Dir, BackupDir, 'lobby-party.cfg', BackupCount, BackupBytes);
+  if Result <> '' then Exit;
 
   LastConfigBackupDir := BackupDir;
   Log('Backed up ' + IntToStr(BackupCount) + ' existing server config(s) to: ' + BackupDir);
@@ -2101,16 +2160,33 @@ begin
     Exit;
 
   Result := VerifyInstalledFileHash(
-    Baseq2Dir + 'muffmode-map-cycle.example.txt',
-    '{#PackageMapCycleExampleHash}',
-    'structured map-cycle example');
+    Baseq2Dir + 'mapdb.json',
+    '{#PackageMapDbHash}',
+    'KEX lobby map catalog');
   if Result <> '' then
     Exit;
 
   Result := VerifyInstalledFileHash(
-    Baseq2Dir + 'muffmode-map-pool.example.json',
-    '{#PackageMapPoolExampleHash}',
-    'structured map-pool example');
+    Baseq2Dir + 'muffmode-map-cycle.txt',
+    '{#PackageMapCycleHash}',
+    'structured map cycle');
+  if Result <> '' then
+    Exit;
+
+  Result := VerifyInstalledFileHash(
+    Baseq2Dir + 'muffmode-map-pool.json',
+    '{#PackageMapPoolHash}',
+    'structured map pool');
+  if Result <> '' then
+    Exit;
+
+  Result := VerifyInstalledFileHash(Baseq2Dir + 'lobby-casual.cfg', '{#PackageLobbyCasualHash}', 'casual lobby config');
+  if Result <> '' then Exit;
+  Result := VerifyInstalledFileHash(Baseq2Dir + 'lobby-competitive.cfg', '{#PackageLobbyCompetitiveHash}', 'competitive lobby config');
+  if Result <> '' then Exit;
+  Result := VerifyInstalledFileHash(Baseq2Dir + 'lobby-horde.cfg', '{#PackageLobbyHordeHash}', 'Horde lobby config');
+  if Result <> '' then Exit;
+  Result := VerifyInstalledFileHash(Baseq2Dir + 'lobby-party.cfg', '{#PackageLobbyPartyHash}', 'party lobby config');
   if Result <> '' then
     Exit;
 
@@ -2168,19 +2244,19 @@ begin
 
   Result := VerifyInstalledFileHash(MapsDir + 'mm-aerow.bsp', '{#PackageMapAerowalkHash}', 'Aerowalk map BSP');
   if Result <> '' then Exit;
-  Result := VerifyInstalledFileHash(MapsDir + 'mm-coldzero.bsp', '{#PackageMapColdzeroHash}', 'Cold Zero map BSP');
+  Result := VerifyInstalledFileHash(MapsDir + 'mm-czero.bsp', '{#PackageMapColdzeroHash}', 'Cold Zero map BSP');
   if Result <> '' then Exit;
   Result := VerifyInstalledFileHash(MapsDir + 'mm-crucible.bsp', '{#PackageMapCrucibleHash}', 'Crucible map BSP');
   if Result <> '' then Exit;
-  Result := VerifyInstalledFileHash(MapsDir + 'mm-kmachine.bsp', '{#PackageMapKmachineHash}', 'Kmachine map BSP');
+  Result := VerifyInstalledFileHash(MapsDir + 'mm-kmach.bsp', '{#PackageMapKmachineHash}', 'Kmachine map BSP');
   if Result <> '' then Exit;
   Result := VerifyInstalledFileHash(MapsDir + 'mm-powertrip.bsp', '{#PackageMapPowertripHash}', 'Powertrip map BSP');
   if Result <> '' then Exit;
   Result := VerifyInstalledFileHash(MapsDir + 'mm-rage.bsp', '{#PackageMapRageHash}', 'Rage map BSP');
   if Result <> '' then Exit;
-  Result := VerifyInstalledFileHash(MapsDir + 'mm-railgun101.bsp', '{#PackageMapRailgun101Hash}', 'Railgun 101 map BSP');
+  Result := VerifyInstalledFileHash(MapsDir + 'mm-rail101.bsp', '{#PackageMapRailgun101Hash}', 'Railgun 101 map BSP');
   if Result <> '' then Exit;
-  Result := VerifyInstalledFileHash(MapsDir + 'mm-reclamation.bsp', '{#PackageMapReclamationHash}', 'Reclamation map BSP');
+  Result := VerifyInstalledFileHash(MapsDir + 'mm-reclam.bsp', '{#PackageMapReclamationHash}', 'Reclamation map BSP');
   if Result <> '' then Exit;
   Result := VerifyInstalledFileHash(MapsDir + 'mm-recycler.bsp', '{#PackageMapRecyclerHash}', 'Recycler map BSP');
   if Result <> '' then Exit;
@@ -2459,8 +2535,13 @@ begin
     'EntityVenDm2SHA256: {#PackageEntityVenDm2Hash}' + #13#10 +
     'EntityZtn2dm5SHA256: {#PackageEntityZtn2dm5Hash}' + #13#10 +
     'ServerConfigGuideSHA256: {#PackageConfigReadmeHash}' + #13#10 +
-    'MapCycleExampleSHA256: {#PackageMapCycleExampleHash}' + #13#10 +
-    'MapPoolExampleSHA256: {#PackageMapPoolExampleHash}' + #13#10 +
+    'MapDbSHA256: {#PackageMapDbHash}' + #13#10 +
+    'MapCycleSHA256: {#PackageMapCycleHash}' + #13#10 +
+    'MapPoolSHA256: {#PackageMapPoolHash}' + #13#10 +
+    'LobbyCasualSHA256: {#PackageLobbyCasualHash}' + #13#10 +
+    'LobbyCompetitiveSHA256: {#PackageLobbyCompetitiveHash}' + #13#10 +
+    'LobbyHordeSHA256: {#PackageLobbyHordeHash}' + #13#10 +
+    'LobbyPartySHA256: {#PackageLobbyPartyHash}' + #13#10 +
     'ServerBaseConfigSHA256: {#PackageServerBaseHash}' + #13#10 +
     'FactoriesConfigSHA256: {#PackageFactoriesHash}' + #13#10;
 
@@ -2558,7 +2639,7 @@ begin
         BackupMessage := '';
         if LastConfigBackupDir <> '' then
           BackupMessage :=
-            'Existing server-base.cfg and factories.cfg files were backed up before the packaged configs were installed:' +
+            'Existing Muff Mode server config and map-policy files were backed up before the packaged files were installed:' +
             #13#10#13#10 + LastConfigBackupDir;
 
         if LastBackupFile <> '' then

@@ -56,6 +56,7 @@ internal sealed class InstalledVersionMarker
     public string? PackageRootName { get; set; }
     public string? BackupFileName { get; set; }
     public string? BackupGameDllSha256 { get; set; }
+    public string? ConfigBackupDirectoryName { get; set; }
     public string? PackageSha256 { get; set; }
     public DateTimeOffset? PackagedAtUtc { get; set; }
     public string? InstalledGameDllSha256 { get; set; }

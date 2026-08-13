@@ -118,6 +118,10 @@ struct ledger_entry_t {
 	std::string		prior_value;
 	std::string		prior_latched;
 	std::string		applied_value;
+	// Advanced by the frame reconciler. A complete preset can therefore adopt
+	// only writes made since the last observation, even when the final value is
+	// identical to the factory-applied value.
+	int				observed_modified_count = -1;
 	bool			prior_had_latch = false;
 	cvar_owner_t	owner = cvar_owner_t::None;
 };
@@ -204,6 +208,14 @@ void RelatchBaselines()
 	CaptureBaseline(g_factory, s_factory_base);
 }
 
+void ObserveOwnedCvars()
+{
+	for (ledger_entry_t &entry : s_ledger) {
+		const cvar_t *cvar = gi.cvar(entry.name.c_str(), nullptr, CVAR_NOFLAGS);
+		entry.observed_modified_count = cvar ? cvar->modified_count : -1;
+	}
+}
+
 const char *IntText(int value)
 {
 	return G_Fmt("{}", value).data();
@@ -283,6 +295,7 @@ cvar_write_t MM_GT_WriteOwnedCvar(const char *name, const char *value,
 
 	entry->owner = owner;
 	entry->applied_value = value;
+	entry->observed_modified_count = cvar ? cvar->modified_count : -1;
 	return cvar_write_t::Applied;
 }
 
@@ -316,6 +329,35 @@ void MM_GT_RestoreOwned()
 				entry.name.c_str(), entry.prior_latched.c_str()).data());
 
 		s_ledger.erase(s_ledger.begin() + static_cast<ptrdiff_t>(index));
+	}
+}
+
+void AdoptReassertedFactoryBaselines()
+{
+	for (ledger_entry_t &entry : s_ledger) {
+		if (entry.owner != cvar_owner_t::Factory)
+			continue;
+
+		cvar_t *cvar = gi.cvar(entry.name.c_str(), nullptr, CVAR_NOFLAGS);
+		if (!cvar)
+			continue;
+
+		const session_detail::reasserted_factory_baseline_t replacement =
+			session_detail::ResolveReassertedFactoryBaseline(
+				entry.observed_modified_count,
+				cvar->modified_count,
+				cvar->string,
+				cvar->latched_string);
+		if (!replacement.adopt)
+			continue;
+
+		// A pending latch is the operator's latest requested baseline. Promote it
+		// to the immediate restore value because this reapply already has a map
+		// boundary queued; otherwise the factory's force-write could clear it or
+		// the map load could apply it after the factory.
+		entry.prior_value = replacement.value ? replacement.value : "";
+		entry.prior_latched.clear();
+		entry.prior_had_latch = false;
 	}
 }
 
@@ -489,8 +531,8 @@ mm_gt_plan_t BuildPlan(const mm_gt_request_t &request)
 	const bool factory_moves = s_committed.has_factory != next.has_factory ||
 		(next.has_factory &&
 			!session_detail::IdsEqual(s_committed.factory_id, next.factory_id));
-	const bool will_reload = request.allow_reload &&
-		(gametype_moves || factory_moves);
+	const bool will_reload = session_detail::SelectionRequiresReload(
+		request, gametype_moves, factory_moves, next.has_factory);
 
 	// MM_GT_Resolve already ran the requested value through the resolver; this
 	// is the same derivation, kept only to recover whether the raw request was
@@ -610,8 +652,11 @@ void Commit(const mm_gt_plan_t &plan)
 
 	// 1. Give back everything the outgoing factory took. Doing this first means
 	//    the incoming factory writes over a clean baseline.
-	if (writes_factory)
+	if (writes_factory) {
+		if (plan.adopt_reasserted_factory_baselines)
+			AdoptReassertedFactoryBaselines();
 		MM_GT_RestoreOwned();
+	}
 
 	// 2. Identity and the legacy aliases, always.
 	ForceSetGametype(plan.next.configured);
@@ -763,14 +808,30 @@ void MM_GT_Reconcile()
 	// here is what stops serverinfo advertising one factory while the session,
 	// the published name and the ledger all still hold another.
 	const bool factory_moved = BaselineValueChanged(g_factory, s_factory_base);
+	const bool factory_reasserted = session_detail::FactoryWasReasserted(
+		factory_moved,
+		s_committed.has_factory,
+		g_factory ? g_factory->modified_count : -1,
+		s_factory_base.modified_count);
 
-	if (!gametype_moved && !teamplay_moved && !ctf_moved && !factory_moved) {
+	if (!gametype_moved && !teamplay_moved && !ctf_moved && !factory_moved &&
+		!factory_reasserted) {
+		// Advance the per-cvar observation point on ordinary frames. If a later
+		// complete preset reasserts g_factory, only writes from that command batch
+		// are eligible to become the factory's new restore baselines.
+		if (!s_has_pending)
+			ObserveOwnedCvars();
 		RelatchBaselines();
 		return;
 	}
 
 	mm_gt_request_t request;
 	request.source = gt_source_t::ExternalCvar;
+	// A config can temporarily clear and then restore the active g_factory in
+	// one command batch. Its final value is unchanged, but baseline settings in
+	// that config may have overwritten the factory. Treat the explicit reassert
+	// like `factory <active id>` and restore/apply it atomically at a map boundary.
+	request.force_reapply = factory_reasserted;
 	request.gametype = gametype_moved
 		? g_gametype->integer
 		: (int)MM_GTGametypeFromAliases(

@@ -1,0 +1,29 @@
+// MuffMode production map cycle.
+//
+// The ordered passes interleave expansions, map sizes, objective maps, and the
+// bundled MuffMode set. MuffMode filters this shared sequence by gametype and
+// active human count, so incompatible entries are skipped automatically.
+// Random mode treats these as an eligible set and applies the pool's popular
+// weighting. Keep the legacy factory rotations as the safety fallback.
+// Railgun 101 remains available in the catalog for explicit Instagib use, but
+// is deliberately absent here because ordinary weapon modes cannot use it.
+
+// Pass 1: compact staples and low-population maps
+q2dm1 q2ctf1 mm-aerow xdm1 rdm4 q64/dm1
+q2dm2 q2ctf2 mm-crucible xdm2 rdm1 q64/dm2
+
+// Pass 2: compact-to-medium maps
+q2dm3 q2ctf3 mm-czero xdm5 rdm2 q64/dm3
+q2dm5 q2ctf4 mm-kmach xdm3 rdm3 q64/dm4
+
+// Pass 3: medium maps and alternate modes
+q2dm8 q2ctf5 mm-powertrip xdm4 rdm5 q64/dm5
+q2dm6 ndctf0 mm-rage xdm7 rdm10 q64/dm6
+
+// Pass 4: larger team maps and the remainder of the bundled set
+q2dm7 q2kctf1 mm-reclam xdm6 rdm12 q64/dm8
+q2dm4 q2kctf2 mm-recycler mgdm1 rdm14 q64/dm10
+
+// Large maps. Their pool bounds keep them out of small automatic matches.
+rdm6 rdm7 rdm8 rdm9 rdm11 rdm13
+q64/dm7 q64/dm9

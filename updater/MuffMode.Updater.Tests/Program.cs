@@ -9,7 +9,7 @@ internal static class Program
 {
     private readonly record struct CalledMethod(int MetadataToken, int Offset);
 
-    private const string TestRelativePath = @"rerelease\maps\obsolete-test.bsp";
+    private const string TestRelativePath = @"rerelease\baseq2\maps\obsolete-test.bsp";
     private static readonly byte[] ExpectedPayload = CreateExpectedPayload();
     private static readonly string ExpectedSha256 = Convert.ToHexString(
         SHA256.HashData(ExpectedPayload)).ToLowerInvariant();
@@ -34,12 +34,19 @@ internal static class Program
         Run("file reparse point is preserved", PreservesFileReparsePoint);
         Run("reparse-point parent cannot redirect cleanup outside the install root", PreservesReparseParentTarget);
         Run("deferred self-update always attempts obsolete-file cleanup", VerifiesDeferredCleanupWiring);
+        Run("updater bootstrap inventory stays rename-safe", VerifiesStableBootstrapInventory);
+        Run("legacy updater bridge inventory stays exact", VerifiesLegacyUpdaterBridgeInventory);
+        Run("server-config backup directory names round-trip", VerifiesConfigBackupDirectoryNames);
+        Run("empty operator configs can be restored atomically", RestoresEmptyOperatorConfig);
+        Run("partial host installs roll back as one bundle", RollsBackPartialHostBundle);
+        Run("installed receipt rewrites preserve the destination manifest", VerifiesReceiptExcludedDestinationManifest);
+        Run("GitHub Markdown release notes render as styled rich text", RendersGitHubReleaseNotesMarkdown);
         Run("zero-padded release tags are accepted", AcceptsZeroPaddedReleaseTags);
         Run("a release tag must be a bare version", RejectsTagsThatAreNotBareVersions);
         Run("an unversioned release tag is skipped, not fatal", SkipsReleaseWithUnversionedTag);
         Run("a release title cannot override the release tag", PrefersTagOverTitleForReleaseVersion);
 
-        Console.WriteLine($"Updater cleanup tests: {passed} passed, {skipped} skipped, {failed} failed.");
+        Console.WriteLine($"Updater tests: {passed} passed, {skipped} skipped, {failed} failed.");
         return failed == 0 ? 0 : 1;
     }
 
@@ -239,6 +246,356 @@ internal static class Program
         Assert(
             finallyProtectsCleanup,
             "Obsolete-map cleanup must remain in a finally handler around staged-file cleanup.");
+    }
+
+    private static void RendersGitHubReleaseNotesMarkdown()
+    {
+        Exception? failure = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                using var target = new RichTextBox
+                {
+                    BackColor = Color.FromArgb(18, 20, 21)
+                };
+                target.CreateControl();
+
+                var release = new ReleaseInfo(
+                    new SemanticVersion(1, 2, 3),
+                    42,
+                    "v1.2.3",
+                    "beta",
+                    "Muff Mode v1.2.3 Beta",
+                    "",
+                    "https://github.com/DarkMatter-Productions/MuffMode/releases/tag/v1.2.3",
+                    true,
+                    new DateTimeOffset(2026, 8, 13, 12, 0, 0, TimeSpan.Zero),
+                    43,
+                    "muffmode-1.2.3-beta.zip",
+                    "https://example.invalid/muffmode.zip",
+                    8 * 1024 * 1024,
+                    "application/zip",
+                    null,
+                    "sha256:abc");
+                const string markdown = "# Highlights\n\n- **Safer hosting** with `mapdb.json` and [full details](https://example.com/details).\n\n> Ready for lobby hosts.\n\n```cfg\nexec lobby-casual.cfg\n```";
+
+                ReleaseNotesRenderer.Render(target, release, markdown);
+
+                Assert(target.Text.Contains("Highlights", StringComparison.Ordinal), "The Markdown heading disappeared.");
+                Assert(target.Text.Contains("• Safer hosting", StringComparison.Ordinal), "The list was not rendered with a display bullet.");
+                Assert(target.Text.Contains("full details — https://example.com/details", StringComparison.Ordinal), "The Markdown link was not rendered readably.");
+                Assert(target.Text.Contains("exec lobby-casual.cfg", StringComparison.Ordinal), "The fenced code block disappeared.");
+                Assert(!target.Text.Contains("**", StringComparison.Ordinal), "Bold Markdown delimiters remained visible.");
+                Assert(!target.Text.Contains("```", StringComparison.Ordinal), "Code-fence delimiters remained visible.");
+
+                var boldStart = target.Text.IndexOf("Safer hosting", StringComparison.Ordinal);
+                target.Select(boldStart, "Safer hosting".Length);
+                Assert(target.SelectionFont?.Bold == true, "Bold Markdown was not styled bold.");
+
+                var codeStart = target.Text.IndexOf("mapdb.json", StringComparison.Ordinal);
+                target.Select(codeStart, "mapdb.json".Length);
+                Assert(target.SelectionBackColor != target.BackColor, "Inline code did not receive code styling.");
+            }
+            catch (Exception ex)
+            {
+                failure = ex;
+            }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+
+        if (failure is not null)
+        {
+            throw new InvalidOperationException("The rich-text Markdown renderer failed on its UI thread.", failure);
+        }
+    }
+
+    private static void VerifiesStableBootstrapInventory()
+    {
+        var requiredPackageFiles = GetPrivateStaticStringSet("RequiredPackageFiles");
+        var requiredInstallPlanFiles = GetPrivateStaticStringSet("RequiredInstallPlanFiles");
+        var mutableHostAssets = new[]
+        {
+            "factories.cfg",
+            "lobby-casual.cfg",
+            "lobby-competitive.cfg",
+            "lobby-horde.cfg",
+            "lobby-party.cfg",
+            "mapdb.json",
+            "muffmode-map-cycle.txt",
+            "muffmode-map-pool.json"
+        };
+
+        foreach (var fileName in mutableHostAssets)
+        {
+            Assert(
+                !requiredPackageFiles.Any(path => Path.GetFileName(path).Equals(fileName, StringComparison.OrdinalIgnoreCase)),
+                $"RequiredPackageFiles hard-pins renameable host asset {fileName}.");
+            Assert(
+                !requiredInstallPlanFiles.Any(path => Path.GetFileName(path).Equals(fileName, StringComparison.OrdinalIgnoreCase)),
+                $"RequiredInstallPlanFiles hard-pins renameable host asset {fileName}.");
+        }
+    }
+
+    private static void VerifiesLegacyUpdaterBridgeInventory()
+    {
+        var actual = GetPrivateStaticStringSet("LegacyUpdaterCompatibilityFiles")
+            .Select(Path.GetFileName)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var expected = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "gt-CA.cfg",
+            "gt-CTF.cfg",
+            "gt-DUEL.cfg",
+            "gt-FFA.cfg",
+            "gt-HORDE.cfg",
+            "gt-INSTAGIB.cfg",
+            "gt-NADEFEST.cfg",
+            "gt-REDROVER.cfg",
+            "gt-STRIKE.cfg",
+            "gt-TDM.cfg"
+        };
+
+        Assert(actual.SetEquals(expected), "The v0.60.20 bridge file inventory changed.");
+    }
+
+    private static void VerifiesConfigBackupDirectoryNames()
+    {
+        WithSandbox((_, installRoot) =>
+        {
+            var backupRoot = Path.Combine(
+                installRoot,
+                "rerelease",
+                "baseq2",
+                "MuffModeBackups");
+            Directory.CreateDirectory(backupRoot);
+
+            const string timestamp = "20260813-120000";
+            var generated = (string)InvokeInstallationManagerMethod(
+                "GetUniqueConfigBackupDirectory",
+                backupRoot,
+                timestamp)!;
+            AssertEqual(
+                Path.Combine(backupRoot, $"server-configs-before-muffmode-{timestamp}"),
+                generated);
+            Directory.CreateDirectory(generated);
+
+            var indexed = (string)InvokeInstallationManagerMethod(
+                "GetUniqueConfigBackupDirectory",
+                backupRoot,
+                timestamp)!;
+            AssertEqual(
+                Path.Combine(backupRoot, $"server-configs-before-muffmode-{timestamp}-2"),
+                indexed);
+
+            foreach (var prefix in new[]
+                     {
+                         "server-configs-before-muffmode-",
+                         "server-configs.before-muffmode-"
+                     })
+            {
+                var directoryName = $"{prefix}{timestamp}-compat";
+                var directory = Path.Combine(backupRoot, directoryName);
+                Directory.CreateDirectory(directory);
+                var markerName = (string)InvokeInstallationManagerMethod(
+                    "GetConfigBackupDirectoryName",
+                    installRoot,
+                    directory)!;
+                AssertEqual(directoryName, markerName);
+            }
+        });
+    }
+
+    private static void RestoresEmptyOperatorConfig()
+    {
+        WithSandbox((_, installRoot) =>
+        {
+            var backupDirectory = Path.Combine(
+                installRoot,
+                "rerelease",
+                "baseq2",
+                "MuffModeBackups",
+                "server-configs-before-muffmode-test");
+            var destinationDirectory = Path.Combine(installRoot, "rerelease", "baseq2");
+            Directory.CreateDirectory(backupDirectory);
+            Directory.CreateDirectory(destinationDirectory);
+
+            var backupPath = Path.Combine(backupDirectory, "server-base.cfg");
+            var destinationPath = Path.Combine(destinationDirectory, "server-base.cfg");
+            File.WriteAllBytes(backupPath, []);
+            File.WriteAllText(destinationPath, "package contents");
+
+            InvokeInstallationManagerMethod(
+                "CopyRollbackFileAtomically",
+                installRoot,
+                backupPath,
+                destinationPath,
+                "rollback copy for rerelease/baseq2/server-base.cfg");
+
+            Assert(File.Exists(destinationPath), "The empty operator config was not restored.");
+            AssertEqual(0L, new FileInfo(destinationPath).Length);
+        });
+    }
+
+    private static void RollsBackPartialHostBundle()
+    {
+        WithSandbox((_, installRoot) =>
+        {
+            var packageRoot = Path.Combine(installRoot, "package-source");
+            var baseq2 = Path.Combine(installRoot, "rerelease", "baseq2");
+            var backupDirectory = Path.Combine(
+                baseq2,
+                "MuffModeBackups",
+                "server-configs-before-muffmode-rollback-test");
+            Directory.CreateDirectory(packageRoot);
+            Directory.CreateDirectory(baseq2);
+            Directory.CreateDirectory(backupDirectory);
+
+            var changedDestination = Path.Combine(baseq2, "server-base.cfg");
+            var newDestination = Path.Combine(baseq2, "lobby-casual.cfg");
+            var matchingDestination = Path.Combine(baseq2, "factories.cfg");
+            var changedSource = Path.Combine(packageRoot, "server-base.cfg");
+            var newSource = Path.Combine(packageRoot, "lobby-casual.cfg");
+            var matchingSource = Path.Combine(packageRoot, "factories.cfg");
+
+            File.WriteAllText(changedSource, "new baseline");
+            File.WriteAllText(newSource, "new lobby");
+            File.WriteAllText(matchingSource, "unchanged factory");
+            File.WriteAllText(changedDestination, "operator baseline");
+            File.WriteAllText(matchingDestination, "unchanged factory");
+            File.SetAttributes(matchingDestination, FileAttributes.ReadOnly);
+            File.WriteAllText(Path.Combine(backupDirectory, "server-base.cfg"), "operator baseline");
+
+            var installPlan = CreatePrivateInstallPlanFromSources(
+                (changedSource, changedDestination, @"rerelease\baseq2\server-base.cfg"),
+                (newSource, newDestination, @"rerelease\baseq2\lobby-casual.cfg"),
+                (matchingSource, matchingDestination, @"rerelease\baseq2\factories.cfg"));
+            var rollbackFiles = InvokeInstallationManagerMethod(
+                "CaptureServerConfigRollbackFiles",
+                installPlan)!;
+
+            File.SetAttributes(matchingDestination, FileAttributes.Normal);
+            File.WriteAllText(changedDestination, "new baseline");
+            File.WriteAllText(newDestination, "new lobby");
+
+            InvokeInstallationManagerMethod(
+                "RollbackServerConfigs",
+                installRoot,
+                rollbackFiles,
+                backupDirectory);
+
+            AssertEqual("operator baseline", File.ReadAllText(changedDestination));
+            Assert(!File.Exists(newDestination), "A newly installed host file survived rollback.");
+            AssertEqual("unchanged factory", File.ReadAllText(matchingDestination));
+            Assert(
+                (File.GetAttributes(matchingDestination) & FileAttributes.ReadOnly) != 0,
+                "Rollback did not restore attributes on a pre-existing matching host file.");
+        });
+    }
+
+    private static void VerifiesReceiptExcludedDestinationManifest()
+    {
+        WithSandbox((_, installRoot) =>
+        {
+            var baseq2 = Path.Combine(installRoot, "rerelease", "baseq2");
+            Directory.CreateDirectory(baseq2);
+
+            var ordinaryPath = Path.Combine(baseq2, "server-base.cfg");
+            var jsonReceiptPath = Path.Combine(baseq2, "muffmode-version.json");
+            var textReceiptPath = Path.Combine(baseq2, "muffmode.version");
+            File.WriteAllText(ordinaryPath, "stable config");
+            File.WriteAllText(jsonReceiptPath, "package metadata");
+            File.WriteAllText(textReceiptPath, "package version");
+
+            Assert(InstallationManager.IsMutableInstalledReceiptPath(
+                @"rerelease\baseq2\muffmode-version.json"), "The JSON receipt was not classified as mutable.");
+            Assert(InstallationManager.IsMutableInstalledReceiptPath(
+                "rerelease/baseq2/muffmode.version"), "The text receipt was not classified as mutable.");
+            Assert(!InstallationManager.IsMutableInstalledReceiptPath(
+                @"rerelease\baseq2\server-base.cfg"), "A stable host file was classified as a receipt.");
+
+            var installPlan = CreatePrivateInstallPlan(
+                (ordinaryPath, @"rerelease\baseq2\server-base.cfg"),
+                (jsonReceiptPath, @"rerelease\baseq2\muffmode-version.json"),
+                (textReceiptPath, @"rerelease\baseq2\muffmode.version"));
+            var before = (string)InvokeInstallationManagerMethod(
+                "ComputeInstalledDestinationManifestSha256",
+                installPlan)!;
+
+            File.WriteAllText(jsonReceiptPath, "installed receipt metadata");
+            File.WriteAllText(textReceiptPath, "installed version");
+            var afterReceiptRewrite = (string)InvokeInstallationManagerMethod(
+                "ComputeInstalledDestinationManifestSha256",
+                installPlan)!;
+            AssertEqual(before, afterReceiptRewrite);
+
+            File.WriteAllText(ordinaryPath, "changed config");
+            var afterStableFileChange = (string)InvokeInstallationManagerMethod(
+                "ComputeInstalledDestinationManifestSha256",
+                installPlan)!;
+            Assert(
+                !string.Equals(before, afterStableFileChange, StringComparison.Ordinal),
+                "The destination manifest ignored a stable installed file change.");
+        });
+    }
+
+    private static Array CreatePrivateInstallPlan(params (string DestinationPath, string RelativePath)[] files)
+    {
+        return CreatePrivateInstallPlanFromSources(
+            files.Select(file => (
+                SourcePath: file.DestinationPath,
+                file.DestinationPath,
+                file.RelativePath)).ToArray());
+    }
+
+    private static Array CreatePrivateInstallPlanFromSources(
+        params (string SourcePath, string DestinationPath, string RelativePath)[] files)
+    {
+        var installFileType = typeof(InstallationManager).GetNestedType(
+            "PackageInstallFile",
+            BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("PackageInstallFile is missing from InstallationManager.");
+        var constructor = installFileType.GetConstructors(
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+            .Single(candidate => candidate.GetParameters().Length == 5);
+        var installPlan = Array.CreateInstance(installFileType, files.Length);
+
+        for (var index = 0; index < files.Length; index++)
+        {
+            var (sourcePath, destinationPath, relativePath) = files[index];
+            var bytes = File.ReadAllBytes(sourcePath);
+            var sha256 = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+            var installFile = constructor.Invoke(
+                [sourcePath, relativePath, destinationPath, (long)bytes.Length, sha256]);
+            installPlan.SetValue(installFile, index);
+        }
+
+        return installPlan;
+    }
+
+    private static IReadOnlyCollection<string> GetPrivateStaticStringSet(string fieldName)
+    {
+        var field = typeof(InstallationManager).GetField(
+            fieldName,
+            BindingFlags.NonPublic | BindingFlags.Static)
+            ?? throw new InvalidOperationException($"{fieldName} is missing from InstallationManager.");
+        return field.GetValue(null) as IReadOnlyCollection<string>
+            ?? throw new InvalidOperationException($"{fieldName} is not a string collection.");
+    }
+
+    private static object? InvokeInstallationManagerMethod(string name, params object?[] arguments)
+    {
+        var method = GetPrivateStaticMethod(typeof(InstallationManager), name);
+        try
+        {
+            return method.Invoke(null, arguments);
+        }
+        catch (TargetInvocationException ex)
+        {
+            throw new InvalidOperationException(ex.InnerException!.Message, ex.InnerException);
+        }
     }
 
     private static ObsoleteFileCleanupOutcome Cleanup(string installRoot)

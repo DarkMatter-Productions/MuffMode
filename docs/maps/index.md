@@ -4,7 +4,9 @@
 
 Muff Mode's `mm-*` maps are a small museum with live rockets in it: Quake II duel standards, late-90s community curios, Rocket Arena and Quake III visitors, and a few stranger public-server pieces rebuilt for the rerelease era.
 
-This guide covers the current authoritative final set from `mm-maps-finals-1`. Each detail page includes the Muff Mode filename, release status, original release date where it could be found, a short history, play notes, preserved files, and a level item register read from the final BSP. Work-in-progress coverage is limited to the active local dev tree and keeps only the newest apparent state for each map identity. The release package currently carries a curated subset plus several separately named ports; the packaged structured-pool example, rather than this archive catalog, is the exact installed-map manifest.
+This guide covers the current authoritative final set from `mm-maps-finals-1`. Each detail page includes the Muff Mode filename, release status, original release date where it could be found, a short history, play notes, preserved files, and a level item register read from the final BSP. Work-in-progress coverage is limited to the active local dev tree and keeps only the newest apparent state for each map identity. The release package currently carries a curated subset plus several separately named ports; the packaged structured pool, rather than this archive catalog, is the exact installed-map manifest.
+
+Packaged BSPs retain the short map-bundle IDs. In particular, use `mm-czero`, `mm-kmach`, `mm-rail101`, and `mm-reclam` in consoles and server configs; the catalog, structured pool, cycle, and source archive all keep those names aligned.
 
 ## Status Key
 

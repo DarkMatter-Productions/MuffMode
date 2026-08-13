@@ -11,7 +11,9 @@ On startup, the updater and launcher:
 1. Detects Quake 2 install paths from saved settings, Steam library folders, Epic manifests, GOG registry entries, and common store install folders.
 2. Queries `DarkMatter-Productions/MuffMode` GitHub releases.
 3. Shows detected Steam, Epic Games Store, GOG, and Xbox app / Microsoft Store locations in a source selector, while keeping an other-location path/browse option available.
-4. Shows the latest version, local version, release changelog, and actions.
+4. Shows the latest version, local version, actions, and a styled rendering of
+   the GitHub release Markdown, including headings, lists, emphasis, code,
+   quotes, and clickable web links.
 
 The user can then:
 
@@ -69,6 +71,13 @@ Cancel is available during the network download and temporary extraction/validat
 <Quake 2>\rerelease\baseq2\MuffModeBackups
 ```
 
-It does not delete unrelated files from the installation folder, and individual file replacements use temporary files so a failed copy is less likely to leave a truncated destination.
+It does not delete unrelated files from the installation folder, and individual file replacements use temporary files so a failed copy is less likely to leave a truncated destination. Package-owned lobby-host files that differ from the incoming release are backed up beside the DLL backups. If package-file copying or package-content verification fails, the updater restores that mutually referencing host bundle before reporting the failed update.
 
-If the release package contains `MuffModeUpdater.exe` and that destination is the updater executable currently running, the updater skips that file instead of trying to overwrite itself.
+Current updater builds stage a verified replacement for a running
+`MuffModeUpdater.exe`, finish the package install, and then hand off through a
+short-lived helper so the updater can replace itself safely. The public
+v0.60.20 updater predates that flow: it can install one bridge release, but
+cannot update its own executable while running. Hosts still on v0.60.20 should
+close it and use the current Windows installer, or replace
+`MuffModeUpdater.exe` manually while it is closed, before relying on later
+in-app updates.

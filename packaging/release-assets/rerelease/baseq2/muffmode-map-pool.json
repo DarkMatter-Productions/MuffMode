@@ -4,7 +4,10 @@
       "bsp": "q2dm1",
       "title": "The Edge",
       "episode": "baseq2",
+      "min": 1,
+      "max": 8,
       "dm": true,
+      "tdm": true,
       "duel": true,
       "popular": true
     },
@@ -12,73 +15,115 @@
       "bsp": "q2dm2",
       "title": "Tokay's Towers",
       "episode": "baseq2",
-      "dm": true
+      "min": 2,
+      "max": 8,
+      "dm": true,
+      "tdm": true,
+      "duel": true,
+      "popular": true
     },
     {
       "bsp": "q2dm3",
       "title": "The Frag Pipe",
       "episode": "baseq2",
+      "min": 1,
+      "max": 8,
       "dm": true,
+      "tdm": true,
+      "duel": true,
       "popular": true
     },
     {
       "bsp": "q2dm4",
       "title": "Lost Hallways",
       "episode": "baseq2",
-      "dm": true
+      "min": 6,
+      "max": 16,
+      "dm": true,
+      "tdm": true
     },
     {
       "bsp": "q2dm5",
       "title": "The Pits",
       "episode": "baseq2",
-      "dm": true
+      "min": 2,
+      "max": 10,
+      "dm": true,
+      "tdm": true,
+      "popular": true
     },
     {
       "bsp": "q2dm6",
       "title": "Lava Tomb",
       "episode": "baseq2",
-      "dm": true
+      "min": 2,
+      "max": 10,
+      "dm": true,
+      "tdm": true
     },
     {
       "bsp": "q2dm7",
       "title": "The Slimy Place",
       "episode": "baseq2",
-      "dm": true
+      "min": 2,
+      "max": 8,
+      "dm": true,
+      "tdm": true
     },
     {
       "bsp": "q2dm8",
       "title": "WareHouse",
       "episode": "baseq2",
-      "dm": true
+      "min": 2,
+      "max": 8,
+      "dm": true,
+      "tdm": true,
+      "duel": true,
+      "popular": true
     },
     {
       "bsp": "base64",
       "title": "The Strogg Base",
       "episode": "baseq2",
-      "dm": true
+      "min": 16,
+      "max": 32,
+      "dm": true,
+      "tdm": true
     },
     {
       "bsp": "city64",
       "title": "Courts at War",
       "episode": "baseq2",
-      "dm": true
+      "min": 16,
+      "max": 32,
+      "dm": true,
+      "tdm": true
     },
     {
       "bsp": "sewer64",
       "title": "The Sewers of Stroggos",
       "episode": "baseq2",
-      "dm": true
+      "min": 16,
+      "max": 32,
+      "dm": true,
+      "tdm": true
     },
     {
       "bsp": "mgdm1",
       "title": "Misty Heights",
       "episode": "mg2",
-      "dm": true
+      "min": 4,
+      "max": 16,
+      "dm": true,
+      "tdm": true,
+      "popular": true
     },
     {
       "bsp": "q2ctf1",
       "title": "McKinley Revival",
       "episode": "baseq2",
+      "min": 4,
+      "max": 16,
       "ctf": true,
       "popular": true
     },
@@ -86,298 +131,492 @@
       "bsp": "q2ctf2",
       "title": "Stronghold Opposition",
       "episode": "baseq2",
-      "ctf": true
+      "min": 4,
+      "max": 16,
+      "ctf": true,
+      "popular": true
     },
     {
       "bsp": "q2ctf3",
       "title": "The Smelter",
       "episode": "baseq2",
+      "min": 6,
+      "max": 20,
       "ctf": true
     },
     {
       "bsp": "q2ctf4",
       "title": "Outlands II",
       "episode": "baseq2",
+      "min": 6,
+      "max": 20,
       "ctf": true
     },
     {
       "bsp": "q2ctf5",
       "title": "Capture Showdown",
       "episode": "baseq2",
+      "min": 6,
+      "max": 24,
       "ctf": true
     },
     {
       "bsp": "ndctf0",
       "title": "Something Epic",
       "episode": "baseq2",
+      "min": 2,
+      "max": 10,
       "ctf": true
     },
     {
       "bsp": "q2kctf1",
       "title": "Captured Reckoning",
       "episode": "baseq2",
+      "min": 2,
+      "max": 12,
       "ctf": true
     },
     {
       "bsp": "q2kctf2",
       "title": "Nexus CTF",
       "episode": "baseq2",
+      "min": 4,
+      "max": 18,
       "ctf": true
     },
     {
       "bsp": "xdm1",
       "title": "Munitions Dump",
       "episode": "xatrix",
-      "dm": true
+      "min": 2,
+      "max": 8,
+      "dm": true,
+      "tdm": true,
+      "duel": true,
+      "popular": true
     },
     {
       "bsp": "xdm2",
       "title": "Deadly Reckoning",
       "episode": "xatrix",
-      "dm": true
+      "min": 2,
+      "max": 10,
+      "dm": true,
+      "tdm": true,
+      "duel": true,
+      "popular": true
     },
     {
       "bsp": "xdm3",
       "title": "Reservoir Stroggs",
       "episode": "xatrix",
-      "dm": true
+      "min": 6,
+      "max": 16,
+      "dm": true,
+      "tdm": true
     },
     {
       "bsp": "xdm4",
       "title": "The Sludge Pit",
       "episode": "xatrix",
-      "dm": true
+      "min": 4,
+      "max": 12,
+      "dm": true,
+      "tdm": true
     },
     {
       "bsp": "xdm5",
       "title": "Stomping Grounds",
       "episode": "xatrix",
-      "dm": true
+      "min": 2,
+      "max": 8,
+      "dm": true,
+      "tdm": true,
+      "duel": true
     },
     {
       "bsp": "xdm6",
       "title": "Hidden Agenda",
       "episode": "xatrix",
-      "dm": true
+      "min": 6,
+      "max": 18,
+      "dm": true,
+      "tdm": true
     },
     {
       "bsp": "xdm7",
       "title": "The XEdge",
       "episode": "xatrix",
-      "dm": true
+      "min": 4,
+      "max": 12,
+      "dm": true,
+      "tdm": true,
+      "popular": true
     },
     {
       "bsp": "rdm1",
       "title": "The Low Road",
       "episode": "rogue",
-      "dm": true
+      "min": 4,
+      "max": 12,
+      "dm": true,
+      "tdm": true
     },
     {
       "bsp": "rdm2",
       "title": "The High Road",
       "episode": "rogue",
-      "dm": true
+      "min": 4,
+      "max": 10,
+      "dm": true,
+      "tdm": true
     },
     {
       "bsp": "rdm3",
       "title": "Boxed In",
       "episode": "rogue",
-      "dm": true
+      "min": 6,
+      "max": 18,
+      "dm": true,
+      "tdm": true
     },
     {
       "bsp": "rdm4",
       "title": "Razor's Edge",
       "episode": "rogue",
-      "dm": true
+      "min": 2,
+      "max": 8,
+      "dm": true,
+      "tdm": true,
+      "duel": true,
+      "popular": true
     },
     {
       "bsp": "rdm5",
       "title": "Stone Hinge",
       "episode": "rogue",
-      "dm": true
+      "min": 6,
+      "max": 16,
+      "dm": true,
+      "tdm": true
     },
     {
       "bsp": "rdm6",
       "title": "Nexus",
       "episode": "rogue",
-      "dm": true
+      "min": 8,
+      "max": 24,
+      "dm": true,
+      "tdm": true
     },
     {
       "bsp": "rdm7",
       "title": "Sewer Citadel",
       "episode": "rogue",
-      "dm": true
+      "min": 10,
+      "max": 32,
+      "dm": true,
+      "tdm": true
     },
     {
       "bsp": "rdm8",
       "title": "Styx & Stones",
       "episode": "rogue",
-      "dm": true
+      "min": 8,
+      "max": 24,
+      "dm": true,
+      "tdm": true
     },
     {
       "bsp": "rdm9",
       "title": "Scenic Overlook",
       "episode": "rogue",
-      "dm": true
+      "min": 6,
+      "max": 18,
+      "dm": true,
+      "tdm": true
     },
     {
       "bsp": "rdm10",
       "title": "Great Divide",
       "episode": "rogue",
-      "dm": true
+      "min": 4,
+      "max": 12,
+      "dm": true,
+      "tdm": true
     },
     {
       "bsp": "rdm11",
       "title": "Dish It Out",
       "episode": "rogue",
-      "dm": true
+      "min": 10,
+      "max": 32,
+      "dm": true,
+      "tdm": true
     },
     {
       "bsp": "rdm12",
       "title": "Fall From Grace",
       "episode": "rogue",
-      "dm": true
+      "min": 4,
+      "max": 12,
+      "dm": true,
+      "tdm": true
     },
     {
       "bsp": "rdm13",
       "title": "Roads to Nowhere",
       "episode": "rogue",
-      "dm": true
+      "min": 8,
+      "max": 24,
+      "dm": true,
+      "tdm": true
     },
     {
       "bsp": "rdm14",
       "title": "Rogue's Edge",
       "episode": "rogue",
-      "dm": true
+      "min": 4,
+      "max": 12,
+      "dm": true,
+      "tdm": true,
+      "popular": true
     },
     {
       "bsp": "q64/dm1",
       "title": "Agony",
       "episode": "n64",
-      "dm": true
+      "min": 1,
+      "max": 6,
+      "dm": true,
+      "tdm": true,
+      "duel": true,
+      "popular": true
     },
     {
       "bsp": "q64/dm2",
       "title": "Corridors",
       "episode": "n64",
-      "dm": true
+      "min": 2,
+      "max": 8,
+      "dm": true,
+      "tdm": true,
+      "duel": true
     },
     {
       "bsp": "q64/dm3",
       "title": "War Room",
       "episode": "n64",
-      "dm": true
+      "min": 1,
+      "max": 6,
+      "dm": true,
+      "tdm": true,
+      "duel": true
     },
     {
       "bsp": "q64/dm4",
       "title": "Twists",
       "episode": "n64",
-      "dm": true
+      "min": 2,
+      "max": 6,
+      "dm": true,
+      "tdm": true,
+      "duel": true
     },
     {
       "bsp": "q64/dm5",
       "title": "Fortress",
       "episode": "n64",
-      "dm": true
+      "min": 2,
+      "max": 6,
+      "dm": true,
+      "tdm": true,
+      "duel": true
     },
     {
       "bsp": "q64/dm6",
       "title": "Cold Steel",
       "episode": "n64",
-      "dm": true
+      "min": 1,
+      "max": 4,
+      "dm": true,
+      "tdm": true,
+      "duel": true
     },
     {
       "bsp": "q64/dm7",
       "title": "Mad Dash",
       "episode": "n64",
-      "dm": true
+      "min": 4,
+      "max": 10,
+      "dm": true,
+      "tdm": true
     },
     {
       "bsp": "q64/dm8",
       "title": "Dying Halls",
       "episode": "n64",
-      "dm": true
+      "min": 2,
+      "max": 6,
+      "dm": true,
+      "tdm": true,
+      "duel": true
     },
     {
       "bsp": "q64/dm9",
       "title": "Empty Space",
       "episode": "n64",
-      "dm": true
+      "min": 1,
+      "max": 4,
+      "dm": true,
+      "duel": true
     },
     {
       "bsp": "q64/dm10",
       "title": "Overflow",
       "episode": "n64",
-      "dm": true
+      "min": 2,
+      "max": 6,
+      "dm": true,
+      "tdm": true,
+      "duel": true
     },
     {
       "bsp": "mm-aerow",
       "title": "Aerowalk",
       "episode": "muffmode",
+      "min": 2,
+      "max": 4,
       "dm": true,
+      "tdm": true,
       "duel": true,
       "popular": true,
-      "custom": true
+      "ctf": false,
+      "arena": false,
+      "custom": true,
+      "custom_textures": false,
+      "custom_sounds": false
     },
     {
-      "bsp": "mm-coldzero",
+      "bsp": "mm-czero",
       "title": "Cold Zero",
       "episode": "muffmode",
+      "min": 3,
+      "max": 8,
       "dm": true,
-      "custom": true
+      "tdm": true,
+      "popular": true,
+      "ctf": false,
+      "arena": false,
+      "custom": true,
+      "custom_textures": false,
+      "custom_sounds": false
     },
     {
       "bsp": "mm-crucible",
       "title": "The Crucible",
       "episode": "muffmode",
+      "min": 2,
+      "max": 6,
       "dm": true,
+      "tdm": true,
       "duel": true,
-      "custom": true
+      "popular": true,
+      "ctf": false,
+      "arena": false,
+      "custom": true,
+      "custom_textures": false,
+      "custom_sounds": false
     },
     {
-      "bsp": "mm-kmachine",
+      "bsp": "mm-kmach",
       "title": "The Killing Machine",
       "episode": "muffmode",
+      "min": 2,
+      "max": 8,
       "dm": true,
+      "tdm": true,
       "duel": true,
-      "custom": true
+      "popular": true,
+      "ctf": false,
+      "arena": false,
+      "custom": true,
+      "custom_textures": false,
+      "custom_sounds": false
     },
     {
       "bsp": "mm-powertrip",
       "title": "Powertrip",
       "episode": "muffmode",
+      "min": 2,
+      "max": 4,
       "dm": true,
-      "custom": true
+      "duel": true,
+      "popular": true,
+      "ctf": false,
+      "arena": false,
+      "custom": true,
+      "custom_textures": false,
+      "custom_sounds": false
     },
     {
       "bsp": "mm-rage",
       "title": "The Rage",
       "episode": "muffmode",
+      "min": 2,
+      "max": 8,
       "dm": true,
+      "tdm": true,
       "duel": true,
-      "custom": true
+      "popular": true,
+      "ctf": false,
+      "arena": false,
+      "custom": true,
+      "custom_textures": false,
+      "custom_sounds": false
     },
     {
-      "bsp": "mm-railgun101",
+      "bsp": "mm-rail101",
       "title": "Railgun 101",
       "episode": "muffmode",
+      "min": 2,
+      "max": 6,
       "dm": true,
-      "custom": true
+      "ctf": false,
+      "arena": false,
+      "custom": true,
+      "custom_textures": false,
+      "custom_sounds": false
     },
     {
-      "bsp": "mm-reclamation",
+      "bsp": "mm-reclam",
       "title": "Reclamation",
       "episode": "muffmode",
+      "min": 2,
+      "max": 4,
       "dm": true,
       "duel": true,
-      "custom": true
+      "popular": true,
+      "ctf": false,
+      "arena": false,
+      "custom": true,
+      "custom_textures": false,
+      "custom_sounds": false
     },
     {
       "bsp": "mm-recycler",
       "title": "Recycler",
       "episode": "muffmode",
+      "min": 2,
+      "max": 5,
       "dm": true,
-      "custom": true
+      "duel": true,
+      "popular": true,
+      "ctf": false,
+      "arena": false,
+      "custom": true,
+      "custom_textures": false,
+      "custom_sounds": false
     }
   ]
 }

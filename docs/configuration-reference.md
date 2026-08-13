@@ -459,6 +459,26 @@ values aligned, but expect a provider or engine build to enforce a lower
 service-specific ceiling. The shared Quake II protocol limit remains 256;
 MuffMode's supported connected-client ceiling is 128.
 
+### Bundled Lobby Presets
+
+Execute one preset before creating a KEX lobby so its connected-client
+allocation and lobby-capacity request are both in place:
+
+| File | Capacity | Startup and policy |
+| --- | ---: | --- |
+| `lobby-casual.cfg` | 16 | Unranked House Deathmatch; random structured rotation; curated classic factory voting; map votes and MyMap enabled. |
+| `lobby-competitive.cfg` | 16 | Ranked Duel Competition; ordered structured rotation; competition factories; map votes and MyMap disabled. |
+| `lobby-party.cfg` | 16 | Unranked Instagib Jump; random structured rotation; curated mutator factories; map votes and MyMap enabled. |
+| `lobby-horde.cfg` | 8 | Unranked Classic Horde; random structured rotation; Horde factories only; map votes and MyMap disabled. |
+
+Each executes `server-base.cfg`, sets `maxclients` and
+`kexmultiplayer maxplayers`, enables the production pool/cycle, and selects a
+starting `g_gametype`/`g_factory` pair. The files are package-owned templates;
+for customization, copy the baseline, chosen lobby, pool, and cycle to
+operator-owned leaf filenames and update all three references in the copied
+lobby. Executing a preset after a lobby already exists cannot resize that
+existing provider lobby.
+
 ## Access And Player Policy
 
 | Cvar | Default | Purpose |
@@ -739,7 +759,7 @@ uncapped by default.
 
 | Cvar | Default | Purpose |
 | --- | --- | --- |
-| `g_maps_pool_file` | empty | Opt-in structured map-pool JSON leaf filename under `baseq2`; empty keeps legacy map sources active. |
+| `g_maps_pool_file` | empty | Opt-in MuffMode structured map-pool JSON leaf filename under `baseq2`; empty keeps legacy map sources active. Never set this to the KEX `mapdb.json`. |
 | `g_maps_cycle_file` | empty | Optional structured cycle leaf filename under `baseq2`; requires a valid structured pool. |
 | `g_maps_random` | `1` | `1` selects randomly from eligible cycle maps, with `popular` maps weighted twice; `0` follows cycle order. |
 | `g_maps_repeat_delay` | `1800` | Preferred seconds before a structured-cycle map repeats; clamped to `0`–`86400` and relaxed if necessary to keep rotation moving. |
@@ -845,10 +865,18 @@ an idle body cannot out-camp a player who was actually playing.
 
 ### Structured Map Pools (Optional)
 
-Structured map pools provide a large searchable catalog plus a separate
-automatic-rotation cycle. They are opt-in: copy
-`muffmode-map-pool.example.json` and `muffmode-map-cycle.example.txt` to new
-leaf filenames in `rerelease/baseq2`, edit those copies, then configure them:
+The package installs three production map assets with separate jobs:
+
+| File | Consumer and schema |
+| --- | --- |
+| `mapdb.json` | KEX engine/UI metadata. This is a full stock-derived database, retaining the stock `episodes` and `maps` arrays and appending the nine bundled MuffMode maps with KEX `dm`/`tdm`/`ctf`/`bot` metadata. It preserves stock menus and is not a server rotation policy file. |
+| `muffmode-map-pool.json` | MuffMode's strict multiplayer catalog. Its root contains only `maps`; it adds mode preferences, active-human bounds, popularity, and custom-resource policy. |
+| `muffmode-map-cycle.txt` | MuffMode's ordered or random automatic-selection subset, referring to entries in the strict pool. Catalog-only specialist maps need not appear. |
+
+Never point `g_maps_pool_file` at `mapdb.json`. The engine database's root and
+key set do not satisfy MuffMode's strict pool schema, so the load fails closed.
+The production lobby presets already select the MuffMode pool and cycle. For a
+different server config, enable them with:
 
 ```text
 set g_maps_pool_file "muffmode-map-pool.json"
@@ -856,6 +884,11 @@ set g_maps_cycle_file "muffmode-map-cycle.txt"
 set g_maps_random "1"
 set g_maps_repeat_delay "1800"
 ```
+
+All three files and the lobby presets are package-owned. Leave `mapdb.json` as
+shipped. Before changing pool membership, bounds, weights, or cycle order, copy
+the pool and cycle to operator-owned leaf filenames and update a copied lobby
+or server config to name them.
 
 Only safe leaf filenames are accepted for these two cvars; paths and traversal
 segments are rejected. Pool identifiers are portable lowercase ASCII BSP stems
@@ -892,7 +925,7 @@ Supported fields are:
 | `dm`, `tdm`, `ctf`, `duel`, `arena` | one or more | Boolean mode-suitability flags. CTF and Arena always require their matching flags. Duel/TDM tags are preferred when present, with generic `dm` maps used as fallback at every eligibility tier. |
 | `title` | no | Display title; defaults to `bsp`. |
 | `episode` | no | Display/filter grouping such as `baseq2`, `rogue`, or `muffmode`. |
-| `min`, `max` | no | Inclusive human-player bounds; `0` or omission means no bound. |
+| `min`, `max` | no | Inclusive active-human-player bounds; `0` or omission means no bound. Bots, spectators, and spare connected slots do not count. |
 | `popular` | no | Gives the map weight `2` instead of `1` when `g_maps_random` is enabled. |
 | `custom`, `custom_textures`, `custom_sounds` | no | Catalog metadata. Either asset flag also marks the entry as custom. |
 
@@ -904,15 +937,42 @@ fail the cycle instead of being guessed. With `g_maps_random 0`, the order
 determines the next eligible map. With `g_maps_random 1`, the cycle is the
 eligible set and `popular` supplies the only extra weighting.
 
+With a valid pool and cycle, structured selection supersedes the active
+factory's `maps` directive for normal automatic transitions and for the map
+chosen by a factory or gametype change. The factory's `g_map_list` remains the
+legacy safety fallback when structured selection is disabled, invalid, or has
+no compatible candidate.
+
 Selection uses the requested raw gametype, so a transition into Arena can
 choose an `arena`-tagged map before that mode becomes effective. It first
-honors human-player bounds and the repeat delay; Duel/TDM tries its specialized
+honors active-human bounds and the repeat delay; Duel/TDM tries its specialized
 tag before generic `dm` fallback at each tier. If needed, selection relaxes
-the repeat delay and then player bounds, but it always excludes the current
-map. If no other compatible cycle entry remains, normal legacy `g_map_list`
-transition handling continues.
+the repeat delay and then player bounds. Normal next-map selection always
+excludes the current map. If no other compatible cycle entry remains, legacy `g_map_list`
+transition handling continues. When a factory change selects its first map, the
+load is clamped to the incoming factory's `minplayers`/`maxplayers` range rather
+than using an empty boot server or the outgoing match's population.
 
-An explicit gametype change is the one exception to next-map ordering: ordered
+The post-match next-map pick uses the same mode, active-human bounds, repeat,
+and current-map eligibility as automatic rotation. It relaxes cooldown first;
+if even one player-count-valid map remains, it never adds out-of-range maps just
+to fill a ballot, and a one-map pick is suppressed. It drops player bounds only
+when no bounded candidate exists. Direct map votes and MyMap
+requests intentionally do less: they validate that the requested BSP is a safe
+member of the active catalog, but do not enforce that entry's mode tags or
+`min`/`max`. This permits an explicit host/player override on Casual and Party
+lobbies. Competitive and Horde disable map votes and MyMap so those paths
+cannot bypass their automatic-selection policy.
+
+`mm-rail101` is a specialist Railgun/Instagib practice map with no weapon
+pickups. The schema has no ruleset-or-factory requirement, so the production
+cycle deliberately leaves it catalog-only for explicit use with an appropriate
+factory. No bundled map is Arena-compatible: the production pool contains no
+`arena: true` entry, the cycle cannot satisfy Arena, and every bundled lobby
+preset excludes Arena. Install licensed compatible maps and add them to custom
+pool/cycle and factory policy before enabling that gametype.
+
+An explicit factory or gametype change is the exception to next-map ordering: ordered
 selection begins at the first compatible cycle entry, matching the legacy
 "first map after the new gametype config" behavior. That path may reload the
 current map when it is the first compatible entry; random selection still
@@ -1072,10 +1132,12 @@ The default `7` enables all three.
 When `g_dm_exec_level_cfg` is enabled, MuffMode executes a config named for the
 loaded map (`exec <mapname>`) at level start. It is off by default.
 
-Per-gametype config files (`gt-FFA.cfg` and friends) no longer exist. Everything
-they carried — the mode's ruleset, limits, map rotation, player limits and
-gameplay settings — now lives in a factory. See [Factories](#factories) and the
-migration notes in `baseq2/CONFIGS_README.md`.
+Functional per-gametype config files (`gt-FFA.cfg` and friends) are retired and
+no longer auto-execute. Everything they carried — the mode's ruleset, limits,
+map rotation, player limits and gameplay settings — now lives in a factory. A
+transition ZIP may contain inert filenames solely for old-updater compatibility;
+see [Factories](#factories) and the migration notes in
+`baseq2/CONFIGS_README.md`.
 
 To run endless Horde, select a factory with `roundlimit 0` — the shipped
 `horde_endless` does exactly that. See
