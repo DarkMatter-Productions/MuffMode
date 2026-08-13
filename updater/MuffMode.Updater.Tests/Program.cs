@@ -186,9 +186,13 @@ internal static class Program
             var outsidePath = Path.Combine(outsideMaps, "obsolete-test.bsp");
             File.WriteAllBytes(outsidePath, ExpectedPayload);
 
-            var rereleasePath = Path.Combine(installRoot, "rerelease");
-            Directory.CreateDirectory(rereleasePath);
-            var mapsLink = Path.Combine(rereleasePath, "maps");
+            // Derive the linked parent from the cleanup candidate so this safety
+            // test follows any future package-layout change automatically.
+            var mapsLink = Path.GetDirectoryName(GetCandidatePath(installRoot))
+                ?? throw new InvalidOperationException("The cleanup candidate has no parent directory.");
+            var mapsParent = Path.GetDirectoryName(mapsLink)
+                ?? throw new InvalidOperationException("The cleanup maps directory has no parent directory.");
+            Directory.CreateDirectory(mapsParent);
 
             try
             {
