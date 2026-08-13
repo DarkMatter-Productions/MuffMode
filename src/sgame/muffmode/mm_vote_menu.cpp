@@ -937,7 +937,19 @@ void UpdateFactory(gentity_t *ent)
 	for (int i = offset; i < total_factories && menu_index < (kMapMenuFirstItem + page_size); i++)
 	{
 		MenuVote_SetArg(entries[menu_index], values[i]);
-		MenuVote_SetText(entries[menu_index], values[i]);
+
+		// The list mixes factories from every base gametype (a CA preset sits
+		// next to an FFA one), and picking a cross-gametype entry silently
+		// switches the match's gametype along with it. Tagging each row with
+		// its base gametype is what makes that consequence visible up front
+		// instead of a surprise after the vote passes.
+		const int base = muffmode::factory::MM_Factory_BaseGametype(values[i]);
+		if (base >= (int)GT_FIRST && base <= (int)GT_LAST)
+			MenuVote_SetText(entries[menu_index],
+				G_Fmt("[{}] {}", gt_short_name[base], values[i]).data());
+		else
+			MenuVote_SetText(entries[menu_index], values[i]);
+
 		entries[menu_index].SelectFunc = SelectFactory;
 		menu_index++;
 	}
