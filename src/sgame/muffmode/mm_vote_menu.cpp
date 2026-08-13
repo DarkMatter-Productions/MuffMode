@@ -840,6 +840,18 @@ static const std::vector<std::string> &FactoryMenuValues()
 		remaining.remove_prefix(end + 1);
 	}
 
+	// Grouped by base gametype (table order, matching the Gametype picker)
+	// rather than left in registry order, so every "[ffa] ..." row the label
+	// above added now sits together instead of interleaved with other bases.
+	std::sort(values.begin(), values.end(),
+		[](const std::string &a, const std::string &b) {
+			const int base_a = muffmode::factory::MM_Factory_BaseGametype(a);
+			const int base_b = muffmode::factory::MM_Factory_BaseGametype(b);
+			if (base_a != base_b)
+				return base_a < base_b;
+			return a < b;
+		});
+
 	s_factory_menu_snapshot.values = std::move(values);
 	s_factory_menu_snapshot.revision = current;
 	s_factory_menu_snapshot.initialized = true;
