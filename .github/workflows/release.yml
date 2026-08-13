@@ -444,6 +444,20 @@ jobs:
             throw "Could not install the reviewed Inno Setup package."
           }
 
+          $installedInnoRows = @(choco list --local-only --exact --limit-output innosetup)
+          if ($LASTEXITCODE -ne 0) {
+            throw "Could not query the installed Inno Setup package version."
+          }
+          $installedInnoVersions = @(
+            $installedInnoRows |
+              ForEach-Object { $_.Trim() } |
+              Where-Object { $_ -cmatch '^innosetup\|' } |
+              ForEach-Object { ($_ -csplit '\|', 2)[1] }
+          )
+          if ($installedInnoVersions.Count -ne 1 -or $installedInnoVersions[0] -cne "6.7.1") {
+            throw "Installed Inno Setup package version '$($installedInnoVersions -join ', ')' did not match reviewed version 6.7.1."
+          }
+
           $compilerCandidates = @(
             (Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6/ISCC.exe"),
             (Join-Path $env:ProgramFiles "Inno Setup 6/ISCC.exe"),
@@ -454,10 +468,6 @@ jobs:
             throw "The reviewed Inno Setup compiler was not found after installation."
           }
           $compiler = (Resolve-Path -LiteralPath $compiler).Path
-          $compilerVersion = (Get-Item -LiteralPath $compiler).VersionInfo.ProductVersion
-          if ($compilerVersion -cnotmatch "^6\.7\.1(?:\.0)?$") {
-            throw "Inno Setup compiler version '$compilerVersion' did not match reviewed version 6.7.1."
-          }
           "compiler_path=$compiler" >> $env:GITHUB_OUTPUT
 
       - name: Build Release Package

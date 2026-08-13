@@ -332,7 +332,8 @@ foreach ($runtimeContract in @(
     '$copilotExecutable = Join-Path $copilotExtractDirectory "package\copilot.exe"',
     '$copilotExecutableStream.ReadByte() -ne 0x4d',
     '& $copilotExecutableItem.FullName --help',
-    '$compilerVersion -cnotmatch "^6\.7\.1(?:\.0)?$"',
+    'choco list --local-only --exact --limit-output innosetup',
+    '$installedInnoVersions.Count -ne 1 -or $installedInnoVersions[0] -cne "6.7.1"',
     'INNO_SETUP_COMPILER: ${{ steps.inno.outputs.compiler_path }}'
 )) {
     if (-not $buildJob.Contains($runtimeContract)) {
