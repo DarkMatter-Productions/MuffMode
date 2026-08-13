@@ -974,6 +974,13 @@ select_spawn_result_t SelectSpawnPoint(vec3_t avoid_point, const vec3_t &check_m
 	auto try_add_spot = [&](gentity_t *spot) {
 		if (!SpawnSpotUsable(spot, avoid_point) || !SpawnPointClear(spot, check_mins, check_maxs))
 			return;
+		// Reject spots a stationary fighter can never validate downstream: MM_Horde_RunSpawning
+		// fails the whole attempt post-selection if the chosen spot isn't in any fighter's PHS
+		// (e.g. behind a closed door), and with few remaining candidates that can keep
+		// reselecting the same blocked spot forever. Filtering here up front — rather than only
+		// deprioritizing into close_candidates — lets a different, reachable candidate win instead.
+		if (!OriginSharesFighterPHS(spot->s.origin))
+			return;
 
 		const vec3_t delta = spot->s.origin - cluster;
 		Candidate candidate = {

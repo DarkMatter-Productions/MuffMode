@@ -10,6 +10,9 @@ namespace muffmode::horde {
 void ResetRuntimeState();
 void RefreshTargetLoadCache();
 void HarvestReachEvidence(gentity_t *monster);
+// True when origin is in the PHS of at least one living, non-eliminated fighter
+// (respects closed area portals). Defined in mm_horde.cpp.
+bool OriginSharesFighterPHS(const vec3_t &origin);
 float AdaptivePressureMult();
 void Adaptive_BeginWave();
 void Adaptive_RecordWaveEnd();
