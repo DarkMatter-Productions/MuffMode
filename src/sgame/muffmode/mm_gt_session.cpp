@@ -840,7 +840,7 @@ void MM_GT_Reconcile()
 			teamplay && teamplay->integer != 0);
 
 	if (factory_moved) {
-		const char *selected = g_factory->string ? g_factory->string : "";
+		const char *selected = g_factory && g_factory->string ? g_factory->string : "";
 		if (selected[0]) {
 			request.has_factory = true;
 			session_detail::CopyId(request.factory_id, selected);
