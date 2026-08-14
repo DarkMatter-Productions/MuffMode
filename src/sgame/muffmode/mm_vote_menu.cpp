@@ -33,8 +33,7 @@ constexpr int cvmenu_map = 3;
 // losing a row with nothing to catch it. The static_assert below is what makes
 // the next insertion a build failure rather than a missing menu entry.
 constexpr int kCallVoteGametypeRow		= cvmenu_map;
-constexpr int kCallVoteFactoryRow		= kCallVoteGametypeRow + 1;
-constexpr int kCallVoteRulesetRow		= kCallVoteFactoryRow + 1;
+constexpr int kCallVoteRulesetRow		= kCallVoteGametypeRow + 1;
 constexpr int kCallVoteMapRow			= kCallVoteRulesetRow + 1;
 constexpr int kCallVoteBlank1Row		= kCallVoteMapRow + 1;
 constexpr int kCallVoteScorelimitRow	= kCallVoteBlank1Row + 1;
@@ -53,9 +52,10 @@ static_assert(kCallVoteLastRow < MENU_MAX_ROWS - 1,
 	"call-a-vote content rows must leave the final row for the return entry");
 
 void OpenMap(gentity_t *ent, menu_hnd_t *p);
-void OpenFactory(gentity_t *ent, menu_hnd_t *p);
-void UpdateFactory(gentity_t *ent);
+void OpenFactoryVariants(gentity_t *ent, gametype_t gt);
+void UpdateFactoryVariants(gentity_t *ent);
 void SelectFactory(gentity_t *ent, menu_hnd_t *p);
+void SelectGameTypeDefault(gentity_t *ent, menu_hnd_t *p);
 void OpenGameType(gentity_t *ent, menu_hnd_t *p);
 void UpdateGameType(gentity_t *ent);
 void SelectGameType(gentity_t *ent, menu_hnd_t *p);
@@ -137,10 +137,17 @@ const menu_t kMapMenuTemplate[] = {
 };
 
 // [MuffMode] Paged like the map menu rather than fixed like the gametype menu:
-// the shipped catalogue carries 58 selectable factories, and a fixed-choice
-// submenu fills rows 2..content_limit and silently drops everything past the
-// fifteenth.
-const menu_t kFactoryMenuTemplate[] = {
+// an operator can add more variants to a single gametype than fit on one
+// page, and a fixed-choice submenu fills rows 2..content_limit and silently
+// drops everything past the fifteenth.
+//
+// Scoped to one gametype at a time (see UpdateFactoryVariants) -- this used to
+// be a flat list of every factory from every gametype, but that meant picking
+// a gametype and picking a factory were two unrelated top-level menu rows.
+// Return goes back to the Gametype list, not straight to Call a Vote, so
+// browsing another gametype's variants doesn't require a detour through the
+// top menu.
+const menu_t kFactoryVariantMenuTemplate[] = {
 	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_CENTER, nullptr },
 	{ "", MENU_ALIGN_LEFT, SelectFactory },
@@ -158,7 +165,7 @@ const menu_t kFactoryMenuTemplate[] = {
 	{ "", MENU_ALIGN_LEFT, SelectFactory },
 	{ "", MENU_ALIGN_LEFT, SelectFactory },
 	{ "", MENU_ALIGN_LEFT, nullptr },
-	{ "$g_pc_return", MENU_ALIGN_LEFT, G_Menu_ReturnToCallVote }
+	{ "$g_pc_return", MENU_ALIGN_LEFT, G_Menu_ReturnToGameType }
 };
 
 const menu_t kGameTypeMenuTemplate[] = {
@@ -310,7 +317,7 @@ const menu_t kScoreLimitMenuTemplate[] = {
 
 static_assert(std::size(kCallVoteMenuTemplate) == MENU_MAX_ROWS);
 static_assert(std::size(kMapMenuTemplate) == MENU_MAX_ROWS);
-static_assert(std::size(kFactoryMenuTemplate) == MENU_MAX_ROWS);
+static_assert(std::size(kFactoryVariantMenuTemplate) == MENU_MAX_ROWS);
 static_assert(std::size(kGameTypeMenuTemplate) == MENU_MAX_ROWS);
 static_assert(std::size(kRulesetMenuTemplate) == MENU_MAX_ROWS);
 static_assert(std::size(kPowerupsMenuTemplate) == MENU_MAX_ROWS);
@@ -787,8 +794,9 @@ void OpenMap(gentity_t *ent, menu_hnd_t *)
 // menu reuses them rather than restating the same arithmetic. The two paged
 // menus then cannot drift apart.
 
-struct FactoryMenuPage {
+struct FactoryVariantMenuPage {
 	int offset = 0;
+	gametype_t gt = GT_NONE;
 };
 
 struct FactoryMenuSnapshot {
@@ -867,7 +875,7 @@ void SelectFactory(gentity_t *ent, menu_hnd_t *p)
 	MenuVote_InitiateSelection(ent, p, "factory");
 }
 
-void PreviousFactoryPage(gentity_t *ent, menu_hnd_t *p)
+void PreviousFactoryVariantPage(gentity_t *ent, menu_hnd_t *p)
 {
 	if (!ent || !ent->client || !p)
 		return;
@@ -876,7 +884,7 @@ void PreviousFactoryPage(gentity_t *ent, menu_hnd_t *p)
 	if (page_size <= 0)
 		return;
 
-	FactoryMenuPage *page = static_cast<FactoryMenuPage *>(p->arg);
+	FactoryVariantMenuPage *page = static_cast<FactoryVariantMenuPage *>(p->arg);
 	if (page && page->offset > 0)
 	{
 		page->offset -= page_size;
@@ -885,7 +893,7 @@ void PreviousFactoryPage(gentity_t *ent, menu_hnd_t *p)
 	P_Menu_Update(ent);
 }
 
-void NextFactoryPage(gentity_t *ent, menu_hnd_t *p)
+void NextFactoryVariantPage(gentity_t *ent, menu_hnd_t *p)
 {
 	if (!ent || !ent->client || !p)
 		return;
@@ -894,17 +902,58 @@ void NextFactoryPage(gentity_t *ent, menu_hnd_t *p)
 	if (page_size <= 0)
 		return;
 
-	FactoryMenuPage *page = static_cast<FactoryMenuPage *>(p->arg);
+	FactoryVariantMenuPage *page = static_cast<FactoryVariantMenuPage *>(p->arg);
 	if (page)
 		page->offset += page_size;
 	P_Menu_Update(ent);
 }
 
-void UpdateFactory(gentity_t *ent)
+// [MuffMode] The *named* variant ids for one gametype -- the identity id
+// itself (e.g. "ffa") is excluded here and handled separately in
+// UpdateFactoryVariants, because it must be offered even when
+// g_votable_factories doesn't name it (see below). FactoryMenuValues() is
+// already sorted by base gametype then id, so this is a contiguous slice
+// rather than a fresh scan/parse.
+std::vector<const std::string *> FactoryVariantIds(gametype_t gt)
+{
+	const std::vector<std::string> &all = FactoryMenuValues();
+	const std::string_view identity_id = gt_short_name[(int)gt];
+
+	std::vector<const std::string *> ids;
+	for (const std::string &id : all)
+	{
+		if (muffmode::factory::MM_Factory_BaseGametype(id) != (int)gt)
+			continue;
+		if (id != identity_id)
+			ids.push_back(&id);
+	}
+	return ids;
+}
+
+// [MuffMode] The "no factory" choice, i.e. just this gametype with whatever
+// factory is already active for it. This is deliberately a "gametype" vote,
+// not a "factory <identity-id>" vote: g_votable_factories is meant to curate
+// which *named presets* an operator wants offered, and routing the default
+// through it would let a tight factory whitelist silently strand an
+// otherwise-votable gametype (MM_IsGametypeVotable already passed, back in
+// SelectGameType, and is gated only by g_votable_gametypes) with no menu path
+// to vote for it -- "None available" and a dead end, even though
+// `callvote gametype <gt>` still works fine from the console.
+void SelectGameTypeDefault(gentity_t *ent, menu_hnd_t *p)
+{
+	MenuVote_InitiateSelection(ent, p, "gametype");
+}
+
+void UpdateFactoryVariants(gentity_t *ent)
 {
 	MenuVoteView view;
 	if (!MenuVote_View(ent, view) || !MenuVote_HasIndex(view, 0) || !MenuVote_HasIndex(view, 1))
 		return;
+
+	FactoryVariantMenuPage *page = static_cast<FactoryVariantMenuPage *>(ent->client->menu->arg);
+	if (!page || page->gt < GT_FIRST || page->gt > GT_LAST)
+		return;
+	const gametype_t gt = page->gt;
 
 	menu_t *entries = view.entries;
 	const int page_size = MapPageSize(view.num);
@@ -916,81 +965,78 @@ void UpdateFactory(gentity_t *ent)
 
 	MenuVote_ClearEntry(entries[1]);
 
-	const std::vector<std::string> &values = FactoryMenuValues();
+	const std::vector<const std::string *> values = FactoryVariantIds(gt);
 
-	FactoryMenuPage *page = static_cast<FactoryMenuPage *>(ent->client->menu->arg);
-	int offset = page ? page->offset : 0;
-	const int total_factories = static_cast<int>(values.size());
+	int offset = page->offset;
+	// +1: the always-present "default" (no factory) choice, logical index 0,
+	// ahead of every named variant.
+	const int total_variants = static_cast<int>(values.size()) + 1;
 
-	offset = ClampMapPageOffset(offset, total_factories, page_size);
-	if (page)
-		page->offset = offset;
+	offset = ClampMapPageOffset(offset, total_variants, page_size);
+	page->offset = offset;
 
-	int total_pages = (total_factories + page_size - 1) / page_size;
+	int total_pages = (total_variants + page_size - 1) / page_size;
 	if (total_pages < 1)
 		total_pages = 1;
 	const int current_page = (offset / page_size) + 1;
 
 	if (total_pages > 1)
-		MenuVote_SetText(entries[0], G_Fmt("Select Factory ({}/{})", current_page, total_pages).data());
+		MenuVote_SetText(entries[0], G_Fmt("{} ({}/{})", gt_long_name[(int)gt], current_page, total_pages).data());
 	else
-		MenuVote_SetText(entries[0], "Select Factory");
+		MenuVote_SetText(entries[0], gt_long_name[(int)gt]);
 
 	MenuVote_ClearRange(view, kMapMenuFirstItem, content_limit);
 
-	if (total_factories <= 0)
-	{
-		// Reachable with a g_votable_factories list that names nothing valid.
-		MenuVote_SetText(entries[kMapMenuFirstItem], "None available");
-		return;
-	}
-
 	int menu_index = kMapMenuFirstItem;
-	for (int i = offset; i < total_factories && menu_index < (kMapMenuFirstItem + page_size); i++)
+	for (int i = offset; i < total_variants && menu_index < (kMapMenuFirstItem + page_size); i++)
 	{
-		MenuVote_SetArg(entries[menu_index], values[i]);
-
-		// The list mixes factories from every base gametype (a CA preset sits
-		// next to an FFA one), and picking a cross-gametype entry silently
-		// switches the match's gametype along with it. Tagging each row with
-		// its base gametype is what makes that consequence visible up front
-		// instead of a surprise after the vote passes.
-		const int base = muffmode::factory::MM_Factory_BaseGametype(values[i]);
-		if (base >= (int)GT_FIRST && base <= (int)GT_LAST)
-			MenuVote_SetText(entries[menu_index],
-				G_Fmt("[{}] {}", gt_short_name[base], values[i]).data());
+		if (i == 0)
+		{
+			MenuVote_SetArg(entries[menu_index], gt_short_name[(int)gt]);
+			MenuVote_SetText(entries[menu_index], gt_long_name[(int)gt]);
+			entries[menu_index].SelectFunc = SelectGameTypeDefault;
+		}
 		else
-			MenuVote_SetText(entries[menu_index], values[i]);
+		{
+			const std::string &id = *values[i - 1];
+			MenuVote_SetArg(entries[menu_index], id);
 
-		entries[menu_index].SelectFunc = SelectFactory;
+			const muffmode::factory::mm_factory_t *entry = muffmode::factory::MM_Factory_Find(id);
+			MenuVote_SetText(entries[menu_index],
+				entry && !entry->title.empty() ? entry->title.c_str() : id.c_str());
+			entries[menu_index].SelectFunc = SelectFactory;
+		}
+
 		menu_index++;
 	}
 
 	if (offset > 0)
 	{
 		MenuVote_SetText(entries[prev_index], "< Prev Page");
-		entries[prev_index].SelectFunc = PreviousFactoryPage;
+		entries[prev_index].SelectFunc = PreviousFactoryVariantPage;
 	}
 
-	if (offset + page_size < total_factories)
+	if (offset + page_size < total_variants)
 	{
 		MenuVote_SetText(entries[next_index], "> Next Page");
-		entries[next_index].SelectFunc = NextFactoryPage;
+		entries[next_index].SelectFunc = NextFactoryVariantPage;
 	}
 }
 
-void OpenFactory(gentity_t *ent, menu_hnd_t *)
+void OpenFactoryVariants(gentity_t *ent, gametype_t gt)
 {
 	if (!ent || !ent->client)
 		return;
 
-	FactoryMenuPage *page = static_cast<FactoryMenuPage *>(gi.TagMalloc(sizeof(FactoryMenuPage), TAG_LEVEL));
+	FactoryVariantMenuPage *page = static_cast<FactoryVariantMenuPage *>(
+		gi.TagMalloc(sizeof(FactoryVariantMenuPage), TAG_LEVEL));
 	if (!page)
 		return;
 
 	*page = {};
-	if (!MenuVote_OpenMenu(ent, kFactoryMenuTemplate,
-		muffmode::CountAsInt(kFactoryMenuTemplate), page, UpdateFactory))
+	page->gt = gt;
+	if (!MenuVote_OpenMenu(ent, kFactoryVariantMenuTemplate,
+		muffmode::CountAsInt(kFactoryVariantMenuTemplate), page, UpdateFactoryVariants))
 		gi.TagFree(page);
 }
 
@@ -1043,7 +1089,7 @@ void SelectGameType(gentity_t *ent, menu_hnd_t *p)
 		return;
 	}
 
-	MenuVote_Initiate(ent, "gametype", value->c_str());
+	OpenFactoryVariants(ent, gt);
 }
 
 void OpenGameType(gentity_t *ent, menu_hnd_t *)
@@ -1171,27 +1217,11 @@ void UpdateCallVote(gentity_t *ent)
 	MenuVote_SetText(entries[0], "Call a Vote");
 
 	entries[kCallVoteGametypeRow].SelectFunc = OpenGameType;
+	// [MuffMode] Already carries the active factory's title (e.g. "Instagib
+	// FFA"), composed into level.gametype_name -- picking a factory is nested
+	// under picking a gametype now (see OpenFactoryVariants), so there is no
+	// separate Factory row left to name the id.
 	MenuVote_SetText(entries[kCallVoteGametypeRow], G_Fmt("Gametype: {}", level.gametype_name).data());
-
-	// [MuffMode] The gametype row already carries an active factory's *title*,
-	// composed into level.gametype_name, so this row shows the id instead of
-	// repeating it. The id is also the actionable half: it is what
-	// `callvote factory <id>` and `factory info <id>` take.
-	const std::vector<std::string> &votable_factories = FactoryMenuValues();
-	if (votable_factories.empty())
-	{
-		entries[kCallVoteFactoryRow].SelectFunc = nullptr;
-		MenuVote_SetText(entries[kCallVoteFactoryRow], "Factory: N/A");
-	}
-	else
-	{
-		entries[kCallVoteFactoryRow].SelectFunc = OpenFactory;
-		const muffmode::factory::mm_factory_t *active = muffmode::factory::MM_Factory_Active();
-		if (active && !active->id.empty())
-			MenuVote_SetText(entries[kCallVoteFactoryRow], G_Fmt("Factory: {}", active->id.c_str()).data());
-		else
-			MenuVote_SetText(entries[kCallVoteFactoryRow], "Factory: none");
-	}
 
 	entries[kCallVoteRulesetRow].SelectFunc = OpenRuleset;
 	MenuVote_SetText(entries[kCallVoteRulesetRow], G_Fmt("Ruleset: {}", CurrentRulesetName()).data());
@@ -1498,6 +1528,15 @@ void G_Menu_ReturnToCallVote(gentity_t *ent, menu_hnd_t *p)
 		return;
 
 	muffmode::vote_menu::OpenCallVoteMenu(ent);
+	gi.local_sound(ent, CHAN_AUTO, gi.soundindex("misc/menu3.wav"), 1, ATTN_NONE, 0);
+}
+
+void G_Menu_ReturnToGameType(gentity_t *ent, menu_hnd_t *p)
+{
+	if (!ent || !ent->client)
+		return;
+
+	muffmode::vote_menu::OpenGameType(ent, nullptr);
 	gi.local_sound(ent, CHAN_AUTO, gi.soundindex("misc/menu3.wav"), 1, ATTN_NONE, 0);
 }
 

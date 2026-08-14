@@ -64,4 +64,5 @@ inline constexpr bool FactoryMenuSnapshotNeedsRefresh(
 bool Vote_Menu_Active(gentity_t *ent);
 void G_Menu_CallVote(gentity_t *ent, menu_hnd_t *p);
 void G_Menu_ReturnToCallVote(gentity_t *ent, menu_hnd_t *p);
+void G_Menu_ReturnToGameType(gentity_t *ent, menu_hnd_t *p);
 void G_Menu_Vote_Open(gentity_t *ent);
