@@ -1642,6 +1642,10 @@ struct level_locals_t {
 	int			last_standing_count[TEAM_NUM_TEAMS];	// round team modes: survivors per team last poll, to fire "last one standing" only on the >1 -> 1 edge
 
 	bool		locked[TEAM_NUM_TEAMS];
+	// [MuffMode] Automatic g_match_lock ownership is separate from captain/admin
+	// locks so warmup cancellation can release only the lock it created.
+	bool		automatic_match_locked[TEAM_NUM_TEAMS];
+	int			match_lock_modification_count;
 	gentity_t	*captain[TEAM_NUM_TEAMS];	// team captains (nullptr = no captain)
 
 	gtime_t		ctf_last_flag_capture;
@@ -3628,6 +3632,7 @@ struct client_session_t {
 
 	// duel stats
 	bool			duel_queued;
+	uint64_t		duel_queue_order;	// persistent FIFO sequence; zero when not queued
 	int				wins, losses;
 
 	// real time of team joining

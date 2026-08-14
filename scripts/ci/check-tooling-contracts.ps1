@@ -206,7 +206,8 @@ $buildWorkflow = Get-Content -LiteralPath (Join-Path $repoRoot ".github\workflow
 foreach ($newBranchContract in @(
     'github.event.repository.default_branch',
     'git merge-base HEAD',
-    'timeout-minutes: 90'
+    'timeout-minutes: 90',
+    'run: ./scripts/ci/build-msbuild.ps1 -Configuration Release -Platform x64 -TreatWarningsAsErrors -AdditionalMsBuildArgs "/p:MMGhostRuntimeTesting=true"'
 )) {
     if ($buildWorkflow -notmatch [regex]::Escape($newBranchContract)) {
         Fail-ToolingContract "the build workflow lost new-branch or timeout contract '$newBranchContract'."

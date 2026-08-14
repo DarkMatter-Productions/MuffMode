@@ -1491,9 +1491,15 @@ static int SortRanks(const void *a, const void *b) {
 	// then spectators
 	if (!ClientIsPlaying(ca) && !ClientIsPlaying(cb)) {
 		if (ca->sess.duel_queued && cb->sess.duel_queued) {
-			if (ca->sess.team_join_time > cb->sess.team_join_time)
+			const int a_client_num = *static_cast<const int *>(a);
+			const int b_client_num = *static_cast<const int *>(b);
+			if (MM_DuelQueueOrderBefore(
+				ca->sess.duel_queue_order, a_client_num,
+				cb->sess.duel_queue_order, b_client_num))
 				return -1;
-			if (ca->sess.team_join_time < cb->sess.team_join_time)
+			if (MM_DuelQueueOrderBefore(
+				cb->sess.duel_queue_order, b_client_num,
+				ca->sess.duel_queue_order, a_client_num))
 				return 1;
 		}
 		if (ca->sess.duel_queued)
@@ -2154,8 +2160,14 @@ void CheckDMExitRules() {
 		return;
 	}
 	
-	if (minplayers->integer > 0 &&
-		logical_players < static_cast<size_t>(minplayers->integer)) {
+	const int effective_min_players = muffmode::match::EffectiveMinPlayers();
+	if (GT(GT_DUEL) &&
+		logical_players != static_cast<size_t>(effective_min_players)) {
+		QueueIntermission("Duel requires exactly two players.", true, false);
+		return;
+	}
+	if (notGT(GT_DUEL) && minplayers->integer > 0 &&
+		logical_players < static_cast<size_t>(effective_min_players)) {
 		QueueIntermission("Not enough players remaining.", true, false);
 		return;
 	}

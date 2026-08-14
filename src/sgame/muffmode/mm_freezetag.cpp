@@ -14,6 +14,7 @@
 #include "monsters/m_player.h"
 
 #include <array>
+#include <cstdint>
 #include <string>
 
 namespace {
@@ -54,6 +55,12 @@ enum class frozen_release_t : uint8_t {
 	OutOfWorld
 };
 
+struct thaw_credit_owner_t {
+	bool bound = false;
+	int32_t spawn_count = 0;
+	std::string social_id;
+};
+
 struct freeze_state_t {
 	bool frozen = false;
 	bool crouched = false;
@@ -62,6 +69,7 @@ struct freeze_state_t {
 	gtime_t thaw_last_update = 0_ms;
 	float thaw_progress_seconds = 0.0f;
 	std::array<float, MAX_CLIENTS> thaw_credit_seconds = {};
+	std::array<thaw_credit_owner_t, MAX_CLIENTS> thaw_credit_owners = {};
 	gtime_t next_notice = 0_ms;
 	gtime_t next_help = 0_ms;
 	gtime_t next_thaw_feedback = 0_ms;
@@ -79,17 +87,65 @@ struct freeze_state_t {
 };
 
 std::array<freeze_state_t, MAX_CLIENTS> s_freeze;
+std::array<freeze_state_t, MAX_CLIENTS> s_ghost_freeze;
+
+int ClientSlotIndex(const gentity_t *ent)
+{
+	if (!ent || !g_entities)
+		return -1;
+
+	const size_t capacity = std::min(
+		static_cast<size_t>(game.maxclients), s_freeze.size());
+	if (!capacity)
+		return -1;
+
+	// Public ghost hooks can run while a client slot is disconnected. Validate
+	// its address without relational pointer arithmetic or dereferencing an
+	// arbitrary caller-provided pointer first.
+	const uintptr_t address = reinterpret_cast<uintptr_t>(ent);
+	const uintptr_t first = reinterpret_cast<uintptr_t>(&g_entities[1]);
+	if (address < first)
+		return -1;
+
+	const uintptr_t offset = address - first;
+	if (offset >= capacity * sizeof(gentity_t) || offset % sizeof(gentity_t))
+		return -1;
+
+	return static_cast<int>(offset / sizeof(gentity_t));
+}
 
 int ClientIndex(const gentity_t *ent)
 {
-	if (!ent || !ent->client)
-		return -1;
-
-	const int index = static_cast<int>(ent - g_entities - 1);
-	if (index < 0 || index >= static_cast<int>(game.maxclients) || index >= MAX_CLIENTS)
+	const int index = ClientSlotIndex(ent);
+	if (index < 0 || !ent->client)
 		return -1;
 
 	return index;
+}
+
+void SanitizeGhostRestoredState(freeze_state_t &state)
+{
+	state.view_proxy_entnum = kNoFrozenViewProxy;
+	state.thawer_entnum = kNoThawer;
+	state.thawer_count = 0;
+	state.bot_rescuer_entnum = kNoThawer;
+
+	// Keep the absolute freeze/thaw start times and accumulated thaw work, but
+	// never turn time spent disconnected into thaw progress on the first frame.
+	state.thaw_last_update = state.thaw_started ? level.time : 0_ms;
+	state.next_notice = level.time + kFrozenNoticeInterval;
+	state.next_help = 0_ms;
+	state.next_thaw_feedback = 0_ms;
+	// Orbit angles are durable; the input-sampling baseline belongs to the old
+	// network command stream and would make the first reconnect command jump.
+	state.last_cmd_angles = {};
+	state.has_last_cmd_angles = false;
+
+	// These transitions belonged to the old live entity/world frame. The
+	// restored body will sample its new placement before scheduling any of them.
+	state.hazard_since = 0_ms;
+	state.release_pending = frozen_release_t::None;
+	state.crush_displace_pending = false;
 }
 
 freeze_state_t *StateFor(gentity_t *ent)
@@ -301,8 +357,22 @@ void RecordThawContributors(freeze_state_t &state, const thaw_scan_t &scan, floa
 	for (int i = 0; i < stored; ++i) {
 		gentity_t *contributor = scan.contributors[i];
 		const int index = ClientIndex(contributor);
-		if (index >= 0)
-			state.thaw_credit_seconds[static_cast<size_t>(index)] += delta_seconds;
+		if (index < 0)
+			continue;
+
+		const size_t slot = static_cast<size_t>(index);
+		thaw_credit_owner_t &owner = state.thaw_credit_owners[slot];
+		const char *social_id = contributor->client->pers.social_id;
+		if (!owner.bound || owner.spawn_count != contributor->spawn_count ||
+			owner.social_id != social_id) {
+			// Client slots are reusable. Work accumulated by a previous occupant
+			// must never become an assist for the replacement player.
+			state.thaw_credit_seconds[slot] = 0.0f;
+			owner.bound = true;
+			owner.spawn_count = contributor->spawn_count;
+			owner.social_id = social_id;
+		}
+		state.thaw_credit_seconds[slot] += delta_seconds;
 	}
 }
 
@@ -814,7 +884,8 @@ void ApplyFrozenState(gentity_t *ent, freeze_state_t &state)
 	client->ps.pmove.pm_type = PM_FREEZE;
 	client->ps.pmove.origin = ent->s.origin;
 	client->ps.pmove.velocity = ent->velocity;
-	client->ps.pmove.pm_flags &= ~(PMF_TIME_TELEPORT | PMF_TIME_WATERJUMP | PMF_TIME_LAND);
+	client->ps.pmove.pm_flags &=
+		~(PMF_TIME_TELEPORT | PMF_TIME_WATERJUMP | PMF_TIME_LAND | PMF_ON_LADDER);
 	if (state.crouched)
 		client->ps.pmove.pm_flags |= PMF_DUCKED;
 	client->ps.stats[STAT_SHOW_STATUSBAR] = 1;
@@ -1069,13 +1140,34 @@ bool CanReceiveThawCredit(gentity_t *frozen, gentity_t *helper)
 		IsFreezeTeam(helper->client->sess.team);
 }
 
+void ClearThawCredit(freeze_state_t &state, size_t slot)
+{
+	if (slot >= state.thaw_credit_seconds.size())
+		return;
+
+	state.thaw_credit_seconds[slot] = 0.0f;
+	state.thaw_credit_owners[slot] = {};
+}
+
+bool ThawCreditOwnerMatches(const freeze_state_t &state, size_t slot,
+	const gentity_t *helper)
+{
+	if (slot >= state.thaw_credit_owners.size() || !helper || !helper->client ||
+		!helper->client->pers.connected)
+		return false;
+
+	const thaw_credit_owner_t &owner = state.thaw_credit_owners[slot];
+	return owner.bound && owner.spawn_count == helper->spawn_count &&
+		owner.social_id == helper->client->pers.social_id;
+}
+
 struct thaw_credit_t {
 	gentity_t *primary = nullptr;
 	std::array<gentity_t *, MAX_CLIENTS> assists = {};
 	int assist_count = 0;
 };
 
-thaw_credit_t BuildThawCredit(gentity_t *frozen, const freeze_state_t &state, gentity_t *primary)
+thaw_credit_t BuildThawCredit(gentity_t *frozen, freeze_state_t &state, gentity_t *primary)
 {
 	thaw_credit_t credit;
 	if (!CanReceiveThawCredit(frozen, primary))
@@ -1086,10 +1178,15 @@ thaw_credit_t BuildThawCredit(gentity_t *frozen, const freeze_state_t &state, ge
 	const int limit = std::min(static_cast<int>(game.maxclients), static_cast<int>(MAX_CLIENTS));
 
 	for (int i = 0; i < limit; ++i) {
+		const size_t slot = static_cast<size_t>(i);
 		gentity_t *helper = ClientEntityForIndex(i);
+		if (!ThawCreditOwnerMatches(state, slot, helper)) {
+			ClearThawCredit(state, slot);
+			continue;
+		}
 		if (!helper || helper == credit.primary || !CanReceiveThawCredit(frozen, helper))
 			continue;
-		if (!MM_FreezeTagThawAssistQualifies(state.thaw_credit_seconds[static_cast<size_t>(i)], thaw_seconds))
+		if (!MM_FreezeTagThawAssistQualifies(state.thaw_credit_seconds[slot], thaw_seconds))
 			continue;
 
 		credit.assists[static_cast<size_t>(credit.assist_count++)] = helper;
@@ -1171,7 +1268,7 @@ void AwardThawCredit(gentity_t *ent, const thaw_credit_t &credit)
 	}
 }
 
-void RespawnThawedPlayerAtSpawnPoint(gentity_t *ent, const freeze_state_t &state, gentity_t *thawer)
+void RespawnThawedPlayerAtSpawnPoint(gentity_t *ent, freeze_state_t &state, gentity_t *thawer)
 {
 	if (!ent || !ent->client)
 		return;
@@ -1214,7 +1311,7 @@ void ReleaseFrozenBody(gentity_t *ent, frozen_release_t reason)
 	gi.LocClient_Print(ent, PRINT_CENTER, "Your frozen body was lost.");
 }
 
-void RestoreFrozenPlayerAt(gentity_t *ent, const freeze_state_t &state, gentity_t *thawer, const vec3_t &thaw_origin)
+void RestoreFrozenPlayerAt(gentity_t *ent, freeze_state_t &state, gentity_t *thawer, const vec3_t &thaw_origin)
 {
 	if (!ent || !ent->client)
 		return;
@@ -1339,6 +1436,7 @@ void ResetThawProgress(freeze_state_t &state)
 	state.thaw_last_update = 0_ms;
 	state.thaw_progress_seconds = 0.0f;
 	state.thaw_credit_seconds.fill(0.0f);
+	state.thaw_credit_owners.fill(thaw_credit_owner_t{});
 	state.thawer_entnum = kNoThawer;
 	state.thawer_count = 0;
 	state.next_thaw_feedback = 0_ms;
@@ -1434,12 +1532,28 @@ mm_freezetag_team_counts_t CountTeam(team_t team)
 
 	for (uint32_t i = 1; i <= game.maxclients; ++i) {
 		gentity_t *slot = &g_entities[i];
-		if (!slot->inuse || !slot->client)
+		if (!slot->client)
 			continue;
-		if (!MM_Ghost_ReservedClientCountsForRound(slot, team) || !RawFrozen(slot))
+		if (!MM_Ghost_ReservedClientCountsForRound(slot, team))
 			continue;
 
 		counts.participants++;
+		if (!MM_FreezeTag_GhostIsFrozen(slot)) {
+			mm_ghost_reserved_round_state_t state{};
+			if (!MM_Ghost_ReservedRoundState(slot, team, state))
+				continue;
+			if (!state.exact_health) {
+				// Membership remains authoritative, but the ordinary fallback has
+				// intentionally discarded exact combat state. Treat it as active so
+				// its team cannot lose while the engine still owes ClientBegin, and
+				// defer only a health tie-break.
+				counts.active++;
+				counts.health_complete = false;
+			} else if (!state.dead && state.health > 0) {
+				counts.active++;
+				counts.total_health += state.health;
+			}
+		}
 	}
 
 	return counts;
@@ -1663,6 +1777,58 @@ void MM_FreezeTag_ClearClient(gentity_t *ent)
 	}
 }
 
+void MM_FreezeTag_GhostCapture(const gentity_t *ent)
+{
+	const int index = ClientIndex(ent);
+	if (index < 0)
+		return;
+
+	// Capturing an unfrozen client must retire any older reservation state that
+	// occupied this client slot.
+	s_ghost_freeze[static_cast<size_t>(index)] = {};
+	const freeze_state_t &live = s_freeze[static_cast<size_t>(index)];
+	if (live.frozen)
+		s_ghost_freeze[static_cast<size_t>(index)] = live;
+}
+
+void MM_FreezeTag_GhostRestore(gentity_t *ent)
+{
+	const int index = ClientIndex(ent);
+	if (index < 0)
+		return;
+
+	freeze_state_t restored = s_ghost_freeze[static_cast<size_t>(index)];
+	s_ghost_freeze[static_cast<size_t>(index)] = {};
+
+	// The connection/setup path may have installed a fresh live state in this
+	// slot. It owns any proxy it names; release that state before replacing it.
+	MM_FreezeTag_ClearClient(ent);
+	if (!restored.frozen)
+		return;
+
+	SanitizeGhostRestoredState(restored);
+	s_freeze[static_cast<size_t>(index)] = restored;
+	ApplyFrozenState(ent, s_freeze[static_cast<size_t>(index)]);
+}
+
+void MM_FreezeTag_GhostClear(const gentity_t *ent)
+{
+	const int index = ClientSlotIndex(ent);
+	if (index >= 0)
+		s_ghost_freeze[static_cast<size_t>(index)] = {};
+}
+
+void MM_FreezeTag_GhostClearAll()
+{
+	s_ghost_freeze.fill(freeze_state_t{});
+}
+
+bool MM_FreezeTag_GhostIsFrozen(const gentity_t *ent)
+{
+	const int index = ClientSlotIndex(ent);
+	return index >= 0 && s_ghost_freeze[static_cast<size_t>(index)].frozen;
+}
+
 void MM_FreezeTag_DetachWorldEntities()
 {
 	if (!MM_FreezeTag_IsActive())
@@ -1874,6 +2040,22 @@ bool MM_FreezeTag_ClientThink(gentity_t *ent, const usercmd_t *ucmd)
 		MM_FreezeTag_BlockFrozenCommand(ent, false);
 		client->latched_buttons &= ~BUTTON_ATTACK;
 	}
+
+	return true;
+}
+
+bool MM_FreezeTag_BlockFrozenFootsteps(gentity_t *ent)
+{
+	if (!RawFrozen(ent))
+		return false;
+
+	// A frozen body uses toss physics so weapon knockback can slide it. Vanilla
+	// otherwise mistakes that velocity for running and repeatedly emits steps.
+	// Also discard a movement event queued earlier in the frame before the hit
+	// froze the player. Non-movement impulse events remain intact.
+	if (ent->s.event == EV_FOOTSTEP || ent->s.event == EV_OTHER_FOOTSTEP ||
+		ent->s.event == EV_LADDER_STEP)
+		ent->s.event = EV_NONE;
 
 	return true;
 }

@@ -26,6 +26,7 @@
 #include "monsters/m_player.h"	// corpse frames on match reset
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
@@ -43,6 +44,154 @@ extern cvar_t *g_horde_champion_max_per_run;
 extern cvar_t *g_horde_champion_chance;
 
 namespace muffmode::match {
+
+namespace {
+
+bool IsLockIndex(team_t team)
+{
+	return team > TEAM_NONE && team < TEAM_NUM_TEAMS;
+}
+
+bool AutomaticLockPhase()
+{
+	return level.match_state == match_state_t::MATCH_COUNTDOWN ||
+		level.match_state == match_state_t::MATCH_IN_PROGRESS ||
+		level.match_state == match_state_t::MATCH_ENDED;
+}
+
+void ClearAutomaticMatchLocks()
+{
+	std::fill(std::begin(level.automatic_match_locked),
+		std::end(level.automatic_match_locked), false);
+}
+
+void ApplyAutomaticMatchLocksForCurrentPhase()
+{
+	ClearAutomaticMatchLocks();
+	if (!deathmatch->integer || GT(GT_ARENA) || !AutomaticLockPhase() ||
+		!muffmode::CvarEnabled(g_match_lock))
+		return;
+
+	if (Teams()) {
+		level.automatic_match_locked[TEAM_RED] = true;
+		level.automatic_match_locked[TEAM_BLUE] = true;
+	} else {
+		level.automatic_match_locked[TEAM_FREE] = true;
+	}
+}
+
+void SynchronizeAutomaticMatchLocksForCurrentPhase()
+{
+	level.match_lock_modification_count = g_match_lock
+		? g_match_lock->modified_count : -1;
+	ApplyAutomaticMatchLocksForCurrentPhase();
+}
+
+void ResetClientMatchScopedState()
+{
+	// Timeout allowance and warmup commitment belong to one singleton match,
+	// not to the client connection or the map lifetime.
+	for (size_t i = 0; i < static_cast<size_t>(game.maxclients); ++i) {
+		gentity_t *ec = &g_entities[i + 1];
+		if (!ec->client || !ec->client->pers.connected)
+			continue;
+		ec->client->pers.vote_count = 0;
+		ec->client->pers.timeout_used = false;
+		ec->client->resp.ready = false;
+	}
+}
+
+void ResetMatchScopedTransientState()
+{
+	level.suddendeath = false;
+	level.overtime = 0_sec;
+	level.tied_overtime_start = 0_sec;
+	level.prepare_to_fight = false;
+	level.countdown_check = 0_sec;
+	level.matchendwarn_check = 0_sec;
+	level.match_cancel_delay_timer = 0_sec;
+	level.match_state_queued = 0;
+	level.round_number = 0;
+	level.round_state = round_state_t::ROUND_NONE;
+	level.round_state_queued = 0;
+	level.round_state_timer = 0_sec;
+	level.timeout_in_place = 0_sec;
+	level.timeout_ent = nullptr;
+	level.timeout_auto = false;
+	level.timeout_resuming = false;
+	std::fill(std::begin(level.frag_warning), std::end(level.frag_warning), false);
+	std::fill(std::begin(level.team_old_scores), std::end(level.team_old_scores), 0);
+	std::fill(std::begin(level.count_living), std::end(level.count_living), 0);
+	std::fill(std::begin(level.last_standing_count),
+		std::end(level.last_standing_count), 0);
+	ClearAutomaticMatchLocks();
+}
+
+bool SingletonMatchCanStart()
+{
+	if (level.intermission_queued || level.intermission_time)
+		return false;
+	if (level.match_state > match_state_t::MATCH_COUNTDOWN)
+		return false;
+	const bool duel = GT(GT_DUEL);
+	const size_t occupied_slots = duel
+		? MM_Duel_OccupiedSlots()
+		: static_cast<size_t>(level.num_playing_clients);
+	if (!MM_SingletonMatchRosterCanStart(duel, occupied_slots))
+		return false;
+	return true;
+}
+
+} // namespace
+
+int EffectiveMinPlayers()
+{
+	return MM_EffectiveMatchMinPlayers(
+		GT(GT_DUEL), muffmode::CvarInteger(minplayers));
+}
+
+bool IsTeamLocked(team_t team)
+{
+	if (!IsLockIndex(team))
+		return false;
+	ReconcileAutomaticMatchLocks();
+	return level.locked[team] || level.automatic_match_locked[team];
+}
+
+bool IsTeamManuallyLocked(team_t team)
+{
+	return IsLockIndex(team) && level.locked[team];
+}
+
+bool IsTeamAutomaticallyLocked(team_t team)
+{
+	if (!IsLockIndex(team))
+		return false;
+	ReconcileAutomaticMatchLocks();
+	return level.automatic_match_locked[team];
+}
+
+void SetManualTeamLocked(team_t team, bool locked)
+{
+	if (IsLockIndex(team))
+		level.locked[team] = locked;
+}
+
+void SetAutomaticTeamLocked(team_t team, bool locked)
+{
+	if (IsLockIndex(team))
+		level.automatic_match_locked[team] = locked;
+}
+
+void ReconcileAutomaticMatchLocks()
+{
+	const int modified_count = g_match_lock ? g_match_lock->modified_count : -1;
+	if (level.match_lock_modification_count == modified_count)
+		return;
+
+	level.match_lock_modification_count = modified_count;
+	ApplyAutomaticMatchLocksForCurrentPhase();
+}
 
 gclient_t *SortedConnectedClient(size_t slot)
 {
@@ -320,8 +469,20 @@ void ResetEntities(bool reset_players, bool reset_ghost, bool reset_score)
 			MM_FreezeTag_DetachWorldEntities();
 	}
 
+	// These fields deliberately live outside the generic world snapshot: they
+	// describe the match controller that requested the reload, not map entities.
+	// Preserve them across the level-structure rebuild just like the controller's
+	// stack-local reset arguments.
+	std::array<bool, TEAM_NUM_TEAMS> automatic_match_locked{};
+	std::copy(std::begin(level.automatic_match_locked),
+		std::end(level.automatic_match_locked), automatic_match_locked.begin());
+	const int match_lock_modification_count = level.match_lock_modification_count;
+
 	const world_entity_reload_result_t reload_result =
 		G_ResetWorldEntitiesFromSavedString();
+	std::copy(automatic_match_locked.begin(), automatic_match_locked.end(),
+		std::begin(level.automatic_match_locked));
+	level.match_lock_modification_count = match_lock_modification_count;
 	if (reload_result == world_entity_reload_result_t::reloaded) {
 		if (reset_players)
 			ResetPlayers(reset_ghost, reset_score);
@@ -435,6 +596,14 @@ bool StartNewRound(bool reset_world = true)
 		// world still needs held flags and Techs released during cleanup.
 		if (++level.world_epoch == 0)
 			level.world_epoch = 1;
+	}
+
+	// Resolve exact-state reservations before player rebuilding and Red Rover's
+	// team shuffle. The regular ghost frame runs earlier than StartNewRound, so
+	// deferring this to the next tick would shuffle without a pending reconnect.
+	MM_Ghost_ResolveRoundTransition();
+
+	if (reset_world && !MM_Horde_ShouldSkipEntitiesReset()) {
 		if (GT(GT_FREEZE)) {
 			ResetEntities(false, false, false);
 		} else {
@@ -587,22 +756,26 @@ Match_Start
 Starts a match
 ============
 */
-void Match_Start() {
-	MM_Announcer_OnMatchReset();
-	MM_Duel_ResetFinalResult();
+bool Match_Start() {
 	if (!deathmatch->integer)
-		return;
+		return false;
 	if (GT(GT_ARENA)) {
 		// [MuffMode] Each room owns its own match state. Console/admin start
 		// requests must not run the singleton reset and team-lock path.
+		MM_Announcer_OnMatchReset();
+		MM_Duel_ResetFinalResult();
 		MM_Arena_OnMatchStart();
-		return;
+		return true;
 	}
+	if (!match::SingletonMatchCanStart())
+		return false;
+
+	MM_Announcer_OnMatchReset();
+	MM_Duel_ResetFinalResult();
+	match::ResetMatchScopedTransientState();
 
 	level.match_time = level.time;
 	level.match_start_time = level.time;
-	level.overtime = 0_sec;
-	level.tied_overtime_start = 0_sec;
 
 	const char *s = G_TimeString(timelimit->value ? timelimit->value * 1000 : 0, true);
 	gi.configstring(CONFIG_MATCH_STATE, s);
@@ -637,17 +810,17 @@ void Match_Start() {
 	UnReadyAll();
 	ValidateCaptains();
 
-	// g_match_lock: lock teams via level.locked so unlockteam can override per-team
-	if (g_match_lock->integer && Teams()) {
-		level.locked[TEAM_RED] = true;
-		level.locked[TEAM_BLUE] = true;
-	} else if (g_match_lock->integer) {
-		level.locked[TEAM_FREE] = true;
-	}
+	// Keep automatic policy separate from captain/admin locks. An explicit
+	// unlock can now override one side without losing lock provenance.
+	match::SynchronizeAutomaticMatchLocksForCurrentPhase();
 
 	match::SetMatchId();
 	MM_MatchStats_Init();
 	MM_PlayerStats_OnMatchStart();
+	MM_Ghost_OnMatchStart();
+	// World rebuilding and ghost fallback normalization may copy persistent
+	// client state. Clear match-scoped client flags after both have completed.
+	match::ResetClientMatchScopedState();
 
 	gi.LocBroadcast_Print(PRINT_TTS, "Match ID: {}\n", level.match_id.c_str());
 
@@ -664,11 +837,12 @@ void Match_Start() {
 	// ResetEntities already rebuilt the world; round modes should initialize
 	// their first countdown without parsing the same entity lump a second time.
 	if (match::StartNewRound(false))
-		return;
+		return true;
 
 	gi.LocBroadcast_Print(PRINT_CENTER, "FIGHT!");
 	//gi.positioned_sound(world->s.origin, world, CHAN_AUTO | CHAN_RELIABLE, gi.soundindex("misc/tele_up.wav"), 1, ATTN_NONE, 0);
 	MM_Announce(mm_announce_event_t::FightWithBackup, world);
+	return true;
 }
 
 /*
@@ -690,6 +864,7 @@ void Match_Reset() {
 	//	return;
 	//}
 
+	match::ResetMatchScopedTransientState();
 	MM_PlayerStats_OnMatchAbort();
 	MM_Ghost_ClearAll(true);
 	match::ResetEntities(true, false, true);
@@ -698,10 +873,14 @@ void Match_Reset() {
 	// a reset cannot leave it armed for the match that replaces it.
 	MM_Awards_Reset();
 	UnReadyAll();
+	match::ResetClientMatchScopedState();
 	ValidateCaptains();
 
-	// clear any team locks (g_match_lock or captain locks) on reset
-	level.locked[TEAM_SPECTATOR] = level.locked[TEAM_FREE] = level.locked[TEAM_RED] = level.locked[TEAM_BLUE] = false;
+	// A full reset clears both explicit and automatic locks. Countdown
+	// cancellation uses the narrower automatic-lock release path below.
+	std::fill(std::begin(level.locked), std::end(level.locked), false);
+	std::fill(std::begin(level.automatic_match_locked),
+		std::end(level.automatic_match_locked), false);
 
 	level.match_time = level.time;
 	level.match_state = match_state_t::MATCH_WARMUP_DEFAULT;
@@ -709,10 +888,12 @@ void Match_Reset() {
 	level.warmup_notice_time = 0_sec;
 	level.warmup_gametype_hud_time = level.time;
 	level.match_state_timer = 0_sec;
+	level.warmup_modification_count = g_warmup_countdown->modified_count;
 	level.intermission_queued = 0_sec;
 	level.intermission_exit = false;
 	level.intermission_time = 0_sec;
-	level.tied_overtime_start = 0_sec;
+	level.intermission_victor_msg[0] = '\0';
+	match::SynchronizeAutomaticMatchLocksForCurrentPhase();
 
 	CalculateRanks();
 
@@ -752,7 +933,7 @@ void BroadcastWarmupWaitNotice()
 
 	switch (level.warmup_requisite) {
 	case warmup_req_t::WARMUP_REQ_MORE_PLAYERS:
-		msg = G_Fmt("Waiting for players ({} minimum)", minplayers->integer).data();
+		msg = G_Fmt("Waiting for players ({} minimum)", EffectiveMinPlayers()).data();
 		break;
 	case warmup_req_t::WARMUP_REQ_BALANCE:
 		msg = "Teams are imbalanced.";
@@ -848,10 +1029,10 @@ bool ReadyConditionsMet()
 
 	// wait if no players at all
 	if (!count_humans && !count_bots)
-		return true;
+		return false;
 
 	// wait if below minimum players
-	const int min_players = muffmode::CvarInteger(minplayers);
+	const int min_players = EffectiveMinPlayers();
 	if (min_players > 0 && (count_humans + count_bots) < min_players)
 		return false;
 
@@ -880,6 +1061,75 @@ CheckLastManStanding
 */
 namespace muffmode::match {
 
+static int CountRoundReservations(team_t team)
+{
+	int count = 0;
+	for (size_t i = 0; i < static_cast<size_t>(game.maxclients); ++i) {
+		gentity_t *slot = &g_entities[i + 1];
+		if (MM_Ghost_ReservedClientCountsForRound(slot, team))
+			count++;
+	}
+	return count;
+}
+
+struct round_team_view_t {
+	int living = 0;
+	int64_t total_health = 0;
+	bool health_complete = true;
+	gentity_t *sole_connected_survivor = nullptr;
+};
+
+static bool SlotHasRoundReservation(gentity_t *slot)
+{
+	return MM_Ghost_ReservedClientCountsForRound(slot, TEAM_FREE) ||
+		MM_Ghost_ReservedClientCountsForRound(slot, TEAM_RED) ||
+		MM_Ghost_ReservedClientCountsForRound(slot, TEAM_BLUE);
+}
+
+static round_team_view_t BuildRoundTeamView(team_t team)
+{
+	round_team_view_t view;
+	auto add_living = [&view](int32_t health,
+		gentity_t *connected_survivor) {
+		view.living++;
+		view.total_health += health;
+		view.sole_connected_survivor = view.living == 1
+			? connected_survivor : nullptr;
+	};
+
+	for (size_t i = 0; i < static_cast<size_t>(game.maxclients); ++i) {
+		gentity_t *slot = &g_entities[i + 1];
+		mm_ghost_reserved_round_state_t reserved;
+		if (MM_Ghost_ReservedRoundState(slot, team, reserved)) {
+			if (!reserved.exact_health) {
+				// Membership is still authoritative, but the deferred Begin
+				// fallback intentionally discarded combat state. Count it as
+				// living so a handshake cannot cause a false elimination, and
+				// defer a tied health decision until ClientBegin restores it.
+				add_living(0, nullptr);
+				view.health_complete = false;
+			} else if (!reserved.dead && reserved.health > 0) {
+				add_living(reserved.health, nullptr);
+			}
+			continue;
+		}
+
+		// A protected live mirror is represented by its reservation above.
+		// Suppress it even if its temporary session happens to name another
+		// team, so one logical fighter cannot enter two team views.
+		if (SlotHasRoundReservation(slot) || !slot->inuse || !slot->client ||
+			!slot->client->pers.connected || MM_Ghost_IsPendingRestore(slot) ||
+			!ClientIsPlaying(slot->client) || slot->client->sess.team != team ||
+			slot->client->eliminated || slot->deadflag || slot->health <= 0) {
+			continue;
+		}
+
+		add_living(slot->health, slot);
+	}
+
+	return view;
+}
+
 static void CheckLastManStanding() {
 	if (notGT(GT_CA) && notGT(GT_FREEZE) && notGT(GT_STRIKE) && notGT(GT_RR) && notGT(GT_HORDE) && notGT(GT_LMS))
 		return;
@@ -898,11 +1148,15 @@ static void CheckLastManStanding() {
 		int count = 0;
 
 		for (auto ec : active_clients()) {
-			if (!ClientIsPlaying(ec->client) || ec->client->eliminated)
+			if (MM_Ghost_IsPendingRestore(ec) ||
+				(GT(GT_LMS) && SlotHasRoundReservation(ec)) ||
+				!ClientIsPlaying(ec->client) || ec->client->eliminated)
 				continue;
 			count++;
 			survivor = ec;
 		}
+		if (GT(GT_LMS))
+			count += CountRoundReservations(TEAM_FREE);
 
 		if (level.last_standing_count[TEAM_FREE] > 1 && count == 1 && survivor)
 			announce_survivor(survivor);
@@ -915,39 +1169,36 @@ static void CheckLastManStanding() {
 		gentity_t *survivor = nullptr;
 		int count = 0;
 
-		for (auto ec : active_clients()) {
-			if (ec->client->sess.team != team || !ClientIsPlaying(ec->client))
-				continue;
-			// Red Rover keeps everyone currently on the team (death there defects rather
-			// than eliminates); Freeze Tag counts only unfrozen fighters; CA/Strike count
-			// living, non-eliminated round players.
-			if (GT(GT_RR) || (GT(GT_FREEZE) ? MM_FreezeTag_ClientIsActiveFighter(ec) : (!ec->client->eliminated && ec->health > 0))) {
-				count++;
-				survivor = ec;
+		if (GT(GT_CA) || GT(GT_STRIKE)) {
+			const round_team_view_t view = BuildRoundTeamView(team);
+			count = view.living;
+			survivor = view.sole_connected_survivor;
+		} else {
+			for (auto ec : active_clients()) {
+				if (MM_Ghost_IsPendingRestore(ec) ||
+					(GT(GT_RR) && SlotHasRoundReservation(ec)) ||
+					ec->client->sess.team != team ||
+					!ClientIsPlaying(ec->client)) {
+					continue;
+				}
+				// Red Rover keeps everyone currently on the team (death there
+				// defects rather than eliminates); Freeze Tag counts only
+				// unfrozen fighters through its sidecar-owned view.
+				if (GT(GT_RR) ||
+					(GT(GT_FREEZE) &&
+						MM_FreezeTag_ClientIsActiveFighter(ec))) {
+					count++;
+					survivor = ec;
+				}
 			}
+			if (GT(GT_RR))
+				count += CountRoundReservations(team);
 		}
 
 		if (level.last_standing_count[team] > 1 && count == 1 && survivor)
 			announce_survivor(survivor);
 
 		level.last_standing_count[team] = count;
-	}
-}
-
-static void CountLivingRoundPlayers(int &count_living_red, int &count_living_blue)
-{
-	count_living_red = 0;
-	count_living_blue = 0;
-
-	for (auto ec : active_clients()) {
-		if (!ec->client || !ClientIsPlaying(ec->client) || ec->client->eliminated ||
-				ec->deadflag || ec->health <= 0)
-			continue;
-
-		if (ec->client->sess.team == TEAM_RED)
-			count_living_red++;
-		else if (ec->client->sess.team == TEAM_BLUE)
-			count_living_blue++;
 	}
 }
 
@@ -1022,25 +1273,20 @@ void TickRoundState() {
 	if (level.round_state == round_state_t::ROUND_IN_PROGRESS) {
 		CheckLastManStanding();
 
-		auto is_living_round_player = [](gentity_t *ent) {
-			return ent->client && ClientIsPlaying(ent->client) &&
-				!ent->client->eliminated && !ent->deadflag && ent->health > 0;
-		};
-
 		switch (MM_CurrentGametype()) {
 		case GT_CA:
 		{
-			int count_living_red = 0, count_living_blue = 0;
-			CountLivingRoundPlayers(count_living_red, count_living_blue);
+			const round_team_view_t red = BuildRoundTeamView(TEAM_RED);
+			const round_team_view_t blue = BuildRoundTeamView(TEAM_BLUE);
 
-			if (!count_living_red && count_living_blue) {
+			if (!red.living && blue.living) {
 				G_AdjustTeamScore(TEAM_BLUE, 1);
 				gi.LocBroadcast_Print(PRINT_CENTER, "{} wins the round!\n(eliminated {})\n", Teams_TeamName(TEAM_BLUE), Teams_TeamName(TEAM_RED));
 				MM_Announce(mm_announce_event_t::BlueWinsRound, world);
 				Round_End();
 				return;
 			}
-			if (!count_living_blue && count_living_red) {
+			if (!blue.living && red.living) {
 				G_AdjustTeamScore(TEAM_RED, 1);
 				gi.LocBroadcast_Print(PRINT_CENTER, "{} wins the round!\n(eliminated {})\n", Teams_TeamName(TEAM_RED), Teams_TeamName(TEAM_BLUE));
 				MM_Announce(mm_announce_event_t::RedWinsRound, world);
@@ -1051,13 +1297,15 @@ void TickRoundState() {
 		}
 		case GT_STRIKE:
 		{
-			int count_living_red = 0, count_living_blue = 0;
-			CountLivingRoundPlayers(count_living_red, count_living_blue);
+			const round_team_view_t red = BuildRoundTeamView(TEAM_RED);
+			const round_team_view_t blue = BuildRoundTeamView(TEAM_BLUE);
 
 			const team_t attacker = MM_Strike_AttackingTeam();
 			const team_t defender = MM_Strike_DefendingTeam();
-			const int count_living_attacker = (attacker == TEAM_RED) ? count_living_red : count_living_blue;
-			const int count_living_defender = (defender == TEAM_RED) ? count_living_red : count_living_blue;
+			const int count_living_attacker =
+				(attacker == TEAM_RED) ? red.living : blue.living;
+			const int count_living_defender =
+				(defender == TEAM_RED) ? red.living : blue.living;
 
 			if (!count_living_attacker && count_living_defender) {
 				MM_Strike_EndDefenseTurn(false);
@@ -1067,7 +1315,7 @@ void TickRoundState() {
 				MM_Strike_AwardTurnWin(false);
 				return;
 			}
-			if (!count_living_red && !count_living_blue) {
+			if (!red.living && !blue.living) {
 				MM_Strike_EndMutualElimination();
 				return;
 			}
@@ -1088,23 +1336,65 @@ void TickRoundState() {
 			// Free-for-all elimination: count participants and the active fighters among them
 			// (alive, or dead but still holding a life). The round resolves to the last fighter
 			// standing, a draw on mutual elimination, or a most-health tie-break at the time limit.
-			int participants = 0, active = 0;
+			int participants = static_cast<int>(
+				MM_Ghost_ActivePlayingReservationCountForTeam(TEAM_FREE));
+			int active = 0;
 			gentity_t *survivor = nullptr;
+			gentity_t *reserved_survivor = nullptr;
 
 			for (auto ec : active_clients()) {
-				if (!ClientIsPlaying(ec->client))
+				if (MM_Ghost_IsPendingRestore(ec) ||
+					SlotHasRoundReservation(ec) ||
+					!ClientIsPlaying(ec->client))
 					continue;
 				participants++;
 				if (MM_LMS_ClientIsActiveFighter(ec)) {
 					active++;
 					survivor = ec;
+					reserved_survivor = nullptr;
 				}
 			}
 
-			if (MM_LMSRoundHasWinner(active, participants) &&
-				survivor && survivor->client) {
-				G_AdjustPlayerScore(survivor->client, 1, false, 0);
-				gi.LocBroadcast_Print(PRINT_CENTER, "{} wins the round!\n", survivor->client->resp.netname);
+			// The logical reservation count above includes eliminated participants,
+			// matching the connected loop. The round-state view below admits only
+			// non-eliminated reservations and therefore contributes active fighters,
+			// not participants a second time. Exact snapshots retain health and lives;
+			// a fallback has deliberately discarded combat state, so conservatively
+			// keep it active until ClientBegin rather than declaring a false elimination.
+			for (size_t i = 0;
+				i < static_cast<size_t>(game.maxclients); ++i) {
+				gentity_t *slot = &g_entities[i + 1];
+				mm_ghost_reserved_round_state_t reserved;
+				if (!MM_Ghost_ReservedRoundState(
+						slot, TEAM_FREE, reserved)) {
+					continue;
+				}
+				const bool reserved_active = !reserved.exact_health ||
+					reserved.health > 0 ||
+					(reserved.client && reserved.client->pers.lives > 0);
+				if (!reserved_active)
+					continue;
+				active++;
+				survivor = nullptr;
+				reserved_survivor = slot;
+			}
+
+			if (MM_LMSRoundHasWinner(active, participants)) {
+				gclient_t *winner = nullptr;
+				if (survivor && survivor->client) {
+					winner = survivor->client;
+					G_AdjustPlayerScore(winner, 1, false, 0);
+				} else if (reserved_survivor &&
+					MM_Ghost_AdjustReservedPlayerScore(
+						reserved_survivor, 1)) {
+					winner = MM_Ghost_ReservedClientState(reserved_survivor);
+				}
+				// If ghost authority disappeared between the view and the mutation,
+				// leave the round open and let the next frame rebuild the view.
+				if (!winner)
+					return;
+				gi.LocBroadcast_Print(PRINT_CENTER, "{} wins the round!\n",
+					winner->resp.netname);
 				MM_Announce(mm_announce_event_t::RoundWon, world);
 				Round_End();
 				return;
@@ -1122,25 +1412,68 @@ void TickRoundState() {
 			// health must not decide the round. If nobody is alive at expiry, it is a draw.
 			const bool time_expired = roundtimelimit->value > 0 && level.time >= level.round_state_timer;
 			if (time_expired && participants >= 2) {
-				gentity_t *leader = nullptr;
+				gclient_t *leader = nullptr;
+				gentity_t *reserved_leader = nullptr;
 				int best_health = 0;
 				bool tied = false;
-
-				for (auto ec : active_clients()) {
-					if (!MM_LMS_ClientIsActiveFighter(ec) || ec->health <= 0)
-						continue;
-					if (ec->health > best_health) {
-						best_health = ec->health;
-						leader = ec;
+				bool health_complete = true;
+				auto consider_health = [&](gclient_t *client,
+					gentity_t *reserved_slot, int32_t health) {
+					if (!client || health <= 0)
+						return;
+					if (health > best_health) {
+						best_health = health;
+						leader = client;
+						reserved_leader = reserved_slot;
 						tied = false;
-					} else if (ec->health == best_health) {
+					} else if (health == best_health) {
 						tied = true;
 					}
+				};
+
+				for (size_t i = 0;
+					i < static_cast<size_t>(game.maxclients); ++i) {
+					gentity_t *slot = &g_entities[i + 1];
+					mm_ghost_reserved_round_state_t reserved;
+					if (MM_Ghost_ReservedRoundState(
+							slot, TEAM_FREE, reserved)) {
+						if (!reserved.exact_health) {
+							// The missing health may change either the winner or a
+							// tie. Leave the expired round open until ClientBegin
+							// restores an exact live state.
+							health_complete = false;
+							continue;
+						}
+						if (!reserved.dead && reserved.health > 0)
+							consider_health(reserved.client, slot,
+								reserved.health);
+						continue;
+					}
+
+					if (SlotHasRoundReservation(slot) || !slot->inuse ||
+						!slot->client || !slot->client->pers.connected ||
+						MM_Ghost_IsPendingRestore(slot) ||
+						!MM_LMS_ClientIsActiveFighter(slot) ||
+						slot->deadflag || slot->health <= 0) {
+						continue;
+					}
+					consider_health(slot->client, nullptr, slot->health);
 				}
 
+				if (!health_complete)
+					return;
 				if (leader && !tied) {
-					G_AdjustPlayerScore(leader->client, 1, false, 0);
-					gi.LocBroadcast_Print(PRINT_CENTER, "{} wins the round!\n(most health remaining)\n", leader->client->resp.netname);
+					if (reserved_leader) {
+						if (!MM_Ghost_AdjustReservedPlayerScore(
+								reserved_leader, 1)) {
+							return;
+						}
+					} else {
+						G_AdjustPlayerScore(leader, 1, false, 0);
+					}
+					gi.LocBroadcast_Print(PRINT_CENTER,
+						"{} wins the round!\n(most health remaining)\n",
+						leader->resp.netname);
 					MM_Announce(mm_announce_event_t::RoundWon, world);
 				} else {
 					gi.LocBroadcast_Print(PRINT_CENTER, "Round draw!");
@@ -1153,10 +1486,13 @@ void TickRoundState() {
 
 		case GT_RR:
 		{
-			int count_red = 0, count_blue = 0;
+			int count_red = CountRoundReservations(TEAM_RED);
+			int count_blue = CountRoundReservations(TEAM_BLUE);
 
 			for (auto ec : active_clients()) {
-				if (!ClientIsPlaying(ec->client))
+				if (MM_Ghost_IsPendingRestore(ec) ||
+					SlotHasRoundReservation(ec) ||
+					!ClientIsPlaying(ec->client))
 					continue;
 				if (ec->client->sess.team == TEAM_RED)
 					count_red++;
@@ -1169,19 +1505,39 @@ void TickRoundState() {
 			if (team_cleared || time_expired) {
 				gclient_t *top = nullptr;
 				int best_round_frags = 0, best_round_dmg = 0;
-
-				for (auto ec : active_clients()) {
-					if (!ClientIsPlaying(ec->client))
-						continue;
-
-					const int round_frags = ec->client->resp.score - ec->client->resp.round_start_score;
-					const int round_dmg = ec->client->resp.round_dmg;
+				auto consider_round_leader = [&](gclient_t *client) {
+					if (!client)
+						return;
+					const int round_frags =
+						client->resp.score - client->resp.round_start_score;
+					const int round_dmg = client->resp.round_dmg;
 					if (!top || round_frags > best_round_frags ||
-						(round_frags == best_round_frags && round_dmg > best_round_dmg)) {
-						top = ec->client;
+						(round_frags == best_round_frags &&
+							round_dmg > best_round_dmg)) {
+						top = client;
 						best_round_frags = round_frags;
 						best_round_dmg = round_dmg;
 					}
+				};
+
+				for (size_t i = 0;
+					i < static_cast<size_t>(game.maxclients); ++i) {
+					gentity_t *slot = &g_entities[i + 1];
+					const bool reserved =
+						MM_Ghost_ReservedClientCountsForRound(slot, TEAM_RED) ||
+						MM_Ghost_ReservedClientCountsForRound(slot, TEAM_BLUE);
+					if (reserved) {
+						consider_round_leader(
+							MM_Ghost_ReservedClientState(slot));
+						continue;
+					}
+					if (!slot->inuse || !slot->client ||
+						!slot->client->pers.connected ||
+						MM_Ghost_IsPendingRestore(slot) ||
+						!ClientIsPlaying(slot->client)) {
+						continue;
+					}
+					consider_round_leader(slot->client);
 				}
 
 				if (top)
@@ -1202,56 +1558,34 @@ void TickRoundState() {
 		if (roundtimelimit->value > 0 && level.time >= level.round_state_timer) {
 			// highest number of players remaining or highest total health wins
 			if (GT(GT_CA)) {
-				int living_red = 0, living_blue = 0;
+				const round_team_view_t red = BuildRoundTeamView(TEAM_RED);
+				const round_team_view_t blue = BuildRoundTeamView(TEAM_BLUE);
 
-				for (auto ec : active_clients()) {
-					if (!is_living_round_player(ec))
-						continue;
-
-					switch (ec->client->sess.team) {
-					case TEAM_RED:
-						living_red++;
-						break;
-					case TEAM_BLUE:
-						living_blue++;
-						break;
-					}
-				}
-
-				if (living_red > living_blue) {
+				if (red.living > blue.living) {
 					G_AdjustTeamScore(TEAM_RED, 1);
-					gi.LocBroadcast_Print(PRINT_CENTER, "{} wins the round!\n(players remaining: {} vs {})\n", Teams_TeamName(TEAM_RED), living_red, living_blue);
+					gi.LocBroadcast_Print(PRINT_CENTER, "{} wins the round!\n(players remaining: {} vs {})\n", Teams_TeamName(TEAM_RED), red.living, blue.living);
 					//gi.positioned_sound(world->s.origin, world, CHAN_AUTO | CHAN_RELIABLE, gi.soundindex("ctf/flagcap.wav"), 1, ATTN_NONE, 0);
 					MM_Announce(mm_announce_event_t::RedWinsRound, world);
-				} else if (living_blue > living_red) {
+				} else if (blue.living > red.living) {
 					G_AdjustTeamScore(TEAM_BLUE, 1);
-					gi.LocBroadcast_Print(PRINT_CENTER, "{} wins the round!\n(players remaining: {} vs {})\n", Teams_TeamName(TEAM_BLUE), living_blue, living_red);
+					gi.LocBroadcast_Print(PRINT_CENTER, "{} wins the round!\n(players remaining: {} vs {})\n", Teams_TeamName(TEAM_BLUE), blue.living, red.living);
 					//gi.positioned_sound(world->s.origin, world, CHAN_AUTO | CHAN_RELIABLE, gi.soundindex("ctf/flagcap.wav"), 1, ATTN_NONE, 0);
 					MM_Announce(mm_announce_event_t::BlueWinsRound, world);
 				} else {
-					int total_health_red = 0, total_health_blue = 0;
+					// A deferred ClientBegin carries exact membership but no safe
+					// combat health. It already counts in the tied survivor total;
+					// wait for Begin rather than inventing zero and mis-awarding.
+					if (!red.health_complete || !blue.health_complete)
+						return;
 
-					for (auto ec : active_players()) {
-						if (!is_living_round_player(ec))
-							continue;
-						switch (ec->client->sess.team) {
-						case TEAM_RED:
-							total_health_red += ec->health;
-							break;
-						case TEAM_BLUE:
-							total_health_blue += ec->health;
-							break;
-						}
-					}
-
-					if (total_health_red > total_health_blue) {
+					if (red.total_health > blue.total_health) {
 						G_AdjustTeamScore(TEAM_RED, 1);
-						gi.LocBroadcast_Print(PRINT_CENTER, "{} wins the round!\n(total health: {} vs {})\n", Teams_TeamName(TEAM_RED), total_health_red, total_health_blue);
+						gi.LocBroadcast_Print(PRINT_CENTER, "{} wins the round!\n(total health: {} vs {})\n", Teams_TeamName(TEAM_RED), red.total_health, blue.total_health);
 						//gi.positioned_sound(world->s.origin, world, CHAN_AUTO | CHAN_RELIABLE, gi.soundindex("ctf/flagcap.wav"), 1, ATTN_NONE, 0);
 						MM_Announce(mm_announce_event_t::RedWinsRound, world);
-					} else if (total_health_blue > total_health_red) {
+					} else if (blue.total_health > red.total_health) {
 						G_AdjustTeamScore(TEAM_BLUE, 1);
-						gi.LocBroadcast_Print(PRINT_CENTER, "{} wins the round!\n(total health: {} vs {})\n", Teams_TeamName(TEAM_BLUE), total_health_blue, total_health_red);
+						gi.LocBroadcast_Print(PRINT_CENTER, "{} wins the round!\n(total health: {} vs {})\n", Teams_TeamName(TEAM_BLUE), blue.total_health, red.total_health);
 						//gi.positioned_sound(world->s.origin, world, CHAN_AUTO | CHAN_RELIABLE, gi.soundindex("ctf/flagcap.wav"), 1, ATTN_NONE, 0);
 						MM_Announce(mm_announce_event_t::BlueWinsRound, world);
 					} else {
@@ -1371,13 +1705,27 @@ Once a frame, check for changes in match state during warmup
 namespace muffmode::match {
 
 void TickWarmupState() {
-	uint8_t min_players;
+	ReconcileAutomaticMatchLocks();
+	const int min_players = EffectiveMinPlayers();
+
+	// Queue bots before promotion so every contender follows the same FIFO path.
+	// This must run before the zero-player return: an empty Duel can still have
+	// queued humans waiting to occupy its newly available slots.
+	if (GT(GT_DUEL)) {
+		MM_Duel_QueueSpectatorBots();
+		if (MM_Duel_AddPlayer())
+			return;
+	}
 
 	if (!level.num_playing_clients) {
+		const size_t logical_reservations =
+			MM_Ghost_ActivePlayingReservationCount();
 		// Horde: every playing client leaving mid-match counts as a defeat;
 		// run the normal end-of-match flow instead of silently abandoning the
 		// wave (which would leave stale wave state and idle monsters behind).
-		if (MM_Horde_CheckDesertionDefeat())
+		// A healthy logical reservation is still a Horde player, even while no
+		// connected entity is visible to the rank counters.
+		if (!logical_reservations && MM_Horde_CheckDesertionDefeat())
 			return;
 
 		// let a queued/running intermission complete - with no playing clients
@@ -1389,7 +1737,7 @@ void TickWarmupState() {
 		// A reconnect reservation remains an active match participant even though
 		// it is deliberately excluded from the connected-player rank counts.
 		if (level.match_state == match_state_t::MATCH_IN_PROGRESS &&
-			MM_Ghost_HasActiveReservations())
+			logical_reservations > 0)
 			return;
 
 		if (level.match_state != match_state_t::MATCH_NONE) {
@@ -1402,25 +1750,32 @@ void TickWarmupState() {
 			}
 			level.match_state = match_state_t::MATCH_NONE;
 			level.match_state_timer = 0_sec;
+			level.round_state = round_state_t::ROUND_NONE;
+			level.round_state_queued = 0;
+			level.round_state_timer = 0_sec;
 			level.warmup_requisite = warmup_req_t::WARMUP_REQ_NONE;
 			level.warmup_notice_time = 0_sec;
+			level.warmup_gametype_hud_time = level.time;
+			level.match_cancel_delay_timer = 0_sec;
+			level.countdown_check = 0_sec;
+			level.prepare_to_fight = false;
+			ClearAutomaticMatchLocks();
+			UnReadyAll();
 			return;
 		}
 		// pull in any spectating bots
-		for (auto ec : active_clients())
-			if (!ClientIsPlaying(ec->client) && (ec->client->sess.is_a_bot || ec->svflags & SVF_BOT))
-				SetTeam(ec, PickTeam(-1), false, false, false);
+		if (notGT(GT_DUEL)) {
+			for (auto ec : active_clients())
+				if (!ClientIsPlaying(ec->client) && (ec->client->sess.is_a_bot || ec->svflags & SVF_BOT))
+					SetTeam(ec, PickTeam(-1), false, false, false);
+		}
 		return;
 	}
 
-	// duel: pull in a queued spectator if needed
-	if (MM_Duel_AddPlayer())
-		return;
-
-	MM_Duel_QueueSpectatorBots();
-
-	min_players = GT(GT_DUEL) ? 2 : minplayers->integer;
-	if (level.match_state < match_state_t::MATCH_COUNTDOWN && !g_dm_do_warmup->integer && level.num_playing_clients >= min_players
+	const bool roster_has_minimum = GT(GT_DUEL)
+		? MM_Duel_OccupiedSlots() == 2
+		: level.num_playing_clients >= min_players;
+	if (level.match_state < match_state_t::MATCH_COUNTDOWN && !g_dm_do_warmup->integer && roster_has_minimum
 		&& (g_dm_allow_no_humans->integer || level.num_playing_human_clients > 0)) {
 		Match_Start();
 		return;
@@ -1429,16 +1784,34 @@ void TickWarmupState() {
 	// check because we run 3 game frames before calling Connect and/or ClientBegin
 	// for clients on a map_restart
 	if (level.match_state == match_state_t::MATCH_NONE) {
+		ClearAutomaticMatchLocks();
+		UnReadyAll();
 		level.match_state = match_state_t::MATCH_WARMUP_DELAYED;
 		level.match_state_timer = level.time + 5_sec;
 		level.warmup_requisite = warmup_req_t::WARMUP_REQ_NONE;
 		level.warmup_notice_time = level.time;
 		level.warmup_gametype_hud_time = level.time;
+		level.prepare_to_fight = false;
+		level.countdown_check = 0_sec;
 		return;
 	}
 
-	if (level.match_state == match_state_t::MATCH_WARMUP_DELAYED && level.match_state_timer > level.time)
-		return;
+	if (level.match_state == match_state_t::MATCH_WARMUP_DELAYED) {
+		if (level.match_state_timer > level.time)
+			return;
+
+		// Expiry is a real state transition. Previously a complete Duel roster
+		// skipped every later branch and remained DELAYED indefinitely.
+		level.match_state = match_state_t::MATCH_WARMUP_DEFAULT;
+		level.match_state_timer = 0_sec;
+		level.warmup_requisite = warmup_req_t::WARMUP_REQ_NONE;
+		level.warmup_notice_time = level.time;
+		level.warmup_gametype_hud_time = level.time;
+		level.warmup_modification_count = g_warmup_countdown->modified_count;
+		level.prepare_to_fight = false;
+		level.countdown_check = 0_sec;
+		ClearAutomaticMatchLocks();
+	}
 
 	if (level.match_state == match_state_t::MATCH_WARMUP_DEFAULT || level.match_state == match_state_t::MATCH_WARMUP_READYUP)
 		MM_Horde_RunSpawning();
@@ -1452,7 +1825,9 @@ void TickWarmupState() {
 	// (TEAM_SPECTATOR) are left alone; leaving the match is allowed.
 	if (GT(GT_RR) && level.match_state == match_state_t::MATCH_IN_PROGRESS) {
 		for (auto ec : active_clients())
-			if (ec->client && ec->client->pers.connected && ec->client->sess.team == TEAM_NONE)
+			if (ec->client && ec->client->pers.connected &&
+				ec->client->sess.team == TEAM_NONE &&
+				!MM_Ghost_IsPendingRestore(ec))
 				SetTeam(ec, PickTeam(-1), false, false, false);
 	}
 
@@ -1494,13 +1869,15 @@ void TickWarmupState() {
 		// Cancel immediately for team imbalance
 		level.match_cancel_delay_timer = 0_ms;
 		if (level.match_state <= match_state_t::MATCH_COUNTDOWN) {
-			if (level.match_state == match_state_t::MATCH_WARMUP_READYUP)
-				UnReadyAll();
-			else if (level.match_state == match_state_t::MATCH_COUNTDOWN) {
+			if (level.match_state == match_state_t::MATCH_COUNTDOWN) {
 				gi.LocBroadcast_Print(PRINT_CENTER, "Countdown cancelled: teams are imbalanced\n");
-				// clear locks set by g_match_lock at countdown start
-				level.locked[TEAM_RED] = level.locked[TEAM_BLUE] = level.locked[TEAM_FREE] = false;
 			}
+			if (level.match_state == match_state_t::MATCH_WARMUP_READYUP ||
+				level.match_state == match_state_t::MATCH_COUNTDOWN)
+				UnReadyAll();
+			ClearAutomaticMatchLocks();
+			level.prepare_to_fight = false;
+			level.countdown_check = 0_sec;
 
 			if (level.match_state != match_state_t::MATCH_WARMUP_DEFAULT) {
 				const match_state_t prev_state = level.match_state;
@@ -1525,13 +1902,15 @@ void TickWarmupState() {
 		// Only cancel after delay has passed
 		if (level.time >= level.match_cancel_delay_timer) {
 			if (level.match_state <= match_state_t::MATCH_COUNTDOWN) {
-				if (level.match_state == match_state_t::MATCH_WARMUP_READYUP)
-					UnReadyAll();
-				else if (level.match_state == match_state_t::MATCH_COUNTDOWN) {
+				if (level.match_state == match_state_t::MATCH_COUNTDOWN) {
 					gi.LocBroadcast_Print(PRINT_CENTER, "Countdown cancelled: not enough players\n");
-					// clear locks set by g_match_lock at countdown start
-					level.locked[TEAM_RED] = level.locked[TEAM_BLUE] = level.locked[TEAM_FREE] = false;
 				}
+				if (level.match_state == match_state_t::MATCH_WARMUP_READYUP ||
+					level.match_state == match_state_t::MATCH_COUNTDOWN)
+					UnReadyAll();
+				ClearAutomaticMatchLocks();
+				level.prepare_to_fight = false;
+				level.countdown_check = 0_sec;
 
 				if (level.match_state != match_state_t::MATCH_WARMUP_DEFAULT) {
 					const match_state_t prev_state = level.match_state;
@@ -1554,6 +1933,27 @@ void TickWarmupState() {
 
 	// We have enough players - clear the cancellation timer
 	level.match_cancel_delay_timer = 0_ms;
+	if (level.match_state > match_state_t::MATCH_COUNTDOWN)
+		return;
+
+	// Reconcile a countdown-duration change before any DEFAULT -> COUNTDOWN
+	// transition. Otherwise ready-up-disabled servers briefly start and lock a
+	// countdown, then cancel it one frame later when this stale snapshot is seen.
+	if (g_warmup_countdown->modified_count != level.warmup_modification_count) {
+		level.warmup_modification_count = g_warmup_countdown->modified_count;
+		if (level.match_state == match_state_t::MATCH_WARMUP_READYUP ||
+			level.match_state == match_state_t::MATCH_COUNTDOWN)
+			UnReadyAll();
+		ClearAutomaticMatchLocks();
+		level.match_state_timer = 0_sec;
+		level.match_state = match_state_t::MATCH_WARMUP_DEFAULT;
+		level.warmup_requisite = warmup_req_t::WARMUP_REQ_NONE;
+		level.warmup_notice_time = 0_sec;
+		level.warmup_gametype_hud_time = level.time;
+		level.prepare_to_fight = false;
+		level.countdown_check = 0_sec;
+		return;
+	}
 
 	if (level.match_state == match_state_t::MATCH_WARMUP_DEFAULT) {
 		if (!g_dm_do_readyup->integer)
@@ -1567,21 +1967,6 @@ void TickWarmupState() {
 		return;
 	}
 
-	if (level.match_state > match_state_t::MATCH_COUNTDOWN)
-		return;
-
-	// if the warmup is changed at the console, restart it
-	if (g_warmup_countdown->modified_count != level.warmup_modification_count) {
-		level.warmup_modification_count = g_warmup_countdown->modified_count;
-		level.match_state_timer = 0_sec;
-		level.match_state = match_state_t::MATCH_WARMUP_DEFAULT;
-		level.warmup_requisite = warmup_req_t::WARMUP_REQ_NONE;
-		level.warmup_notice_time = 0_sec;
-		level.warmup_gametype_hud_time = level.time;
-		level.prepare_to_fight = false;
-		return;
-	}
-
 	// if sufficient number of players are ready, start countdown
 	if (level.match_state == match_state_t::MATCH_WARMUP_READYUP) {
 		if (ReadyConditionsMet()) {
@@ -1591,15 +1976,7 @@ countdown:
 			level.warmup_notice_time = 0_sec;
 			KillAllMonsters();
 
-			// lock teams on countdown if g_match_lock is enabled
-			if (g_match_lock->integer) {
-				if (Teams()) {
-					level.locked[TEAM_RED] = true;
-					level.locked[TEAM_BLUE] = true;
-				} else {
-					level.locked[TEAM_FREE] = true;
-				}
-			}
+			SynchronizeAutomaticMatchLocksForCurrentPhase();
 
 			if (g_warmup_countdown->integer > 0) {
 				level.match_state_timer = level.time + gtime_t::from_sec(g_warmup_countdown->integer);
@@ -1632,7 +2009,7 @@ countdown:
 	}
 
 	// if the warmup time has counted down, start the match
-	if (level.match_state == match_state_t::MATCH_COUNTDOWN && level.time.seconds() >= level.match_state_timer.seconds()) {
+	if (level.match_state == match_state_t::MATCH_COUNTDOWN && level.time >= level.match_state_timer) {
 start:
 		Match_Start();
 		return;
@@ -1653,6 +2030,7 @@ match-end warning.
 ================
 */
 void MM_Match_RunFrame() {
+	match::ReconcileAutomaticMatchLocks();
 	if (GT(GT_ARENA)) {
 		// [MuffMode] RA2/RA3 arenas own independent state machines. Never
 		// enter the singleton warmup/round/countdown state below.

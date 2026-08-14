@@ -11,6 +11,7 @@ struct mm_freezetag_team_counts_t {
 	int participants = 0;
 	int active = 0;
 	int total_health = 0;
+	bool health_complete = true;
 };
 
 enum class mm_freezetag_round_result_t {
@@ -123,6 +124,12 @@ inline mm_freezetag_round_result_t MM_FreezeTagResolveRound(
 
 	if (blue.active > red.active)
 		return mm_freezetag_round_result_t::BlueWinsByActiveCount;
+
+	// A pre-Begin fallback deliberately has no exact combat health. Keep the
+	// round open until ClientBegin supplies that state instead of fabricating a
+	// health tie-break or awarding the wrong team.
+	if (!red.health_complete || !blue.health_complete)
+		return mm_freezetag_round_result_t::Continue;
 
 	if (red.total_health > blue.total_health)
 		return mm_freezetag_round_result_t::RedWinsByHealth;

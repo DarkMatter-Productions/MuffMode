@@ -408,13 +408,19 @@ void MM_CmdStartMatch(gentity_t *ent) {
 	if (MM_Arena_AdminStart(ent))
 		return;
 
-	if (level.match_state > match_state_t::MATCH_WARMUP_READYUP) {
+	if (level.match_state > match_state_t::MATCH_COUNTDOWN) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "Match has already started.\n");
 		return;
 	}
 
+	if (!Match_Start()) {
+		gi.LocClient_Print(ent, PRINT_HIGH, GT(GT_DUEL)
+			? "Duel requires exactly two contenders before it can start.\n"
+			: "Match cannot start in its current state.\n");
+		return;
+	}
+
 	gi.Broadcast_Print(PRINT_HIGH, "[ADMIN]: Forced match start.\n");
-	Match_Start();
 }
 
 /*

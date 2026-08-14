@@ -878,6 +878,11 @@ G_SetClientEvent
 ===============
 */
 static void G_SetClientEvent(gentity_t *ent) {
+	// [MuffMode] Frozen bodies can slide, but they are inert props rather than
+	// walking players. Filter both newly generated and already queued steps.
+	if (MM_FreezeTag_BlockFrozenFootsteps(ent))
+		return;
+
 	if (level.timeout_in_place)
 		return;
 

@@ -500,7 +500,7 @@ existing provider lobby.
 | `flood_persecond` | `4` | Length of the shared client flood-detection window in seconds. |
 | `flood_waitdelay` | `10` | Seconds a client must wait after triggering the shared client flood protection. |
 | `g_inactivity` | `120` | Seconds before inactive players are moved to spectators. |
-| `g_match_lock` | `0` | Prevents joining while a match is active. |
+| `g_match_lock` | `0` | Adds automatic playing-team locks during countdown and active play. Full Duel challengers still join its spectator queue; disabling it releases only automatic locks and preserves captain/admin locks. |
 | `g_owner_auto_join` | `1` | Auto-joins lobby owner on server start. |
 | `g_owner_push_scores` | `0` | Shows scores to lobby owner on join. |
 

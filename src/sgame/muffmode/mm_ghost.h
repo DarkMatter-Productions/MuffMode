@@ -15,6 +15,13 @@ struct gclient_t;
 struct usercmd_t;
 enum team_t;
 
+struct mm_ghost_reserved_round_state_t {
+	gclient_t *client = nullptr;
+	int32_t health = 0;
+	bool dead = false;
+	bool exact_health = false;
+};
+
 constexpr size_t MM_GHOST_POST_RESTORE_SKIN_MESSAGES_PER_FRAME = 2;
 constexpr size_t MM_GHOST_MAX_CLIENT_CAPACITY = MAX_LOBBY_PLAYERS;
 constexpr size_t MM_GHOST_PLAYER_SKIN_CONFIGSTRING_VALUE_BYTES = 96;
@@ -33,6 +40,25 @@ constexpr size_t MM_GHOST_MAX_SKIN_SYNC_ACTIONS_PER_DRAIN =
 	MM_GHOST_MAX_CLIENT_CAPACITY * 2;
 static_assert(MM_GHOST_MAX_SKIN_SYNC_ACTIONS_PER_DRAIN <=
 	MM_GHOST_MAX_SKIN_SYNC_ACTIONS_TOTAL);
+
+// Converts an opaque address into an array index without subtracting or
+// ordering potentially unrelated C++ pointers. The caller still owns the
+// lifetime of the array; this helper only validates bounds and alignment.
+constexpr size_t MM_GhostAddressIndex(uintptr_t address, uintptr_t base,
+	size_t element_size, size_t element_count) noexcept
+{
+	if (!address || !base || !element_size || !element_count || address < base)
+		return MM_GHOST_NO_CLIENT_INDEX;
+
+	const uintptr_t delta = address - base;
+	if (delta % element_size)
+		return MM_GHOST_NO_CLIENT_INDEX;
+
+	const uintptr_t index = delta / element_size;
+	return index < element_count
+		? static_cast<size_t>(index)
+		: MM_GHOST_NO_CLIENT_INDEX;
+}
 
 enum class mm_ghost_restore_placement_t {
 	SavedPosition,
@@ -82,6 +108,121 @@ constexpr bool MM_GhostShouldDeferSnapshotCleanup(
 constexpr bool MM_GhostRestoreAdminState(bool current_connection_admin, bool is_host)
 {
 	return current_connection_admin || is_host;
+}
+
+constexpr bool MM_GhostIsListenServerHost(
+	bool dedicated_server, bool first_client_slot) noexcept
+{
+	return !dedicated_server && first_client_slot;
+}
+
+constexpr bool MM_GhostConnectionMayClaimSlot(bool duplicate_identity,
+	bool slot_reserved, bool owns_current_reservation) noexcept
+{
+	return !duplicate_identity &&
+		(!slot_reserved || owns_current_reservation);
+}
+
+// A client slot outlives the network connection that used it. Only an
+// authenticated reconnect transaction may carry session state into the next
+// connection; every ordinary accepted connection must start from clean state.
+constexpr bool MM_GhostAcceptedConnectStartsFreshSession(
+	bool owns_restore_transaction) noexcept
+{
+	return !owns_restore_transaction;
+}
+
+constexpr bool MM_GhostSnapshotCarriesLogicalMembership(
+	bool exact_snapshot_current, bool awaiting_begin,
+	bool belongs_to_current_match, bool match_in_progress,
+	bool intermission_active, bool intermission_queued) noexcept
+{
+	return exact_snapshot_current ||
+		(awaiting_begin && belongs_to_current_match && match_in_progress &&
+			!intermission_active && !intermission_queued);
+}
+
+constexpr bool MM_GhostFallbackAuthorityMatches(
+	bool pending, uint32_t source_match_serial,
+	uint32_t current_match_serial) noexcept
+{
+	return pending && source_match_serial == current_match_serial;
+}
+
+constexpr bool MM_GhostFallbackOwnsRoundEntry(
+	bool pending, bool entitled,
+	uint32_t source_match_serial, uint32_t current_match_serial,
+	uint32_t source_round_epoch, uint32_t current_round_epoch) noexcept
+{
+	return pending && entitled &&
+		source_match_serial == current_match_serial &&
+		source_round_epoch == current_round_epoch;
+}
+
+// A fallback cleared after its first ClientBegin may carry round-entry authority
+// across a spawn-point retry, but never across a different entity lifetime,
+// connection identity, match, or round.
+constexpr bool MM_GhostFallbackRoundEntryRetryMatches(
+	bool pending, bool entitled,
+	int32_t source_spawn_generation, int32_t current_spawn_generation,
+	bool identity_matches,
+	uint32_t source_match_serial, uint32_t current_match_serial,
+	uint32_t source_round_epoch, uint32_t current_round_epoch) noexcept
+{
+	return MM_GhostFallbackOwnsRoundEntry(
+		pending, entitled,
+		source_match_serial, current_match_serial,
+		source_round_epoch, current_round_epoch) &&
+		source_spawn_generation == current_spawn_generation &&
+		identity_matches;
+}
+
+// A pre-Begin handoff and a failed ordinary fallback spawn both need server
+// frames even when no fully spawned client remains to keep the main loop awake.
+constexpr bool MM_GhostRecoveryNeedsFrame(
+	bool fallback_pending, bool abort_spawn_pending, bool connected,
+	bool persistent_state_initialized, bool awaiting_respawn) noexcept
+{
+	return connected &&
+		(fallback_pending ||
+			(abort_spawn_pending &&
+				(!persistent_state_initialized || awaiting_respawn)));
+}
+
+// CalculateRanks already owns an in-use, connected playing client. A logical
+// reservation is additive only while that live rank entry is absent.
+constexpr bool MM_GhostReservationNeedsSeparateCount(
+	bool slot_inuse, bool connected, bool live_client_playing) noexcept
+{
+	return !(slot_inuse && connected && live_client_playing);
+}
+
+// Pointer alignment/range proves only that a saved alias names some ghost
+// record. Reload may restore it only when that record still names this client.
+constexpr bool MM_GhostReloadAliasMayRestore(
+	bool index_valid, bool owner_matches) noexcept
+{
+	return index_valid && owner_matches;
+}
+
+struct mm_ghost_fallback_lifecycle_policy_t {
+	bool refresh_settled_authority = false;
+	bool resume_player_stats = false;
+	bool begin_match_stats = false;
+};
+
+constexpr mm_ghost_fallback_lifecycle_policy_t
+MM_GhostFallbackLifecyclePolicy(
+	uint32_t source_match_serial, uint32_t current_match_serial,
+	bool player_stats_open, bool match_stats_collecting) noexcept
+{
+	const bool same_match = source_match_serial == current_match_serial;
+	const bool resume_player_stats = same_match && player_stats_open;
+	return {
+		same_match && !player_stats_open,
+		resume_player_stats,
+		resume_player_stats && match_stats_collecting
+	};
 }
 
 // A failed reconnect profile load has no preference authority. The installed
@@ -152,6 +293,7 @@ struct mm_ghost_skin_sync_step_t {
 	mm_ghost_skin_sync_action_t action = mm_ghost_skin_sync_action_t::None;
 	size_t restored_index = MM_GHOST_NO_CLIENT_INDEX;
 	mm_ghost_skin_sync_pair_t pair{};
+	size_t inspections = 0;
 };
 
 template<size_t Capacity>
@@ -159,6 +301,12 @@ struct mm_ghost_skin_sync_scheduler_t {
 	std::array<mm_ghost_skin_sync_queue_t, Capacity> queues{};
 	uint64_t last_serial = 0;
 	size_t cursor = 0;
+	// Capacity changes are uncommon, but clearing removed slots is still charged
+	// to the same raw-inspection budget as ordinary queue scanning. Remember
+	// partial pruning so a small caller budget cannot resurrect stale work if the
+	// configured capacity changes again before cleanup completes.
+	size_t observed_capacity = Capacity;
+	size_t prune_cursor = Capacity;
 };
 
 template<size_t Capacity>
@@ -284,7 +432,8 @@ template<size_t Capacity>
 constexpr mm_ghost_skin_sync_step_t MM_GhostStepSkinSync(
 	mm_ghost_skin_sync_scheduler_t<Capacity> &scheduler,
 	const std::array<mm_ghost_skin_sync_slot_t, Capacity> &slots,
-	const mm_ghost_skin_sync_context_t &context) noexcept
+	const mm_ghost_skin_sync_context_t &context,
+	size_t inspection_budget = std::numeric_limits<size_t>::max()) noexcept
 {
 	if (!context.presentation_allowed) {
 		MM_GhostResetSkinSync(scheduler);
@@ -296,10 +445,35 @@ constexpr mm_ghost_skin_sync_step_t MM_GhostStepSkinSync(
 		MM_GhostResetSkinSync(scheduler);
 		return {};
 	}
+	if (!inspection_budget)
+		return {};
 
-	for (size_t checked = 0; checked < capacity; checked++) {
+	size_t inspections = 0;
+	if (scheduler.observed_capacity != capacity) {
+		// If a second capacity transition arrives during an earlier bounded prune,
+		// restart at the lowest affected index. In particular, growing must not
+		// expose an entry that a preceding shrink had not reached yet.
+		scheduler.prune_cursor = std::min(scheduler.prune_cursor, capacity);
+		scheduler.observed_capacity = capacity;
+	}
+	while (scheduler.prune_cursor < Capacity &&
+		inspections < inspection_budget) {
+		scheduler.queues[scheduler.prune_cursor++] = {};
+		inspections++;
+	}
+	if (scheduler.prune_cursor < Capacity || inspections >= inspection_budget) {
+		mm_ghost_skin_sync_step_t result{};
+		result.inspections = inspections;
+		return result;
+	}
+	scheduler.cursor %= capacity;
+
+	for (size_t checked = 0;
+		checked < capacity && inspections < inspection_budget;
+		checked++) {
 		const size_t queue_index = scheduler.cursor % capacity;
 		scheduler.cursor = queue_index + 1 == capacity ? 0 : queue_index + 1;
+		inspections++;
 		mm_ghost_skin_sync_queue_t &queue = scheduler.queues[queue_index];
 		if (!queue.active)
 			continue;
@@ -314,47 +488,52 @@ constexpr mm_ghost_skin_sync_step_t MM_GhostStepSkinSync(
 			return {
 				mm_ghost_skin_sync_action_t::PublishCanonical,
 				queue.restored_index,
-				{}
+				{},
+				inspections
 			};
 		}
 
-		for (;;) {
-			const size_t pair_operation = queue.next_operation - 1;
-			if (pair_operation / 2 >= capacity) {
-				queue.active = false;
-				break;
-			}
-			queue.next_operation++;
-
-			const mm_ghost_skin_sync_pair_t pair = MM_GhostSkinSyncPair(
-				queue.restored_index, pair_operation, capacity);
-			if (!pair.valid)
-				continue;
-
-			const size_t peer_index = pair.viewer_index == queue.restored_index
-				? pair.target_index
-				: pair.viewer_index;
-			if (!MM_GhostSkinSyncSlotReady(slots, peer_index, context))
-				continue;
-
-			const mm_ghost_skin_sync_queue_t &peer_queue =
-				scheduler.queues[peer_index];
-			const bool peer_is_newer = peer_queue.serial > queue.serial ||
-				(peer_queue.serial == queue.serial && peer_queue.serial != 0 &&
-					peer_index > queue.restored_index);
-			if (peer_is_newer &&
-				MM_GhostSkinSyncQueueOwnsCurrentPairs(peer_queue, slots, context))
-				continue;
-
-			return {
-				mm_ghost_skin_sync_action_t::ReapplyOverride,
-				queue.restored_index,
-				pair
-			};
+		// Advance at most one structural pair operation for this queue. The
+		// caller budgets inspections, so disconnected peers and overlapping
+		// queues cannot turn one server frame into an unbounded quadratic scan.
+		const size_t pair_operation = queue.next_operation - 1;
+		if (pair_operation / 2 >= capacity) {
+			queue.active = false;
+			continue;
 		}
+		queue.next_operation++;
+
+		const mm_ghost_skin_sync_pair_t pair = MM_GhostSkinSyncPair(
+			queue.restored_index, pair_operation, capacity);
+		if (!pair.valid)
+			continue;
+
+		const size_t peer_index = pair.viewer_index == queue.restored_index
+			? pair.target_index
+			: pair.viewer_index;
+		if (!MM_GhostSkinSyncSlotReady(slots, peer_index, context))
+			continue;
+
+		const mm_ghost_skin_sync_queue_t &peer_queue =
+			scheduler.queues[peer_index];
+		const bool peer_is_newer = peer_queue.serial > queue.serial ||
+			(peer_queue.serial == queue.serial && peer_queue.serial != 0 &&
+				peer_index > queue.restored_index);
+		if (peer_is_newer &&
+			MM_GhostSkinSyncQueueOwnsCurrentPairs(peer_queue, slots, context))
+			continue;
+
+		return {
+			mm_ghost_skin_sync_action_t::ReapplyOverride,
+			queue.restored_index,
+			pair,
+			inspections
+		};
 	}
 
-	return {};
+	mm_ghost_skin_sync_step_t result{};
+	result.inspections = inspections;
+	return result;
 }
 
 template<size_t Capacity>
@@ -495,13 +674,32 @@ bool MM_Ghost_CaptureInactive(gentity_t *ent);
 bool MM_Ghost_CaptureDisconnect(gentity_t *ent);
 void MM_Ghost_MakeDisconnectPlaceholder(gentity_t *ent);
 gentity_t *MM_Ghost_ChooseReconnectSlot(const char *social_id, gentity_t **ignore, size_t num_ignore);
+void MM_Ghost_BeginClientConnect(gentity_t *slot);
+void MM_Ghost_MarkRejectedClientConnect(gentity_t *slot);
+bool MM_Ghost_ConsumeRejectedClientConnect(gentity_t *slot);
+bool MM_Ghost_PrepareClientConnect(gentity_t *slot, const char *social_id);
+bool MM_Ghost_PrepareClientBeginFallback(gentity_t *ent);
+void MM_Ghost_CompleteClientBeginFallback(gentity_t *ent);
+bool MM_Ghost_IsClientBeginFallbackPending(gentity_t *ent);
+bool MM_Ghost_ClientBeginFallbackOwnsRoundEntry(const gentity_t *ent);
+void MM_Ghost_OnMatchStart();
 bool MM_Ghost_IsReservedSlot(gentity_t *slot);
 gclient_t *MM_Ghost_ReservedClientState(gentity_t *slot);
 const gclient_t *MM_Ghost_ReservedClientState(const gentity_t *slot);
-size_t MM_Ghost_ActivePlayingReservationCount();
-size_t MM_Ghost_ActiveHumanPlayingReservationCount();
-size_t MM_Ghost_ActivePlayingReservationCountForTeam(team_t team);
+bool MM_Ghost_ApplyReservedDuelResult(gentity_t *slot, const char *social_id, bool won);
+bool MM_Ghost_QueueReservedDuelLoser(gentity_t *slot, const char *social_id);
+size_t MM_Ghost_ActivePlayingReservationCount(
+	const gentity_t *ignore = nullptr);
+size_t MM_Ghost_ActiveHumanPlayingReservationCount(
+	const gentity_t *ignore = nullptr);
+size_t MM_Ghost_ActivePlayingReservationCountForTeam(
+	team_t team, const gentity_t *ignore = nullptr);
+int64_t MM_Ghost_ActivePlayingReservationScoreForTeam(
+	team_t team, const gentity_t *ignore = nullptr);
 bool MM_Ghost_ReservedClientCountsForRound(const gentity_t *slot, team_t team);
+bool MM_Ghost_ReservedRoundState(gentity_t *slot, team_t team,
+	mm_ghost_reserved_round_state_t &state);
+bool MM_Ghost_AdjustReservedPlayerScore(gentity_t *slot, int32_t offset);
 bool MM_Ghost_IsPendingRestore(gentity_t *ent);
 bool MM_Ghost_IsAbortSpawnPending(gentity_t *ent);
 void MM_Ghost_CancelAbortSpawn(gentity_t *ent);
@@ -512,6 +710,7 @@ bool MM_Ghost_ClientThink(gentity_t *ent, const usercmd_t *ucmd);
 bool MM_Ghost_HasActiveReservations();
 bool MM_Ghost_TryRestore(gentity_t *ent);
 void MM_Ghost_DropTimedOutFlags();
+void MM_Ghost_ResolveRoundTransition();
 void MM_Ghost_RunFrame();
 void MM_Ghost_RunServerFrame();
 void MM_Ghost_ReportDiagnostics(bool reset_after = false);

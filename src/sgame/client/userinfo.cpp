@@ -3,6 +3,7 @@
 
 #include "userinfo.h"
 
+#include "muffmode/mm_ghost.h"
 #include "muffmode/mm_parse.h"
 
 #include <algorithm>
@@ -154,6 +155,17 @@ void ApplyUserinfoChanged(
 	gentity_t *ent, const char *userinfo,
 	bool publish_configstrings, bool refresh_skin_overrides)
 {
+	if (!ent || !userinfo || !g_entities || !game.clients ||
+		game.maxclients <= 0 || !ent->client)
+		return;
+	const size_t client_index = MM_GhostAddressIndex(
+		reinterpret_cast<uintptr_t>(ent),
+		reinterpret_cast<uintptr_t>(&g_entities[1]), sizeof(g_entities[0]),
+		static_cast<size_t>(game.maxclients));
+	if (client_index == MM_GHOST_NO_CLIENT_INDEX ||
+		ent->client != &game.clients[client_index])
+		return;
+
 	char val[MAX_INFO_VALUE] = {};
 
 	if (!gi.Info_ValueForKey(userinfo, "name", ent->client->pers.netname, sizeof(ent->client->pers.netname)))
@@ -238,7 +250,12 @@ void ClientUserinfoChanged(gentity_t *ent, const char *userinfo)
 	// Null-ent guard; same engine teardown class as ClientThink/ClientDisconnect.
 	if (!ent)
 		return;
-	muffmode::player::ApplyUserinfoChanged(ent, userinfo, true, true);
+	// A claimed/reinstating connection may update its parsed preferences, but its
+	// canonical team skin and per-viewer overrides are published only by the
+	// bounded post-restore/abort presentation lane.
+	const bool publish_immediately = !MM_Ghost_IsPendingRestore(ent);
+	muffmode::player::ApplyUserinfoChanged(
+		ent, userinfo, publish_immediately, publish_immediately);
 }
 
 // [MuffMode] Ghost restore has already passed through the ordinary connection

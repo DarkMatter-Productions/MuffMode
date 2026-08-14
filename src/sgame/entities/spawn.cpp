@@ -1847,32 +1847,19 @@ gclient_t *ReloadClient(gclient_t *client)
 	if (!client || !game.clients)
 		return nullptr;
 
-	const uintptr_t address = reinterpret_cast<uintptr_t>(client);
-	const uintptr_t base = reinterpret_cast<uintptr_t>(game.clients);
-	if (address < base)
-		return nullptr;
-	const uintptr_t delta = address - base;
-	if (delta % sizeof(gclient_t))
-		return nullptr;
-
-	const size_t index = static_cast<size_t>(delta / sizeof(gclient_t));
+	const size_t index = MM_GhostAddressIndex(
+		reinterpret_cast<uintptr_t>(client),
+		reinterpret_cast<uintptr_t>(game.clients), sizeof(gclient_t),
+		ReloadClientSlotCount());
 	return index < ReloadClientSlotCount() ? &game.clients[index] : nullptr;
 }
 
 int ReloadGhostIndex(const ghost_t *ghost)
 {
-	if (!ghost)
-		return -1;
-
-	const uintptr_t address = reinterpret_cast<uintptr_t>(ghost);
-	const uintptr_t base = reinterpret_cast<uintptr_t>(&level.ghosts[0]);
-	if (address < base)
-		return -1;
-	const uintptr_t delta = address - base;
-	if (delta % sizeof(ghost_t))
-		return -1;
-
-	const size_t index = static_cast<size_t>(delta / sizeof(ghost_t));
+	const size_t index = MM_GhostAddressIndex(
+		reinterpret_cast<uintptr_t>(ghost),
+		reinterpret_cast<uintptr_t>(&level.ghosts[0]), sizeof(ghost_t),
+		std::size(level.ghosts));
 	return index < std::size(level.ghosts) ? static_cast<int>(index) : -1;
 }
 
@@ -1988,8 +1975,15 @@ std::unique_ptr<world_reload_state_t> CaptureWorldReloadState()
 		std::end(level.intermission_victor_msg),
 		state->intermission_victor_msg.begin());
 
-	for (size_t i = 0; i < ReloadClientSlotCount(); i++)
-		state->client_ghost_index[i] = ReloadGhostIndex(game.clients[i].resp.ghost);
+	for (size_t i = 0; i < ReloadClientSlotCount(); i++) {
+		const int ghost_index = ReloadGhostIndex(game.clients[i].resp.ghost);
+		const bool index_valid = ghost_index >= 0 &&
+			ghost_index < static_cast<int>(std::size(level.ghosts));
+		const bool owner_matches = index_valid &&
+			level.ghosts[ghost_index].ent == &g_entities[i + 1];
+		state->client_ghost_index[i] = MM_GhostReloadAliasMayRestore(
+			index_valid, owner_matches) ? ghost_index : -1;
+	}
 
 	return state;
 }
@@ -2416,10 +2410,14 @@ world_entity_reload_result_t G_ResetWorldEntitiesFromSavedString()
 		ent->s.number = static_cast<int32_t>(i + 1);
 
 		const int ghost_index = state->client_ghost_index[i];
-		game.clients[i].resp.ghost =
-			ghost_index >= 0 && ghost_index < static_cast<int>(std::size(level.ghosts))
-				? &level.ghosts[ghost_index]
-				: nullptr;
+		const bool index_valid = ghost_index >= 0 &&
+			ghost_index < static_cast<int>(std::size(level.ghosts));
+		const bool owner_matches = index_valid &&
+			level.ghosts[ghost_index].ent == ent;
+		game.clients[i].resp.ghost = MM_GhostReloadAliasMayRestore(
+			index_valid, owner_matches)
+			? &level.ghosts[ghost_index]
+			: nullptr;
 
 		if (state->client_was_linked[i] && ent->inuse)
 			gi.linkentity(ent);

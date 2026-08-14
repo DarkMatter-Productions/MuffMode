@@ -8,9 +8,11 @@
 
 #include <algorithm>
 #include <iterator>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace muffmode::duel {
 
@@ -90,8 +92,11 @@ gentity_t *MM_DuelEntityForClient(const gclient_t *client)
 	if (!client || !game.clients)
 		return nullptr;
 
-	const ptrdiff_t client_num = client - game.clients;
-	if (client_num < 0 || client_num >= (ptrdiff_t)game.maxclients)
+	const size_t client_num = MM_GhostAddressIndex(
+		reinterpret_cast<uintptr_t>(client),
+		reinterpret_cast<uintptr_t>(game.clients),
+		sizeof(game.clients[0]), static_cast<size_t>(game.maxclients));
+	if (client_num == MM_GHOST_NO_CLIENT_INDEX)
 		return nullptr;
 
 	gentity_t *ent = &g_entities[client_num + 1];
@@ -112,6 +117,8 @@ namespace duel = muffmode::duel;
 
 namespace {
 
+uint64_t next_duel_queue_order = 0;
+
 struct final_duel_result_t {
 	bool frozen = false;
 	bool valid = false;
@@ -122,12 +129,42 @@ struct final_duel_result_t {
 
 final_duel_result_t final_duel_result;
 
-bool DuelEntryMatchesIdentity(const mm_duel_score_entry_t &entry,
-	int client_num, std::string_view social_id) noexcept
+const gclient_t *AuthoritativeDuelParticipantState(gentity_t *ent)
 {
-	if (!social_id.empty() && !entry.social_id.empty())
-		return entry.social_id == social_id;
-	return client_num >= 0 && entry.client_num == client_num;
+	if (!ent || !ent->client)
+		return nullptr;
+
+	if (const gclient_t *reserved = MM_Ghost_ReservedClientState(ent)) {
+		return reserved->sess.team != TEAM_NONE &&
+			reserved->sess.team != TEAM_SPECTATOR
+			? reserved : nullptr;
+	}
+
+	return ent->inuse && ent->client->pers.connected &&
+		ClientIsPlaying(ent->client)
+		? ent->client : nullptr;
+}
+
+int DuelClientNum(const gentity_t *ent) noexcept
+{
+	if (!ent || !g_entities)
+		return -1;
+	const size_t client_num = MM_GhostAddressIndex(
+		reinterpret_cast<uintptr_t>(ent),
+		reinterpret_cast<uintptr_t>(&g_entities[1]), sizeof(g_entities[0]),
+		static_cast<size_t>(game.maxclients));
+	return client_num == MM_GHOST_NO_CLIENT_INDEX
+		? -1 : static_cast<int>(client_num);
+}
+
+bool DuelEntryMatchesIdentity(const mm_duel_score_entry_t &entry,
+	int client_num, int32_t spawn_count, std::string_view social_id) noexcept
+{
+	if (!social_id.empty() || !entry.social_id.empty())
+		return !social_id.empty() && !entry.social_id.empty() &&
+			entry.social_id == social_id;
+	return client_num >= 0 && entry.client_num == client_num &&
+		entry.spawn_count == spawn_count;
 }
 
 bool DuelEntryRanksBefore(
@@ -158,6 +195,39 @@ gentity_t *ConnectedEntityForDuelEntry(const mm_duel_score_entry_t &entry)
 	return ent;
 }
 
+gentity_t *SlotForDuelEntry(const mm_duel_score_entry_t &entry)
+{
+	if (entry.client_num < 0 ||
+		static_cast<size_t>(entry.client_num) >= game.maxclients)
+		return nullptr;
+	return &g_entities[entry.client_num + 1];
+}
+
+bool SlotMayOwnDuelEntry(
+	const gentity_t *slot, const mm_duel_score_entry_t &entry) noexcept
+{
+	// Social identity survives a legitimate slot migration. Without it, the
+	// entity generation is the only thing separating this result from a later
+	// client that recycled the same numeric slot.
+	return slot && (!entry.social_id.empty() ||
+		slot->spawn_count == entry.spawn_count);
+}
+
+void ApplyDuelSessionResult(const mm_duel_score_entry_t &entry, bool won)
+{
+	if (gentity_t *slot = SlotForDuelEntry(entry))
+		if (SlotMayOwnDuelEntry(slot, entry) &&
+			MM_Ghost_ApplyReservedDuelResult(
+				slot, entry.social_id.c_str(), won))
+			return;
+
+	if (gentity_t *ent = ConnectedEntityForDuelEntry(entry)) {
+		int &counter = won ? ent->client->sess.wins : ent->client->sess.losses;
+		if (counter < std::numeric_limits<int>::max())
+			counter++;
+	}
+}
+
 bool CommitFinalDuelResult(const mm_duel_score_entry_t &winner,
 	const mm_duel_score_entry_t &loser, bool draw)
 {
@@ -169,8 +239,10 @@ bool CommitFinalDuelResult(const mm_duel_score_entry_t &winner,
 	final_duel_result.winner = winner;
 	final_duel_result.loser = loser;
 	if (!draw) {
-		if (gentity_t *winner_ent = ConnectedEntityForDuelEntry(winner))
-			winner_ent->client->sess.wins++;
+		// The reservation snapshot is authoritative while disconnected or pending;
+		// update it (and its connected mirror) exactly once for both participants.
+		ApplyDuelSessionResult(winner, true);
+		ApplyDuelSessionResult(loser, false);
 	}
 	return true;
 }
@@ -185,19 +257,9 @@ mm_duel_score_view_t MM_Duel_CurrentScoreView()
 
 	for (size_t i = 0; i < game.maxclients; ++i) {
 		gentity_t *ent = &g_entities[i + 1];
-		if (!ent->client)
+		const gclient_t *state = AuthoritativeDuelParticipantState(ent);
+		if (!state)
 			continue;
-
-		const gclient_t *state = MM_Ghost_ReservedClientState(ent);
-		if (!state) {
-			if (!ent->inuse || !ent->client->pers.connected ||
-				!ClientIsPlaying(ent->client))
-				continue;
-			state = ent->client;
-		} else if (state->sess.team == TEAM_NONE ||
-			state->sess.team == TEAM_SPECTATOR) {
-			continue;
-		}
 
 		mm_duel_score_entry_t entry;
 		entry.client_num = static_cast<int>(i);
@@ -242,15 +304,18 @@ bool CommitForfeit(gentity_t *forfeiter, bool departure)
 	if (notGT(GT_DUEL) || !forfeiter || !forfeiter->client ||
 		final_duel_result.frozen)
 		return false;
-	const ptrdiff_t client_num = forfeiter - g_entities - 1;
-	if (client_num < 0 || client_num >= static_cast<ptrdiff_t>(game.maxclients))
+	const size_t client_num = MM_GhostAddressIndex(
+		reinterpret_cast<uintptr_t>(forfeiter),
+		reinterpret_cast<uintptr_t>(&g_entities[1]), sizeof(g_entities[0]),
+		static_cast<size_t>(game.maxclients));
+	if (client_num == MM_GHOST_NO_CLIENT_INDEX)
 		return false;
 
 	const mm_duel_score_view_t view = MM_Duel_CurrentScoreView();
 	if (view.participant_count != 2)
 		return false;
-	size_t forfeiter_index = view.players[0].client_num == client_num ? 0 :
-		view.players[1].client_num == client_num ? 1 : 2;
+	size_t forfeiter_index = view.players[0].client_num == static_cast<int>(client_num) ? 0 :
+		view.players[1].client_num == static_cast<int>(client_num) ? 1 : 2;
 	if (forfeiter_index >= view.participant_count ||
 		forfeiter_index >= view.players.size())
 		return false;
@@ -281,12 +346,22 @@ bool MM_Duel_CommitDepartureForfeit(gentity_t *forfeiter)
 mm_duel_final_outcome_t MM_Duel_FinalOutcome(
 	int client_num, std::string_view social_id) noexcept
 {
+	// This compatibility overload has no entity generation. An authenticated
+	// social identity is still sufficient, but a bare reusable slot is not.
+	if (social_id.empty())
+		return mm_duel_final_outcome_t::unavailable;
+	return MM_Duel_FinalOutcome(client_num, 0, social_id);
+}
+
+mm_duel_final_outcome_t MM_Duel_FinalOutcome(
+	int client_num, int32_t spawn_count, std::string_view social_id) noexcept
+{
 	if (!final_duel_result.frozen || !final_duel_result.valid)
 		return mm_duel_final_outcome_t::unavailable;
 	const bool winner = DuelEntryMatchesIdentity(
-		final_duel_result.winner, client_num, social_id);
+		final_duel_result.winner, client_num, spawn_count, social_id);
 	const bool loser = DuelEntryMatchesIdentity(
-		final_duel_result.loser, client_num, social_id);
+		final_duel_result.loser, client_num, spawn_count, social_id);
 	if (!winner && !loser)
 		return mm_duel_final_outcome_t::unavailable;
 	if (final_duel_result.draw)
@@ -299,21 +374,73 @@ mm_duel_final_outcome_t MM_Duel_FinalOutcome(
 mm_duel_final_outcome_t MM_Duel_FinalOutcomeForClient(
 	const gentity_t *ent) noexcept
 {
-	if (!ent || ent <= g_entities ||
-		ent > g_entities + static_cast<ptrdiff_t>(game.maxclients))
+	const size_t client_num = MM_GhostAddressIndex(
+		reinterpret_cast<uintptr_t>(ent),
+		reinterpret_cast<uintptr_t>(&g_entities[1]), sizeof(g_entities[0]),
+		static_cast<size_t>(game.maxclients));
+	if (client_num == MM_GHOST_NO_CLIENT_INDEX)
 		return mm_duel_final_outcome_t::unavailable;
 	return MM_Duel_FinalOutcome(
-		static_cast<int>(ent - g_entities - 1),
+		static_cast<int>(client_num),
+		ent->spawn_count,
 		ent->client ? std::string_view(ent->client->pers.social_id) :
 			std::string_view{});
 }
 
 size_t MM_Duel_OccupiedSlots()
 {
-	const size_t connected = level.num_playing_clients > 0
-		? static_cast<size_t>(level.num_playing_clients) : 0;
-	return MM_DuelLogicalParticipantCount(
-		connected, MM_Ghost_ActivePlayingReservationCount());
+	if (notGT(GT_DUEL))
+		return 0;
+
+	size_t occupied = 0;
+	for (size_t i = 0; i < game.maxclients; ++i)
+		if (AuthoritativeDuelParticipantState(&g_entities[i + 1]))
+			++occupied;
+	return occupied;
+}
+
+bool MM_Duel_JoinWouldQueue() noexcept
+{
+	if (notGT(GT_DUEL))
+		return false;
+	return MM_DuelJoinWouldQueue(
+		MM_Duel_OccupiedSlots(),
+		level.match_state <= match_state_t::MATCH_WARMUP_READYUP,
+		level.intermission_time != 0_ms || level.intermission_queued != 0_ms);
+}
+
+uint64_t MM_Duel_AllocateQueueOrder()
+{
+	uint64_t highest = next_duel_queue_order;
+	for (gentity_t *ent : active_clients()) {
+		if (!ent || !ent->client || !ent->client->sess.duel_queued)
+			continue;
+		highest = std::max(highest, ent->client->sess.duel_queue_order);
+	}
+
+	if (highest != std::numeric_limits<uint64_t>::max()) {
+		next_duel_queue_order = highest + 1;
+		return next_duel_queue_order;
+	}
+
+	// A uint64 wrap is practically unreachable, but rebasing the bounded live
+	// queue keeps allocation total and preserves its exact current ordering.
+	std::vector<gentity_t *> queued;
+	queued.reserve(game.maxclients);
+	for (gentity_t *ent : active_clients())
+		if (ent && ent->client && ent->client->sess.duel_queued)
+			queued.push_back(ent);
+	std::sort(queued.begin(), queued.end(), [](const gentity_t *lhs,
+		const gentity_t *rhs) {
+		return MM_DuelQueueOrderBefore(
+			lhs->client->sess.duel_queue_order, DuelClientNum(lhs),
+			rhs->client->sess.duel_queue_order, DuelClientNum(rhs));
+	});
+
+	next_duel_queue_order = 0;
+	for (gentity_t *ent : queued)
+		ent->client->sess.duel_queue_order = ++next_duel_queue_order;
+	return ++next_duel_queue_order;
 }
 
 bool MM_Duel_AddPlayer()
@@ -327,29 +454,29 @@ bool MM_Duel_AddPlayer()
 	if (level.match_state > match_state_t::MATCH_WARMUP_READYUP || level.intermission_time || level.intermission_queued)
 		return false;
 
-	gclient_t *next_in_line = nullptr;
-
-	for (auto ec : active_clients()) {
-		if (ClientIsPlaying(ec->client))
+	std::vector<gentity_t *> queued;
+	queued.reserve(game.maxclients);
+	for (gentity_t *ec : active_clients()) {
+		if (!ec || !ec->client || ClientIsPlaying(ec->client))
 			continue;
-
 		if (!ec->client->sess.duel_queued)
 			continue;
-
-		if (!next_in_line || ec->client->sess.team_join_time < next_in_line->sess.team_join_time)
-			next_in_line = ec->client;
+		queued.push_back(ec);
 	}
 
-	if (!next_in_line)
-		return false;
+	std::sort(queued.begin(), queued.end(), [](const gentity_t *lhs,
+		const gentity_t *rhs) {
+		return MM_DuelQueueOrderBefore(
+			lhs->client->sess.duel_queue_order, DuelClientNum(lhs),
+			rhs->client->sess.duel_queue_order, DuelClientNum(rhs));
+	});
 
-	gentity_t *ent = duel::MM_DuelEntityForClient(next_in_line);
-	if (!ent)
-		return false;
-
-	SetTeam(ent, TEAM_FREE, false, true, false);
-
-	return true;
+	// A pending restore or another transiently blocked head must not make the
+	// warmup controller believe promotion succeeded, nor strand valid followers.
+	for (gentity_t *ent : queued)
+		if (SetTeam(ent, TEAM_FREE, false, true, false))
+			return true;
+	return false;
 }
 
 void MM_Duel_RemoveLoser()
@@ -359,15 +486,29 @@ void MM_Duel_RemoveLoser()
 		return;
 
 	const mm_duel_score_entry_t loser = final_duel_result.loser;
-	MM_Duel_ResetFinalResult();
+	if (gentity_t *slot = SlotForDuelEntry(loser)) {
+		if (SlotMayOwnDuelEntry(slot, loser) &&
+			MM_Ghost_QueueReservedDuelLoser(
+			slot, loser.social_id.c_str())) {
+			MM_Duel_ResetFinalResult();
+			return;
+		}
+	}
 	gentity_t *ent = ConnectedEntityForDuelEntry(loser);
-	if (!ent || !ClientIsPlaying(ent->client))
+	if (!ent || !ClientIsPlaying(ent->client)) {
+		MM_Duel_ResetFinalResult();
 		return;
+	}
 
 	if (duel::MM_DuelCvarEnabled(g_verbose))
 		gi.Com_PrintFmt("Duel: Moving the loser, {}, to end of queue.\n", ent->client->resp.netname);
 
-	SetTeam(ent, TEAM_NONE, false, true, false);
+	if (!SetTeam(ent, TEAM_NONE, false, true, false)) {
+		gi.Com_PrintFmt("Duel: unable to move loser {} to the queue.\n",
+			ent->client->resp.netname);
+		return;
+	}
+	MM_Duel_ResetFinalResult();
 }
 
 void MM_Duel_MatchEnd_AdjustScores()

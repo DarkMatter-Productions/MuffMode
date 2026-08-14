@@ -6,6 +6,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cmath>
 #include <string>
 #include <vector>
 
@@ -218,6 +219,17 @@ struct mm_match_player_stats_t {
 	uint32_t camp_idle_samples = 0;
 	std::array<mm_match_camp_cell_t, MM_MATCH_CAMP_CELL_SLOTS> camp_cells{};
 
+	// [MuffMode] Distance travelled while the grapple is attached and pulling
+	// this player. The anchor is transient collection state carried alongside
+	// the total so reconnect/freeze snapshots remain self-contained.
+	uint64_t grapple_ride_distance = 0;
+	std::array<float, 3> grapple_ride_anchor{};
+	bool grapple_ride_anchor_valid = false;
+
+	// Blaster frags against opponents who were actively playing: no spawn kills,
+	// inactive bodies, suicides, teammates, or other target practice.
+	uint32_t blaster_active_opponent_kills = 0;
+
 	std::array<uint32_t, MM_MATCH_MOD_COUNT> mod_total_kills{};
 	std::array<uint32_t, MM_MATCH_MOD_COUNT> mod_total_deaths{};
 	std::array<uint64_t, MM_MATCH_MOD_COUNT> mod_total_dmg_dealt{};
@@ -243,6 +255,46 @@ struct mm_match_player_stats_t {
 	int64_t play_start_real_time_ms = 0;
 	int64_t play_end_real_time_ms = 0;
 };
+
+// A legitimate 100 ms movement step is far below this even at grapple speed.
+// Larger discontinuities are teleports, restores, or map mechanics and must not
+// turn one hook attachment into an instant MONKEY MAN award.
+inline constexpr double MM_MATCH_GRAPPLE_MAX_SAMPLE_DISTANCE = 512.0;
+
+// Records one movement sample and returns the whole world units accepted. A
+// false `riding` sample deliberately breaks the chain so travel while the hook
+// is flying or detached cannot bridge into the next ride.
+inline uint64_t MM_MatchStatsRecordGrappleTravel(mm_match_player_stats_t &stats,
+	float x, float y, float z, bool riding)
+{
+	if (!riding) {
+		stats.grapple_ride_anchor_valid = false;
+		return 0;
+	}
+
+	const std::array<float, 3> current { x, y, z };
+	if (!stats.grapple_ride_anchor_valid) {
+		stats.grapple_ride_anchor = current;
+		stats.grapple_ride_anchor_valid = true;
+		return 0;
+	}
+
+	const double dx = static_cast<double>(x) - stats.grapple_ride_anchor[0];
+	const double dy = static_cast<double>(y) - stats.grapple_ride_anchor[1];
+	const double dz = static_cast<double>(z) - stats.grapple_ride_anchor[2];
+	stats.grapple_ride_anchor = current;
+
+	const double distance = std::sqrt(dx * dx + dy * dy + dz * dz);
+	if (!std::isfinite(distance) || distance > MM_MATCH_GRAPPLE_MAX_SAMPLE_DISTANCE)
+		return 0;
+
+	const uint64_t whole_units = static_cast<uint64_t>(distance + 0.5);
+	if (whole_units > UINT64_MAX - stats.grapple_ride_distance)
+		stats.grapple_ride_distance = UINT64_MAX;
+	else
+		stats.grapple_ride_distance += whole_units;
+	return whole_units;
+}
 
 struct mm_match_overall_stats_t {
 	bool collecting = false;

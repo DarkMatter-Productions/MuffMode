@@ -34,10 +34,85 @@ bool IsClientIndexInRange(int client_num)
 	return client_num >= 0 && static_cast<size_t>(client_num) < game.maxclients;
 }
 
-bool HumanPlayerLimitReached()
+bool IsLiveRankedPlayer(const gentity_t *ent)
+{
+	return ent && ent->inuse && ent->client &&
+		ent->client->pers.connected && ClientIsPlaying(ent->client);
+}
+
+bool IsHumanPlayer(const gentity_t *ent)
+{
+	return ent && ent->client && !ent->client->sess.is_a_bot &&
+		!(ent->svflags & SVF_BOT);
+}
+
+struct LogicalTeamView {
+	size_t red_count = 0;
+	size_t blue_count = 0;
+	int64_t red_score = 0;
+	int64_t blue_score = 0;
+};
+
+LogicalTeamView BuildLogicalTeamView(const gentity_t *ignore)
+{
+	const size_t live_red = static_cast<size_t>(
+		std::max(level.num_playing_red, 0));
+	const size_t live_blue = static_cast<size_t>(
+		std::max(level.num_playing_blue, 0));
+	const size_t reserved_red =
+		MM_Ghost_ActivePlayingReservationCountForTeam(TEAM_RED);
+	const size_t reserved_blue =
+		MM_Ghost_ActivePlayingReservationCountForTeam(TEAM_BLUE);
+	const mm_team_count_side_t ignored_live_side =
+		IsLiveRankedPlayer(ignore) && ignore->client->sess.team == TEAM_RED
+			? mm_team_count_side_t::Red
+			: IsLiveRankedPlayer(ignore) && ignore->client->sess.team == TEAM_BLUE
+				? mm_team_count_side_t::Blue
+				: mm_team_count_side_t::None;
+	mm_team_count_side_t ignored_reserved_side = mm_team_count_side_t::None;
+	if (ignore) {
+		if (reserved_red !=
+			MM_Ghost_ActivePlayingReservationCountForTeam(TEAM_RED, ignore))
+			ignored_reserved_side = mm_team_count_side_t::Red;
+		else if (reserved_blue !=
+			MM_Ghost_ActivePlayingReservationCountForTeam(TEAM_BLUE, ignore))
+			ignored_reserved_side = mm_team_count_side_t::Blue;
+	}
+	const mm_team_logical_counts_t counts = MM_TeamLogicalCounts(
+		live_red, live_blue, reserved_red, reserved_blue,
+		ignored_live_side, ignored_reserved_side);
+	LogicalTeamView view{ counts.red, counts.blue };
+
+	for (size_t i = 0; i < game.maxclients; ++i) {
+		const gentity_t *slot = &g_entities[i + 1];
+		if (slot == ignore || !IsLiveRankedPlayer(slot))
+			continue;
+		if (slot->client->sess.team == TEAM_RED)
+			view.red_score += static_cast<int64_t>(slot->client->resp.score);
+		else if (slot->client->sess.team == TEAM_BLUE)
+			view.blue_score += static_cast<int64_t>(slot->client->resp.score);
+	}
+	view.red_score += MM_Ghost_ActivePlayingReservationScoreForTeam(
+		TEAM_RED, ignore);
+	view.blue_score += MM_Ghost_ActivePlayingReservationScoreForTeam(
+		TEAM_BLUE, ignore);
+
+	return view;
+}
+
+bool HumanPlayerLimitReached(const gentity_t *ignore = nullptr)
 {
 	const int limit = CvarInteger(maxplayers);
-	return limit > 0 && level.num_playing_human_clients >= limit;
+	if (limit <= 0)
+		return false;
+
+	int64_t logical_humans = std::max<int64_t>(
+		static_cast<int64_t>(level.num_playing_human_clients), 0);
+	if (IsLiveRankedPlayer(ignore) && IsHumanPlayer(ignore) && logical_humans > 0)
+		--logical_humans;
+	logical_humans += static_cast<int64_t>(
+		MM_Ghost_ActiveHumanPlayingReservationCount(ignore));
+	return logical_humans >= limit;
 }
 
 std::string DisplayName(gentity_t *ent)
@@ -100,6 +175,17 @@ bool IsPlayingTeam(team_t team)
 	return team == TEAM_RED || team == TEAM_BLUE;
 }
 
+bool IsTargetValidForCurrentMode(team_t team, bool force)
+{
+	if (team == TEAM_SPECTATOR)
+		return true;
+	if (team == TEAM_NONE)
+		return force && GT(GT_DUEL);
+	if (Teams())
+		return team == TEAM_RED || team == TEAM_BLUE;
+	return team == TEAM_FREE;
+}
+
 } // namespace muffmode::team
 
 int PlayerSortByJoinTime(const void *a, const void *b) {
@@ -124,10 +210,19 @@ team_t PickTeam(int ignore_client_num) {
 	if (!Teams())
 		return TEAM_FREE;
 
-	if (level.num_playing_blue > level.num_playing_red)
+	const gentity_t *ignore = muffmode::team::IsClientIndexInRange(
+		ignore_client_num) ? &g_entities[ignore_client_num + 1] : nullptr;
+	const muffmode::team::LogicalTeamView logical =
+		muffmode::team::BuildLogicalTeamView(ignore);
+
+	if (MM_TeamLowerLogicalSide({
+			logical.red_count, logical.blue_count }) ==
+		mm_team_count_side_t::Red)
 		return TEAM_RED;
 
-	if (level.num_playing_red > level.num_playing_blue)
+	if (MM_TeamLowerLogicalSide({
+			logical.red_count, logical.blue_count }) ==
+		mm_team_count_side_t::Blue)
 		return TEAM_BLUE;
 
 	// equal team count, so join the team with the lowest score
@@ -139,27 +234,9 @@ team_t PickTeam(int ignore_client_num) {
 	// equal team scores, so join team with lowest total individual scores
 	// skip in tdm as it's redundant
 	if (notGT(GT_TDM)) {
-		int iscore_red = 0, iscore_blue = 0;
-
-		for (size_t i = 0; i < game.maxclients; i++) {
-			if (ignore_client_num >= 0 && i == static_cast<size_t>(ignore_client_num))
-				continue;
-			if (!game.clients[i].pers.connected)
-				continue;
-
-			if (game.clients[i].sess.team == TEAM_RED) {
-				iscore_red += game.clients[i].resp.score;
-				continue;
-			}
-			if (game.clients[i].sess.team == TEAM_BLUE) {
-				iscore_blue += game.clients[i].resp.score;
-				continue;
-			}
-		}
-
-		if (iscore_blue > iscore_red)
+		if (logical.blue_score > logical.red_score)
 			return TEAM_RED;
-		if (iscore_red > iscore_blue)
+		if (logical.red_score > logical.blue_score)
 			return TEAM_BLUE;
 	}
 
@@ -268,21 +345,31 @@ bool AllowTeamSwitch(gentity_t *ent, team_t desired_team) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "You cannot change teams during a Red Rover match.\n");
 		return false;
 	}
-	if (desired_team != TEAM_SPECTATOR && HumanPlayerLimitReached()) {
+	if (desired_team != TEAM_SPECTATOR && HumanPlayerLimitReached(ent)) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "Maximum player count has been reached.\n");
 		return false; // ignore the request
 	}
 
-	if (level.locked[desired_team]) {
+	if (muffmode::match::IsTeamLocked(desired_team)) {
 		gi.LocBroadcast_Print(PRINT_HIGH, "{} is locked.\n", Teams_TeamName(desired_team));
 		return false; // ignore the request
 	}
 
 	if (Teams()) {
 		if (muffmode::CvarEnabled(g_teamplay_force_balance)) {
-			// We allow a spread of two
-			if ((desired_team == TEAM_RED && (level.num_playing_red - level.num_playing_blue > 1)) ||
-				(desired_team == TEAM_BLUE && (level.num_playing_blue - level.num_playing_red > 1))) {
+			// Exclude the target's current live/reserved membership, then project
+			// the requested admission. A final spread of two remains allowed.
+			const LogicalTeamView without_target = BuildLogicalTeamView(ent);
+			const mm_team_count_side_t desired_side = desired_team == TEAM_RED
+				? mm_team_count_side_t::Red
+				: desired_team == TEAM_BLUE
+					? mm_team_count_side_t::Blue
+					: mm_team_count_side_t::None;
+			const auto projection = MM_TeamProjectForceBalanceSwitch(
+				without_target.red_count, without_target.blue_count,
+				0, 0, mm_team_count_side_t::None,
+				mm_team_count_side_t::None, desired_side);
+			if (!projection.allowed) {
 				gi.LocClient_Print(ent, PRINT_HIGH, "{} has too many players.\n", Teams_TeamName(desired_team));
 				return false; // ignore the request
 			}
@@ -341,11 +428,11 @@ int TeamBalance(bool force) {
 	if (GT(GT_RR))
 		return 0;
 
-	int logical_red = level.num_playing_red + static_cast<int>(
-		MM_Ghost_ActivePlayingReservationCountForTeam(TEAM_RED));
-	int logical_blue = level.num_playing_blue + static_cast<int>(
-		MM_Ghost_ActivePlayingReservationCountForTeam(TEAM_BLUE));
-	int delta = std::abs(logical_red - logical_blue);
+	const muffmode::team::LogicalTeamView logical =
+		muffmode::team::BuildLogicalTeamView(nullptr);
+	int64_t logical_red = static_cast<int64_t>(logical.red_count);
+	int64_t logical_blue = static_cast<int64_t>(logical.blue_count);
+	int64_t delta = std::abs(logical_red - logical_blue);
 
 	if (delta < 2)
 		return 0;
@@ -466,54 +553,73 @@ SetTeam
 bool SetTeam(gentity_t *ent, team_t desired_team, bool inactive, bool force, bool silent) {
 	if (!ent || !ent->client)
 		return false;
+	// Team automation, admin force-team, and ordinary commands must not mutate a
+	// claimed/reinstating target outside the transactional ghost commit/abort path.
+	if (MM_Ghost_IsPendingRestore(ent))
+		return false;
 
 	bool arena_result = false;
 	if (MM_Arena_HandleTeamRequest(ent, desired_team, inactive, force, silent, arena_result))
 		return arena_result;
 
-	if (!muffmode::team::IsTeamInRange(desired_team))
-		return false;
-
-	if (desired_team == TEAM_NONE && !(force && GT(GT_DUEL)))
+	if (!muffmode::team::IsTeamInRange(desired_team) ||
+		!muffmode::team::IsTargetValidForCurrentMode(desired_team, force))
 		return false;
 
 	const team_t old_team = ent->client->sess.team;
 	bool queue = false;
 
-	if (desired_team != TEAM_SPECTATOR && ent->client->sess.inactive && MM_Ghost_TryRestore(ent))
+	if (desired_team != TEAM_NONE && desired_team != TEAM_SPECTATOR &&
+		ent->client->sess.inactive && MM_Ghost_TryRestore(ent))
 		return true;
-	
+
+	// A queued spectator may repeat the ordinary play command while a slot is
+	// open. Promotion still belongs to the ordered queue scanner; otherwise a
+	// command retry could jump older contenders. The forced TEAM_FREE request
+	// used by that scanner is deliberately exempt.
+	if (GT(GT_DUEL) && old_team == TEAM_SPECTATOR &&
+		ent->client->sess.duel_queued &&
+		((desired_team == TEAM_FREE && !force) || desired_team == TEAM_NONE)) {
+		P_Menu_Close(ent);
+		return true;
+	}
+
+	if (!force && desired_team != TEAM_SPECTATOR && desired_team == old_team) {
+		P_Menu_Close(ent);
+		return false;
+	}
+
+	// Duel has one roster-admission policy for every entry point. Resolve queue
+	// intent before player-cap and lock checks so maxplayers=2 and an active-match
+	// lock still permit spectators to join the waiting line. Forced TEAM_FREE is
+	// intentionally rejected when it would bypass the two-slot/phase invariant;
+	// TEAM_NONE is the explicit internal request to queue.
+	if (GT(GT_DUEL)) {
+		if (desired_team == TEAM_NONE) {
+			desired_team = TEAM_SPECTATOR;
+			queue = true;
+		} else if (desired_team == TEAM_FREE && MM_Duel_JoinWouldQueue()) {
+			if (force)
+				return false;
+			desired_team = TEAM_SPECTATOR;
+			queue = true;
+		}
+	}
+
 	if (!force) {
-		// Check if this would be a duel queue join (spectator with queue flag)
-		const bool would_be_duel_queue = GT(GT_DUEL) &&
-			desired_team != TEAM_SPECTATOR && MM_Duel_OccupiedSlots() >= 2;
-		
 		if (!ClientIsPlaying(ent->client) && desired_team != TEAM_SPECTATOR) {
 			bool revoke = false;
 			// Check if the desired team is locked (covers both captain lock and g_match_lock)
-			if (level.locked[desired_team] && !would_be_duel_queue) {
+			if (muffmode::match::IsTeamLocked(desired_team)) {
 				gi.LocClient_Print(ent, PRINT_HIGH, "{} is locked.\n", Teams_TeamName(desired_team));
 				revoke = true;
-			} else if (muffmode::team::HumanPlayerLimitReached()) {
+			} else if (muffmode::team::HumanPlayerLimitReached(ent)) {
 				gi.LocClient_Print(ent, PRINT_HIGH, "Maximum player load reached.\n");
 				revoke = true;
 			}
 			if (revoke) {
 				P_Menu_Close(ent);
 				return false;
-			}
-		}
-
-		if (desired_team != TEAM_SPECTATOR && desired_team == ent->client->sess.team) {
-			P_Menu_Close(ent);
-			return false;
-		}
-
-		if (GT(GT_DUEL)) {
-			if (desired_team != TEAM_SPECTATOR && MM_Duel_OccupiedSlots() >= 2) {
-				desired_team = TEAM_SPECTATOR;
-				queue = true;
-				P_Menu_Close(ent);
 			}
 		}
 
@@ -526,13 +632,6 @@ bool SetTeam(gentity_t *ent, team_t desired_team, bool inactive, bool force, boo
 			gi.LocClient_Print(ent, PRINT_HIGH, "You may not switch teams more than once per 5 seconds.\n");
 			P_Menu_Close(ent);
 			return false;
-		}
-	} else {
-		if (GT(GT_DUEL)) {
-			if (desired_team == TEAM_NONE) {
-				desired_team = TEAM_SPECTATOR;
-				queue = true;
-			}
 		}
 	}
 
@@ -604,6 +703,7 @@ bool SetTeam(gentity_t *ent, team_t desired_team, bool inactive, bool force, boo
 	ent->client->sess.spectator_state = desired_team == TEAM_SPECTATOR ? SPECTATOR_FREE : SPECTATOR_NOT;
 	ent->client->sess.spectator_client = 0;
 	ent->client->sess.duel_queued = queue;
+	ent->client->sess.duel_queue_order = queue ? MM_Duel_AllocateQueueOrder() : 0;
 
 	if (desired_team != TEAM_SPECTATOR) {
 		if (Teams() || GT(GT_ARENA))
@@ -634,10 +734,6 @@ bool SetTeam(gentity_t *ent, team_t desired_team, bool inactive, bool force, boo
 	// on TEAM_FREE and would never arm it. sess.team is already assigned above.
 	if (ClientIsPlaying(ent->client))
 		MM_MatchInfoHud_Show(ent);
-
-	// if they are playing a duel, count as a loss
-	if (GT(GT_DUEL) && old_team == TEAM_FREE)
-		ent->client->sess.losses++;
 
 	ClientSpawn(ent);
 	G_PostRespawn(ent);

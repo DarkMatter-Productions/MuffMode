@@ -188,6 +188,14 @@ seconds, so the press that dismissed the scoreboard cannot skip it unseen.
 Anything you won is repeated in your end-of-match summary, and `awards` reprints
 the last reel at any time.
 
+Awards are deliberately exceptional rather than automatic: the match must last
+at least two minutes, ties produce no winner, and most titles demand both a large
+sample and a dominant share. Rarer stories include **MONKEY MAN** for enormous
+grapple-assisted travel, **HAVING A BLAST** for deadly accurate blaster play,
+**BLENDER WITH LEGS** for chainfist dominance, **CHAINGUN WANKER** for excessive
+chaingun carnage, and **THIS IS FINE** for winning hard while absorbing an
+unreasonable amount of damage.
+
 MyMap modifiers are `pu` (powerups), `pa` (power armor), `ht` (health),
 `ar` (armor), `am` (ammo), and `wp` (weapons). Prefix a code with `+` to
 force that category on for the queued map or `-` to remove it, for example
@@ -236,6 +244,7 @@ Use `hook` and `unhook` directly if you prefer separate commands.
 - Some gametypes are works in progress. The [Gameplay Reference](gameplay-reference.md) calls these out.
 - Rulesets change starts, weapons, ammo, armor, health, powerups, and movement feel. The [Rulesets](rulesets.md) guide has the player-facing differences.
 - Custom skins, voting, team picking, timeouts, MyMap, and ready-up behavior are server controlled.
+- Duel always keeps exactly two active slots. Additional challengers can join its FIFO spectator queue even when the server's active-player limit is two or the running match is locked; selecting Join Queue again preserves the existing position.
 - Completed matches update your saved per-gametype rating and aggregate record when the server can identify your account and can guarantee admission of every required result. Match-end summaries show the result and rating change; matches containing bots or profile-unready players, non-Duel matches with a departure, and result sets the bounded persistence queue cannot accept remain unranked and do not apply Elo. A valid two-player Duel departure instead settles both players atomically as a forfeit and closes the match.
 - During active matches, servers can restore your match state automatically if you reconnect quickly with the same social ID. That reserved state remains the authority for finishing the interrupted match, then the admitted result is reconciled with your current profile before the next match; reconnect-time preferences are preserved. The older `ghost <code>` path remains as a fallback.
 - If something feels misconfigured, ask the host to run `doctor`; it reports risky cvar combinations and suggested fixes.

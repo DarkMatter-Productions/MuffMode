@@ -188,6 +188,7 @@ void ApplySettings(gentity_t *ent, menu_hnd_t *p)
 		gi.LocBroadcast_Print(PRINT_HIGH, "{} turned {} match lock.\n",
 			ent->client->resp.netname, settings->match_lock ? "on" : "off");
 		gi.cvar_set("g_match_lock", settings->match_lock ? "1" : "0");
+		muffmode::match::ReconcileAutomaticMatchLocks();
 	}
 
 	P_Menu_Close(ent);
@@ -374,8 +375,12 @@ void ApplyMatchAction(gentity_t *ent, menu_hnd_t *p)
 	}
 
 	if (level.match_state <= match_state_t::MATCH_COUNTDOWN) {
-		gi.LocBroadcast_Print(PRINT_CHAT, "Match has been forced to start.\n");
-		Match_Start();
+		if (Match_Start())
+			gi.LocBroadcast_Print(PRINT_CHAT, "Match has been forced to start.\n");
+		else
+			gi.LocClient_Print(ent, PRINT_HIGH, GT(GT_DUEL)
+				? "Duel requires exactly two contenders before it can start.\n"
+				: "Match cannot start in its current state.\n");
 	} else if (level.match_state == match_state_t::MATCH_IN_PROGRESS) {
 		gi.LocBroadcast_Print(PRINT_CHAT, "Match has been forced to terminate.\n");
 		Match_Reset();
@@ -1491,46 +1496,62 @@ void Update(gentity_t *ent)
 			entries[kFreeSpectate].SelectFunc = nullptr;
 		}
 	} else if (teams) {
-		if (!muffmode::CvarEnabled(g_teamplay_allow_team_pick) && !level.locked[TEAM_RED] && !level.locked[TEAM_BLUE]) {
+		const bool red_locked = muffmode::match::IsTeamLocked(TEAM_RED);
+		const bool blue_locked = muffmode::match::IsTeamLocked(TEAM_BLUE);
+		const int team_capacity = max(1, max_players / 2);
+		if (!muffmode::CvarEnabled(g_teamplay_allow_team_pick) && !red_locked && !blue_locked) {
 			menu::SetText(entries[kTeamsJoinRed], G_Fmt("Join a Team ({}/{})", num_red + num_blue, max_players).data());
 			menu::SetText(entries[kTeamsJoinBlue], "");
 
 			entries[kTeamsJoinRed].SelectFunc = JoinRed;
 			entries[kTeamsJoinBlue].SelectFunc = nullptr;
 		} else {
-			if (level.locked[TEAM_RED]) {
+			if (red_locked) {
 				menu::SetText(entries[kTeamsJoinRed], G_Fmt("{} is LOCKED", Teams_TeamName(TEAM_RED)).data());
 				entries[kTeamsJoinRed].SelectFunc = nullptr;
 			} else {
-				menu::SetText(entries[kTeamsJoinRed], G_Fmt("Join {} ({}/{})", Teams_TeamName(TEAM_RED), num_red, max_players / 2).data());
+				menu::SetText(entries[kTeamsJoinRed], G_Fmt("Join {} ({}/{})", Teams_TeamName(TEAM_RED), num_red, team_capacity).data());
 				entries[kTeamsJoinRed].SelectFunc = JoinRed;
 			}
-			if (level.locked[TEAM_BLUE]) {
+			if (blue_locked) {
 				menu::SetText(entries[kTeamsJoinBlue], G_Fmt("{} is LOCKED", Teams_TeamName(TEAM_BLUE)).data());
 				entries[kTeamsJoinBlue].SelectFunc = nullptr;
 			} else {
-				menu::SetText(entries[kTeamsJoinBlue], G_Fmt("Join {} ({}/{})", Teams_TeamName(TEAM_BLUE), num_blue, max_players / 2).data());
+				menu::SetText(entries[kTeamsJoinBlue], G_Fmt("Join {} ({}/{})", Teams_TeamName(TEAM_BLUE), num_blue, team_capacity).data());
 				entries[kTeamsJoinBlue].SelectFunc = JoinBlue;
 			}
 
 		}
 	} else {
-		// Allow duel queue joining even during match lock (queue joining doesn't affect active match)
-		const bool is_duel_queue_join = GT(GT_DUEL) &&
-			MM_Duel_OccupiedSlots() >= 2;
-		if (level.locked[TEAM_FREE] && !is_duel_queue_join) {
+		const bool duel = GT(GT_DUEL);
+		const bool already_queued = duel &&
+			ent->client->sess.team == TEAM_SPECTATOR &&
+			ent->client->sess.duel_queued;
+		// Queue admission is intentionally available through a full, live, ended,
+		// countdown, or intermission Duel. Use the same policy as SetTeam so the
+		// menu never advertises a roster join that the command path will queue.
+		const bool duel_queue_join = duel && MM_Duel_JoinWouldQueue();
+		if (already_queued) {
+			menu::SetText(entries[kFreeJoin],
+				G_Fmt("Queued to Play ({} queued)", num_queue).data());
+			entries[kFreeJoin].SelectFunc = nullptr;
+		} else if (muffmode::match::IsTeamLocked(TEAM_FREE) && !duel_queue_join) {
 			menu::SetText(entries[kFreeJoin], "Match LOCKED");
 			entries[kFreeJoin].SelectFunc = nullptr;
-		} else if (GT(GT_DUEL) && MM_Duel_OccupiedSlots() >= 2) {
-			menu::SetText(entries[kFreeJoin], G_Fmt("Join Queue to Play ({}/{})", num_queue, max(0, max_players - 2)).data());
+		} else if (duel_queue_join) {
+			menu::SetText(entries[kFreeJoin],
+				G_Fmt("Join Queue to Play ({} queued)", num_queue).data());
 			entries[kFreeJoin].SelectFunc = JoinFree;
 		} else {
-			menu::SetText(entries[kFreeJoin], G_Fmt("Join Match ({}/{})", num_free, GT(GT_DUEL) ? 2 : max_players).data());
+			const size_t playing = duel ? MM_Duel_OccupiedSlots() :
+				static_cast<size_t>(max(0, num_free));
+			menu::SetText(entries[kFreeJoin],
+				G_Fmt("Join Match ({}/{})", playing, duel ? 2 : max_players).data());
 			entries[kFreeJoin].SelectFunc = JoinFree;
 		}
 		menu::SetText(entries[kFreeArenaLobby], "");
 		entries[kFreeArenaLobby].SelectFunc = nullptr;
-		menu::SetText(entries[kFreeSpectate], "Spectate");
+		menu::SetText(entries[kFreeSpectate], already_queued ? "Leave Queue" : "Spectate");
 		entries[kFreeSpectate].SelectFunc = JoinSpectator;
 	}
 
