@@ -165,7 +165,10 @@ const menu_t kFactoryVariantMenuTemplate[] = {
 	{ "", MENU_ALIGN_LEFT, SelectFactory },
 	{ "", MENU_ALIGN_LEFT, SelectFactory },
 	{ "", MENU_ALIGN_LEFT, nullptr },
-	{ "$g_pc_return", MENU_ALIGN_LEFT, G_Menu_ReturnToGameType }
+	// [MuffMode] Literal text, not the shared "$g_pc_return" loc key every
+	// other submenu's return row uses: this is the one row in this file whose
+	// return target isn't Call a Vote, so it says where it's actually going.
+	{ "Return to Gametype", MENU_ALIGN_LEFT, G_Menu_ReturnToGameType }
 };
 
 const menu_t kGameTypeMenuTemplate[] = {
