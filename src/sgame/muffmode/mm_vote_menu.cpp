@@ -971,9 +971,14 @@ void UpdateFactoryVariants(gentity_t *ent)
 	const std::vector<const std::string *> values = FactoryVariantIds(gt);
 
 	int offset = page->offset;
-	// +1: the always-present "default" (no factory) choice, logical index 0,
-	// ahead of every named variant.
-	const int total_variants = static_cast<int>(values.size()) + 1;
+	// The synthesized "default" (no factory) choice only takes the logical
+	// index-0 slot when this gametype has no curated variant of its own --
+	// otherwise it just duplicates the gametype's own name as a confusing
+	// extra row above real presets like "Classic Deathmatch". It stays as a
+	// fallback so a gametype g_votable_gametypes allows but g_votable_factories
+	// leaves with nothing curated is still reachable from the menu.
+	const bool show_default = values.empty();
+	const int total_variants = static_cast<int>(values.size()) + (show_default ? 1 : 0);
 
 	offset = ClampMapPageOffset(offset, total_variants, page_size);
 	page->offset = offset;
@@ -993,15 +998,16 @@ void UpdateFactoryVariants(gentity_t *ent)
 	int menu_index = kMapMenuFirstItem;
 	for (int i = offset; i < total_variants && menu_index < (kMapMenuFirstItem + page_size); i++)
 	{
-		if (i == 0)
+		if (show_default && i == 0)
 		{
 			MenuVote_SetArg(entries[menu_index], gt_short_name[(int)gt]);
-			MenuVote_SetText(entries[menu_index], gt_long_name[(int)gt]);
+			MenuVote_SetText(entries[menu_index],
+				G_Fmt("{} (default)", gt_long_name[(int)gt]).data());
 			entries[menu_index].SelectFunc = SelectGameTypeDefault;
 		}
 		else
 		{
-			const std::string &id = *values[i - 1];
+			const std::string &id = *values[show_default ? i - 1 : i];
 			MenuVote_SetArg(entries[menu_index], id);
 
 			const muffmode::factory::mm_factory_t *entry = muffmode::factory::MM_Factory_Find(id);
