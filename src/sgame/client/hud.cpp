@@ -49,7 +49,7 @@ const char *HudCountdownProgressLabel()
 			return "";
 
 		const int limit = GT_ScoreLimit();
-		if (limit > 0)
+		if (limit > 0 && n <= limit)
 			return G_Fmt("Wave {} of {}", n, limit).data();
 		return G_Fmt("Wave {}", n).data();
 	}
@@ -61,8 +61,12 @@ const char *HudCountdownProgressLabel()
 	if (n <= 0)
 		return "";
 
+	// [MuffMode] For round-win-target modes (FT/CA/LMS) roundlimit is "wins
+	// needed", not a hard cap on rounds played -- draws let round_number
+	// climb past it. Drop the "of N" suffix once that happens instead of
+	// printing an impossible ratio like "Round 11 of 8".
 	const int limit = roundlimit->integer;
-	if (limit > 0)
+	if (limit > 0 && n <= limit)
 		return G_Fmt("Round {} of {}", n, limit).data();
 	return G_Fmt("Round {}", n).data();
 }
