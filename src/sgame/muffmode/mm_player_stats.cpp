@@ -7,6 +7,7 @@
 #include "muffmode/mm_duel.h"
 #include "muffmode/mm_ghost.h"
 #include "muffmode/mm_match_stats.h"
+#include "muffmode/mm_player_name.h"
 #include "muffmode/mm_player_stats.h"
 #include "muffmode/mm_util.h"
 
@@ -251,17 +252,6 @@ std::string_view RecoveryGametypeName() noexcept
 
 bool AlreadySettled(const gentity_t *ent) noexcept;
 
-std::string BoundedPlayerName(const gclient_t *client)
-{
-	if (!client)
-		return {};
-	const char *const end = std::find(
-		client->pers.netname,
-		client->pers.netname + MAX_NETNAME,
-		'\0');
-	return std::string(client->pers.netname, end);
-}
-
 std::vector<player_stats_participant_t> CollectParticipants()
 {
 	std::vector<player_stats_participant_t> participants;
@@ -298,7 +288,7 @@ std::vector<player_stats_participant_t> CollectParticipants()
 		participants.push_back({
 			ent,
 			state,
-			BoundedPlayerName(state),
+			std::string(MM_PlayerDisplayName(state)),
 			requires_profile_result
 				? MM_ClientProfileSerializePreferences(state)
 				: std::string(),
@@ -935,7 +925,7 @@ void SettleDeparture(gentity_t *ent)
 		player_stats_participant_t participant{
 			ent,
 			ent->client,
-			BoundedPlayerName(ent->client),
+			std::string(MM_PlayerDisplayName(ent->client)),
 			MM_ClientProfileSerializePreferences(ent->client),
 			NormalizeClientRating(ent->client),
 			ent->client->resp.score,

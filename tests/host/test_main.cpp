@@ -3,6 +3,7 @@
 
 #include "fake_game_import.h"
 #include "hud_text.h"
+#include "player_name_test_support.h"
 #include "shared/q_std.h"
 #include "muffmode/mm_admin.h"
 #include "muffmode/mm_announcer_rules.h"
@@ -19,6 +20,7 @@
 #include "muffmode/mm_freezetag_rules.h"
 #include "muffmode/mm_gametype.h"
 #include "muffmode/mm_gametype_table.h"
+#include "muffmode/mm_graceful_shutdown.h"
 #include "muffmode/mm_gt_session.h"
 #include "muffmode/mm_ghost.h"
 #include "muffmode/mm_gibs_rules.h"
@@ -39,6 +41,7 @@
 #include "muffmode/mm_parse.h"
 #include "muffmode/mm_pconfig_rules.h"
 #include "muffmode/mm_reliable_text.h"
+#include "muffmode/mm_player_name.h"
 #include "muffmode/mm_player_stats.h"
 #include "muffmode/mm_red_rover_rules.h"
 #include "muffmode/mm_spawn_rules.h"
@@ -1132,6 +1135,35 @@ MM_TEST(map_pool_cycle_start_sizes_for_the_target_factory) {
 	MM_CHECK_EQ(ResolveSelectionPlayerCount(10, 2, 2, false), 10);
 	MM_CHECK_EQ(ResolveSelectionPlayerCount(-1, 2, 12, false), 0);
 	MM_CHECK_EQ(ResolveSelectionPlayerCount(0, 4, 2, true), 4);
+}
+
+MM_TEST(map_pool_custom_map_policy_covers_empty_and_console_rosters) {
+	using muffmode::map_pool::ShouldReplacePendingCustomMap;
+	using muffmode::map_pool::ShouldRestrictCustomMaps;
+
+	MM_CHECK_FALSE(ShouldRestrictCustomMaps(0, 0, 0));
+	MM_CHECK_FALSE(ShouldRestrictCustomMaps(0, 8, 2));
+	MM_CHECK(ShouldRestrictCustomMaps(1, 0, 0));
+	MM_CHECK(ShouldRestrictCustomMaps(1, 8, 1));
+	MM_CHECK_FALSE(ShouldRestrictCustomMaps(1, 8, 0));
+	MM_CHECK(ShouldRestrictCustomMaps(1, -1, 0));
+
+	MM_CHECK(ShouldReplacePendingCustomMap(true, true));
+	MM_CHECK_FALSE(ShouldReplacePendingCustomMap(true, false));
+	MM_CHECK_FALSE(ShouldReplacePendingCustomMap(false, true));
+}
+
+MM_TEST(graceful_shutdown_is_dedicated_and_notifies_new_humans) {
+	using muffmode::graceful_shutdown::DedicatedCommandAvailable;
+	using muffmode::graceful_shutdown::HumanArrivalNeedsNotice;
+
+	MM_CHECK_FALSE(DedicatedCommandAvailable(0));
+	MM_CHECK(DedicatedCommandAvailable(1));
+	MM_CHECK(DedicatedCommandAvailable(-1));
+	MM_CHECK(HumanArrivalNeedsNotice(1, 2));
+	MM_CHECK(HumanArrivalNeedsNotice(0, 1));
+	MM_CHECK_FALSE(HumanArrivalNeedsNotice(2, 2));
+	MM_CHECK_FALSE(HumanArrivalNeedsNotice(2, 1));
 }
 
 MM_TEST(map_pick_does_not_drop_player_bounds_to_fill_a_ballot) {
@@ -2884,6 +2916,191 @@ MM_TEST(freezetag_round_resolves_wipes_draws_and_time_ties) {
 	MM_CHECK_EQ(MM_FreezeTagResolveRound(
 		{ 3, 2, 0, false }, { 3, 1, 1000, false }, true),
 		mm_freezetag_round_result_t::RedWinsByActiveCount);
+}
+
+MM_TEST(player_name_tokens_match_only_the_engine_private_syntax) {
+	MM_CHECK(MM_IsPlayerNameToken("##P0"));
+	MM_CHECK(MM_IsPlayerNameToken("##P127"));
+	MM_CHECK(MM_IsPlayerNameToken("##P99999999999999999999"));
+
+	MM_CHECK_FALSE(MM_IsPlayerNameToken("#P7"));
+	MM_CHECK_FALSE(MM_IsPlayerNameToken("##P"));
+	MM_CHECK_FALSE(MM_IsPlayerNameToken("##P7x"));
+	MM_CHECK_FALSE(MM_IsPlayerNameToken("##p7"));
+	MM_CHECK_FALSE(MM_IsPlayerNameToken("Player"));
+}
+
+MM_TEST(player_display_name_selection_never_leaks_a_transport_token) {
+	MM_CHECK_EQ(MM_SelectPlayerDisplayName("Alice", "##P7"),
+		std::string_view("Alice"));
+	MM_CHECK_EQ(MM_SelectPlayerDisplayName("", "Ranger"),
+		std::string_view("Ranger"));
+	MM_CHECK_EQ(MM_SelectPlayerDisplayName("##P7", "Ranger"),
+		std::string_view("Ranger"));
+	MM_CHECK_EQ(MM_SelectPlayerDisplayName("#P7", "##P7"),
+		std::string_view("#P7"));
+	MM_CHECK_EQ(MM_SelectPlayerDisplayName("##P7", "##P8"),
+		MM_PLAYER_NAME_FALLBACK);
+	MM_CHECK_EQ(MM_SelectPlayerDisplayName("", ""),
+		MM_PLAYER_NAME_FALLBACK);
+}
+
+MM_TEST(player_name_runtime_accessors_are_bounded_and_sink_specific) {
+	const mm_host_player_name_buffers_t human{ "Alice", "##P7" };
+	MM_CHECK_EQ(MM_HostPlayerDisplayName(human), std::string("Alice"));
+	MM_CHECK_EQ(MM_HostPlayerDisplayNameCString(human),
+		std::string("Alice"));
+	MM_CHECK_EQ(MM_HostPlayerLocalizationName(human),
+		std::string("##P7"));
+
+	const mm_host_player_name_buffers_t bot{
+		"Ranger", "##P7", true, true, true
+	};
+	MM_CHECK_EQ(MM_HostPlayerDisplayName(bot), std::string("Ranger"));
+	MM_CHECK_EQ(MM_HostPlayerLocalizationName(bot),
+		std::string("Ranger"));
+
+	const mm_host_player_name_buffers_t unterminated_submitted{
+		std::string_view{}, "Ranger", false, true, false
+	};
+	MM_CHECK_EQ(MM_HostPlayerDisplayName(unterminated_submitted),
+		std::string("Ranger"));
+	const mm_host_player_name_buffers_t unterminated_both{
+		std::string_view{}, std::string_view{}, false, false, false
+	};
+	MM_CHECK_EQ(MM_HostPlayerDisplayName(unterminated_both),
+		std::string(MM_PLAYER_NAME_FALLBACK));
+}
+
+MM_TEST(player_profile_name_storage_rejects_transport_tokens) {
+	MM_CHECK_EQ(MM_SanitizePlayerDisplayName("{A}\"B}C"),
+		std::string("ABC"));
+	MM_CHECK_EQ(MM_SanitizePlayerDisplayName("A\\B"),
+		std::string("AB"));
+	MM_CHECK_EQ(MM_SanitizePlayerDisplayName("##P17"),
+		std::string(MM_PLAYER_NAME_FALLBACK));
+	MM_CHECK_EQ(MM_SanitizePlayerDisplayName(std::string(64, 'A')).size(),
+		static_cast<size_t>(MAX_NETNAME - 1));
+	MM_CHECK_EQ(MM_PlayerNameForStorage("##P17"),
+		std::string("Player"));
+	MM_CHECK_EQ(MM_PlayerNameForStorage("#P17"),
+		std::string("#P17"));
+	MM_CHECK_EQ(MM_PlayerNameForStorage(std::string("A\1B", 3)),
+		std::string("A B"));
+	MM_CHECK_EQ(MM_PlayerNameForStorage(""), std::string("Player"));
+	MM_CHECK_EQ(MM_PlayerNameForStorage(std::string(64, 'A')).size(),
+		static_cast<size_t>(MAX_NETNAME - 1));
+}
+
+MM_TEST(player_name_sanitizers_preserve_utf8_boundaries) {
+	const std::string euro = "\xE2\x82\xAC";
+	std::string nine_euros;
+	for (int i = 0; i < 9; i++)
+		nine_euros.append(euro);
+	const std::string ten_euros = nine_euros + euro;
+	const std::string eleven_euros = ten_euros + euro;
+
+	const auto prefixed = MM_PrepareBotConnectionName(
+		ten_euros, {}, {}, "B|");
+	MM_CHECK_EQ(prefixed.base_name, ten_euros);
+	MM_CHECK_EQ(prefixed.display_name, std::string("B|") + nine_euros);
+	MM_CHECK(MM_IsWellFormedUtf8(prefixed.display_name));
+
+	const std::string stored = MM_PlayerNameForStorage(eleven_euros);
+	MM_CHECK_EQ(stored, ten_euros);
+	MM_CHECK(MM_IsWellFormedUtf8(stored));
+}
+
+MM_TEST(player_connect_name_policy_ignores_reused_slot_history) {
+	MM_CHECK(MM_ShouldEncodePlayerName(false)); // human after human
+	MM_CHECK(MM_ShouldEncodePlayerName(false)); // human after bot
+	MM_CHECK_FALSE(MM_ShouldEncodePlayerName(true)); // bot after human
+	MM_CHECK_FALSE(MM_ShouldEncodePlayerName(true)); // bot after bot
+
+	MM_CHECK_EQ(MM_SelectBotConnectionBaseName("0", "Ranger"),
+		std::string_view("Ranger"));
+	MM_CHECK_EQ(MM_SelectBotConnectionBaseName("", "Ranger"),
+		std::string_view("Ranger"));
+	MM_CHECK_EQ(MM_SelectBotConnectionBaseName("##P4", "Ranger"),
+		std::string_view("Ranger"));
+	MM_CHECK_EQ(MM_SelectBotConnectionBaseName("Bitterman", "Ranger"),
+		std::string_view("Bitterman"));
+	MM_CHECK_EQ(MM_SelectBotConnectionBaseName("", ""),
+		MM_PLAYER_NAME_FALLBACK);
+	MM_CHECK_EQ(MM_SelectBotConnectionBaseName("0", ""),
+		MM_PLAYER_NAME_FALLBACK);
+	MM_CHECK(MM_PlayerNameHasPrefix("BOT Ranger", "BOT "));
+	MM_CHECK_FALSE(MM_PlayerNameHasPrefix("Ranger", "BOT "));
+
+	const auto initial = MM_ResolveBotConnectionName(
+		"Ranger", "", "", "B|");
+	MM_CHECK_EQ(initial.base_name, std::string("Ranger"));
+	MM_CHECK_EQ(initial.display_name, std::string("B|Ranger"));
+	const auto sanitized_initial = MM_PrepareBotConnectionName(
+		"{Ranger", "", "", "B|");
+	MM_CHECK_EQ(sanitized_initial.base_name, std::string("Ranger"));
+	MM_CHECK_EQ(sanitized_initial.display_name, std::string("B|Ranger"));
+	const auto unsafe_mixed_prefix = MM_PrepareBotConnectionName(
+		"Ranger", "", "", "B|{");
+	MM_CHECK_EQ(unsafe_mixed_prefix.base_name, std::string("Ranger"));
+	MM_CHECK_EQ(unsafe_mixed_prefix.display_name, std::string("B|Ranger"));
+	const auto delimiter_prefix = MM_PrepareBotConnectionName(
+		"Ranger", "", "", "B\\");
+	MM_CHECK_EQ(delimiter_prefix.base_name, std::string("Ranger"));
+	MM_CHECK_EQ(delimiter_prefix.display_name, std::string("BRanger"));
+	const auto prefix_collision = MM_ResolveBotConnectionName(
+		"Ranger", "", "", "R");
+	MM_CHECK_EQ(prefix_collision.base_name, std::string("Ranger"));
+	MM_CHECK_EQ(prefix_collision.display_name, std::string("RRanger"));
+	const auto unchanged = MM_ResolveBotConnectionName(
+		"0", initial.display_name, initial.base_name, "B|");
+	MM_CHECK_EQ(unchanged.base_name, std::string("Ranger"));
+	MM_CHECK_EQ(unchanged.display_name, std::string("B|Ranger"));
+	const auto empty_placeholder = MM_PrepareBotConnectionName(
+		"", initial.display_name, initial.base_name, "B|");
+	MM_CHECK_EQ(empty_placeholder.base_name, std::string("Ranger"));
+	MM_CHECK_EQ(empty_placeholder.display_name, std::string("B|Ranger"));
+	const auto token_placeholder = MM_PrepareBotConnectionName(
+		"##P4", initial.display_name, initial.base_name, "B|");
+	MM_CHECK_EQ(token_placeholder.base_name, std::string("Ranger"));
+	MM_CHECK_EQ(token_placeholder.display_name, std::string("B|Ranger"));
+	const auto replaced = MM_ResolveBotConnectionName(
+		"0", unchanged.display_name, unchanged.base_name, "X|");
+	MM_CHECK_EQ(replaced.base_name, std::string("Ranger"));
+	MM_CHECK_EQ(replaced.display_name, std::string("X|Ranger"));
+	const auto overlapping_prefix = MM_ResolveBotConnectionName(
+		"0", initial.display_name, initial.base_name, "R");
+	MM_CHECK_EQ(overlapping_prefix.base_name, std::string("Ranger"));
+	MM_CHECK_EQ(overlapping_prefix.display_name, std::string("RRanger"));
+	const auto removed = MM_ResolveBotConnectionName(
+		"0", replaced.display_name, replaced.base_name, "");
+	MM_CHECK_EQ(removed.base_name, std::string("Ranger"));
+	MM_CHECK_EQ(removed.display_name, std::string("Ranger"));
+
+	const auto renamed = MM_PrepareBotUserinfoName(
+		"Sarge", initial.display_name, initial.base_name, "B|");
+	MM_CHECK_EQ(renamed.base_name, std::string("Sarge"));
+	MM_CHECK_EQ(renamed.display_name, std::string("B|Sarge"));
+	const auto replayed_rename = MM_PrepareBotUserinfoName(
+		renamed.display_name, renamed.display_name, renamed.base_name, "B|");
+	MM_CHECK_EQ(replayed_rename.base_name, std::string("Sarge"));
+	MM_CHECK_EQ(replayed_rename.display_name, std::string("B|Sarge"));
+	const auto changed_prefix_reparse = MM_PrepareBotUserinfoName(
+		initial.display_name, initial.display_name, initial.base_name, "X|");
+	MM_CHECK_EQ(changed_prefix_reparse.base_name, std::string("Ranger"));
+	MM_CHECK_EQ(changed_prefix_reparse.display_name, std::string("X|Ranger"));
+	const auto second_changed_prefix_reparse = MM_PrepareBotUserinfoName(
+		changed_prefix_reparse.display_name,
+		changed_prefix_reparse.display_name,
+		changed_prefix_reparse.base_name, "X|");
+	MM_CHECK_EQ(second_changed_prefix_reparse.base_name,
+		std::string("Ranger"));
+	MM_CHECK_EQ(second_changed_prefix_reparse.display_name,
+		std::string("X|Ranger"));
+	const auto renamed_prefix_collision = MM_PrepareBotUserinfoName(
+		"Ranger", initial.display_name, initial.base_name, "R");
+	MM_CHECK_EQ(renamed_prefix_collision.base_name, std::string("Ranger"));
+	MM_CHECK_EQ(renamed_prefix_collision.display_name, std::string("RRanger"));
 }
 
 MM_TEST(freezetag_late_spawns_wait_for_next_round) {
@@ -4993,20 +5210,39 @@ MM_TEST(ghost_deferred_presentation_is_connection_and_transition_owned) {
 
 MM_TEST(reliable_fanout_budget_is_overflow_safe_and_fail_closed) {
 	mm_reliable_fanout_budget_t budget{
-		MM_GHOST_POST_RESTORE_SKIN_MESSAGES_PER_FRAME,
-		MM_GHOST_POST_RESTORE_SKIN_MESSAGES_PER_FRAME *
-			MM_GHOST_MAX_SKIN_CONFIGSTRING_MESSAGE_BYTES
+		MM_GHOST_POST_RESTORE_RELIABLE_MESSAGES_PER_FRAME,
+		MM_GHOST_POST_RESTORE_RELIABLE_BYTES_PER_FRAME
 	};
 
-	MM_CHECK(MM_ReliableFanoutTryReserve(
-		budget, MM_GHOST_MAX_SKIN_CONFIGSTRING_MESSAGE_BYTES));
-	MM_CHECK(MM_ReliableFanoutTryReserve(
-		budget, MM_GHOST_MAX_SKIN_CONFIGSTRING_MESSAGE_BYTES));
+	MM_CHECK(MM_ReliableFanoutTryReserveBatch(
+		budget, MM_GHOST_CANONICAL_PRESENTATION_MESSAGES,
+		MM_GHOST_MAX_CANONICAL_PRESENTATION_BYTES));
+	MM_CHECK(MM_ReliableFanoutTryReserveBatch(
+		budget, MM_GHOST_CANONICAL_PRESENTATION_MESSAGES,
+		MM_GHOST_MAX_CANONICAL_PRESENTATION_BYTES));
 	MM_CHECK_FALSE(MM_ReliableFanoutTryReserve(budget, 1));
-	MM_CHECK_EQ(budget.messages, MM_GHOST_POST_RESTORE_SKIN_MESSAGES_PER_FRAME);
+	MM_CHECK_EQ(budget.messages,
+		MM_GHOST_POST_RESTORE_RELIABLE_MESSAGES_PER_FRAME);
 	MM_CHECK_EQ(budget.bytes,
-		MM_GHOST_POST_RESTORE_SKIN_MESSAGES_PER_FRAME *
-			MM_GHOST_MAX_SKIN_CONFIGSTRING_MESSAGE_BYTES);
+		MM_GHOST_POST_RESTORE_RELIABLE_BYTES_PER_FRAME);
+
+	mm_reliable_fanout_budget_t zero_batch{ 2, 10 };
+	MM_CHECK_FALSE(MM_ReliableFanoutTryReserveBatch(zero_batch, 0, 0));
+	MM_CHECK_EQ(zero_batch.messages, 0u);
+	MM_CHECK_EQ(zero_batch.bytes, 0u);
+
+	mm_reliable_fanout_budget_t count_limited{ 2, 100, 1, 10 };
+	MM_CHECK_FALSE(MM_ReliableFanoutTryReserveBatch(
+		count_limited, 2, 20));
+	MM_CHECK_EQ(count_limited.messages, 1u);
+	MM_CHECK_EQ(count_limited.bytes, 10u);
+	mm_reliable_fanout_budget_t count_overflow{
+		std::numeric_limits<size_t>::max(), 10, 1, 0
+	};
+	MM_CHECK_FALSE(MM_ReliableFanoutTryReserveBatch(
+		count_overflow, std::numeric_limits<size_t>::max(), 0));
+	MM_CHECK_EQ(count_overflow.messages, 1u);
+	MM_CHECK_EQ(count_overflow.bytes, 0u);
 
 	mm_reliable_fanout_budget_t byte_limited{
 		3, MM_GHOST_MAX_SKIN_CONFIGSTRING_MESSAGE_BYTES
@@ -5407,10 +5643,13 @@ MM_TEST(ghost_skin_sync_queue_diagnostics_bound_remaining_work) {
 MM_TEST(ghost_skin_sync_stress_bounds_repeated_max_client_reconnects) {
 	constexpr size_t capacity = MM_GHOST_MAX_CLIENT_CAPACITY;
 	constexpr size_t reconnect_waves = 4;
-	constexpr size_t expected_pair_messages_per_wave =
+	constexpr size_t expected_pair_actions_per_wave =
 		capacity * (capacity - 1);
-	constexpr size_t expected_messages_per_wave =
-		capacity + expected_pair_messages_per_wave;
+	constexpr size_t expected_actions_per_wave =
+		capacity + expected_pair_actions_per_wave;
+	constexpr size_t expected_wire_messages_per_wave =
+		capacity * MM_GHOST_CANONICAL_PRESENTATION_MESSAGES +
+		expected_pair_actions_per_wave;
 
 	auto slots = ReadyGhostSkinSyncSlots();
 	mm_ghost_skin_sync_scheduler_t<capacity> scheduler{};
@@ -5429,22 +5668,24 @@ MM_TEST(ghost_skin_sync_stress_bounds_repeated_max_client_reconnects) {
 		for (auto &owners : pair_owners)
 			owners.fill(MM_GHOST_NO_CLIENT_INDEX);
 		std::array<size_t, capacity> canonical_counts{};
-		size_t total_messages = 0;
+		size_t total_actions = 0;
+		size_t total_wire_messages = 0;
 		size_t frames = 0;
 
 		while (MM_GhostActiveSkinSyncQueueCount(scheduler)) {
 			mm_reliable_fanout_budget_t budget{
-				MM_GHOST_POST_RESTORE_SKIN_MESSAGES_PER_FRAME,
-				MM_GHOST_POST_RESTORE_SKIN_MESSAGES_PER_FRAME *
-					MM_GHOST_MAX_SKIN_CONFIGSTRING_MESSAGE_BYTES
+				MM_GHOST_POST_RESTORE_RELIABLE_MESSAGES_PER_FRAME,
+				MM_GHOST_POST_RESTORE_RELIABLE_BYTES_PER_FRAME
 			};
-			size_t sent_this_frame = 0;
+			size_t actions_this_frame = 0;
+			size_t wire_messages_this_frame = 0;
+			size_t wire_bytes_this_frame = 0;
 			size_t inspections_this_frame = 0;
 
 			while (inspections_this_frame <
 					MM_GHOST_MAX_SKIN_SYNC_ACTIONS_PER_DRAIN &&
-				sent_this_frame <
-					MM_GHOST_POST_RESTORE_SKIN_MESSAGES_PER_FRAME) {
+				actions_this_frame <
+					MM_GHOST_POST_RESTORE_PRESENTATION_ACTIONS_PER_FRAME) {
 				const size_t remaining_inspections =
 					MM_GHOST_MAX_SKIN_SYNC_ACTIONS_PER_DRAIN -
 					inspections_this_frame;
@@ -5458,12 +5699,23 @@ MM_TEST(ghost_skin_sync_stress_bounds_repeated_max_client_reconnects) {
 					continue;
 				}
 
-				MM_CHECK(MM_ReliableFanoutTryReserve(
-					budget, MM_GHOST_MAX_SKIN_CONFIGSTRING_MESSAGE_BYTES));
 				if (step.action == mm_ghost_skin_sync_action_t::PublishCanonical) {
+					MM_CHECK(MM_ReliableFanoutTryReserveBatch(
+						budget, MM_GHOST_CANONICAL_PRESENTATION_MESSAGES,
+						MM_GHOST_MAX_CANONICAL_PRESENTATION_BYTES));
+					wire_messages_this_frame +=
+						MM_GHOST_CANONICAL_PRESENTATION_MESSAGES;
+					wire_bytes_this_frame +=
+						MM_GHOST_MAX_CANONICAL_PRESENTATION_BYTES;
 					MM_CHECK(step.restored_index < capacity);
 					canonical_counts[step.restored_index]++;
 				} else {
+					MM_CHECK(MM_ReliableFanoutTryReserve(
+						budget,
+						MM_GHOST_MAX_SKIN_CONFIGSTRING_MESSAGE_BYTES));
+					wire_messages_this_frame++;
+					wire_bytes_this_frame +=
+						MM_GHOST_MAX_SKIN_CONFIGSTRING_MESSAGE_BYTES;
 					MM_CHECK_EQ(step.action,
 						mm_ghost_skin_sync_action_t::ReapplyOverride);
 					MM_CHECK(step.pair.valid);
@@ -5475,27 +5727,28 @@ MM_TEST(ghost_skin_sync_stress_bounds_repeated_max_client_reconnects) {
 					pair_owners[step.pair.viewer_index][step.pair.target_index] =
 						step.restored_index;
 				}
-				sent_this_frame++;
-				total_messages++;
+				actions_this_frame++;
+				total_actions++;
 			}
+			total_wire_messages += wire_messages_this_frame;
 
 			MM_CHECK(inspections_this_frame > 0);
 			MM_CHECK(inspections_this_frame <=
 				MM_GHOST_MAX_SKIN_SYNC_ACTIONS_PER_DRAIN);
-			MM_CHECK(sent_this_frame <=
-				MM_GHOST_POST_RESTORE_SKIN_MESSAGES_PER_FRAME);
-			MM_CHECK_EQ(budget.messages, sent_this_frame);
-			MM_CHECK_EQ(budget.bytes,
-				sent_this_frame * MM_GHOST_MAX_SKIN_CONFIGSTRING_MESSAGE_BYTES);
+			MM_CHECK(actions_this_frame <=
+				MM_GHOST_POST_RESTORE_PRESENTATION_ACTIONS_PER_FRAME);
+			MM_CHECK_EQ(budget.messages, wire_messages_this_frame);
+			MM_CHECK_EQ(budget.bytes, wire_bytes_this_frame);
 			frames++;
 			MM_CHECK(frames <= capacity * (2 * capacity + 2));
 		}
 
-		MM_CHECK_EQ(total_messages, expected_messages_per_wave);
+		MM_CHECK_EQ(total_actions, expected_actions_per_wave);
+		MM_CHECK_EQ(total_wire_messages, expected_wire_messages_per_wave);
 		MM_CHECK(frames >=
-			(expected_messages_per_wave +
-				MM_GHOST_POST_RESTORE_SKIN_MESSAGES_PER_FRAME - 1) /
-			MM_GHOST_POST_RESTORE_SKIN_MESSAGES_PER_FRAME);
+			(expected_actions_per_wave +
+				MM_GHOST_POST_RESTORE_PRESENTATION_ACTIONS_PER_FRAME - 1) /
+			MM_GHOST_POST_RESTORE_PRESENTATION_ACTIONS_PER_FRAME);
 		for (size_t target = 0; target < capacity; target++)
 			MM_CHECK_EQ(canonical_counts[target], 1u);
 		for (size_t viewer = 0; viewer < capacity; viewer++) {

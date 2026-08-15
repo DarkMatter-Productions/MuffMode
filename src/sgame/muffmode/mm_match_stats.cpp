@@ -7,6 +7,7 @@
 #include "muffmode/mm_freezetag.h"
 #include "muffmode/mm_match_stats.h"
 #include "muffmode/mm_parse.h"
+#include "muffmode/mm_player_name.h"
 #include "muffmode/mm_player_stats.h"
 
 #include <algorithm>
@@ -162,22 +163,6 @@ uint8_t ModIndex(const mod_t &mod)
 	return static_cast<uint8_t>(mod.id);
 }
 
-std::string PlayerName(const gclient_t *client)
-{
-	if (!client)
-		return {};
-	// pers.netname holds the client-resolved "##P<n>" cross-play token (see
-	// EncodedPlayerName in userinfo.cpp) for every non-bot player -- it only
-	// renders correctly through gi.LocClient_Print/LocBroadcast_Print's own
-	// player-name substitution, not when copied into award/report/layout text
-	// built server-side. resp.netname is the actual submitted name and is
-	// always populated (for bots and humans alike), so it's the right value
-	// for text that doesn't go through that substitution.
-	if (client->resp.netname[0])
-		return client->resp.netname;
-	return client->pers.netname;
-}
-
 std::string PlayerSocialId(const gclient_t *client)
 {
 	return client && client->pers.social_id[0]
@@ -191,10 +176,7 @@ std::string ServerHostName()
 		game.maxclients <= 0 || !g_entities[1].inuse ||
 		!g_entities[1].client || !g_entities[1].client->pers.connected)
 		return {};
-	char value[MAX_INFO_VALUE]{};
-	gi.Info_ValueForKey(g_entities[1].client->pers.userinfo,
-		"name", value, sizeof(value));
-	return value;
+	return std::string(MM_PlayerDisplayName(g_entities[1].client));
 }
 
 std::string HtmlEscape(std::string_view input)
@@ -369,7 +351,7 @@ FrozenPlayer FreezePlayer(gentity_t *entity,
 	player.client_num = static_cast<int>(entity - g_entities - 1);
 	player.spawn_count = entity->spawn_count;
 	player.social_id = PlayerSocialId(entity->client);
-	player.player_name = PlayerName(entity->client);
+	player.player_name = MM_PlayerDisplayName(entity->client);
 	player.team = entity->client->sess.team;
 	player.score = entity->client->resp.score;
 	player.bot = entity->client->sess.is_a_bot ||
@@ -3444,10 +3426,10 @@ void MM_MatchStats_RecordDeath(gentity_t *victim, gentity_t *attacker,
 
 	mm_match_death_event_t event;
 	event.time_msec = MatchElapsedMsec();
-	event.victim.name = PlayerName(victim->client);
+	event.victim.name = MM_PlayerDisplayName(victim->client);
 	event.victim.id = PlayerSocialId(victim->client);
 	if (player_attacker) {
-		event.attacker.name = PlayerName(attacker->client);
+		event.attacker.name = MM_PlayerDisplayName(attacker->client);
 		event.attacker.id = PlayerSocialId(attacker->client);
 	} else {
 		event.attacker.name = "Environment";

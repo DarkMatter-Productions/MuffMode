@@ -6,6 +6,7 @@
 #include "muffmode/mm_gametype.h"
 #include "muffmode/mm_pconfig.h"
 #include "muffmode/mm_pconfig_rules.h"
+#include "muffmode/mm_player_name.h"
 #include "muffmode/mm_util.h"
 
 #include "json/json.h"
@@ -320,31 +321,13 @@ std::string CurrentGametypeKey()
 	return gt_short_name_upper[GT_FFA];
 }
 
-std::string SafePlayerName(std::string_view name)
-{
-	std::string result;
-	result.reserve(std::min(name.size(), static_cast<size_t>(MAX_NETNAME - 1)));
-	for (const unsigned char ch : name) {
-		if (result.size() >= static_cast<size_t>(MAX_NETNAME - 1))
-			break;
-		if (ch < 0x20 || ch == 0x7f) {
-			if (!result.empty() && result.back() != ' ')
-				result.push_back(' ');
-			continue;
-		}
-		result.push_back(static_cast<char>(ch));
-	}
-	while (!result.empty() && result.back() == ' ')
-		result.pop_back();
-	return result.empty() ? "Player" : result;
-}
-
 bool IsSafeStoredName(const Json::Value &value)
 {
 	if (!value.isString())
 		return false;
 	const std::string name = value.asString();
-	return name.size() < MAX_NETNAME && SafePlayerName(name) == name;
+	return name.size() < MAX_NETNAME &&
+		MM_PlayerNameForStorage(name) == name;
 }
 
 bool IsSafeTimestamp(const Json::Value &value)
@@ -1104,7 +1087,7 @@ void RepairAliases(
 	const auto append = [&](std::string_view alias) {
 		if (aliases.size() >= k_max_aliases || alias.empty() || alias == current_name)
 			return;
-		const std::string safe = SafePlayerName(alias);
+		const std::string safe = MM_PlayerNameForStorage(alias);
 		if (safe != alias)
 			return;
 		if (std::find(aliases.begin(), aliases.end(), safe) != aliases.end())
@@ -1482,7 +1465,7 @@ repair_result_t RepairProfile(
 		previous_name = root["playerName"].asString();
 	const std::string current_name = requested_name.empty()
 		? (previous_name.empty() ? std::string("Player") : previous_name)
-		: SafePlayerName(requested_name);
+		: MM_PlayerNameForStorage(requested_name);
 	const bool name_changed = !previous_name.empty() && previous_name != current_name;
 	if (previous_name != current_name) {
 		root["playerName"] = current_name;
@@ -2349,7 +2332,8 @@ bool MM_ClientProfileSavePreferences(
 	const auto gametype = NormalizeGametype(CurrentGametypeKey());
 	if (!gametype)
 		return false;
-	const std::string player_name = SafePlayerName(client->pers.netname);
+	const std::string player_name =
+		MM_PlayerNameForStorage(MM_PlayerDisplayName(client));
 	if (!QueuePreferenceSave(
 			social_id,
 			ConfigFromClient(client),

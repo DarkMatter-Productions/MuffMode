@@ -2566,6 +2566,8 @@ extern cvar_t *g_maps_pool_file;
 extern cvar_t *g_maps_cycle_file;
 extern cvar_t *g_maps_random;
 extern cvar_t *g_maps_repeat_delay;
+extern cvar_t *g_maps_avoid_custom;
+extern cvar_t *q2rex_console_players;
 extern cvar_t *g_votable_gametypes;
 extern cvar_t *g_votable_rulesets;
 // [MuffMode] Factory presets: the selected id, its published title, the files
@@ -3507,6 +3509,8 @@ struct client_match_stats_t {
 struct client_persistant_t {
 	char			userinfo[MAX_INFO_STRING];
 	char			social_id[MAX_INFO_VALUE];
+	// Human value becomes the engine-localization token ##P<slot> after parsing.
+	// Use MM_PlayerDisplayName for server-built or durable output.
 	char			netname[MAX_NETNAME];
 	handedness_t	hand;
 	auto_switch_t	autoswitch;
@@ -3624,6 +3628,10 @@ struct client_session_t {
 	bool			admin;
 	bool			is_888;
 	bool			is_a_bot;
+	// Unprefixed bot name retained across engine placeholder reconnects.
+	char			bot_base_name[MAX_NETNAME];
+	// Last display value generated from bot_base_name and bot_name_prefix.
+	char			bot_display_name[MAX_NETNAME];
 
 	// inactivity timer
 	bool			inactive;
@@ -3694,6 +3702,7 @@ struct client_respawn_t {
 
 	int					rank, old_rank;
 
+	// Sanitized submitted display name; use MM_PlayerDisplayName at call sites.
 	char				netname[MAX_NETNAME];
 	gtime_t				team_delay_time;
 

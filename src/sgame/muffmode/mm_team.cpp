@@ -9,6 +9,7 @@
 #include "muffmode/mm_ghost.h"
 #include "muffmode/mm_match.h"
 #include "muffmode/mm_match_stats.h"
+#include "muffmode/mm_player_name.h"
 #include "muffmode/mm_player_stats.h"
 #include "muffmode/mm_red_rover_rules.h"
 #include "muffmode/mm_statusbar.h"
@@ -117,19 +118,16 @@ bool HumanPlayerLimitReached(const gentity_t *ignore = nullptr)
 
 std::string DisplayName(gentity_t *ent)
 {
-	char name[MAX_INFO_VALUE] = { 0 };
-
-	if (ent && ent->client)
-		gi.Info_ValueForKey(ent->client->pers.userinfo, "name", name, sizeof(name));
-	if (!name[0] && ent && ent->client)
-		CopyString(name, ent->client->resp.netname);
+	const std::string_view name = ent && ent->client
+		? MM_PlayerDisplayName(ent->client)
+		: std::string_view{};
 
 	std::string display;
-	for (const unsigned char *p = reinterpret_cast<const unsigned char *>(name); *p; p++) {
-		if (*p < ' ' || *p == 0x7F || *p == '%')
+	for (const unsigned char ch : name) {
+		if (ch < ' ' || ch == 0x7F || ch == '%')
 			display += ' ';
 		else
-			display += static_cast<char>(*p);
+			display += static_cast<char>(ch);
 	}
 
 	while (!display.empty() && display.back() == ' ')

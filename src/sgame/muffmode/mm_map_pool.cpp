@@ -2,6 +2,7 @@
 // Licensed under the GNU General Public License 2.0.
 
 #include "g_local.h"
+#include "core/debug_log.h"
 #include "muffmode/mm_command_contracts.h"
 #include "muffmode/mm_map_pool.h"
 #include "muffmode/mm_maps.h"
@@ -61,6 +62,7 @@ struct map_runtime_state_t {
 	int cycle_file_modified = -1;
 	std::string cached_context;
 	std::string cached_selection;
+	std::string policy_transition_source;
 };
 
 map_runtime_state_t s_state;
@@ -841,6 +843,7 @@ std::vector<size_t> BuildCandidates(
 	int64_t now,
 	int repeat_delay,
 	std::string_view current_key,
+	bool exclude_custom,
 	bool enforce_player_bounds,
 	bool enforce_cooldown,
 	bool exclude_current)
@@ -853,6 +856,8 @@ std::vector<size_t> BuildCandidates(
 			continue;
 		const map_entry_t &entry = s_state.snapshot.pool[index];
 		if (!HasMode(entry.modes, required_mode))
+			continue;
+		if (exclude_custom && entry.custom)
 			continue;
 		if (exclude_current && entry.canonical_bsp == current_key)
 			continue;
@@ -881,6 +886,7 @@ std::vector<size_t> BuildPreferredCandidates(
 	int64_t now,
 	int repeat_delay,
 	std::string_view current_key,
+	bool exclude_custom,
 	bool enforce_player_bounds,
 	bool enforce_cooldown,
 	bool exclude_current)
@@ -891,6 +897,7 @@ std::vector<size_t> BuildPreferredCandidates(
 		now,
 		repeat_delay,
 		current_key,
+		exclude_custom,
 		enforce_player_bounds,
 		enforce_cooldown,
 		exclude_current);
@@ -901,10 +908,55 @@ std::vector<size_t> BuildPreferredCandidates(
 			now,
 			repeat_delay,
 			current_key,
+			exclude_custom,
 			enforce_player_bounds,
 			enforce_cooldown,
 			exclude_current);
 	}
+	return candidates;
+}
+
+std::vector<size_t> BuildStockSafetyCandidates(
+	mode_selection_t modes,
+	std::string_view current_key,
+	bool exclude_current)
+{
+	auto collect = [current_key](
+		map_mode_flags_t required_mode,
+		bool require_mode,
+		bool skip_current) {
+		std::vector<size_t> candidates;
+		candidates.reserve(s_state.snapshot.pool.size());
+		for (size_t index = 0; index < s_state.snapshot.pool.size(); index++) {
+			const map_entry_t &entry = s_state.snapshot.pool[index];
+			if (entry.custom ||
+				(skip_current && entry.canonical_bsp == current_key) ||
+				(require_mode && !HasMode(entry.modes, required_mode))) {
+				continue;
+			}
+			candidates.push_back(index);
+		}
+		return candidates;
+	};
+
+	for (const bool skip_current : { exclude_current, false }) {
+		std::vector<size_t> candidates =
+			collect(modes.preferred, true, skip_current);
+		if (!candidates.empty())
+			return candidates;
+		if (modes.fallback != MAP_MODE_NONE) {
+			candidates = collect(modes.fallback, true, skip_current);
+			if (!candidates.empty())
+				return candidates;
+		}
+	}
+
+	// A malformed all-custom cycle must not escape through the legacy list.
+	// The structured pool itself is the final safety source, even when the only
+	// stock entry is not tagged for this mode.
+	std::vector<size_t> candidates = collect(MAP_MODE_NONE, false, exclude_current);
+	if (candidates.empty() && exclude_current)
+		candidates = collect(MAP_MODE_NONE, false, false);
 	return candidates;
 }
 
@@ -1412,6 +1464,7 @@ void MM_RecordStructuredMapPlayed()
 	// decision cache here also makes same-map reloads start a fresh rotation.
 	map_pool::s_state.cached_context.clear();
 	map_pool::s_state.cached_selection.clear();
+	map_pool::s_state.policy_transition_source.clear();
 
 	if (!map_pool::s_state.initialized)
 		return;
@@ -1462,15 +1515,28 @@ uint64_t MM_MapPoolRevision()
 	return map_pool::s_state.revision;
 }
 
+bool MM_CustomMapsRestricted()
+{
+	return map_pool::ShouldRestrictCustomMaps(
+		g_maps_avoid_custom ? g_maps_avoid_custom->integer : 0,
+		static_cast<int>(level.num_playing_human_clients),
+		q2rex_console_players ? q2rex_console_players->integer : 0);
+}
+
 bool MM_StructuredMapPoolContains(const char *mapname)
 {
 	if (!mapname || !MM_IsSafeMapToken(mapname) ||
 		!MM_StructuredMapPoolLoaded()) {
 		return false;
 	}
-	return map_pool::s_state.snapshot.index.find(
-		map_pool::CanonicalMapKey(mapname)) !=
-		map_pool::s_state.snapshot.index.end();
+	const auto found = map_pool::s_state.snapshot.index.find(
+		map_pool::CanonicalMapKey(mapname));
+	if (found == map_pool::s_state.snapshot.index.end() ||
+		found->second >= map_pool::s_state.snapshot.pool.size()) {
+		return false;
+	}
+	return !MM_CustomMapsRestricted() ||
+		!map_pool::s_state.snapshot.pool[found->second].custom;
 }
 
 bool MM_ResolveStructuredMapName(
@@ -1490,6 +1556,10 @@ bool MM_ResolveStructuredMapName(
 		found->second >= map_pool::s_state.snapshot.pool.size()) {
 		return false;
 	}
+	if (MM_CustomMapsRestricted() &&
+		map_pool::s_state.snapshot.pool[found->second].custom) {
+		return false;
+	}
 
 	resolved = map_pool::s_state.snapshot.pool[found->second].bsp;
 	return true;
@@ -1499,8 +1569,11 @@ std::vector<std::string> MM_CollectStructuredMapPool()
 {
 	std::vector<std::string> maps;
 	maps.reserve(map_pool::s_state.snapshot.pool.size());
-	for (const map_pool::map_entry_t &entry : map_pool::s_state.snapshot.pool)
-		maps.push_back(entry.bsp);
+	const bool exclude_custom = MM_CustomMapsRestricted();
+	for (const map_pool::map_entry_t &entry : map_pool::s_state.snapshot.pool) {
+		if (!exclude_custom || !entry.custom)
+			maps.push_back(entry.bsp);
+	}
 	return maps;
 }
 
@@ -1538,18 +1611,20 @@ static bool MM_SelectStructuredMap(
 		cycle_start);
 	const bool random_selection =
 		g_maps_random && g_maps_random->integer != 0;
+	const bool exclude_custom = MM_CustomMapsRestricted();
 	const std::string current_key = current_map_safe
 		? map_pool::CanonicalMapKey(level.mapname)
 		: std::string();
 	const std::string context = fmt::format(
-		"{}:{}:{}:{}:{}:{}:{}",
+		"{}:{}:{}:{}:{}:{}:{}:{}",
 		cycle_start ? "start" : "next",
 		current_key,
 		gametype,
 		map_pool::s_state.revision,
 		player_count,
 		repeat_delay,
-		random_selection ? 1 : 0);
+		random_selection ? 1 : 0,
+		exclude_custom ? 1 : 0);
 	if (map_pool::s_state.cached_context == context &&
 		!map_pool::s_state.cached_selection.empty()) {
 		mapname = map_pool::s_state.cached_selection;
@@ -1566,11 +1641,16 @@ static bool MM_SelectStructuredMap(
 		map_pool::SELECTION_RELAXATIONS) {
 		candidates = map_pool::BuildPreferredCandidates(
 			modes, player_count, now, repeat_delay, current_key,
+			exclude_custom,
 			relaxation.enforce_player_bounds,
 			relaxation.enforce_cooldown,
 			!cycle_start);
 		if (!candidates.empty())
 			break;
+	}
+	if (candidates.empty() && exclude_custom) {
+		candidates = map_pool::BuildStockSafetyCandidates(
+			modes, current_key, !cycle_start);
 	}
 	if (candidates.empty())
 		return false;
@@ -1604,6 +1684,90 @@ bool MM_SelectStructuredCycleStartMap(std::string &mapname)
 	return MM_SelectStructuredMap(mapname, true);
 }
 
+void MM_EnforceCustomMapPolicy()
+{
+	if (!MM_CustomMapsRestricted() || !MM_StructuredMapCycleActive() ||
+		!MM_IsSafeMapToken(level.mapname)) {
+		map_pool::s_state.policy_transition_source.clear();
+		return;
+	}
+
+	const std::string current_key = map_pool::CanonicalMapKey(level.mapname);
+	const auto found = map_pool::s_state.snapshot.index.find(current_key);
+	if (found == map_pool::s_state.snapshot.index.end() ||
+		found->second >= map_pool::s_state.snapshot.pool.size() ||
+		!map_pool::s_state.snapshot.pool[found->second].custom) {
+		map_pool::s_state.policy_transition_source.clear();
+		return;
+	}
+
+	const std::string transition_source = fmt::format(
+		"{}:{}", current_key, map_pool::s_state.revision);
+	if (map_pool::s_state.policy_transition_source == transition_source)
+		return;
+	map_pool::s_state.policy_transition_source = transition_source;
+
+	std::string replacement;
+	if (!MM_SelectStructuredNextMap(replacement) || replacement.empty() ||
+		muffmode::maps::MapTokensEqual(replacement, level.mapname)) {
+		gi.Com_PrintFmt(
+			"Custom-map policy could not find a standard replacement for '{}'.\n",
+			level.mapname);
+		return;
+	}
+
+	const bool empty = level.num_playing_human_clients == 0;
+	gi.Com_PrintFmt(
+		"Custom-map policy: switching from '{}' to '{}' because {}.\n",
+		level.mapname,
+		replacement,
+		empty ? "the server is empty" : "a console player is present");
+	gi.AddCommandString(G_Fmt("gamemap \"{}\"\n", replacement).data());
+}
+
+bool MM_RevalidatePendingCustomMapPolicy()
+{
+	MM_HandleMapPoolCvarChanges();
+	if (!MM_CustomMapsRestricted() || !MM_StructuredMapCycleActive() ||
+		!level.changemap || !MM_IsSafeMapToken(level.changemap)) {
+		return true;
+	}
+
+	const auto found = map_pool::s_state.snapshot.index.find(
+		map_pool::CanonicalMapKey(level.changemap));
+	if (found == map_pool::s_state.snapshot.index.end() ||
+		found->second >= map_pool::s_state.snapshot.pool.size() ||
+		!map_pool::ShouldReplacePendingCustomMap(
+			true, map_pool::s_state.snapshot.pool[found->second].custom)) {
+		return true;
+	}
+
+	const std::string rejected = level.changemap;
+	std::string replacement;
+	if (!MM_SelectStructuredNextMap(replacement) || replacement.empty() ||
+		muffmode::maps::MapTokensEqual(replacement, rejected)) {
+		gi.Com_PrintFmt(
+			"Custom-map policy blocked pending map '{}' but could not find a standard replacement.\n",
+			rejected);
+		return false;
+	}
+
+	MM_MQ_CancelPendingMapLoad();
+	Q_strlcpy(level.nextmap, replacement.c_str(), sizeof(level.nextmap));
+	level.changemap = level.nextmap;
+	gi.LocBroadcast_Print(
+		PRINT_HIGH,
+		"Next map changed from {} to {} so every player can join.\n",
+		rejected.c_str(),
+		replacement.c_str());
+	MuffModeLog(
+		"MAP",
+		"Custom-map policy replaced pending map '%s' with '%s'",
+		rejected.c_str(),
+		replacement.c_str());
+	return true;
+}
+
 std::vector<map_pool::map_choice_t> MM_CollectStructuredMapChoices(
 	size_t max_choices)
 {
@@ -1626,6 +1790,7 @@ std::vector<map_pool::map_choice_t> MM_CollectStructuredMapChoices(
 	const int64_t now = map_pool::SteadySeconds();
 	const map_pool::mode_selection_t modes =
 		map_pool::ModesForGametype(gametype);
+	const bool exclude_custom = MM_CustomMapsRestricted();
 
 	// Relax cooldown first. If any player-count-valid map remains after that,
 	// keep the bounds: a one-map "choice" is not worth an intermission pause,
@@ -1635,12 +1800,17 @@ std::vector<map_pool::map_choice_t> MM_CollectStructuredMapChoices(
 		map_pool::SELECTION_RELAXATIONS) {
 		candidates = map_pool::BuildPreferredCandidates(
 			modes, player_count, now, repeat_delay, current_key,
+			exclude_custom,
 			relaxation.enforce_player_bounds,
 			relaxation.enforce_cooldown,
 			true);
 		if (!map_pool::ShouldContinueMapPickRelaxation(
 			candidates.size(), relaxation))
 			break;
+	}
+	if (candidates.empty() && exclude_custom) {
+		candidates = map_pool::BuildStockSafetyCandidates(
+			modes, current_key, true);
 	}
 	if (candidates.empty())
 		return choices;

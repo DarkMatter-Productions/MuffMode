@@ -201,7 +201,7 @@ struct GhostDiagnostics {
 	uint64_t fallback_placements = 0;
 	uint64_t skin_queues_queued = 0;
 	uint64_t skin_actions_attempted = 0;
-	uint64_t skin_messages_emitted = 0;
+	uint64_t skin_actions_emitted = 0;
 	uint64_t skin_actions_without_message = 0;
 	size_t peak_active_skin_queues = 0;
 };
@@ -491,6 +491,8 @@ void RemovePlaceholder(size_t index)
 	ent->client->awaiting_respawn = false;
 	ent->client->respawn_timeout = 0_ms;
 	ent->timestamp = level.time + 1_sec;
+	const int32_t playernum = static_cast<int32_t>(ent - g_entities - 1);
+	gi.configstring(CONFIG_FOLLOW_PLAYER_NAME + playernum, "");
 }
 
 void ReleaseExpiredMatchItems(const AutoGhostSnapshot &snapshot);
@@ -1221,15 +1223,15 @@ void RunDeferredSkinSyncs(bool presentation_allowed)
 		return;
 
 	mm_reliable_fanout_scope_t fanout_budget(
-		MM_GHOST_POST_RESTORE_SKIN_MESSAGES_PER_FRAME,
-		MM_GHOST_POST_RESTORE_SKIN_MESSAGES_PER_FRAME *
-			MM_GHOST_MAX_SKIN_CONFIGSTRING_MESSAGE_BYTES,
-		"post-restore skin synchronization");
+		MM_GHOST_POST_RESTORE_RELIABLE_MESSAGES_PER_FRAME,
+		MM_GHOST_POST_RESTORE_RELIABLE_BYTES_PER_FRAME,
+		"post-restore presentation synchronization");
 
-	size_t sent = 0;
+	size_t sent_actions = 0;
 	size_t inspections = 0;
 	while (inspections < MM_GHOST_MAX_SKIN_SYNC_ACTIONS_PER_DRAIN &&
-		sent < MM_GHOST_POST_RESTORE_SKIN_MESSAGES_PER_FRAME &&
+		sent_actions <
+			MM_GHOST_POST_RESTORE_PRESENTATION_ACTIONS_PER_FRAME &&
 		scheduler_has_work()) {
 		const mm_ghost_skin_sync_step_t step =
 			MM_GhostStepSkinSync(deferred_skin_sync, slots, context,
@@ -1247,7 +1249,7 @@ void RunDeferredSkinSyncs(bool presentation_allowed)
 		bool emitted = false;
 		if (step.action == mm_ghost_skin_sync_action_t::PublishCanonical) {
 			if (step.restored_index < capacity)
-				emitted = MM_PublishCanonicalPlayerSkin(
+				emitted = MM_PublishCanonicalPlayerPresentation(
 					&g_entities[step.restored_index + 1]);
 		} else if (step.action == mm_ghost_skin_sync_action_t::ReapplyOverride &&
 			step.pair.valid && step.pair.viewer_index < capacity &&
@@ -1258,8 +1260,8 @@ void RunDeferredSkinSyncs(bool presentation_allowed)
 		}
 
 		if (emitted) {
-			IncrementDiagnostic(diagnostics.skin_messages_emitted);
-			sent++;
+			IncrementDiagnostic(diagnostics.skin_actions_emitted);
+			sent_actions++;
 		} else {
 			IncrementDiagnostic(diagnostics.skin_actions_without_message);
 		}
@@ -4324,7 +4326,7 @@ void MM_Ghost_ReportDiagnostics(bool reset_after)
 		"MuffMode ghost presentation: queues active={} peak={} pending-actions-upper-bound={} queued={}; actions attempted={} emitted={} without-message={}.\n",
 		active_skin_queues, ghost.peak_active_skin_queues,
 		pending_skin_actions, ghost.skin_queues_queued,
-		ghost.skin_actions_attempted, ghost.skin_messages_emitted,
+		ghost.skin_actions_attempted, ghost.skin_actions_emitted,
 		ghost.skin_actions_without_message);
 	gi.Com_PrintFmt(
 		"MuffMode reliable fan-out: scopes started={} completed={} active={} peak-active={} reserved messages={} bytes={} rejected messages={} bytes={}; peak-scope messages={} bytes={} last-scope messages={} bytes={} out-of-order={}.\n",

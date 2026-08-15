@@ -7,6 +7,7 @@
 #include "muffmode/mm_match.h"
 #include "muffmode/mm_menu.h"
 #include "muffmode/mm_pconfig.h"
+#include "muffmode/mm_player_name.h"
 #include "muffmode/mm_skin.h"
 #include "muffmode/mm_team.h"
 #include "muffmode/mm_util.h"
@@ -65,7 +66,8 @@ bool CopyHostPlayerName(char *value, size_t value_size)
 	if (!g_entities || game.maxclients <= 0 || !g_entities[1].client)
 		return false;
 
-	gi.Info_ValueForKey(g_entities[1].client->pers.userinfo, "name", value, value_size);
+	Q_strlcpy(value, MM_PlayerDisplayNameCString(g_entities[1].client),
+		value_size);
 	return value[0] != '\0';
 }
 

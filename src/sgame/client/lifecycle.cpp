@@ -20,6 +20,7 @@
 #include "muffmode/mm_motd.h"
 #include "muffmode/mm_parse.h"
 #include "muffmode/mm_pconfig.h"
+#include "muffmode/mm_player_name.h"
 #include "muffmode/mm_player_stats.h"
 #include "muffmode/mm_ruleset.h"
 #include "muffmode/mm_spawn_rules.h"
@@ -964,10 +965,14 @@ void ClientSpawn(gentity_t *ent) {
 		ClientUserinfoChanged(ent, userinfo);
 
 		if (coop->integer) {
+			Q_strlcpy(resp.netname, client->resp.netname,
+				sizeof(resp.netname));
 			if (resp.score > client->pers.score)
 				client->pers.score = resp.score;
 		} else {
 			resp = {};
+			Q_strlcpy(resp.netname, client->resp.netname,
+				sizeof(resp.netname));
 			sess.team = TEAM_FREE;
 		}
 	}
@@ -1743,6 +1748,21 @@ bool ClientConnect(gentity_t *ent, char *userinfo, const char *social_id, bool i
 	// reservation before mutating reusable client state.
 	ent->client = &game.clients[client_index];
 	MM_Ghost_BeginClientConnect(ent);
+	char retained_bot_name[MAX_NETNAME]{};
+	char retained_bot_base_name[MAX_NETNAME]{};
+	if (is_bot && ent->client->sess.is_a_bot) {
+		Q_strlcpy(retained_bot_name,
+			MM_PlayerDisplayNameCString(ent->client),
+			sizeof(retained_bot_name));
+		// Trust the retained base only while it still describes this exact
+		// displayed name. A mid-map rename invalidates stale prefix metadata.
+		if (!strcmp(ent->client->sess.bot_display_name,
+				retained_bot_name)) {
+			Q_strlcpy(retained_bot_base_name,
+				ent->client->sess.bot_base_name,
+				sizeof(retained_bot_base_name));
+		}
+	}
 	if ((is_bot && MM_Ghost_IsReservedSlot(ent)) ||
 		(!is_bot && !MM_Ghost_PrepareClientConnect(ent, social_id))) {
 		MM_Ghost_MarkRejectedClientConnect(ent);
@@ -1765,6 +1785,33 @@ bool ClientConnect(gentity_t *ent, char *userinfo, const char *social_id, bool i
 		g_dedicated && g_dedicated->integer, client_index == 0);
 	ent->client->pers.voted = 0;
 	P_PublishEngineTeam(ent);
+	// The incoming connection type is authoritative. Establish it before any
+	// userinfo parse (including InitClientPersistant's reparse) so a reused slot's
+	// stale SVF_BOT cannot invert human name encoding or give a bot a ##P token.
+	ent->svflags = is_bot ? (SVF_PLAYER | SVF_BOT) : SVF_PLAYER;
+	ent->client->sess.is_a_bot = is_bot;
+
+	if (is_bot) {
+		char incoming_name[MAX_INFO_VALUE]{};
+		gi.Info_ValueForKey(userinfo, "name", incoming_name,
+			sizeof(incoming_name));
+		const mm_bot_connection_name_t resolved_name =
+			MM_PrepareBotConnectionName(incoming_name,
+				retained_bot_name,
+				retained_bot_base_name, bot_name_prefix->string);
+		char canonical_name[MAX_NETNAME]{};
+		Q_strlcpy(canonical_name, resolved_name.display_name.c_str(),
+			sizeof(canonical_name));
+		Q_strlcpy(ent->client->sess.bot_base_name,
+			resolved_name.base_name.c_str(),
+			sizeof(ent->client->sess.bot_base_name));
+		Q_strlcpy(ent->client->sess.bot_display_name, canonical_name,
+			sizeof(ent->client->sess.bot_display_name));
+		gi.Info_SetValueForKey(userinfo, "name", canonical_name);
+	} else {
+		ent->client->sess.bot_base_name[0] = '\0';
+		ent->client->sess.bot_display_name[0] = '\0';
+	}
 
 	// set up userinfo early
 	ClientUserinfoChanged(ent, userinfo);
@@ -1788,46 +1835,11 @@ bool ClientConnect(gentity_t *ent, char *userinfo, const char *social_id, bool i
 		if (!game.autosaved || !ent->client->pers.weapon)
 			InitClientPersistant(ent, ent->client);
 	}
-
-	// make sure we start with known default(s)
-	ent->svflags = SVF_PLAYER;
-
-	if (is_bot) {
-		ent->svflags |= SVF_BOT;
-		ent->client->sess.is_a_bot = true;
-
-		// On level change the engine reconnects bots with a default/placeholder name
-		// (typically "0" or empty). Restore the previously-stored name so it is not lost.
-		char engine_name[MAX_INFO_VALUE] = { 0 };
-		gi.Info_ValueForKey(userinfo, "name", engine_name, sizeof(engine_name));
-		if ((!engine_name[0] || !strcmp(engine_name, "0")) && ent->client->resp.netname[0]) {
-			gi.Info_SetValueForKey(userinfo, "name", ent->client->resp.netname);
-			ClientUserinfoChanged(ent, userinfo);
-		}
-
-		if (bot_name_prefix->string[0] && *bot_name_prefix->string) {
-			char oldname[MAX_INFO_VALUE];
-			char newname[MAX_NETNAME];
-
-			gi.Info_ValueForKey(userinfo, "name", oldname, sizeof(oldname));
-			Q_strlcpy(newname, bot_name_prefix->string, sizeof(newname));
-			Q_strlcat(newname, oldname, sizeof(newname));
-			gi.Info_SetValueForKey(userinfo, "name", newname);
-			ClientUserinfoChanged(ent, userinfo);
-		}
-	} else {
-		// Clear bot flag for human clients - sess persists across map loads (TAG_GAME),
-		// so if a bot previously occupied this slot, is_a_bot would still be true
-		ent->client->sess.is_a_bot = false;
-	}
-
 	Q_strlcpy(ent->client->pers.social_id, social_id, sizeof(ent->client->pers.social_id));
 
 	if (game.maxclients > 1) {
-		char value[MAX_INFO_VALUE] = { 0 };
-		// [Paril-KEX] fetch name because now netname is kinda unsuitable
-		gi.Info_ValueForKey(userinfo, "name", value, sizeof(value));
-		gi.LocClient_Print(nullptr, PRINT_HIGH, "$g_player_connected", value);
+		gi.LocClient_Print(nullptr, PRINT_HIGH, "$g_player_connected",
+			MM_PlayerDisplayNameCString(ent->client));
 	}
 	ent->client->pers.connected = true;
 
@@ -1974,6 +1986,8 @@ void ClientDisconnect(gentity_t *ent) {
 		ent->client->pers.connected = false;
 		ent->client->pers.spawned = false;
 		ent->timestamp = level.time + 1_sec;
+		const int32_t playernum = static_cast<int32_t>(ent - g_entities - 1);
+		gi.configstring(CONFIG_FOLLOW_PLAYER_NAME + playernum, "");
 	}
 
 	// update active scoreboards

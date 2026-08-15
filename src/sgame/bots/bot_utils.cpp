@@ -3,6 +3,7 @@
 
 #include "../g_local.h"
 #include "../monsters/m_player.h"
+#include "../muffmode/mm_player_name.h"
 #include "bot_utils.h"
 
 constexpr int Team_Coop_Monster = 0;
@@ -174,6 +175,9 @@ static void Player_UpdateState(gentity_t *player) {
 
 	static_assert(sizeof(persistant.inventory) <= sizeof(player->sv.inventory));
 	memcpy(&player->sv.inventory, &persistant.inventory, sizeof(persistant.inventory));
+	Q_strlcpy(player->sv.netname,
+		MM_PlayerDisplayNameCString(player->client),
+		sizeof(player->sv.netname));
 
 	if (!player->sv.init) {
 		player->sv.init = true;
@@ -194,9 +198,6 @@ static void Player_UpdateState(gentity_t *player) {
 		armorInfo[1].max_count = combatarmor_info.max_count;
 		armorInfo[2].item_id = IT_ARMOR_JACKET;
 		armorInfo[2].max_count = jacketarmor_info.max_count;
-
-		gi.Info_ValueForKey(player->client->pers.userinfo, "name", player->sv.netname, sizeof(player->sv.netname));
-
 		gi.Bot_RegisterEntity(player);
 	}
 }

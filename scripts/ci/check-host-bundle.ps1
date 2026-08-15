@@ -828,6 +828,12 @@ foreach ($factoryId in @($factories.Keys)) {
 }
 
 $serverBasePath = Join-Path $baseq2Path "server-base.cfg"
+$serverBaseLines = [System.IO.File]::ReadAllLines($serverBasePath)
+for ($lineIndex = 0; $lineIndex -lt $serverBaseLines.Count; $lineIndex++) {
+    if ($serverBaseLines[$lineIndex] -match '^\s*//.*;') {
+        throw "server-base.cfg line $($lineIndex + 1) contains a semicolon in a comment; the engine would execute the text after it."
+    }
+}
 $serverBase = Read-Config -Path $serverBasePath -IsLobby $false -RegisteredCvars $registeredCvars
 $criticalServerBaseSettings = @{
     g_factory_file = "factories.cfg"

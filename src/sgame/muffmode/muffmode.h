@@ -36,6 +36,7 @@
 #include "mm_motd.h"
 #include "mm_nav_bake.h"
 #include "mm_pconfig.h"
+#include "mm_player_name.h"
 #include "mm_player_stats.h"
 #include "mm_ruleset.h"
 #include "mm_ruleset_weapons.h"

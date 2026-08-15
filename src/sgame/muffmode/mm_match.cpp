@@ -18,6 +18,7 @@
 #include "muffmode/mm_lms_rules.h"
 #include "muffmode/mm_match.h"
 #include "muffmode/mm_match_stats.h"
+#include "muffmode/mm_player_name.h"
 #include "muffmode/mm_player_stats.h"
 #include "muffmode/mm_red_rover_rules.h"
 #include "muffmode/mm_strike.h"
@@ -2132,7 +2133,7 @@ void MM_CmdTimeIn(gentity_t *ent) {
 		return;
 	}
 
-	gi.LocBroadcast_Print(PRINT_HIGH, "{} is resuming the match.\n", ent->client->pers.netname);
+	gi.LocBroadcast_Print(PRINT_HIGH, "{} is resuming the match.\n", MM_PlayerLocalizationName(ent->client));
 	MM_TimeoutBeginResumeCountdown();
 }
 

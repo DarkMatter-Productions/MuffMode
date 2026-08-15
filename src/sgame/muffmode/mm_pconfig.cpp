@@ -9,6 +9,7 @@
 #include "muffmode/mm_pconfig.h"
 #include "muffmode/mm_pconfig_rules.h"
 #include "muffmode/mm_parse.h"
+#include "muffmode/mm_player_name.h"
 #include "muffmode/mm_skin.h"
 #include "muffmode/mm_util.h"
 
@@ -558,7 +559,7 @@ void MM_ClientInitPConfig(gentity_t *ent)
 	const mm_client_profile_load_status_t profile_status = MM_ClientProfileLoad(
 		ent->client,
 		ent->client->pers.social_id,
-		ent->client->pers.netname,
+		MM_PlayerDisplayName(ent->client),
 		gt_short_name_upper[gametype],
 		missing_profile_seed);
 	ent->client->sess.profile_persistence_ready =
