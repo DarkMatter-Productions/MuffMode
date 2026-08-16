@@ -2709,10 +2709,12 @@ mm_award_player_facts_t AwardFacts(const FrozenPlayer &player,
 // profile and a padded match is not a ranking, so one bot participant disarms
 // the reel entirely -- the same bar MM_PlayerStatsMatchCanBeRanked applies to
 // rating settlement, evaluated here against the frozen participant set so it
-// does not depend on which module ran first.
+// does not depend on which module ran first. Arena Rooms and Horde are
+// excluded from rating settlement for the same reason (see
+// MM_PlayerStats_OnMatchStart), so awards stay off for both too.
 bool AwardsMatchIsRanked(const FrozenMatch &match)
 {
-	if (!CvarEnabled(g_ranked, true) || GT(GT_ARENA))
+	if (!CvarEnabled(g_ranked, true) || GT(GT_ARENA) || GT(GT_HORDE))
 		return false;
 
 	size_t humans = 0;

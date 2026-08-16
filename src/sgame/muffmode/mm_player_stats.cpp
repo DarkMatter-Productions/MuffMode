@@ -1115,8 +1115,11 @@ void MM_PlayerStats_OnProfileLoaded(gentity_t *ent)
 void MM_PlayerStats_OnMatchStart()
 {
 	// Arena Rooms are simultaneous independent series and do not have a single
-	// global result that this rating lifecycle can settle safely.
-	if (GT(GT_ARENA)) {
+	// global result that this rating lifecycle can settle safely. Horde is
+	// co-op PvE, so a human's resp.score reflects wave survival against
+	// monsters, not a contest against teammates -- there is no adversarial
+	// actual-score to settle.
+	if (GT(GT_ARENA) || GT(GT_HORDE)) {
 		s_match_open = false;
 		s_match_gametype.clear();
 		s_match_has_bot_participant = false;
@@ -1305,7 +1308,7 @@ bool MM_PlayerStats_SessionIsRanked(const gentity_t *ent) noexcept
 		return false;
 	if (!muffmode::CvarEnabled(g_ranked))
 		return false;
-	if (GT(GT_ARENA))
+	if (GT(GT_ARENA) || GT(GT_HORDE))
 		return false;
 	if (IsBot(ent) || ent->client->sess.is_a_bot)
 		return false;
@@ -1383,6 +1386,12 @@ void MM_CmdSkillRating(gentity_t *ent)
 	if (GT(GT_ARENA)) {
 		gi.LocClient_Print(ent, PRINT_HIGH,
 			"Arena Rooms are unranked; live room statistics remain available in Player Stats.\n");
+		return;
+	}
+
+	if (GT(GT_HORDE)) {
+		gi.LocClient_Print(ent, PRINT_HIGH,
+			"Horde is unranked; live match statistics remain available in Player Stats.\n");
 		return;
 	}
 
