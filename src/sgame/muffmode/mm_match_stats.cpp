@@ -7,6 +7,7 @@
 #include "muffmode/mm_freezetag.h"
 #include "muffmode/mm_match_stats.h"
 #include "muffmode/mm_parse.h"
+#include "muffmode/mm_player_name.h"
 #include "muffmode/mm_player_stats.h"
 
 #include <algorithm>
@@ -162,22 +163,6 @@ uint8_t ModIndex(const mod_t &mod)
 	return static_cast<uint8_t>(mod.id);
 }
 
-std::string PlayerName(const gclient_t *client)
-{
-	if (!client)
-		return {};
-	// pers.netname holds the client-resolved "##P<n>" cross-play token (see
-	// EncodedPlayerName in userinfo.cpp) for every non-bot player -- it only
-	// renders correctly through gi.LocClient_Print/LocBroadcast_Print's own
-	// player-name substitution, not when copied into award/report/layout text
-	// built server-side. resp.netname is the actual submitted name and is
-	// always populated (for bots and humans alike), so it's the right value
-	// for text that doesn't go through that substitution.
-	if (client->resp.netname[0])
-		return client->resp.netname;
-	return client->pers.netname;
-}
-
 std::string PlayerSocialId(const gclient_t *client)
 {
 	return client && client->pers.social_id[0]
@@ -191,10 +176,7 @@ std::string ServerHostName()
 		game.maxclients <= 0 || !g_entities[1].inuse ||
 		!g_entities[1].client || !g_entities[1].client->pers.connected)
 		return {};
-	char value[MAX_INFO_VALUE]{};
-	gi.Info_ValueForKey(g_entities[1].client->pers.userinfo,
-		"name", value, sizeof(value));
-	return value;
+	return std::string(MM_PlayerDisplayName(g_entities[1].client));
 }
 
 std::string HtmlEscape(std::string_view input)
@@ -369,7 +351,7 @@ FrozenPlayer FreezePlayer(gentity_t *entity,
 	player.client_num = static_cast<int>(entity - g_entities - 1);
 	player.spawn_count = entity->spawn_count;
 	player.social_id = PlayerSocialId(entity->client);
-	player.player_name = PlayerName(entity->client);
+	player.player_name = MM_PlayerDisplayName(entity->client);
 	player.team = entity->client->sess.team;
 	player.score = entity->client->resp.score;
 	player.bot = entity->client->sess.is_a_bot ||
@@ -478,7 +460,7 @@ mm_match_player_outcome_t PlayerOutcome(const FrozenMatch &match,
 	}
 	if (match.duel_mode) {
 		switch (MM_Duel_FinalOutcome(
-			player.client_num, player.social_id)) {
+			player.client_num, player.spawn_count, player.social_id)) {
 		case mm_duel_final_outcome_t::win:
 			return mm_match_player_outcome_t::win;
 		case mm_duel_final_outcome_t::loss:
@@ -2582,6 +2564,34 @@ void SampleCampPositions()
 	}
 }
 
+// Grapple travel is sampled every simulation frame rather than on the camping
+// sampler's one-second cadence; otherwise a fast hook route would become a set
+// of long chords and badly undercount corners. The bounded accumulator rejects
+// teleports and restore discontinuities.
+void SampleGrappleTravel()
+{
+	if (!MM_MatchStats_IsCollecting() ||
+		level.match_state != match_state_t::MATCH_IN_PROGRESS) {
+		return;
+	}
+
+	for (gentity_t *entity : active_players()) {
+		if (!entity->client)
+			continue;
+
+		gclient_t *client = entity->client;
+		const gentity_t *hook = client->grapple_ent;
+		const bool dragging_frozen_body = hook && hook->enemy &&
+			hook->enemy->inuse && MM_FreezeTag_IsFrozen(hook->enemy);
+		const bool riding = client->pers.spawned && entity->health > 0 &&
+			!client->eliminated && !MM_FreezeTag_IsFrozen(entity) && hook &&
+			client->grapple_state > GRAPPLE_STATE_FLY && !dragging_frozen_body;
+
+		MM_MatchStatsRecordGrappleTravel(client->pers.match,
+			entity->s.origin[0], entity->s.origin[1], entity->s.origin[2], riding);
+	}
+}
+
 // Quads already lying on the floor at the moment the match opens.
 //
 // This is the exact complement of MM_MatchStats_RecordItemAvailable, not a
@@ -2657,11 +2667,17 @@ mm_award_player_facts_t AwardFacts(const FrozenPlayer &player,
 	facts.ctf_carrier_time_msec = stats.ctf_flag_carrier_time_total_msec;
 	facts.completed_lives = stats.completed_lives;
 	facts.life_average_msec = stats.life_average_msec;
+	facts.grapple_ride_distance = stats.grapple_ride_distance;
 	facts.camp_samples = stats.camp_samples;
 	facts.camp_idle_samples = stats.camp_idle_samples;
 	facts.play_time_msec = PlayerPlayTime(player, match_end_msec);
 	facts.score = player.score;
 	facts.bot = player.bot;
+
+	const size_t blaster = static_cast<size_t>(mm_match_weapon_t::blaster);
+	facts.blaster_shots = stats.total_shots_per_weapon[blaster];
+	facts.blaster_hits = stats.total_hits_per_weapon[blaster];
+	facts.blaster_active_opponent_kills = stats.blaster_active_opponent_kills;
 
 	for (size_t index = 1; index < MM_MATCH_HIGH_VALUE_ITEM_COUNT; index++)
 		SaturatingAdd(facts.high_value_pickups, stats.pickup_counts[index]);
@@ -2673,6 +2689,9 @@ mm_award_player_facts_t AwardFacts(const FrozenPlayer &player,
 
 		switch (MM_MatchStats_WeaponForMod(
 			mod_t(static_cast<mod_id_t>(index)))) {
+		case mm_match_weapon_t::chainfist:
+			SaturatingAdd(facts.chainfist_kills, kills);
+			break;
 		case mm_match_weapon_t::shotgun:
 		case mm_match_weapon_t::super_shotgun:
 			SaturatingAdd(facts.shotgun_kills, kills);
@@ -2684,8 +2703,11 @@ mm_award_player_facts_t AwardFacts(const FrozenPlayer &player,
 			SaturatingAdd(facts.rocket_kills, kills);
 			break;
 		case mm_match_weapon_t::machinegun:
+			SaturatingAdd(facts.bullet_kills, kills);
+			break;
 		case mm_match_weapon_t::chaingun:
 			SaturatingAdd(facts.bullet_kills, kills);
+			SaturatingAdd(facts.chaingun_kills, kills);
 			break;
 		case mm_match_weapon_t::hand_grenades:
 			SaturatingAdd(facts.grenade_kills, kills);
@@ -2758,6 +2780,10 @@ std::vector<mm_award_result_t> DecideAwards(const FrozenMatch &match)
 	match_facts.participants = facts.size();
 	match_facts.team_mode = match.team_mode;
 	match_facts.ctf_mode = match.ctf_mode;
+	match_facts.grapple_enabled = g_allow_grapple &&
+		(!strcmp(g_allow_grapple->string, "auto")
+			? (GTF(GTF_CTF) && !level.no_grapple)
+			: g_allow_grapple->integer != 0);
 
 	std::array<mm_award_result_t, MM_AWARDS_DISPLAY_LIMIT> reel {};
 	const size_t count = MM_AwardsSelect(facts.data(), facts.size(), match_facts,
@@ -2859,6 +2885,7 @@ void MM_MatchStats_ClientBegin(gentity_t *player)
 	mm_match_player_stats_t &stats = player->client->pers.match;
 	stats.play_start_real_time_ms = NowUnixMsec();
 	stats.play_end_real_time_ms = 0;
+	stats.grapple_ride_anchor_valid = false;
 	if (!stats.life_started_real_time_ms)
 		stats.life_started_real_time_ms = NowUnixMsec();
 }
@@ -2869,6 +2896,7 @@ void MM_MatchStats_ClientEnd(gentity_t *player)
 		level.match.finalized)
 		return;
 	mm_match_player_stats_t &stats = player->client->pers.match;
+	stats.grapple_ride_anchor_valid = false;
 	const auto archived = std::find_if(g_departed_players.begin(),
 		g_departed_players.end(), [&](const FrozenPlayer &candidate) {
 			return SameParticipant(candidate, player);
@@ -2955,6 +2983,7 @@ void MM_MatchStats_RecordSpawn(gclient_t *client)
 {
 	if (!ValidClient(client) || !ClientIsPlaying(client))
 		return;
+	client->pers.match.grapple_ride_anchor_valid = false;
 	client->pers.match.life_started_real_time_ms = NowUnixMsec();
 }
 
@@ -2991,6 +3020,7 @@ void MM_MatchStats_RunFrame()
 {
 	ExportWorker().DrainNotices();
 	SampleCampPositions();
+	SampleGrappleTravel();
 }
 
 void MM_MatchStats_FreezeResultTime()
@@ -3336,6 +3366,10 @@ void MM_MatchStats_RecordDeath(gentity_t *victim, gentity_t *attacker,
 	const bool player_attacker = attacker && attacker->client;
 	const bool friendly = team_kill || mod.friendly_fire;
 	const bool valid_kill = player_attacker && !suicide && !friendly;
+	const bool active_opponent = valid_kill && !spawn_death &&
+		victim->client->pers.spawned && ClientIsPlaying(victim->client) &&
+		!victim->client->sess.inactive && !victim->client->eliminated &&
+		!MM_FreezeTag_IsFrozen(victim);
 	mm_match_player_stats_t &victim_stats = victim->client->pers.match;
 
 	if (valid_kill) {
@@ -3345,6 +3379,10 @@ void MM_MatchStats_RecordDeath(gentity_t *victim, gentity_t *attacker,
 		SaturatingAdd(attacker->client->pers.match.mod_total_kills[mod_index], 1);
 		SaturatingAdd(level.match.total_kills, 1);
 		SaturatingAdd(level.match.mod_kills[mod_index], 1);
+		if (active_opponent && mod.id == MOD_BLASTER) {
+			SaturatingAdd(
+				attacker->client->pers.match.blaster_active_opponent_kills, 1);
+		}
 		// [MuffMode] Whether the Quad was still running decides which of the two
 		// Quad awards its owner walks away with. Sampled here rather than passed
 		// in, because the kill and the damage that caused it share a frame.
@@ -3390,10 +3428,10 @@ void MM_MatchStats_RecordDeath(gentity_t *victim, gentity_t *attacker,
 
 	mm_match_death_event_t event;
 	event.time_msec = MatchElapsedMsec();
-	event.victim.name = PlayerName(victim->client);
+	event.victim.name = MM_PlayerDisplayName(victim->client);
 	event.victim.id = PlayerSocialId(victim->client);
 	if (player_attacker) {
-		event.attacker.name = PlayerName(attacker->client);
+		event.attacker.name = MM_PlayerDisplayName(attacker->client);
 		event.attacker.id = PlayerSocialId(attacker->client);
 	} else {
 		event.attacker.name = "Environment";

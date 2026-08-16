@@ -35,18 +35,27 @@ struct mm_reliable_fanout_diagnostics_t {
 	size_t last_scope_bytes = 0;
 };
 
-constexpr bool MM_ReliableFanoutTryReserve(
-	mm_reliable_fanout_budget_t &budget, size_t message_bytes) noexcept
+constexpr bool MM_ReliableFanoutTryReserveBatch(
+	mm_reliable_fanout_budget_t &budget,
+	size_t message_count,
+	size_t message_bytes) noexcept
 {
-	if (budget.messages >= budget.max_messages)
+	if (!message_count || budget.messages > budget.max_messages ||
+		message_count > budget.max_messages - budget.messages)
 		return false;
 	if (budget.bytes > budget.max_bytes ||
 		message_bytes > budget.max_bytes - budget.bytes)
 		return false;
 
-	budget.messages++;
+	budget.messages += message_count;
 	budget.bytes += message_bytes;
 	return true;
+}
+
+constexpr bool MM_ReliableFanoutTryReserve(
+	mm_reliable_fanout_budget_t &budget, size_t message_bytes) noexcept
+{
+	return MM_ReliableFanoutTryReserveBatch(budget, 1, message_bytes);
 }
 
 // While a scope is active, participating message writers must reserve their
@@ -64,6 +73,8 @@ public:
 
 private:
 	friend bool MM_ReserveReliableFanoutMessage(size_t message_bytes);
+	friend bool MM_ReserveReliableFanoutMessages(
+		size_t message_count, size_t message_bytes);
 
 	mm_reliable_fanout_budget_t budget_{};
 	mm_reliable_fanout_scope_t *parent_ = nullptr;
@@ -75,6 +86,10 @@ private:
 // Returns true when no fan-out scope is active. When one is active, the caller
 // may write only after this reservation succeeds.
 bool MM_ReserveReliableFanoutMessage(size_t message_bytes);
+// Atomically reserves a group of messages that must either all be published or
+// all be deferred. message_bytes is their combined wire size.
+bool MM_ReserveReliableFanoutMessages(
+	size_t message_count, size_t message_bytes);
 
 mm_reliable_fanout_diagnostics_t MM_GetReliableFanoutDiagnostics();
 void MM_ResetReliableFanoutDiagnostics();

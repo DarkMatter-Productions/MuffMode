@@ -55,15 +55,43 @@ inline constexpr bool MM_DuelDepartureForfeitAllowed(
 	return participant_count == 2 && participant_index < 2;
 }
 
+inline constexpr bool MM_DuelJoinWouldQueue(
+	size_t occupied_slots, bool roster_open, bool intermission) noexcept
+{
+	return occupied_slots >= 2 || !roster_open || intermission;
+}
+
+inline constexpr bool MM_DuelQueueOrderBefore(
+	uint64_t lhs_order, int lhs_client_num,
+	uint64_t rhs_order, int rhs_client_num) noexcept
+{
+	// Zero is the legacy/unassigned value. Treat it as older than every newly
+	// allocated order so an in-flight queue can be upgraded without newcomers
+	// jumping its existing members.
+	if (lhs_order != rhs_order) {
+		if (lhs_order == 0)
+			return true;
+		if (rhs_order == 0)
+			return false;
+		return lhs_order < rhs_order;
+	}
+	return lhs_client_num < rhs_client_num;
+}
+
 // [MuffMode] GT_DUEL queue and match-end handling.
 bool MM_Duel_AddPlayer();
 size_t MM_Duel_OccupiedSlots();
+bool MM_Duel_JoinWouldQueue() noexcept;
+uint64_t MM_Duel_AllocateQueueOrder();
 mm_duel_score_view_t MM_Duel_CurrentScoreView();
 void MM_Duel_ResetFinalResult();
 bool MM_Duel_CommitForfeit(gentity_t *forfeiter);
 bool MM_Duel_CommitDepartureForfeit(gentity_t *forfeiter);
 mm_duel_final_outcome_t MM_Duel_FinalOutcome(
 	int client_num, std::string_view social_id = {}) noexcept;
+mm_duel_final_outcome_t MM_Duel_FinalOutcome(
+	int client_num, int32_t spawn_count,
+	std::string_view social_id = {}) noexcept;
 mm_duel_final_outcome_t MM_Duel_FinalOutcomeForClient(
 	const gentity_t *ent) noexcept;
 void MM_Duel_RemoveLoser();

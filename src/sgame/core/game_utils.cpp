@@ -10,6 +10,7 @@
 #include "muffmode/mm_freezetag.h"
 #include "muffmode/mm_profile.h"
 #include "muffmode/mm_parse.h"
+#include "muffmode/mm_player_name.h"
 #include "muffmode/mm_skin.h"
 #include "muffmode/mm_spawn_rules.h"
 #include "muffmode/mm_time_format.h"
@@ -1103,7 +1104,7 @@ bool KillBox(gentity_t *ent, bool from_spawning, mod_id_t mod, bool bsp_clipping
 	if (num > 0)
 		MuffModeLog("TELEFRAG", "KillBox: %d entities in box (spawner=%s, from_spawning=%d, mod=%d)",
 			num,
-			(ent->client && ent->client->pers.netname[0]) ? ent->client->pers.netname : ent->classname ? ent->classname : "?",
+			(ent->client && !MM_PlayerDisplayName(ent->client).empty()) ? MM_PlayerDisplayNameCString(ent->client) : ent->classname ? ent->classname : "?",
 			(int)from_spawning, (int)mod);
 
 	for (const killbox_candidate_t &candidate : candidates) {
@@ -1144,8 +1145,8 @@ bool KillBox(gentity_t *ent, bool from_spawning, mod_id_t mod, bool bsp_clipping
 
 		if (hit->client)
 			MuffModeLog("TELEFRAG", "KillBox: '%s' telefragging '%s' (mod=%d, from_spawning=%d)",
-				(ent->client && ent->client->pers.netname[0]) ? ent->client->pers.netname : "?",
-				hit->client->pers.netname,
+				(ent->client && !MM_PlayerDisplayName(ent->client).empty()) ? MM_PlayerDisplayNameCString(ent->client) : "?",
+				MM_PlayerDisplayNameCString(hit->client),
 				(int)mod, (int)from_spawning);
 
 		MM_PROFILE_INC(killbox_damage_events);

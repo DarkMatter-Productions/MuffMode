@@ -521,13 +521,10 @@ void FollowCycle(gentity_t *ent, int dir) {
 	if (max_clients <= 0 || dir == 0)
 		return;
 
-	// if they are playing a duel game, count as a loss
-	if (GT(GT_DUEL) && ent->client->sess.team == TEAM_FREE)
-		ent->client->sess.losses++;
-
 	// first set them to spectator
-	if (cl->sess.spectator_state == SPECTATOR_NOT && !cl->eliminated)
-		SetTeam(ent, TEAM_SPECTATOR, false, false, false);
+	if (cl->sess.spectator_state == SPECTATOR_NOT && !cl->eliminated &&
+		!SetTeam(ent, TEAM_SPECTATOR, false, false, false))
+		return;
 
 	clientnum = clamp(static_cast<int>(cl->sess.spectator_client), 0, max_clients - 1);
 	original = clientnum;

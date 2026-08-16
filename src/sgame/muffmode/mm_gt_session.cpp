@@ -598,9 +598,12 @@ mm_gt_plan_t BuildPlan(const mm_gt_request_t &request)
 // anyway.
 void ResetClientSessions()
 {
-	for (auto ec : active_clients()) {
-		if (!ec->client)
+	for (size_t i = 0; i < static_cast<size_t>(game.maxclients); ++i) {
+		gentity_t *ec = &g_entities[i + 1];
+		if (!ec->client || !ec->client->pers.connected)
 			continue;
+		ec->client->sess.duel_queued = false;
+		ec->client->sess.duel_queue_order = 0;
 
 		if (ec->client->sess.is_a_bot || (ec->svflags & SVF_BOT)) {
 			// Reset bots fully so they go through ClientConnect's spectator
@@ -614,7 +617,6 @@ void ResetClientSessions()
 
 		ec->client->sess.team = TEAM_NONE;
 		P_PublishEngineTeam(ec);
-		ec->client->sess.duel_queued = false;
 		ec->client->sess.initialised = false;
 		ec->client->initial_menu_shown = false;
 		ec->client->initial_menu_delay = level.time + 10_hz;

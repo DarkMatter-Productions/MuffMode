@@ -76,9 +76,12 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+	<ClInclude Include="player_name_test_support.h" />
     <ClInclude Include="fake_game_import.h" />
+	<ClCompile Include="..\..\src\sgame\muffmode\mm_player_name.cpp" />
     <ClCompile Include="..\..\src\shared\q_std.cpp" />
     <ClCompile Include="client_refs_compile_tests.cpp" />
+	<ClCompile Include="player_name_test_support.cpp" />
     <ClCompile Include="q_std_test_stubs.cpp" />
     <ClCompile Include="test_main.cpp" />
   </ItemGroup>

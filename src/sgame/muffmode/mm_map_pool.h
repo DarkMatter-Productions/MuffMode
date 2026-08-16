@@ -26,6 +26,22 @@ constexpr size_t MAX_TITLE_BYTES = 160;
 constexpr size_t MAX_EPISODE_BYTES = 64;
 constexpr size_t MAX_FILTER_BYTES = 160;
 
+inline bool ShouldRestrictCustomMaps(
+	int policy_enabled,
+	int human_players,
+	int console_players) noexcept
+{
+	return policy_enabled != 0 &&
+		(human_players <= 0 || console_players > 0);
+}
+
+inline bool ShouldReplacePendingCustomMap(
+	bool custom_maps_restricted,
+	bool pending_map_is_custom) noexcept
+{
+	return custom_maps_restricted && pending_map_is_custom;
+}
+
 inline char AsciiLower(char value) noexcept
 {
 	if (value >= 'A' && value <= 'Z')
@@ -498,6 +514,8 @@ struct map_choice_t {
 void MM_InitMapPoolSystem();
 void MM_ShutdownMapPoolSystem();
 void MM_HandleMapPoolCvarChanges();
+void MM_EnforceCustomMapPolicy();
+bool MM_RevalidatePendingCustomMapPolicy();
 void MM_RecordStructuredMapPlayed();
 bool MM_ReloadMapPool(gentity_t *ent);
 bool MM_ReloadMapCycle(gentity_t *ent);
@@ -509,6 +527,7 @@ size_t MM_StructuredMapCycleCount();
 uint64_t MM_MapPoolRevision();
 bool MM_StructuredMapPoolContains(const char *mapname);
 bool MM_ResolveStructuredMapName(const char *mapname, std::string &resolved);
+bool MM_CustomMapsRestricted();
 std::vector<std::string> MM_CollectStructuredMapPool();
 std::vector<std::string> MM_CollectStructuredMapCycle();
 bool MM_SelectStructuredNextMap(std::string &mapname);

@@ -16,6 +16,7 @@
 #include "muffmode/mm_factory.h"
 #include "muffmode/mm_gametype.h"
 #include "muffmode/mm_ghost.h"
+#include "muffmode/mm_graceful_shutdown.h"
 #include "muffmode/mm_gt_session.h"
 #include "muffmode/mm_horde.h"
 #include "muffmode/mm_loc.h"
@@ -399,6 +400,8 @@ cvar_t *g_maps_pool_file;
 cvar_t *g_maps_cycle_file;
 cvar_t *g_maps_random;
 cvar_t *g_maps_repeat_delay;
+cvar_t *g_maps_avoid_custom;
+cvar_t *q2rex_console_players;
 cvar_t *g_votable_factories;
 cvar_t *g_votable_gametypes;
 cvar_t *g_votable_rulesets;
@@ -601,6 +604,7 @@ Called after PreInitGame when the game has set up cvars.
 */
 static void InitGame() {
 	gi.Com_Print("==== InitGame ====\n");
+	MM_GracefulShutdown_Reset();
 
 	InitSave();
 
@@ -968,6 +972,11 @@ static void InitGame() {
 	g_maps_cycle_file = gi.cvar("g_maps_cycle_file", "", CVAR_NOFLAGS);
 	g_maps_random = gi.cvar("g_maps_random", "1", CVAR_NOFLAGS);
 	g_maps_repeat_delay = gi.cvar("g_maps_repeat_delay", "1800", CVAR_NOFLAGS);
+	g_maps_avoid_custom = gi.cvar("g_maps_avoid_custom", "0", CVAR_NOFLAGS);
+	// Q2REX publishes this read-only roster count. Other compatible engines
+	// create the fallback at zero, leaving the policy's empty-server guard live.
+	q2rex_console_players = gi.cvar(
+		"q2rex_console_players", "0", CVAR_NOFLAGS);
 	g_votable_gametypes = gi.cvar("g_votable_gametypes", "", CVAR_NOFLAGS);
 	g_votable_factories = gi.cvar("g_votable_factories", "", CVAR_NOFLAGS);
 	g_votable_rulesets = gi.cvar("g_votable_rulesets", "", CVAR_NOFLAGS);
@@ -1491,9 +1500,15 @@ static int SortRanks(const void *a, const void *b) {
 	// then spectators
 	if (!ClientIsPlaying(ca) && !ClientIsPlaying(cb)) {
 		if (ca->sess.duel_queued && cb->sess.duel_queued) {
-			if (ca->sess.team_join_time > cb->sess.team_join_time)
+			const int a_client_num = *static_cast<const int *>(a);
+			const int b_client_num = *static_cast<const int *>(b);
+			if (MM_DuelQueueOrderBefore(
+				ca->sess.duel_queue_order, a_client_num,
+				cb->sess.duel_queue_order, b_client_num))
 				return -1;
-			if (ca->sess.team_join_time < cb->sess.team_join_time)
+			if (MM_DuelQueueOrderBefore(
+				cb->sess.duel_queue_order, b_client_num,
+				ca->sess.duel_queue_order, a_client_num))
 				return 1;
 		}
 		if (ca->sess.duel_queued)
@@ -2154,8 +2169,14 @@ void CheckDMExitRules() {
 		return;
 	}
 	
-	if (minplayers->integer > 0 &&
-		logical_players < static_cast<size_t>(minplayers->integer)) {
+	const int effective_min_players = muffmode::match::EffectiveMinPlayers();
+	if (GT(GT_DUEL) &&
+		logical_players != static_cast<size_t>(effective_min_players)) {
+		QueueIntermission("Duel requires exactly two players.", true, false);
+		return;
+	}
+	if (notGT(GT_DUEL) && minplayers->integer > 0 &&
+		logical_players < static_cast<size_t>(effective_min_players)) {
 		QueueIntermission("Not enough players remaining.", true, false);
 		return;
 	}
@@ -2518,6 +2539,13 @@ void ExitLevel() {
 		level.intermission_fading, level.intermission_exit,
 		level.intermission_fade_time.seconds(), level.time.seconds(),
 		level.in_frame);
+	// The roster may change while the scoreboard, map choice, or awards are
+	// open. Revalidate the already chosen destination at the final boundary so
+	// an earlier custom selection cannot outlive a newly arrived console peer.
+	if (!MM_RevalidatePendingCustomMapPolicy()) {
+		level.intermission_exit = false;
+		return;
+	}
 	const char* next_map = level.changemap ? level.changemap : level.nextmap;
 	if (next_map && next_map[0]) {
 		MuffModeLog("MAP", "Exiting level '%s', next map: '%s'", level.mapname, next_map);
@@ -2699,6 +2727,11 @@ void ExitLevel() {
 	size_t start_offset = changemap.front() == '*' ? 1 : 0;
 
 	MuffModeLog("DEBUG", "ExitLevel: issuing gamemap command for '%s'", level.changemap);
+	if (MM_GracefulShutdown_HandleLevelExit()) {
+		MuffModeLog("MAP", "ExitLevel: final map complete; closing gracefully");
+		level.changemap = nullptr;
+		return;
+	}
 	if (map_len > (6 + start_offset) &&
 		!Q_strncasecmp(changemap.data() + start_offset, "victor", 6) &&
 		!Q_strncasecmp(changemap.data() + map_len - 4, ".pcx", 4))
@@ -3107,6 +3140,15 @@ void G_RunFrame(bool main_loop) {
 	MM_PROFILE_ZONE("G_RunFrame");
 
 	const bool any_clients_spawned = G_AnyClientsSpawned();
+	if (main_loop) {
+		const bool closing = MM_GracefulShutdown_RunFrame();
+		// This must run before the no-client early return: an empty server on a
+		// custom map is precisely the state the policy exists to vacate.
+		if (!closing) {
+			MM_HandleMapPoolCvarChanges();
+			MM_EnforceCustomMapPolicy();
+		}
+	}
 
 	if (main_loop && !any_clients_spawned && !level.timeout_in_place && !MM_Ghost_HasActiveReservations()) {
 		// [MuffMode] An empty server is exactly where a host configures one, so

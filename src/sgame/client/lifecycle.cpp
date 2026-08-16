@@ -20,6 +20,7 @@
 #include "muffmode/mm_motd.h"
 #include "muffmode/mm_parse.h"
 #include "muffmode/mm_pconfig.h"
+#include "muffmode/mm_player_name.h"
 #include "muffmode/mm_player_stats.h"
 #include "muffmode/mm_ruleset.h"
 #include "muffmode/mm_spawn_rules.h"
@@ -88,7 +89,8 @@ bool GhostAbortSpawnUsesDeferredPresentation(gentity_t *ent)
 {
 	return MM_GhostSpawnUsesDeferredPresentation(
 		ghost_abort_restart_in_progress,
-		MM_Ghost_IsAbortSpawnPending(ent));
+		MM_Ghost_IsAbortSpawnPending(ent) ||
+			MM_Ghost_IsClientBeginFallbackPending(ent));
 }
 }
 
@@ -757,11 +759,11 @@ static bool InitPlayerTeam(gentity_t *ent) {
 		(ent->client->sess.is_a_bot || (ent->svflags & SVF_BOT) ||
 			g_dm_force_join->integer || g_dm_auto_join->integer)) {
 		if (ent != &g_entities[1] || (ent == &g_entities[1] && g_owner_auto_join->integer)) {
-			team_t pick = PickTeam(-1);
-			if (!level.locked[pick]) {
-				SetTeam(ent, pick, false, false, false);
+			// SetTeam is the authority for effective locks, Duel queue admission,
+			// player caps, and restore races. Only report auto-join success when it
+			// actually accepted the transition (including a Duel queue placement).
+			if (SetTeam(ent, PickTeam(-1), false, false, false))
 				return true;
-			}
 		}
 	}
 
@@ -820,6 +822,8 @@ void ClientSpawn(gentity_t *ent) {
 	const gtime_t			horde_elim_msg_next = client->horde_elim_msg_next;
 	const bool				defer_ghost_presentation =
 		GhostAbortSpawnUsesDeferredPresentation(ent);
+	const bool				ghost_round_entry =
+		MM_Ghost_ClientBeginFallbackOwnsRoundEntry(ent);
 
 	if (GTF(GTF_ROUNDS) && level.match_state == match_state_t::MATCH_IN_PROGRESS && notGT(GT_HORDE)) {
 		const bool round_locked = level.round_state == round_state_t::ROUND_IN_PROGRESS ||
@@ -830,9 +834,12 @@ void ClientSpawn(gentity_t *ent) {
 			// LMS uses the Horde-style lives model: a mid-round (re)spawn with lives left is a
 			// living respawn, not an elimination. Only auto-eliminate LMS spawners who are out
 			// of lives (latecomers/round-joiners get no lives, so they spectate until next round).
-			if (!freeze_thaw_respawn && GTF(GTF_ELIMINATION) && (notGT(GT_LMS) || ent->client->pers.lives <= 0))
+			if (!ghost_round_entry && !freeze_thaw_respawn &&
+				GTF(GTF_ELIMINATION) &&
+				(notGT(GT_LMS) || ent->client->pers.lives <= 0))
 				ClientSetEliminated(ent);
-			else if (ClientIsPlaying(ent->client) && !freeze_thaw_respawn && MM_FreezeTag_ShouldHoldSpawnForRound())
+			else if (!ghost_round_entry && ClientIsPlaying(ent->client) &&
+				!freeze_thaw_respawn && MM_FreezeTag_ShouldHoldSpawnForRound())
 				ClientSetEliminated(ent);
 		}
 	}
@@ -850,6 +857,8 @@ void ClientSpawn(gentity_t *ent) {
 		lives = ent->client->pers.spawned ? ent->client->pers.lives : g_coop_enable_lives->integer + 1;
 	else if (GT(GT_HORDE) && ClientIsPlaying(ent->client))
 		lives = ent->client->pers.lives;
+	else if (GT(GT_LMS) && ghost_round_entry)
+		lives = MM_LMS_LivesPerRound();
 	
 	// clear velocity now, since landmark may change it
 	ent->velocity = {};
@@ -956,10 +965,14 @@ void ClientSpawn(gentity_t *ent) {
 		ClientUserinfoChanged(ent, userinfo);
 
 		if (coop->integer) {
+			Q_strlcpy(resp.netname, client->resp.netname,
+				sizeof(resp.netname));
 			if (resp.score > client->pers.score)
 				client->pers.score = resp.score;
 		} else {
 			resp = {};
+			Q_strlcpy(resp.netname, client->resp.netname,
+				sizeof(resp.netname));
 			sess.team = TEAM_FREE;
 		}
 	}
@@ -1398,10 +1411,19 @@ void ClientBegin(gentity_t *ent) {
 	if (!ent)
 		return;
 
-	ent->client = game.clients + (ent - g_entities - 1);
+	const size_t client_index = MM_GhostAddressIndex(
+		reinterpret_cast<uintptr_t>(ent),
+		reinterpret_cast<uintptr_t>(&g_entities[1]),
+		sizeof(g_entities[0]), static_cast<size_t>(game.maxclients));
+	if (client_index == MM_GHOST_NO_CLIENT_INDEX || !game.clients)
+		return;
+	ent->client = &game.clients[client_index];
+	const bool ghost_begin_fallback =
+		MM_Ghost_PrepareClientBeginFallback(ent);
 	const bool retained_level_client = !ent->client->pers.spawned &&
 		!ent->client->sess.is_a_bot &&
 		MM_ClientProfileCanPersistIdentity(ent->client->pers.social_id) &&
+		!ghost_begin_fallback &&
 		!MM_Ghost_ReservedClientState(ent);
 	ent->client->awaiting_respawn = false;
 	ent->client->respawn_timeout = 0_ms;
@@ -1439,7 +1461,8 @@ void ClientBegin(gentity_t *ent) {
 	// preferences from ClientConnect. Enter the restore delay before ordinary
 	// ClientBegin republishes canonical skins or applies viewer-wide overrides;
 	// the bounded restore scheduler owns those presentation writes.
-	if (deathmatch->integer && notGT(GT_ARENA) && MM_Ghost_TryRestore(ent))
+	if (!ghost_begin_fallback && deathmatch->integer && notGT(GT_ARENA) &&
+		MM_Ghost_TryRestore(ent))
 		return;
 
 	// Map loads clear engine configstrings without calling ClientConnect again.
@@ -1453,6 +1476,8 @@ void ClientBegin(gentity_t *ent) {
 
 	if (deathmatch->integer) {
 		ClientBeginDeathmatch(ent);
+		if (ghost_begin_fallback)
+			MM_Ghost_CompleteClientBeginFallback(ent);
 
 		// count current clients and rank for scoreboard
 		CalculateRanks();
@@ -1712,15 +1737,81 @@ bool ClientConnect(gentity_t *ent, char *userinfo, const char *social_id, bool i
 	// Retail providers may represent an unavailable account identity with a null
 	// pointer. Normalize it once before any C-string consumer sees it.
 	social_id = social_id && social_id[0] ? social_id : "";
-	// they can connect
-	ent->client = game.clients + (ent - g_entities - 1);
+	const size_t client_index = MM_GhostAddressIndex(
+		reinterpret_cast<uintptr_t>(ent),
+		reinterpret_cast<uintptr_t>(&g_entities[1]),
+		sizeof(g_entities[0]), static_cast<size_t>(game.maxclients));
+	if (client_index == MM_GHOST_NO_CLIENT_INDEX || !game.clients)
+		return false;
+
+	// Attach the engine-selected slot, then atomically validate/claim any
+	// reservation before mutating reusable client state.
+	ent->client = &game.clients[client_index];
+	MM_Ghost_BeginClientConnect(ent);
+	char retained_bot_name[MAX_NETNAME]{};
+	char retained_bot_base_name[MAX_NETNAME]{};
+	if (is_bot && ent->client->sess.is_a_bot) {
+		Q_strlcpy(retained_bot_name,
+			MM_PlayerDisplayNameCString(ent->client),
+			sizeof(retained_bot_name));
+		// Trust the retained base only while it still describes this exact
+		// displayed name. A mid-map rename invalidates stale prefix metadata.
+		if (!strcmp(ent->client->sess.bot_display_name,
+				retained_bot_name)) {
+			Q_strlcpy(retained_bot_base_name,
+				ent->client->sess.bot_base_name,
+				sizeof(retained_bot_base_name));
+		}
+	}
+	if ((is_bot && MM_Ghost_IsReservedSlot(ent)) ||
+		(!is_bot && !MM_Ghost_PrepareClientConnect(ent, social_id))) {
+		MM_Ghost_MarkRejectedClientConnect(ent);
+		return false;
+	}
+	const bool owns_restore_transaction =
+		!is_bot && MM_Ghost_IsPendingRestore(ent);
+	if (deathmatch->integer && MM_GhostAcceptedConnectStartsFreshSession(
+			owns_restore_transaction)) {
+		// The game client array survives disconnects and slot reuse. Do not let a
+		// different connection inherit queue priority, Duel records, readiness,
+		// inactivity, team state, or profile flags from the prior occupant.
+		ent->client->sess = {};
+	}
 	MM_Ghost_CancelAbortSpawn(ent);
 	ent->client->sess.team = deathmatch->integer ? TEAM_NONE : TEAM_FREE;
 	// Authentication belongs to a network connection, not a reusable client
 	// slot or ghost snapshot. Real auth may grant this again after connect.
-	ent->client->sess.admin = ent == &g_entities[1];
+	ent->client->sess.admin = MM_GhostIsListenServerHost(
+		g_dedicated && g_dedicated->integer, client_index == 0);
 	ent->client->pers.voted = 0;
 	P_PublishEngineTeam(ent);
+	// The incoming connection type is authoritative. Establish it before any
+	// userinfo parse (including InitClientPersistant's reparse) so a reused slot's
+	// stale SVF_BOT cannot invert human name encoding or give a bot a ##P token.
+	ent->svflags = is_bot ? (SVF_PLAYER | SVF_BOT) : SVF_PLAYER;
+	ent->client->sess.is_a_bot = is_bot;
+
+	if (is_bot) {
+		char incoming_name[MAX_INFO_VALUE]{};
+		gi.Info_ValueForKey(userinfo, "name", incoming_name,
+			sizeof(incoming_name));
+		const mm_bot_connection_name_t resolved_name =
+			MM_PrepareBotConnectionName(incoming_name,
+				retained_bot_name,
+				retained_bot_base_name, bot_name_prefix->string);
+		char canonical_name[MAX_NETNAME]{};
+		Q_strlcpy(canonical_name, resolved_name.display_name.c_str(),
+			sizeof(canonical_name));
+		Q_strlcpy(ent->client->sess.bot_base_name,
+			resolved_name.base_name.c_str(),
+			sizeof(ent->client->sess.bot_base_name));
+		Q_strlcpy(ent->client->sess.bot_display_name, canonical_name,
+			sizeof(ent->client->sess.bot_display_name));
+		gi.Info_SetValueForKey(userinfo, "name", canonical_name);
+	} else {
+		ent->client->sess.bot_base_name[0] = '\0';
+		ent->client->sess.bot_display_name[0] = '\0';
+	}
 
 	// set up userinfo early
 	ClientUserinfoChanged(ent, userinfo);
@@ -1744,46 +1835,11 @@ bool ClientConnect(gentity_t *ent, char *userinfo, const char *social_id, bool i
 		if (!game.autosaved || !ent->client->pers.weapon)
 			InitClientPersistant(ent, ent->client);
 	}
-
-	// make sure we start with known default(s)
-	ent->svflags = SVF_PLAYER;
-
-	if (is_bot) {
-		ent->svflags |= SVF_BOT;
-		ent->client->sess.is_a_bot = true;
-
-		// On level change the engine reconnects bots with a default/placeholder name
-		// (typically "0" or empty). Restore the previously-stored name so it is not lost.
-		char engine_name[MAX_INFO_VALUE] = { 0 };
-		gi.Info_ValueForKey(userinfo, "name", engine_name, sizeof(engine_name));
-		if ((!engine_name[0] || !strcmp(engine_name, "0")) && ent->client->resp.netname[0]) {
-			gi.Info_SetValueForKey(userinfo, "name", ent->client->resp.netname);
-			ClientUserinfoChanged(ent, userinfo);
-		}
-
-		if (bot_name_prefix->string[0] && *bot_name_prefix->string) {
-			char oldname[MAX_INFO_VALUE];
-			char newname[MAX_NETNAME];
-
-			gi.Info_ValueForKey(userinfo, "name", oldname, sizeof(oldname));
-			Q_strlcpy(newname, bot_name_prefix->string, sizeof(newname));
-			Q_strlcat(newname, oldname, sizeof(newname));
-			gi.Info_SetValueForKey(userinfo, "name", newname);
-			ClientUserinfoChanged(ent, userinfo);
-		}
-	} else {
-		// Clear bot flag for human clients - sess persists across map loads (TAG_GAME),
-		// so if a bot previously occupied this slot, is_a_bot would still be true
-		ent->client->sess.is_a_bot = false;
-	}
-
 	Q_strlcpy(ent->client->pers.social_id, social_id, sizeof(ent->client->pers.social_id));
 
 	if (game.maxclients > 1) {
-		char value[MAX_INFO_VALUE] = { 0 };
-		// [Paril-KEX] fetch name because now netname is kinda unsuitable
-		gi.Info_ValueForKey(userinfo, "name", value, sizeof(value));
-		gi.LocClient_Print(nullptr, PRINT_HIGH, "$g_player_connected", value);
+		gi.LocClient_Print(nullptr, PRINT_HIGH, "$g_player_connected",
+			MM_PlayerDisplayNameCString(ent->client));
 	}
 	ent->client->pers.connected = true;
 
@@ -1830,6 +1886,16 @@ void ClientDisconnect(gentity_t *ent) {
 	// violation reading offset 0x78, rcx = 0).
 	if (!ent || !ent->client)
 		return;
+	// The engine may pair a rejected ClientConnect with ClientDisconnect. No
+	// connection lifetime began, so consuming this marker must leave an existing
+	// reservation/placeholder byte-for-byte intact.
+	if (MM_Ghost_ConsumeRejectedClientConnect(ent))
+		return;
+	// A timeout caller is an entity lifetime, not a reusable client slot. Auto
+	// timeouts remain reservation-owned; a manual caller that disconnects loses
+	// its time-in authority before another account can reuse this address.
+	if (level.timeout_ent == ent && !level.timeout_auto)
+		level.timeout_ent = nullptr;
 
 	// Raw references to this reusable client slot must end with this lifetime.
 	MM_ClearDepartingClientReferences(ent);
@@ -1839,10 +1905,14 @@ void ClientDisconnect(gentity_t *ent) {
 	// remain allocated after either a normal disconnect or snapshot capture.
 	Weapon_Grapple_DoReset(ent->client);
 
-	// Pause clocks before a reconnect ghost copies the session. A successful
-	// reservation remains unsettled until it expires or the match ends.
-	MM_PlayerStats_OnClientPause(ent);
-	MM_MatchStats_ClientEnd(ent);
+	// A claimed/reinstating connection never resumed participation, so a second
+	// drop must preserve the already-paused reservation without settling it again.
+	const bool ghost_reservation_pending = MM_Ghost_IsPendingRestore(ent) ||
+		MM_Ghost_ReservedClientState(ent);
+	if (!ghost_reservation_pending) {
+		MM_PlayerStats_OnClientPause(ent);
+		MM_MatchStats_ClientEnd(ent);
+	}
 
 	const bool abort_spawn_pending = MM_Ghost_IsAbortSpawnPending(ent);
 	MM_Ghost_CancelAbortSpawn(ent);
@@ -1852,13 +1922,17 @@ void ClientDisconnect(gentity_t *ent) {
 	const bool auto_ghosted =
 		MM_GhostDisconnectMayCaptureSnapshot(abort_spawn_pending) &&
 		notGT(GT_ARENA) && MM_Ghost_CaptureDisconnect(ent);
-	if (!auto_ghosted)
+	if (!auto_ghosted && !ghost_reservation_pending)
 		MM_PlayerStats_OnClientDisconnect(ent);
 	MM_Arena_OnClientDisconnect(ent);
 	if (!auto_ghosted) {
 		TossClientItems(ent);
 		// Item drops can add final CTF statistics after participation stopped.
 		MM_MatchStats_ClientEnd(ent);
+		// A departed non-reservation must release its legacy ghost record after
+		// final statistics/item consumers finish, or sequential churn exhausts
+		// every reusable record and leaves stale entity aliases behind.
+		MM_Ghost_ClearClient(ent);
 	}
 	PlayerTrail_Destroy(ent);
 
@@ -1913,6 +1987,8 @@ void ClientDisconnect(gentity_t *ent) {
 		ent->client->pers.connected = false;
 		ent->client->pers.spawned = false;
 		ent->timestamp = level.time + 1_sec;
+		const int32_t playernum = static_cast<int32_t>(ent - g_entities - 1);
+		gi.configstring(CONFIG_FOLLOW_PLAYER_NAME + playernum, "");
 	}
 
 	// update active scoreboards

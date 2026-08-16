@@ -92,15 +92,24 @@ mm_reliable_fanout_scope_t::~mm_reliable_fanout_scope_t() noexcept
 
 bool MM_ReserveReliableFanoutMessage(size_t message_bytes)
 {
+	return MM_ReserveReliableFanoutMessages(1, message_bytes);
+}
+
+bool MM_ReserveReliableFanoutMessages(
+	size_t message_count, size_t message_bytes)
+{
+	if (!message_count)
+		return false;
 	if (!reliable_fanout_scope)
 		return true;
 
-	// First prove that every active budget can accept the message. Committing in
+	// First prove that every active budget can accept the batch. Committing in
 	// a second pass keeps parent accounting unchanged when a child rejects it.
 	mm_reliable_fanout_scope_t *rejected_scope = nullptr;
 	for (auto *scope = reliable_fanout_scope; scope; scope = scope->parent_) {
 		auto candidate = scope->budget_;
-		if (!MM_ReliableFanoutTryReserve(candidate, message_bytes)) {
+		if (!MM_ReliableFanoutTryReserveBatch(
+				candidate, message_count, message_bytes)) {
 			rejected_scope = scope;
 			break;
 		}
@@ -108,18 +117,22 @@ bool MM_ReserveReliableFanoutMessage(size_t message_bytes)
 
 	if (!rejected_scope) {
 		for (auto *scope = reliable_fanout_scope; scope; scope = scope->parent_)
-			MM_ReliableFanoutTryReserve(scope->budget_, message_bytes);
-		SaturatingIncrement(reliable_fanout_diagnostics.messages_reserved);
+			MM_ReliableFanoutTryReserveBatch(
+				scope->budget_, message_count, message_bytes);
+		SaturatingAdd(
+			reliable_fanout_diagnostics.messages_reserved, message_count);
 		SaturatingAdd(reliable_fanout_diagnostics.bytes_reserved, message_bytes);
 		return true;
 	}
 
-	SaturatingIncrement(reliable_fanout_diagnostics.messages_rejected);
+	SaturatingAdd(
+		reliable_fanout_diagnostics.messages_rejected, message_count);
 	SaturatingAdd(reliable_fanout_diagnostics.bytes_rejected, message_bytes);
 
 	if (!rejected_scope->warned_) {
 		gi.Com_PrintFmt(
-			"MuffMode: dropped an over-budget reliable message in '{}' ({} bytes after {}/{} messages and {}/{} bytes).\n",
+			"MuffMode: dropped {} over-budget reliable messages in '{}' ({} bytes after {}/{} messages and {}/{} bytes).\n",
+			message_count,
 			rejected_scope->source_ ? rejected_scope->source_ : "unknown source",
 			message_bytes,
 			rejected_scope->budget_.messages,

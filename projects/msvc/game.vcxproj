@@ -232,6 +232,7 @@
     <ClInclude Include="..\..\src\sgame\muffmode\mm_parse.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_pconfig.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_pconfig_rules.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_player_name.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_player_stats.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_profile.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_red_rover_rules.h" />
@@ -371,6 +372,7 @@
     <ClCompile Include="..\..\src\sgame\muffmode\mm_motd.cpp" />
     <ClCompile Include="..\..\src\sgame\muffmode\mm_nav_bake.cpp" />
     <ClCompile Include="..\..\src\sgame\muffmode\mm_pconfig.cpp" />
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_player_name.cpp" />
     <ClCompile Include="..\..\src\sgame\muffmode\mm_player_stats.cpp" />
     <ClCompile Include="..\..\src\sgame\muffmode\mm_ruleset.cpp" />
     <ClCompile Include="..\..\src\sgame\muffmode\mm_ruleset_weapons.cpp" />

@@ -165,6 +165,11 @@ enum class mm_match_award_t : uint8_t {
 	butterfingers,
 	benedict_arnold,
 	kleptomaniac,
+	monkey_man,
+	having_a_blast,
+	blender_with_legs,
+	this_is_fine,
+	chaingun_wanker,
 	total
 };
 
@@ -173,56 +178,74 @@ inline constexpr size_t MM_MATCH_AWARD_COUNT =
 
 // The exported award taxonomy is a public artifact contract, exactly like the
 // medal schema next door: adding an entry is additive, renumbering is not.
-static_assert(MM_MATCH_AWARD_COUNT == 31,
+static_assert(MM_MATCH_AWARD_COUNT == 36,
 	"The public match-award schema must remain stable");
 
 // Qualification thresholds. Each is named rather than inlined so a server owner
 // reading the docs and a maintainer reading the code see the same numbers.
-inline constexpr uint32_t MM_AWARD_SIGNATURE_KILLS = 20;	// shotgun / rail
-inline constexpr uint32_t MM_AWARD_SIGNATURE_SHARE_PCT = 80;
-inline constexpr uint32_t MM_AWARD_ROCKET_KILLS = 15;
-inline constexpr uint32_t MM_AWARD_ROCKET_SHARE_PCT = 50;
-inline constexpr uint32_t MM_AWARD_BULLET_KILLS = 25;
-inline constexpr uint32_t MM_AWARD_BULLET_SHARE_PCT = 60;
-inline constexpr uint32_t MM_AWARD_GRENADE_KILLS = 5;
-inline constexpr uint32_t MM_AWARD_BFG_KILLS = 5;
-inline constexpr uint32_t MM_AWARD_QUAD_CONTROL_PCT = 90;
-inline constexpr uint32_t MM_AWARD_QUAD_KILL_SHARE_PCT = 50;
-inline constexpr uint32_t MM_AWARD_QUAD_GOD_MIN_KILLS = 5;
-inline constexpr uint32_t MM_AWARD_ACCURACY_PCT = 80;
-inline constexpr uint64_t MM_AWARD_ACCURACY_MIN_SHOTS = 150;
-inline constexpr uint32_t MM_AWARD_STORMTROOPER_PCT = 15;
-inline constexpr uint64_t MM_AWARD_STORMTROOPER_MIN_SHOTS = 200;
-inline constexpr uint32_t MM_AWARD_UNTOUCHABLE_KILLS = 15;
-inline constexpr uint32_t MM_AWARD_UNTOUCHABLE_KD_X10 = 30;	// K/D >= 3.0
-inline constexpr uint32_t MM_AWARD_SPAWN_KILLS = 5;
-inline constexpr uint32_t MM_AWARD_SPAWN_SHARE_PCT = 25;
-inline constexpr uint32_t MM_AWARD_CAMP_SHARE_PCT = 60;
-inline constexpr uint32_t MM_AWARD_CAMP_MIN_SAMPLES = 90;
-inline constexpr uint32_t MM_AWARD_CAMP_MAX_IDLE_PCT = 20;
-inline constexpr uint64_t MM_AWARD_CAMP_MIN_SHOTS = 30;
-inline constexpr uint32_t MM_AWARD_HUMILIATION_MEDALS = 3;
-inline constexpr uint32_t MM_AWARD_EXCELLENT_MEDALS = 3;
-inline constexpr uint32_t MM_AWARD_PUNCHING_BAG_DEATHS = 10;
-inline constexpr uint32_t MM_AWARD_PUNCHING_BAG_KD_X100 = 35;	// K/D <= 0.35
-inline constexpr uint32_t MM_AWARD_PUNCHING_BAG_DMG_X100 = 35;	// dealt/taken <= 0.35
-inline constexpr uint32_t MM_AWARD_MAYFLY_LIVES = 8;
-inline constexpr uint32_t MM_AWARD_MAYFLY_LIFE_MSEC = 12000;
-inline constexpr uint32_t MM_AWARD_COCKROACH_LIVES = 5;
-inline constexpr uint32_t MM_AWARD_COCKROACH_LIFE_MSEC = 45000;
-inline constexpr uint32_t MM_AWARD_LEMMING_DEATHS = 4;
-inline constexpr uint32_t MM_AWARD_SUICIDES = 3;
-inline constexpr uint32_t MM_AWARD_TEAM_KILLS = 3;
-inline constexpr uint32_t MM_AWARD_PICKUPS = 15;
-inline constexpr uint32_t MM_AWARD_CTF_CAPTURES = 2;
-inline constexpr uint32_t MM_AWARD_CTF_DEFENCES = 3;
-inline constexpr uint32_t MM_AWARD_CTF_RETURNS = 5;
-inline constexpr uint64_t MM_AWARD_CTF_CARRIER_MSEC = 30000;
-inline constexpr uint32_t MM_AWARD_DAMAGE_LEAD_PCT = 150;	// 1.5x the field average
+inline constexpr uint32_t MM_AWARD_TOP_DOG_SCORE = 15;
+inline constexpr uint32_t MM_AWARD_TOP_DOG_LEAD_PCT = 120;	// 1.2x second place
+inline constexpr uint32_t MM_AWARD_FIRST_BLOOD_KILLS = 10;
+inline constexpr uint32_t MM_AWARD_SIGNATURE_KILLS = 25;	// shotgun / rail
+inline constexpr uint32_t MM_AWARD_SIGNATURE_SHARE_PCT = 85;
+inline constexpr uint32_t MM_AWARD_ROCKET_KILLS = 20;
+inline constexpr uint32_t MM_AWARD_ROCKET_SHARE_PCT = 60;
+inline constexpr uint32_t MM_AWARD_BULLET_KILLS = 30;
+inline constexpr uint32_t MM_AWARD_BULLET_SHARE_PCT = 70;
+inline constexpr uint32_t MM_AWARD_GRENADE_KILLS = 8;
+inline constexpr uint32_t MM_AWARD_BFG_KILLS = 7;
+inline constexpr uint32_t MM_AWARD_QUAD_CONTROL_PCT = 100;
+inline constexpr uint32_t MM_AWARD_QUAD_KILL_SHARE_PCT = 60;
+inline constexpr uint32_t MM_AWARD_QUAD_GOD_MIN_KILLS = 8;
+inline constexpr uint32_t MM_AWARD_ACCURACY_PCT = 85;
+inline constexpr uint64_t MM_AWARD_ACCURACY_MIN_SHOTS = 200;
+inline constexpr uint32_t MM_AWARD_STORMTROOPER_PCT = 10;
+inline constexpr uint64_t MM_AWARD_STORMTROOPER_MIN_SHOTS = 300;
+inline constexpr uint32_t MM_AWARD_UNTOUCHABLE_KILLS = 20;
+inline constexpr uint32_t MM_AWARD_UNTOUCHABLE_KD_X10 = 40;	// K/D >= 4.0
+inline constexpr uint32_t MM_AWARD_SPAWN_KILLS = 8;
+inline constexpr uint32_t MM_AWARD_SPAWN_SHARE_PCT = 35;
+inline constexpr uint32_t MM_AWARD_CAMP_SHARE_PCT = 70;
+inline constexpr uint32_t MM_AWARD_CAMP_MIN_SAMPLES = 120;
+inline constexpr uint32_t MM_AWARD_CAMP_MAX_IDLE_PCT = 10;
+inline constexpr uint64_t MM_AWARD_CAMP_MIN_SHOTS = 50;
+inline constexpr uint32_t MM_AWARD_HUMILIATION_MEDALS = 5;
+inline constexpr uint32_t MM_AWARD_EXCELLENT_MEDALS = 5;
+inline constexpr uint32_t MM_AWARD_PUNCHING_BAG_DEATHS = 15;
+inline constexpr uint32_t MM_AWARD_PUNCHING_BAG_KD_X100 = 25;	// K/D <= 0.25
+inline constexpr uint32_t MM_AWARD_PUNCHING_BAG_DMG_X100 = 25;	// dealt/taken <= 0.25
+inline constexpr uint32_t MM_AWARD_MAYFLY_LIVES = 10;
+inline constexpr uint32_t MM_AWARD_MAYFLY_LIFE_MSEC = 10000;
+inline constexpr uint32_t MM_AWARD_COCKROACH_LIVES = 6;
+inline constexpr uint32_t MM_AWARD_COCKROACH_LIFE_MSEC = 60000;
+inline constexpr uint32_t MM_AWARD_LEMMING_DEATHS = 6;
+inline constexpr uint32_t MM_AWARD_SUICIDES = 5;
+inline constexpr uint32_t MM_AWARD_TEAM_KILLS = 5;
+inline constexpr uint32_t MM_AWARD_PICKUPS = 25;
+inline constexpr uint32_t MM_AWARD_CTF_CAPTURES = 3;
+inline constexpr uint32_t MM_AWARD_CTF_DEFENCES = 5;
+inline constexpr uint32_t MM_AWARD_CTF_RETURNS = 7;
+inline constexpr uint64_t MM_AWARD_CTF_CARRIER_MSEC = 45000;
+inline constexpr uint64_t MM_AWARD_DAMAGE_MIN = 3000;
+inline constexpr uint32_t MM_AWARD_DAMAGE_LEAD_PCT = 175;	// 1.75x field average
+
+// The new oddities are deliberately rarer still: they describe an implausible
+// match, not merely a weapon somebody happened to prefer.
+inline constexpr uint64_t MM_AWARD_MONKEY_MAN_DISTANCE = 30000;
+inline constexpr uint64_t MM_AWARD_BLASTER_MIN_SHOTS = 80;
+inline constexpr uint32_t MM_AWARD_BLASTER_ACCURACY_PCT = 80;
+inline constexpr uint32_t MM_AWARD_BLASTER_ACTIVE_KILLS = 12;
+inline constexpr uint32_t MM_AWARD_CHAINFIST_KILLS = 15;
+inline constexpr uint32_t MM_AWARD_CHAINFIST_SHARE_PCT = 60;
+inline constexpr uint32_t MM_AWARD_CHAINGUN_KILLS = 40;
+inline constexpr uint32_t MM_AWARD_CHAINGUN_SHARE_PCT = 75;
+inline constexpr uint64_t MM_AWARD_THIS_IS_FINE_DAMAGE = 6000;
+inline constexpr uint32_t MM_AWARD_THIS_IS_FINE_KILLS = 20;
+inline constexpr uint32_t MM_AWARD_THIS_IS_FINE_KD_X100 = 250;	// K/D >= 2.5
 
 // A match too short or too thin to be interesting produces no reel at all.
 inline constexpr size_t MM_AWARD_MIN_PARTICIPANTS = 2;
-inline constexpr uint64_t MM_AWARD_MIN_DURATION_MSEC = 60000;
+inline constexpr uint64_t MM_AWARD_MIN_DURATION_MSEC = 120000;
 
 // One player's finished match, flattened. Everything the catalog can reason about
 // lives here; nothing in this header knows what a gentity_t is.
@@ -247,6 +270,19 @@ struct mm_award_player_facts_t {
 	uint32_t bullet_kills = 0;
 	uint32_t grenade_kills = 0;
 	uint32_t bfg_kills = 0;
+	uint32_t chainfist_kills = 0;
+	uint32_t chaingun_kills = 0;
+
+	// The blaster title ignores spawn kills, bots, teammates, inactive bodies,
+	// and other non-contests. Accuracy is likewise kept weapon-local so a
+	// shotgun cannot subsidise a merely decent blaster run.
+	uint64_t blaster_shots = 0;
+	uint64_t blaster_hits = 0;
+	uint32_t blaster_active_opponent_kills = 0;
+
+	// World units actually travelled while an attached grapple pulled the
+	// player. Hook flight and dragging a frozen body do not count.
+	uint64_t grapple_ride_distance = 0;
 
 	uint32_t quad_pickups = 0;
 	uint32_t quad_kills = 0;
@@ -284,6 +320,7 @@ struct mm_award_match_facts_t {
 	size_t participants = 0;
 	bool team_mode = false;
 	bool ctf_mode = false;
+	bool grapple_enabled = false;
 };
 
 struct mm_award_result_t {
@@ -328,6 +365,11 @@ inline const char *MM_AwardTitle(mm_match_award_t award)
 	case mm_match_award_t::butterfingers: return "BUTTERFINGERS";
 	case mm_match_award_t::benedict_arnold: return "BENEDICT ARNOLD";
 	case mm_match_award_t::kleptomaniac: return "KLEPTOMANIAC";
+	case mm_match_award_t::monkey_man: return "MONKEY MAN";
+	case mm_match_award_t::having_a_blast: return "HAVING A BLAST";
+	case mm_match_award_t::blender_with_legs: return "BLENDER WITH LEGS";
+	case mm_match_award_t::this_is_fine: return "THIS IS FINE";
+	case mm_match_award_t::chaingun_wanker: return "CHAINGUN WANKER";
 	case mm_match_award_t::none:
 	case mm_match_award_t::total:
 		break;
@@ -371,6 +413,11 @@ inline const char *MM_AwardKey(mm_match_award_t award)
 	case mm_match_award_t::butterfingers: return "butterfingers";
 	case mm_match_award_t::benedict_arnold: return "benedictArnold";
 	case mm_match_award_t::kleptomaniac: return "kleptomaniac";
+	case mm_match_award_t::monkey_man: return "monkeyMan";
+	case mm_match_award_t::having_a_blast: return "havingABlast";
+	case mm_match_award_t::blender_with_legs: return "blenderWithLegs";
+	case mm_match_award_t::this_is_fine: return "thisIsFine";
+	case mm_match_award_t::chaingun_wanker: return "chaingunWanker";
 	case mm_match_award_t::none:
 	case mm_match_award_t::total:
 		break;
@@ -395,6 +442,9 @@ inline int MM_AwardTier(mm_match_award_t award)
 	case mm_match_award_t::pineapple_express:
 	case mm_match_award_t::big_fragging_gun:
 	case mm_match_award_t::quad_god:
+	case mm_match_award_t::having_a_blast:
+	case mm_match_award_t::blender_with_legs:
+	case mm_match_award_t::chaingun_wanker:
 		return 1;
 	case mm_match_award_t::flag_runner:
 	case mm_match_award_t::last_line:
@@ -406,6 +456,8 @@ inline int MM_AwardTier(mm_match_award_t award)
 	case mm_match_award_t::wrecking_ball:
 	case mm_match_award_t::on_a_rampage:
 	case mm_match_award_t::humiliator:
+	case mm_match_award_t::monkey_man:
+	case mm_match_award_t::this_is_fine:
 		return 3;
 	case mm_match_award_t::spawn_fragger:
 	case mm_match_award_t::dirty_rotten_camper:
@@ -541,21 +593,35 @@ inline size_t MM_AwardsCollect(const mm_award_player_facts_t *players, size_t co
 		return 0;
 
 	// -- Honours -------------------------------------------------------------
-	// Top Dog is only interesting when there was a field to beat.
+	// Top Dog is only interesting when there was a field to beat and the winner
+	// actually put daylight between themselves and second place.
 	if (count >= 3) {
-		const size_t leader = StrictLeader(players, count, 1,
+		const size_t leader = StrictLeader(players, count, MM_AWARD_TOP_DOG_SCORE,
 			[](const mm_award_player_facts_t &p) {
 				return p.score > 0 ? static_cast<uint64_t>(p.score) : 0ull;
 			});
-		Add(out, written, capacity, mm_match_award_t::top_dog, leader,
-			leader == static_cast<size_t>(-1)
-				? 0u : static_cast<uint32_t>(players[leader].score));
+		if (leader != static_cast<size_t>(-1)) {
+			uint32_t runner_up = 0;
+			for (size_t i = 0; i < count; i++) {
+				if (i != leader && players[i].score > 0)
+					runner_up = std::max(runner_up,
+						static_cast<uint32_t>(players[i].score));
+			}
+			const uint32_t winning_score =
+				static_cast<uint32_t>(players[leader].score);
+			if (!runner_up || static_cast<uint64_t>(winning_score) * 100 >=
+				static_cast<uint64_t>(runner_up) * MM_AWARD_TOP_DOG_LEAD_PCT) {
+				Add(out, written, capacity, mm_match_award_t::top_dog, leader,
+					winning_score);
+			}
+		}
 	}
 
 	{
 		const size_t leader = StrictLeader(players, count, 1,
 			[](const mm_award_player_facts_t &p) {
-				return static_cast<uint64_t>(p.first_frag_medals);
+				return p.kills >= MM_AWARD_FIRST_BLOOD_KILLS
+					? static_cast<uint64_t>(p.first_frag_medals) : 0ull;
 			});
 		Add(out, written, capacity, mm_match_award_t::first_blood, leader, 1);
 	}
@@ -585,6 +651,40 @@ inline size_t MM_AwardsCollect(const mm_award_player_facts_t *players, size_t co
 		[](const mm_award_player_facts_t &p) {
 			return static_cast<uint64_t>(p.bullet_kills);
 		});
+	AddSignature(out, written, capacity, players, count,
+		mm_match_award_t::chaingun_wanker, MM_AWARD_CHAINGUN_KILLS,
+		MM_AWARD_CHAINGUN_SHARE_PCT,
+		[](const mm_award_player_facts_t &p) {
+			return static_cast<uint64_t>(p.chaingun_kills);
+		});
+	AddSignature(out, written, capacity, players, count,
+		mm_match_award_t::blender_with_legs, MM_AWARD_CHAINFIST_KILLS,
+		MM_AWARD_CHAINFIST_SHARE_PCT,
+		[](const mm_award_player_facts_t &p) {
+			return static_cast<uint64_t>(p.chainfist_kills);
+		});
+
+	// Default-weapon accuracy is only funny when it came with a body count. Rank
+	// by kills first and accuracy second, so a pristine handful of last hits
+	// cannot steal the title from the player who actually lived on the blaster.
+	{
+		const size_t leader = StrictLeader(players, count, 1,
+			[](const mm_award_player_facts_t &p) {
+				if (p.blaster_shots < MM_AWARD_BLASTER_MIN_SHOTS ||
+					p.blaster_active_opponent_kills < MM_AWARD_BLASTER_ACTIVE_KILLS) {
+					return 0ull;
+				}
+				const uint32_t accuracy =
+					MM_AwardPercent(p.blaster_hits, p.blaster_shots);
+				if (accuracy < MM_AWARD_BLASTER_ACCURACY_PCT)
+					return 0ull;
+				return static_cast<uint64_t>(p.blaster_active_opponent_kills) * 101 +
+					accuracy;
+			});
+		Add(out, written, capacity, mm_match_award_t::having_a_blast, leader,
+			leader == static_cast<size_t>(-1) ? 0 : MM_AwardPercent(
+				players[leader].blaster_hits, players[leader].blaster_shots));
+	}
 
 	// Hand grenades and the BFG are rare enough that raw volume is the story;
 	// no share test, or nobody would ever take them.
@@ -694,7 +794,7 @@ inline size_t MM_AwardsCollect(const mm_award_player_facts_t *players, size_t co
 				value >= average * MM_AWARD_DAMAGE_LEAD_PCT / 100;
 		};
 
-		const size_t dealer = StrictLeader(players, count, 1,
+		const size_t dealer = StrictLeader(players, count, MM_AWARD_DAMAGE_MIN,
 			[](const mm_award_player_facts_t &p) { return p.damage_dealt; });
 		if (dealer != static_cast<size_t>(-1) &&
 			leads_field(players[dealer].damage_dealt, average_dealt)) {
@@ -703,7 +803,7 @@ inline size_t MM_AwardsCollect(const mm_award_player_facts_t *players, size_t co
 					players[dealer].damage_dealt, UINT32_MAX)));
 		}
 
-		const size_t sponge = StrictLeader(players, count, 1,
+		const size_t sponge = StrictLeader(players, count, MM_AWARD_DAMAGE_MIN,
 			[](const mm_award_player_facts_t &p) { return p.damage_received; });
 		if (sponge != static_cast<size_t>(-1) &&
 			leads_field(players[sponge].damage_received, average_taken)) {
@@ -711,6 +811,24 @@ inline size_t MM_AwardsCollect(const mm_award_player_facts_t *players, size_t co
 				static_cast<uint32_t>(std::min<uint64_t>(
 					players[sponge].damage_received, UINT32_MAX)));
 		}
+	}
+
+	// Absorbing this much punishment while maintaining a dominant frag rate is
+	// not a wooden spoon. It is the player standing in the fire insisting that
+	// everything is under control.
+	{
+		const size_t leader = StrictLeader(players, count,
+			MM_AWARD_THIS_IS_FINE_DAMAGE,
+			[](const mm_award_player_facts_t &p) {
+				if (p.kills < MM_AWARD_THIS_IS_FINE_KILLS ||
+					KdRatioX100(p) < MM_AWARD_THIS_IS_FINE_KD_X100) {
+					return 0ull;
+				}
+				return p.damage_received;
+			});
+		Add(out, written, capacity, mm_match_award_t::this_is_fine, leader,
+			leader == static_cast<size_t>(-1) ? 0 : static_cast<uint32_t>(
+				std::min<uint64_t>(players[leader].damage_received, UINT32_MAX)));
 	}
 
 	{
@@ -734,6 +852,18 @@ inline size_t MM_AwardsCollect(const mm_award_player_facts_t *players, size_t co
 	}
 
 	// -- Habits --------------------------------------------------------------
+	if (match.grapple_enabled) {
+		const size_t leader = StrictLeader(players, count,
+			MM_AWARD_MONKEY_MAN_DISTANCE,
+			[](const mm_award_player_facts_t &p) {
+				return p.grapple_ride_distance;
+			});
+		Add(out, written, capacity, mm_match_award_t::monkey_man, leader,
+			leader == static_cast<size_t>(-1) ? 0 : static_cast<uint32_t>(
+				std::min<uint64_t>(players[leader].grapple_ride_distance,
+					UINT32_MAX)));
+	}
+
 	{
 		const size_t leader = StrictLeader(players, count, MM_AWARD_SPAWN_KILLS,
 			[](const mm_award_player_facts_t &p) {

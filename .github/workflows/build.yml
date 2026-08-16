@@ -118,6 +118,12 @@ jobs:
         env:
           VCPKG_ROOT: ${{ github.workspace }}/vcpkg
 
+      - name: Compile ghost runtime test seam
+        shell: pwsh
+        run: ./scripts/ci/build-msbuild.ps1 -Configuration Release -Platform x64 -TreatWarningsAsErrors -AdditionalMsBuildArgs "/p:MMGhostRuntimeTesting=true"
+        env:
+          VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+
       - name: Upload MSBuild log
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: always()

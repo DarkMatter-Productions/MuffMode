@@ -18,6 +18,11 @@ bool MM_FreezeTag_IsFrozenViewProxyVisibleTo(const gentity_t *ent, const gentity
 bool MM_FreezeTag_ShouldFreezeDeath(gentity_t *self, gentity_t *attacker, const mod_t &mod);
 void MM_FreezeTag_FreezePlayer(gentity_t *self, gentity_t *attacker, const mod_t &mod);
 void MM_FreezeTag_ClearClient(gentity_t *ent);
+void MM_FreezeTag_GhostCapture(const gentity_t *ent);
+void MM_FreezeTag_GhostRestore(gentity_t *ent);
+void MM_FreezeTag_GhostClear(const gentity_t *ent);
+void MM_FreezeTag_GhostClearAll();
+bool MM_FreezeTag_GhostIsFrozen(const gentity_t *ent);
 void MM_FreezeTag_DetachWorldEntities();
 void MM_FreezeTag_OnRoundReset();
 void MM_FreezeTag_ResetRoundPlayers();
@@ -26,6 +31,7 @@ bool MM_FreezeTag_ShouldRespawnForRoundCountdown(gentity_t *ent);
 
 bool MM_FreezeTag_RunClientFrame(gentity_t *ent);
 bool MM_FreezeTag_ClientThink(gentity_t *ent, const usercmd_t *ucmd);
+bool MM_FreezeTag_BlockFrozenFootsteps(gentity_t *ent);
 void MM_FreezeTag_ApplyClientEffects(gentity_t *ent);
 void MM_FreezeTag_ApplyFrozenPresentation(gentity_t *ent);
 void MM_FreezeTag_BotBeginFrame(gentity_t *bot);

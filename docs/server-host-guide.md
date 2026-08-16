@@ -276,7 +276,7 @@ Good match flow matters for both audiences: casual players should not get stuck 
 | `g_teamplay_force_balance` | `0` | Blocks joining an over-stacked team. |
 | `g_teamplay_item_drop_notice` | `1` | Sends team notices for dropped major items. |
 | `g_friendly_fire` | `0` | Enables friendly fire. |
-| `g_match_lock` | `0` | Prevents players from joining while a match is active. |
+| `g_match_lock` | `0` | Adds automatic playing-team locks during countdown and active play. Full Duel challengers still enter the spectator queue; turning it off preserves separate captain/admin locks. |
 
 Team captains can lock or unlock their own team and can ready their team. Admins can transfer players, shuffle teams, balance teams, and force ready state.
 

@@ -7,6 +7,7 @@
 #include "muffmode/mm_duel.h"
 #include "muffmode/mm_ghost.h"
 #include "muffmode/mm_match_stats.h"
+#include "muffmode/mm_player_name.h"
 #include "muffmode/mm_player_stats.h"
 #include "muffmode/mm_util.h"
 
@@ -110,14 +111,14 @@ int64_t MonotonicMilliseconds() noexcept
 
 size_t ClientSlotIndex(const gentity_t *ent) noexcept
 {
-	if (!ent || ent <= g_entities || ent > g_entities + game.maxclients)
+	if (!g_entities)
 		return MAX_LOBBY_PLAYERS;
-
-	const ptrdiff_t index = ent - g_entities - 1;
-	if (index < 0 || index >= static_cast<ptrdiff_t>(MAX_LOBBY_PLAYERS))
-		return MAX_LOBBY_PLAYERS;
-
-	return static_cast<size_t>(index);
+	const size_t index = MM_GhostAddressIndex(
+		reinterpret_cast<uintptr_t>(ent),
+		reinterpret_cast<uintptr_t>(&g_entities[1]), sizeof(g_entities[0]),
+		std::min(static_cast<size_t>(game.maxclients),
+			static_cast<size_t>(MAX_LOBBY_PLAYERS)));
+	return index == MM_GHOST_NO_CLIENT_INDEX ? MAX_LOBBY_PLAYERS : index;
 }
 
 bool IsPlayingTeam(team_t team) noexcept
@@ -253,17 +254,6 @@ std::string_view RecoveryGametypeName() noexcept
 
 bool AlreadySettled(const gentity_t *ent) noexcept;
 
-std::string BoundedPlayerName(const gclient_t *client)
-{
-	if (!client)
-		return {};
-	const char *const end = std::find(
-		client->pers.netname,
-		client->pers.netname + MAX_NETNAME,
-		'\0');
-	return std::string(client->pers.netname, end);
-}
-
 std::vector<player_stats_participant_t> CollectParticipants()
 {
 	std::vector<player_stats_participant_t> participants;
@@ -300,7 +290,7 @@ std::vector<player_stats_participant_t> CollectParticipants()
 		participants.push_back({
 			ent,
 			state,
-			BoundedPlayerName(state),
+			std::string(MM_PlayerDisplayName(state)),
 			requires_profile_result
 				? MM_ClientProfileSerializePreferences(state)
 				: std::string(),
@@ -968,7 +958,7 @@ void SettleDeparture(gentity_t *ent)
 		player_stats_participant_t participant{
 			ent,
 			ent->client,
-			BoundedPlayerName(ent->client),
+			std::string(MM_PlayerDisplayName(ent->client)),
 			MM_ClientProfileSerializePreferences(ent->client),
 			NormalizeClientRating(ent->client),
 			ent->client->sess.stats_matches_played,
@@ -1258,22 +1248,54 @@ void MM_PlayerStats_OnClientDisconnect(gentity_t *ent)
 	SettleDeparture(ent);
 }
 
+void MM_PlayerStats_ReconcileSettledReservation(
+	gentity_t *slot, const gclient_t *saved_client)
+{
+	if (!slot || !slot->client || !saved_client ||
+		!slot->client->pers.connected || !s_match_serial ||
+		saved_client->sess.stats_saved_match_serial != s_match_serial ||
+		!muffmode::CStringEquals(
+			slot->client->pers.social_id, saved_client->pers.social_id)) {
+		return;
+	}
+
+	// Keep connection membership and preferences, but do not let the settled
+	// participant result disappear with its inactivity/pending snapshot.
+	slot->client->sess.wins = saved_client->sess.wins;
+	slot->client->sess.losses = saved_client->sess.losses;
+	slot->client->sess.skill_rating = saved_client->sess.skill_rating;
+	slot->client->sess.skill_rating_change =
+		saved_client->sess.skill_rating_change;
+	slot->client->sess.stats_saved_match_serial =
+		saved_client->sess.stats_saved_match_serial;
+	slot->client->sess.stats_saved_match_outcome =
+		saved_client->sess.stats_saved_match_outcome;
+	slot->client->sess.stats_reconnect_suspended =
+		saved_client->sess.stats_reconnect_suspended;
+	slot->client->pers.vote_count = std::max(
+		slot->client->pers.vote_count, saved_client->pers.vote_count);
+	slot->client->pers.timeout_used =
+		slot->client->pers.timeout_used || saved_client->pers.timeout_used;
+}
+
 void MM_PlayerStats_OnReservedClientExpired(
 	gentity_t *slot, gclient_t *saved_client)
 {
 	if (!slot || !slot->client || !saved_client || !s_match_open)
 		return;
 	ApplyRecordedSettlement(saved_client, MatchGametypeName());
-	if (saved_client->sess.stats_saved_match_serial == s_match_serial)
+	if (saved_client->sess.stats_saved_match_serial == s_match_serial) {
+		MM_PlayerStats_ReconcileSettledReservation(slot, saved_client);
 		return;
+	}
 
 	// A reconnect attempt can already have initialized this slot with its new
 	// session. Settle against the reservation copy, then restore that live state.
 	const auto live_client = std::make_unique<gclient_t>(*slot->client);
 	*slot->client = *saved_client;
 	MM_PlayerStats_OnClientDisconnect(slot);
-	*saved_client = *slot->client;
 	*slot->client = *live_client;
+	MM_PlayerStats_ReconcileSettledReservation(slot, saved_client);
 }
 
 void MM_PlayerStats_OnClientPause(gentity_t *ent)

@@ -5,6 +5,7 @@
 #include "g_local.h"
 #include "muffmode/mm_arena.h"
 #include "muffmode/mm_parse.h"
+#include "muffmode/mm_player_name.h"
 
 static bool TargetParseFiniteFloat(const char *token, float &out) {
 	const auto value = MM_ParseFloatArg(token);
@@ -480,7 +481,7 @@ static USE(use_target_changelevel) (gentity_t *self, gentity_t *other, gentity_t
 				return;
 
 			if (activator && activator->client)
-				gi.LocBroadcast_Print(PRINT_HIGH, "$g_exited_level", activator->client->pers.netname);
+				gi.LocBroadcast_Print(PRINT_HIGH, "$g_exited_level", MM_PlayerLocalizationName(activator->client));
 		}
 	}
 

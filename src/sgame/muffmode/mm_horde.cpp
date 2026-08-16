@@ -3,6 +3,7 @@
 
 #include "g_local.h"
 #include "muffmode/mm_announcer.h"
+#include "muffmode/mm_ghost.h"
 #include "muffmode/mm_horde.h"
 #include "muffmode/mm_horde_ai.h"
 #include "muffmode/mm_horde_ai_rules.h"
@@ -890,14 +891,54 @@ bool ClientIsActiveFighter(gentity_t *ec)
 	return ec->client->pers.lives > 0;
 }
 
-bool HasActiveFighter()
+struct LogicalFighterRoster {
+	size_t participants = 0;
+	bool has_active_fighter = false;
+};
+
+LogicalFighterRoster InspectLogicalFighterRoster()
 {
+	LogicalFighterRoster roster;
+
 	for (auto ec : active_clients()) {
+		// A pending restore has a connected live mirror, but its authoritative
+		// membership remains in the reservation counted below. Never count both.
+		if (MM_Ghost_IsPendingRestore(ec) ||
+			!ec->client || !ClientIsPlaying(ec->client)) {
+			continue;
+		}
+
+		++roster.participants;
 		if (ClientIsActiveFighter(ec))
-			return true;
+			roster.has_active_fighter = true;
 	}
 
-	return false;
+	// Logical participant occupancy includes eliminated reservations too: they
+	// keep the roster non-empty so an all-eliminated squad resolves as defeat.
+	// The count API already omits a reservation represented by a live rank entry.
+	roster.participants +=
+		MM_Ghost_ActivePlayingReservationCountForTeam(TEAM_FREE);
+
+	for (uint32_t i = 0; i < game.maxclients; ++i) {
+		gentity_t *slot = &g_entities[i + 1];
+		if (!MM_Ghost_ReservedClientCountsForRound(slot, TEAM_FREE))
+			continue;
+
+		// CountsForRound admits only a current, playing, non-eliminated
+		// reservation, including the dead-with-lives respawn window.
+		roster.has_active_fighter = true;
+		break;
+	}
+
+	return roster;
+}
+
+bool HasActiveFighter(size_t *logical_participants = nullptr)
+{
+	const LogicalFighterRoster roster = InspectLogicalFighterRoster();
+	if (logical_participants)
+		*logical_participants = roster.participants;
+	return roster.has_active_fighter;
 }
 
 void GrantWaveLives()
@@ -1627,9 +1668,12 @@ bool MM_Horde_CheckAllFightersLost()
 		return false;
 	if (level.round_state != round_state_t::ROUND_IN_PROGRESS)
 		return false;
-	if (level.num_playing_clients < 1)
+	size_t logical_participants = 0;
+	const bool has_active_fighter =
+		horde::HasActiveFighter(&logical_participants);
+	if (logical_participants < 1)
 		return false;
-	if (horde::HasActiveFighter())
+	if (has_active_fighter)
 		return false;
 
 	gi.Broadcast_Print(PRINT_CENTER, "DEFEATED!");

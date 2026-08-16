@@ -32,6 +32,7 @@ Use commands in the form `command [arg]`.
 | `load_mappool` / dedicated console `sv load_mappool` | Reload the structured pool and validate its configured cycle. |
 | `load_mapcycle` / dedicated console `sv load_mapcycle` | Reload only the configured structured cycle. |
 | Dedicated console `sv ghost_diag [reset]` | Report ghost capture eligibility/rejections, live reinstatement outcomes, deferred skin synchronization, and game-side reliable-message budget counters. The optional `reset` reports first, then clears the lifetime counters. Engine netchan backlog occupancy is not available through the game API. |
+| Dedicated console `sv graceful_shutdown [cancel]` | Mark the current map as the final one and notify connected players immediately, whenever another human joins, and once per minute. The server closes cleanly after the normal end-of-level scoreboard, map choice, and awards finish; with no human clients it closes immediately. The optional `cancel` keeps the server open if the final boundary has not been reached. Listen servers reject this command. |
 | `loadmotd` | Reload the message of the day file. |
 | `doctor` | Print diagnostics for risky or inconsistent cvar combinations. |
 | `boot <player>` | Remove a player, depending on server admin configuration. |
@@ -502,7 +503,7 @@ existing provider lobby.
 | `flood_persecond` | `4` | Length of the shared client flood-detection window in seconds. |
 | `flood_waitdelay` | `10` | Seconds a client must wait after triggering the shared client flood protection. |
 | `g_inactivity` | `120` | Seconds before inactive players are moved to spectators. |
-| `g_match_lock` | `0` | Prevents joining while a match is active. |
+| `g_match_lock` | `0` | Adds automatic playing-team locks during countdown and active play. Full Duel challengers still join its spectator queue; disabling it releases only automatic locks and preserves captain/admin locks. |
 | `g_owner_auto_join` | `1` | Auto-joins lobby owner on server start. |
 | `g_owner_push_scores` | `0` | Shows scores to lobby owner on join. |
 
@@ -765,6 +766,7 @@ uncapped by default.
 | `g_maps_cycle_file` | empty | Optional structured cycle leaf filename under `baseq2`; requires a valid structured pool. |
 | `g_maps_random` | `1` | `1` selects randomly from eligible cycle maps, with `popular` maps weighted twice; `0` follows cycle order. |
 | `g_maps_repeat_delay` | `1800` | Preferred seconds before a structured-cycle map repeats; clamped to `0`–`86400` and relaxed if necessary to keep rotation moving. |
+| `g_maps_avoid_custom` | `0` | When enabled, structured-pool entries marked `custom` are unavailable while the server has no human players or Q2REX reports a console player in the lobby. The restriction covers automatic rotation, post-match picks, map votes, and MyMap, and immediately returns a custom level to a standard map if the server becomes empty or a console player arrives. Other compatible engines still enforce the empty-server half of the rule. |
 | `g_map_list` | empty | Space-separated map rotation. |
 | `g_map_list_shuffle` | `1` | `0` disables shuffle, `1` shuffles on wrap, `2` shuffles once per gametype session. |
 | `g_map_pick` | `15` | Seconds the post-scoreboard next-map pick stays open; `0` disables it. Clamped to `5`–`60`. See [Next-Map Pick](#next-map-pick). |
@@ -930,6 +932,12 @@ Supported fields are:
 | `min`, `max` | no | Inclusive active-human-player bounds; `0` or omission means no bound. Bots, spectators, and spare connected slots do not count. |
 | `popular` | no | Gives the map weight `2` instead of `1` when `g_maps_random` is enabled. |
 | `custom`, `custom_textures`, `custom_sounds` | no | Catalog metadata. Either asset flag also marks the entry as custom. |
+
+`g_maps_avoid_custom 1` treats this metadata as an availability rule rather
+than a display-only tag. The custom restriction is never relaxed to keep a
+rotation moving. If the configured cycle has no standard candidate, MuffMode
+uses a standard entry from the structured pool, repeating the current standard
+map if necessary, instead of escaping through a custom legacy fallback.
 
 The cycle is an ordered whitespace-separated list of `bsp` identifiers from
 the pool. It accepts an optional UTF-8 BOM, `//` line comments, and `/* ... */`

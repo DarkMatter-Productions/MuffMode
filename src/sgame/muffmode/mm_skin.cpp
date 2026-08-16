@@ -6,6 +6,7 @@
 #include "muffmode/mm_message_budget.h"
 #include "muffmode/mm_pconfig.h"
 #include "muffmode/mm_pconfig_rules.h"
+#include "muffmode/mm_player_name.h"
 #include "muffmode/mm_skin.h"
 
 #include <cstring>
@@ -59,10 +60,12 @@ bool MM_BuildSkinOverrideConfigString(gentity_t *target, const char *skin, char 
 	if (playernum < 0 || playernum >= static_cast<int32_t>(game.maxclients))
 		return false;
 
-	if (!MM_PlayerSkinConfigStringFits(target->client->resp.netname, skin, playernum))
+	const char *const player_name =
+		MM_PlayerDisplayNameCString(target->client);
+	if (!MM_PlayerSkinConfigStringFits(player_name, skin, playernum))
 		return false;
 
-	G_FmtTo(buffer, "{}\\{}\\default", target->client->resp.netname, skin);
+	G_FmtTo(buffer, "{}\\{}\\default", player_name, skin);
 	return true;
 }
 
@@ -295,7 +298,7 @@ void MM_CmdSkinOverride(gentity_t *ent, bool is_enemy, const char *label, const 
 
 } // namespace
 
-bool MM_PublishCanonicalPlayerSkin(gentity_t *target) {
+bool MM_PublishCanonicalPlayerPresentation(gentity_t *target) {
 	if (!MM_IsClientEntity(target))
 		return false;
 
@@ -305,16 +308,28 @@ bool MM_PublishCanonicalPlayerSkin(gentity_t *target) {
 
 	const std::string_view value = Teams() || GT(GT_ARENA) ?
 		G_FormatPlayerSkinConfigString(target, target->client->pers.skin) :
-		G_Fmt("{}\\{}", target->client->resp.netname, target->client->pers.skin);
+		G_Fmt("{}\\{}", MM_PlayerDisplayName(target->client),
+			target->client->pers.skin);
 	if (value.size() >= CS_SIZE(CS_PLAYERSKINS + playernum))
+		return false;
+	const std::string_view player_name =
+		MM_PlayerDisplayName(target->client);
+	if (player_name.size() >=
+		CS_SIZE(CONFIG_FOLLOW_PLAYER_NAME + playernum))
 		return false;
 
 	constexpr size_t CONFIGSTRING_MESSAGE_HEADER_BYTES = 1 + 2;
-	if (!MM_ReserveReliableFanoutMessage(
-			CONFIGSTRING_MESSAGE_HEADER_BYTES + value.size() + 1))
+	const size_t skin_message_bytes =
+		CONFIGSTRING_MESSAGE_HEADER_BYTES + value.size() + 1;
+	const size_t name_message_bytes =
+		CONFIGSTRING_MESSAGE_HEADER_BYTES + player_name.size() + 1;
+	if (!MM_ReserveReliableFanoutMessages(
+			2, skin_message_bytes + name_message_bytes))
 		return false;
 
 	gi.configstring(CS_PLAYERSKINS + playernum, value.data());
+	gi.configstring(CONFIG_FOLLOW_PLAYER_NAME + playernum,
+		player_name.data());
 	return true;
 }
 

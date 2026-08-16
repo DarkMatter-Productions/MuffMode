@@ -378,7 +378,17 @@ bool ApplyWinner(const choice_t &choice)
 		return false;
 	}
 
-	Q_strlcpy(level.nextmap, choice.bsp.c_str(), sizeof(level.nextmap));
+	// Roster policy may change while the ballot is open. Re-resolve at commit
+	// time so a newly present console player cannot inherit a custom winner.
+	MM_HandleMapPoolCvarChanges();
+	std::string resolved;
+	if (!muffmode::maps::ResolveConfiguredMap(
+			choice.bsp.c_str(), resolved) ||
+		resolved.size() >= sizeof(level.nextmap)) {
+		return false;
+	}
+
+	Q_strlcpy(level.nextmap, resolved.c_str(), sizeof(level.nextmap));
 	level.changemap = level.nextmap;
 	return true;
 }

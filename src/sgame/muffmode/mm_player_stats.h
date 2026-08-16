@@ -230,6 +230,10 @@ void MM_PlayerStats_OnClientDisconnect(gentity_t *ent);
 // importing state from a reconnect that may currently occupy the client slot.
 void MM_PlayerStats_OnReservedClientExpired(
 	gentity_t *slot, gclient_t *saved_client);
+// Mirrors an already-settled reservation result into a connected same-identity
+// slot without replacing that connection's membership or preferences.
+void MM_PlayerStats_ReconcileSettledReservation(
+	gentity_t *slot, const gclient_t *saved_client);
 void MM_PlayerStats_OnTeamTransition(
 	gentity_t *ent, team_t old_team, team_t new_team);
 

@@ -3,7 +3,9 @@
 
 #include "userinfo.h"
 
+#include "muffmode/mm_ghost.h"
 #include "muffmode/mm_parse.h"
+#include "muffmode/mm_player_name.h"
 
 #include <algorithm>
 #include <array>
@@ -87,18 +89,6 @@ std::string EncodedPlayerName(gentity_t *player)
 	return std::string("##P") + std::to_string(P_GetLobbyUserNum(player));
 }
 
-void StripUnsafeNameChars(char *name)
-{
-	char *write = name;
-	for (const char *read = name; *read; read++) {
-		const auto c = static_cast<unsigned char>(*read);
-		if (c < 0x20 || c == 0x7F || c == '"' || c == '{' || c == '}')
-			continue;
-		*write++ = static_cast<char>(c);
-	}
-	*write = '\0';
-}
-
 const char *SkinOverride(const char *skin)
 {
 	if (g_allow_custom_skins->integer)
@@ -152,16 +142,48 @@ float ParseUserinfoFov(const char *value)
 
 void ApplyUserinfoChanged(
 	gentity_t *ent, const char *userinfo,
-	bool publish_configstrings, bool refresh_skin_overrides)
+	bool publish_skin_configstring, bool publish_name_configstring,
+	bool refresh_skin_overrides)
 {
+	if (!ent || !userinfo || !g_entities || !game.clients ||
+		game.maxclients <= 0 || !ent->client)
+		return;
+	const size_t client_index = MM_GhostAddressIndex(
+		reinterpret_cast<uintptr_t>(ent),
+		reinterpret_cast<uintptr_t>(&g_entities[1]), sizeof(g_entities[0]),
+		static_cast<size_t>(game.maxclients));
+	if (client_index == MM_GHOST_NO_CLIENT_INDEX ||
+		ent->client != &game.clients[client_index])
+		return;
+	const bool is_bot = ent->client->sess.is_a_bot ||
+		(ent->svflags & SVF_BOT);
+
 	char val[MAX_INFO_VALUE] = {};
 
 	if (!gi.Info_ValueForKey(userinfo, "name", ent->client->pers.netname, sizeof(ent->client->pers.netname)))
 		Q_strlcpy(ent->client->pers.netname, "badinfo", sizeof(ent->client->pers.netname));
 
-	StripUnsafeNameChars(ent->client->pers.netname);
-	if (!ent->client->pers.netname[0])
-		Q_strlcpy(ent->client->pers.netname, "badinfo", sizeof(ent->client->pers.netname));
+	if (is_bot) {
+		const mm_bot_connection_name_t resolved_name =
+			MM_PrepareBotUserinfoName(ent->client->pers.netname,
+				ent->client->sess.bot_display_name,
+				ent->client->sess.bot_base_name,
+				bot_name_prefix->string);
+		Q_strlcpy(ent->client->pers.netname,
+			resolved_name.display_name.c_str(),
+			sizeof(ent->client->pers.netname));
+		Q_strlcpy(ent->client->sess.bot_base_name,
+			resolved_name.base_name.c_str(),
+			sizeof(ent->client->sess.bot_base_name));
+		Q_strlcpy(ent->client->sess.bot_display_name,
+			ent->client->pers.netname,
+			sizeof(ent->client->sess.bot_display_name));
+	} else {
+		const std::string sanitized_name =
+			MM_SanitizePlayerDisplayName(ent->client->pers.netname);
+		Q_strlcpy(ent->client->pers.netname, sanitized_name.c_str(),
+			sizeof(ent->client->pers.netname));
+	}
 	Q_strlcpy(ent->client->resp.netname, ent->client->pers.netname, sizeof(ent->client->resp.netname));
 
 	if (!gi.Info_ValueForKey(userinfo, "skin", val, sizeof(val)))
@@ -172,17 +194,18 @@ void ApplyUserinfoChanged(
 
 	const int playernum = static_cast<int>(ent - g_entities - 1);
 
-	if (publish_configstrings) {
+	if (publish_skin_configstring) {
 		if (Teams() || GT(GT_ARENA)) {
 			G_AssignPlayerSkin(ent, ent->client->pers.skin, refresh_skin_overrides);
 		} else {
-			gi.configstring(CS_PLAYERSKINS + playernum, G_Fmt("{}\\{}", ent->client->pers.netname, ent->client->pers.skin).data());
+			gi.configstring(CS_PLAYERSKINS + playernum, G_Fmt("{}\\{}", ent->client->resp.netname, ent->client->pers.skin).data());
 		}
-
-		gi.configstring(CONFIG_FOLLOW_PLAYER_NAME + playernum, ent->client->pers.netname);
 	}
+	if (publish_name_configstring)
+		gi.configstring(CONFIG_FOLLOW_PLAYER_NAME + playernum,
+			ent->client->resp.netname);
 
-	if (!(ent->svflags & SVF_BOT)) {
+	if (MM_ShouldEncodePlayerName(is_bot)) {
 		const auto encoded_name = EncodedPlayerName(ent);
 		Q_strlcpy(ent->client->pers.netname, encoded_name.c_str(), sizeof(ent->client->pers.netname));
 	}
@@ -218,6 +241,13 @@ void ApplyUserinfoChanged(
 		ent->client->pers.bob_skip = false;
 
 	Q_strlcpy(ent->client->pers.userinfo, userinfo, sizeof(ent->client->pers.userinfo));
+	if (is_bot) {
+		// Internal reparses must see the display value paired with bot_base_name.
+		// Retaining an older/raw value here can turn it into the next base and
+		// stack prefixes after a cvar change.
+		gi.Info_SetValueForKey(ent->client->pers.userinfo, "name",
+			ent->client->resp.netname);
+	}
 }
 
 } // namespace muffmode::player
@@ -238,15 +268,21 @@ void ClientUserinfoChanged(gentity_t *ent, const char *userinfo)
 	// Null-ent guard; same engine teardown class as ClientThink/ClientDisconnect.
 	if (!ent)
 		return;
-	muffmode::player::ApplyUserinfoChanged(ent, userinfo, true, true);
+	// A claimed/reinstating connection may update its parsed preferences, but its
+	// canonical follow name, team skin, and per-viewer overrides are published
+	// only by the bounded post-restore/abort presentation lane.
+	const bool publish_immediately = !MM_Ghost_IsPendingRestore(ent);
+	muffmode::player::ApplyUserinfoChanged(
+		ent, userinfo, publish_immediately, publish_immediately,
+		publish_immediately);
 }
 
 // [MuffMode] Ghost restore has already passed through the ordinary connection
-// userinfo path, which published its name and provisional skin. Parse the live
-// connection's identity and preferences here without another reliable
-// broadcast; the bounded post-restore lane publishes the canonical team skin
-// before applying per-viewer corrections.
+// userinfo path. Parse the live connection's identity and preferences here
+// without another reliable broadcast; the bounded post-restore lane publishes
+// the canonical follow name and team skin before applying per-viewer
+// corrections.
 void ClientUserinfoChangedForRestore(gentity_t *ent, const char *userinfo)
 {
-	muffmode::player::ApplyUserinfoChanged(ent, userinfo, false, false);
+	muffmode::player::ApplyUserinfoChanged(ent, userinfo, false, false, false);
 }

@@ -312,12 +312,12 @@ void MM_CmdLockTeam(gentity_t *ent) {
 		return;
 	}
 
-	if (level.locked[team]) {
+	if (muffmode::match::IsTeamManuallyLocked(team)) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "{} is already locked.\n", Teams_TeamName(team));
 		return;
 	}
 
-	level.locked[team] = true;
+	muffmode::match::SetManualTeamLocked(team, true);
 	gi.LocBroadcast_Print(PRINT_HIGH, "{} has been locked.\n", Teams_TeamName(team));
 	P_Menu_Dirty();
 }
@@ -362,12 +362,15 @@ void MM_CmdUnlockTeam(gentity_t *ent) {
 		return;
 	}
 
-	if (!level.locked[team]) {
+	if (!muffmode::match::IsTeamLocked(team)) {
 		gi.LocClient_Print(ent, PRINT_HIGH, "{} is already unlocked.\n", Teams_TeamName(team));
 		return;
 	}
 
-	level.locked[team] = false;
+	// Preserve the historical per-team override: an explicit unlock removes
+	// both a captain/admin lock and this phase's automatic match lock.
+	muffmode::match::SetManualTeamLocked(team, false);
+	muffmode::match::SetAutomaticTeamLocked(team, false);
 	gi.LocBroadcast_Print(PRINT_HIGH, "{} has been unlocked.\n", Teams_TeamName(team));
 	P_Menu_Dirty();
 }
@@ -399,8 +402,6 @@ UnReadyAll
 void UnReadyAll() {
 	for (auto ec : active_clients()) {
 		if (!ec || !ec->client)
-			continue;
-		if (!ClientIsPlaying(ec->client))
 			continue;
 		ec->client->resp.ready = false;
 	}
@@ -444,7 +445,7 @@ bool ReadyConditions(gentity_t *ent, bool desired_status, bool admin_cmd) {
 	switch (level.warmup_requisite) {
 	case warmup_req_t::WARMUP_REQ_MORE_PLAYERS:
 	{
-		const int minp = GT(GT_DUEL) ? 2 : std::max(1, muffmode::CvarInteger(minplayers));
+		const int minp = muffmode::match::EffectiveMinPlayers();
 		const int req = std::max(1, minp - level.num_playing_clients);
 		gi.LocClient_Print(ent, PRINT_HIGH, "{}{} more player{} present.\n", s, req, req > 1 ? "s are" : " is");
 		break;

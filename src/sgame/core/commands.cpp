@@ -2,6 +2,7 @@
 // Licensed under the GNU General Public License 2.0.
 #include "g_local.h"
 #include "muffmode/mm_client_profile.h"
+#include "muffmode/mm_player_name.h"
 #include "muffmode/mm_player_stats.h"
 #include "debug_log.h"
 #include "muffmode/mm_admin.h"
@@ -1353,8 +1354,7 @@ static void PlayersList(gentity_t *ent, bool ranked) {
 
 			gclient_t *cl = &game.clients[index[i]];
 
-			char value[MAX_INFO_VALUE] = { 0 };
-			gi.Info_ValueForKey(cl->pers.userinfo, "name", value, sizeof(value));
+			const std::string_view value = MM_PlayerDisplayName(cl);
 
 			fmt::format_to(std::back_inserter(small), FMT_STRING("{:9} {:32} {:32} {:02}:{:02} {:4} {:5} {}{}\n"), index[i], cl->pers.social_id, value, (level.time - cl->resp.entertime).milliseconds() / 60000,
 				((level.time - cl->resp.entertime).milliseconds() % 60000) / 1000, cl->ping,
@@ -1435,8 +1435,7 @@ static void Cmd_PlayersJoinTime_f(gentity_t *ent) {
 
 			gclient_t *cl = &game.clients[index[i]];
 
-			char value[MAX_INFO_VALUE] = { 0 };
-			gi.Info_ValueForKey(cl->pers.userinfo, "name", value, sizeof(value));
+			const std::string_view value = MM_PlayerDisplayName(cl);
 
 			fmt::format_to(std::back_inserter(small), FMT_STRING("{:32} {:32}\n"), cl->sess.team_join_time.milliseconds(), value);
 
@@ -2605,7 +2604,7 @@ void ClientCommand(gentity_t *ent) {
 #if 0
 	// check if client is 888, print what is being sent and prevent any further processing
 	if (ent->client->sess.is_888) {
-		gi.Com_PrintFmt("Sneaky little snake Dalude/888 (%s) sent the following command:\n{}\n", ent->client->pers.netname, gi.args());
+		gi.Com_PrintFmt("Sneaky little snake Dalude/888 ({}) sent the following command:\n{}\n", MM_PlayerDisplayName(ent->client), gi.args());
 		return;
 	}
 #endif
