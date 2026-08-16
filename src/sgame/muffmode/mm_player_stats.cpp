@@ -38,6 +38,7 @@ struct player_stats_participant_t {
 	std::string player_name;
 	std::string recovery_preferences_json;
 	float rating = MM_PLAYER_STATS_DEFAULT_RATING;
+	int32_t matches_played = 0;
 	int32_t score = 0;
 	team_t team = TEAM_NONE;
 	bool bot = false;
@@ -63,6 +64,7 @@ bool s_match_has_non_atomic_departure = false;
 struct settled_player_t {
 	float rating = MM_PLAYER_STATS_DEFAULT_RATING;
 	int32_t change = 0;
+	int32_t matches_played = 0;
 	uint32_t serial = 0;
 	mm_player_stats_outcome_t outcome = mm_player_stats_outcome_t::no_contest;
 	bool profile_result_admitted = false;
@@ -305,6 +307,7 @@ std::vector<player_stats_participant_t> CollectParticipants()
 			state == ent->client
 				? NormalizeClientRating(ent->client)
 				: ClientRating(state),
+			state->sess.stats_matches_played,
 			state->resp.score,
 			state->sess.team,
 			bot,
@@ -692,6 +695,7 @@ bool ApplyRecordedSettlement(gclient_t *client, std::string_view gametype,
 	}
 	client->sess.skill_rating = settled->second.rating;
 	client->sess.skill_rating_change = settled->second.change;
+	client->sess.stats_matches_played = settled->second.matches_played;
 	client->sess.stats_saved_match_serial = settled->second.serial;
 	client->sess.stats_saved_match_outcome =
 		static_cast<uint8_t>(settled->second.outcome);
@@ -715,6 +719,7 @@ void SettleParticipant(player_stats_participant_t &participant,
 	}
 
 	const float original_rating = participant.rating;
+	const int32_t original_matches_played = participant.matches_played;
 	const bool persist_profile = outcome !=
 		mm_player_stats_outcome_t::no_contest &&
 		ProfileSettlementRequiresQueue(participant) &&
@@ -728,6 +733,11 @@ void SettleParticipant(player_stats_participant_t &participant,
 
 	bool profile_result_admitted = false;
 	if (persist_profile) {
+		// Optimistically count this match now, mirroring skill_rating above, so a
+		// duel grinder's K bucket does not go stale mid-session. Rolled back below
+		// if admission fails, same as the rating.
+		client->sess.stats_matches_played = original_matches_played + 1;
+		participant.matches_played = client->sess.stats_matches_played;
 		// Preserve the exact result before claiming the in-memory serial. Failed
 		// atomic writes remain queued and are retried without recomputing Elo.
 		profile_result_admitted = EnqueueProfileSettlement(
@@ -738,6 +748,8 @@ void SettleParticipant(player_stats_participant_t &participant,
 			client->sess.skill_rating = original_rating;
 			client->sess.skill_rating_change = 0;
 			participant.rating = original_rating;
+			client->sess.stats_matches_played = original_matches_played;
+			participant.matches_played = original_matches_played;
 		}
 	}
 
@@ -750,6 +762,7 @@ void SettleParticipant(player_stats_participant_t &participant,
 			[std::string(MatchGametypeName())] = {
 			client->sess.skill_rating,
 			client->sess.skill_rating_change,
+			client->sess.stats_matches_played,
 			s_match_serial,
 			outcome,
 			profile_result_admitted
@@ -807,10 +820,12 @@ void SettleDuel(std::vector<player_stats_participant_t> &participants,
 	const float expected_a = MM_PlayerStats_EloExpected(a.rating, b.rating);
 
 	const mm_player_stats_rating_update_t update_a = ratings_allowed
-		? MM_PlayerStats_ApplyRating(a.rating, actual_a, expected_a)
+		? MM_PlayerStats_ApplyRating(a.rating, actual_a, expected_a,
+			MM_PlayerStats_KFactor(a.matches_played))
 		: mm_player_stats_rating_update_t{ a.rating, 0 };
 	const mm_player_stats_rating_update_t update_b = ratings_allowed
-		? MM_PlayerStats_ApplyRating(b.rating, 1.0f - actual_a, 1.0f - expected_a)
+		? MM_PlayerStats_ApplyRating(b.rating, 1.0f - actual_a, 1.0f - expected_a,
+			MM_PlayerStats_KFactor(b.matches_played))
 		: mm_player_stats_rating_update_t{ b.rating, 0 };
 
 	SettleParticipant(a,
@@ -903,7 +918,8 @@ void SettleFfa(std::vector<player_stats_participant_t> &participants,
 		const float expected = MM_PlayerStats_FfaExpectedScore(
 			ratings.data(), ratings.size(), i);
 		const auto update = ratings_allowed
-			? MM_PlayerStats_ApplyRating(participant.rating, actual, expected)
+			? MM_PlayerStats_ApplyRating(participant.rating, actual, expected,
+				MM_PlayerStats_KFactor(participant.matches_played))
 			: mm_player_stats_rating_update_t{ participant.rating, 0 };
 
 		mm_player_stats_outcome_t outcome = mm_player_stats_outcome_t::loss;
@@ -938,6 +954,7 @@ void SettleDeparture(gentity_t *ent)
 			BoundedPlayerName(ent->client),
 			MM_ClientProfileSerializePreferences(ent->client),
 			NormalizeClientRating(ent->client),
+			ent->client->sess.stats_matches_played,
 			ent->client->resp.score,
 			ent->client->sess.team,
 			IsBot(ent),
@@ -980,11 +997,11 @@ void SettleDeparture(gentity_t *ent)
 				quitter->rating, opponent->rating);
 			const auto quitter_update = duel_ratings_allowed
 				? MM_PlayerStats_ApplyRating(quitter->rating, 0.0f,
-					expected_quitter)
+					expected_quitter, MM_PlayerStats_KFactor(quitter->matches_played))
 				: mm_player_stats_rating_update_t{ quitter->rating, 0 };
 			const auto opponent_update = duel_ratings_allowed
 				? MM_PlayerStats_ApplyRating(opponent->rating, 1.0f,
-					1.0f - expected_quitter)
+					1.0f - expected_quitter, MM_PlayerStats_KFactor(opponent->matches_played))
 				: mm_player_stats_rating_update_t{ opponent->rating, 0 };
 			SettleParticipant(*quitter,
 				mm_player_stats_outcome_t::abandon, quitter_update,
@@ -1044,7 +1061,8 @@ void SettleDeparture(gentity_t *ent)
 		const float expected = quitter->team == TEAM_RED ?
 			expected_red : 1.0f - expected_red;
 		const auto update = departure_ratings_allowed
-			? MM_PlayerStats_ApplyRating(quitter->rating, 0.0f, expected)
+			? MM_PlayerStats_ApplyRating(quitter->rating, 0.0f, expected,
+				MM_PlayerStats_KFactor(quitter->matches_played))
 			: mm_player_stats_rating_update_t{ quitter->rating, 0 };
 		SettleParticipant(*quitter,
 			mm_player_stats_outcome_t::abandon, update,
@@ -1063,7 +1081,8 @@ void SettleDeparture(gentity_t *ent)
 	const bool departure_ratings_allowed =
 		ratings_allowed && profile_persistence_allowed;
 	const auto update = departure_ratings_allowed
-		? MM_PlayerStats_ApplyRating(quitter->rating, 0.0f, expected)
+		? MM_PlayerStats_ApplyRating(quitter->rating, 0.0f, expected,
+			MM_PlayerStats_KFactor(quitter->matches_played))
 		: mm_player_stats_rating_update_t{ quitter->rating, 0 };
 	SettleParticipant(*quitter,
 		mm_player_stats_outcome_t::abandon, update,

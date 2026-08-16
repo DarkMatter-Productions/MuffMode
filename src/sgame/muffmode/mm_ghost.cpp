@@ -54,6 +54,7 @@ enum class AutoGhostPhase : uint8_t {
 struct SavedProfileAuthority {
 	float rating = MM_PLAYER_STATS_DEFAULT_RATING;
 	int32_t rating_change = 0;
+	int32_t matches_played = 0;
 	uint32_t stats_serial = 0;
 	uint8_t stats_outcome = 0;
 	bool stats_suspended = false;
@@ -1103,6 +1104,7 @@ SavedProfileAuthority CaptureSavedProfileAuthority(const gclient_t &source)
 	return {
 		source.sess.skill_rating,
 		source.sess.skill_rating_change,
+		source.sess.stats_matches_played,
 		source.sess.stats_saved_match_serial,
 		source.sess.stats_saved_match_outcome,
 		source.sess.stats_reconnect_suspended,
@@ -1120,6 +1122,7 @@ void ApplySavedProfileAuthority(
 		destination.sess.profile_persistence_ready;
 	destination.sess.skill_rating = saved.rating;
 	destination.sess.skill_rating_change = saved.rating_change;
+	destination.sess.stats_matches_played = saved.matches_played;
 	destination.sess.stats_saved_match_serial = saved.stats_serial;
 	destination.sess.stats_saved_match_outcome = saved.stats_outcome;
 	destination.sess.stats_reconnect_suspended = saved.stats_suspended;
@@ -1247,6 +1250,7 @@ void ReconcileDeferredProfiles()
 
 		ent->client->sess.skill_rating = reconciled.rating;
 		ent->client->sess.skill_rating_change = reconciled.rating_change;
+		ent->client->sess.stats_matches_played = reconciled.matches_played;
 		ent->client->sess.stats_saved_match_serial = reconciled.stats_serial;
 		ent->client->sess.stats_saved_match_outcome = reconciled.stats_outcome;
 		ent->client->sess.stats_reconnect_suspended =

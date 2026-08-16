@@ -526,6 +526,7 @@ void MM_ClientInitPConfig(gentity_t *ent)
 		ent->client->sess.profile_persistence_ready = false;
 		ent->client->sess.skill_rating = MM_ClientProfileDefaultRating();
 		ent->client->sess.skill_rating_change = 0;
+		ent->client->sess.stats_matches_played = 0;
 		MM_ClientProfileClearWeaponPreferences(ent->client);
 		return;
 	}

@@ -154,6 +154,27 @@ MM_TEST(player_stats_rating_bounds_and_invalid_values_are_safe) {
 		static_cast<int32_t>(MM_PLAYER_STATS_DEFAULT_RATING));
 }
 
+MM_TEST(player_stats_apply_rating_default_k_matches_explicit_k32) {
+	const auto default_call = MM_PlayerStats_ApplyRating(1500.0f, 1.0f, 0.5f);
+	const auto explicit_k32 = MM_PlayerStats_ApplyRating(
+		1500.0f, 1.0f, 0.5f, MM_PLAYER_STATS_ELO_K);
+	MM_CHECK_EQ(default_call.rating, explicit_k32.rating);
+	MM_CHECK_EQ(default_call.change, explicit_k32.change);
+
+	const auto default_loss = MM_PlayerStats_ApplyRating(1500.0f, 0.0f, 0.5f);
+	const auto explicit_loss = MM_PlayerStats_ApplyRating(
+		1500.0f, 0.0f, 0.5f, MM_PLAYER_STATS_ELO_K);
+	MM_CHECK_EQ(default_loss.rating, explicit_loss.rating);
+	MM_CHECK_EQ(default_loss.change, explicit_loss.change);
+}
+
+MM_TEST(player_stats_kfactor_threshold_boundary) {
+	MM_CHECK_EQ(MM_PlayerStats_KFactor(0), MM_PLAYER_STATS_ELO_K_PROVISIONAL);
+	MM_CHECK_EQ(MM_PlayerStats_KFactor(19), MM_PLAYER_STATS_ELO_K_PROVISIONAL);
+	MM_CHECK_EQ(MM_PlayerStats_KFactor(20), MM_PLAYER_STATS_ELO_K);
+	MM_CHECK_EQ(MM_PlayerStats_KFactor(1000), MM_PLAYER_STATS_ELO_K);
+}
+
 MM_TEST(player_stats_ffa_scores_ties_pairwise) {
 	const int32_t scores[] = { 10, 10, 0 };
 	MM_CHECK_EQ(MM_PlayerStats_FfaActualScore(scores, 3, 0), 0.75f);

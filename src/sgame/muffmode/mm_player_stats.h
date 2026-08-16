@@ -18,6 +18,12 @@ constexpr float MM_PLAYER_STATS_DEFAULT_RATING = 1500.0f;
 constexpr float MM_PLAYER_STATS_MIN_RATING = 0.0f;
 constexpr float MM_PLAYER_STATS_MAX_RATING = 65535.0f;
 constexpr float MM_PLAYER_STATS_ELO_K = 32.0f;
+// A player's first N matches in a gametype move faster toward their true
+// rating, the same idea chess federations use for new players. Composes with
+// MM_PLAYER_STATS_TEAM_WEIGHT_MAX below; k_max_skill_rating_change in
+// mm_client_profile.cpp must stay >= their product.
+constexpr float MM_PLAYER_STATS_ELO_K_PROVISIONAL = 48.0f;
+constexpr int32_t MM_PLAYER_STATS_PROVISIONAL_MATCH_THRESHOLD = 20;
 constexpr size_t MM_PLAYER_STATS_PENDING_SETTLEMENT_LIMIT = 4096;
 
 inline constexpr bool MM_PlayerStatsPendingQueueHasCapacity(
@@ -101,7 +107,8 @@ inline float MM_PlayerStats_EloExpected(
 }
 
 inline mm_player_stats_rating_update_t MM_PlayerStats_ApplyRating(
-	float rating, float actual_score, float expected_score) noexcept
+	float rating, float actual_score, float expected_score,
+	float k_factor = MM_PLAYER_STATS_ELO_K) noexcept
 {
 	rating = MM_PlayerStats_NormalizeRating(rating);
 	actual_score = std::clamp(actual_score, 0.0f, 1.0f);
@@ -110,12 +117,21 @@ inline mm_player_stats_rating_update_t MM_PlayerStats_ApplyRating(
 	// delta. This intentionally improves on WORR's uint16_t assignment, which
 	// discarded the fractional component and accumulated rating drift.
 	const float requested_change =
-		MM_PLAYER_STATS_ELO_K * (actual_score - expected_score);
+		k_factor * (actual_score - expected_score);
 	const float updated = MM_PlayerStats_NormalizeRating(
 		rating + requested_change);
 	const int32_t applied_change = static_cast<int32_t>(
 		updated - rating);
 	return { updated, applied_change };
+}
+
+// A player under the provisional threshold in this gametype moves faster
+// toward their true rating; everyone else keeps today's flat K.
+inline constexpr float MM_PlayerStats_KFactor(int32_t matches_played) noexcept
+{
+	return matches_played < MM_PLAYER_STATS_PROVISIONAL_MATCH_THRESHOLD
+		? MM_PLAYER_STATS_ELO_K_PROVISIONAL
+		: MM_PLAYER_STATS_ELO_K;
 }
 
 inline float MM_PlayerStats_FfaActualScore(

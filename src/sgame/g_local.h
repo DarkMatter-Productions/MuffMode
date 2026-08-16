@@ -18,7 +18,7 @@
 constexpr const char *GAMEVERSION = "baseq2";
 
 constexpr const char *GAMEMOD_TITLE = "Muff Mode";
-constexpr const char *GAMEMOD_VERSION = "0.85.16";
+constexpr const char *GAMEMOD_VERSION = "0.85.17";
 
 //==================================================================
 
@@ -3643,6 +3643,9 @@ struct client_session_t {
 	bool			profile_persistence_ready;
 	float			skill_rating;
 	int32_t			skill_rating_change;
+	// [MuffMode] Matches played in the current gametype's rating pool; scales
+	// Elo K-factor down once a player is past the provisional threshold.
+	int32_t			stats_matches_played;
 	int64_t			stats_play_start_ms;
 	uint32_t		stats_saved_match_serial;
 	uint8_t			stats_saved_match_outcome;

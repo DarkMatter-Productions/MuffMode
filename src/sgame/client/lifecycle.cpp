@@ -1800,6 +1800,7 @@ bool ClientConnect(gentity_t *ent, char *userinfo, const char *social_id, bool i
 	ent->client->sess.profile_persistence_ready = false;
 	ent->client->sess.skill_rating = MM_ClientProfileDefaultRating();
 	ent->client->sess.skill_rating_change = 0;
+	ent->client->sess.stats_matches_played = 0;
 	MM_ClientProfileClearWeaponPreferences(ent->client);
 	MM_ClientInitPConfig(ent);
 	MM_PlayerStats_OnProfileLoaded(ent);

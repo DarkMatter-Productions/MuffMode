@@ -69,7 +69,9 @@ constexpr size_t k_max_profile_stem_bytes = 80;
 constexpr size_t k_max_preference_snapshot_bytes = 0x4000;
 constexpr size_t k_max_command_tokens = 128;
 constexpr size_t k_max_pending_preference_snapshots = MAX_CLIENTS;
-constexpr int32_t k_max_skill_rating_change = 32;
+// Must stay >= MM_PLAYER_STATS_ELO_K_PROVISIONAL * MM_PLAYER_STATS_TEAM_WEIGHT_MAX
+// (mm_player_stats.h) -- see host test player_stats_provisional_k_change_stays_within_persistence_ceiling.
+constexpr int32_t k_max_skill_rating_change = 80;
 constexpr const char *k_profile_directory = "baseq2/pcfg/profiles";
 constexpr const char *k_legacy_profile_directory = "baseq2/pcfg";
 constexpr auto k_profile_lock_timeout = std::chrono::milliseconds(20);
@@ -167,6 +169,7 @@ struct repair_result_t {
 	std::string gametype;
 	float rating = k_default_skill_rating;
 	int32_t rating_change = 0;
+	int32_t matches_played = 0;
 };
 
 bool IsValidItemId(item_id_t id) noexcept
@@ -1252,6 +1255,48 @@ void RepairRatings(
 	}
 }
 
+// Per-gametype match counts, a sibling of "ratings"/"ratingChanges" rather
+// than a member of "stats" (which only ever tracked global aggregates). Scales
+// Elo K-factor for newer players; see MM_PlayerStats_KFactor.
+void RepairMatchesPlayed(
+	Json::Value &root,
+	std::string_view current_gametype,
+	int32_t &current_matches_played,
+	bool &modified,
+	bool &schema_repaired)
+{
+	Json::Value canonical(Json::objectValue);
+	if (root.isMember("matchesPlayed") && root["matchesPlayed"].isObject()) {
+		for (const std::string &stored_key :
+				root["matchesPlayed"].getMemberNames()) {
+			const auto key = NormalizeGametype(stored_key);
+			uint64_t count = 0;
+			if (!key || !JsonCounter(root["matchesPlayed"][stored_key], count))
+				continue;
+			if (canonical.size() >= GT_NUM_GAMETYPES && !canonical.isMember(*key))
+				continue;
+			if (!canonical.isMember(*key))
+				canonical[*key] = CounterValue(count);
+		}
+	} else {
+		schema_repaired = true;
+	}
+
+	if (!canonical.isMember(std::string(current_gametype)))
+		canonical[std::string(current_gametype)] = CounterValue(0);
+
+	uint64_t current_count = 0;
+	JsonCounter(canonical[std::string(current_gametype)], current_count);
+	current_matches_played = static_cast<int32_t>(std::min<uint64_t>(
+		current_count, static_cast<uint64_t>(std::numeric_limits<int32_t>::max())));
+
+	if (!root.isMember("matchesPlayed") || root["matchesPlayed"] != canonical) {
+		root["matchesPlayed"] = std::move(canonical);
+		modified = true;
+		schema_repaired = true;
+	}
+}
+
 void RepairStats(
 	Json::Value &root,
 	float current_rating,
@@ -1506,6 +1551,8 @@ repair_result_t RepairProfile(
 	RepairStats(root, result.rating, result.modified, result.schema_repaired);
 	RepairRatingChanges(root, legacy_ratings, result.gametype, result.rating_change,
 		result.modified, result.schema_repaired);
+	RepairMatchesPlayed(root, result.gametype, result.matches_played,
+		result.modified, result.schema_repaired);
 
 	// Authority comes exclusively from MuffMode's authenticated admin system.
 	if (root.isMember("admin")) {
@@ -1591,6 +1638,11 @@ void ApplyProfileToClient(gclient_t *client, const Json::Value &root,
 	JsonSkillRatingChange(
 		root["ratingChanges"][std::string(gametype)], change);
 	client->sess.skill_rating_change = change;
+
+	uint64_t matches_played = 0;
+	JsonCounter(root["matchesPlayed"][std::string(gametype)], matches_played);
+	client->sess.stats_matches_played = static_cast<int32_t>(std::min<uint64_t>(
+		matches_played, static_cast<uint64_t>(std::numeric_limits<int32_t>::max())));
 }
 
 Json::Value ConfigFromClient(const gclient_t *client)
@@ -2528,6 +2580,7 @@ bool MM_ClientProfilePersistMatchResult(
 
 	root["ratings"][*gametype] = result.skill_rating;
 	root["ratingChanges"][*gametype] = result.skill_rating_change;
+	IncrementCounter(root["matchesPlayed"], gametype->c_str());
 
 	float best_rating = 0.0f;
 	if (!JsonRating(stats["bestSkillRating"], best_rating))
