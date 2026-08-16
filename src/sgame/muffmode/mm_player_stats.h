@@ -134,6 +134,42 @@ inline constexpr float MM_PlayerStats_KFactor(int32_t matches_played) noexcept
 		: MM_PLAYER_STATS_ELO_K;
 }
 
+constexpr float MM_PLAYER_STATS_TEAM_WEIGHT_MIN = 0.5f;
+constexpr float MM_PLAYER_STATS_TEAM_WEIGHT_MAX = 1.5f;
+
+// Share of a team's positive scoring this player produced, normalized so an
+// equal-contribution player always lands at 1.0 -- identical to an even
+// split. Falls back to 1.0 (no differentiation) when the team's total is
+// non-positive (e.g. every player scored 0), so a zero-information match
+// cannot manufacture a spurious swing.
+inline float MM_PlayerStats_TeamContributionShare(
+	int32_t player_score, int32_t team_positive_score_total,
+	size_t team_size) noexcept
+{
+	if (team_size == 0 || team_positive_score_total <= 0)
+		return 1.0f;
+	const float contribution = static_cast<float>(std::max(player_score, 0));
+	const float share = (static_cast<float>(team_size) * contribution) /
+		static_cast<float>(team_positive_score_total);
+	return std::clamp(share,
+		MM_PLAYER_STATS_TEAM_WEIGHT_MIN, MM_PLAYER_STATS_TEAM_WEIGHT_MAX);
+}
+
+// Direction-aware so a plain magnitude multiplier can't reward sandbagging: a
+// delta that favors this player (actual >= expected) is scaled by the raw
+// share (high contributors gain more); a delta that hurts them mirrors around
+// the midpoint (high contributors are shielded, low contributors take the
+// bigger hit either way). Both branches stay inside [MIN, MAX] because
+// MIN + MAX == 2.0.
+inline float MM_PlayerStats_TeamContributionWeight(
+	float contribution_share, float actual_score, float expected_score) noexcept
+{
+	return actual_score >= expected_score
+		? contribution_share
+		: (MM_PLAYER_STATS_TEAM_WEIGHT_MIN + MM_PLAYER_STATS_TEAM_WEIGHT_MAX) -
+			contribution_share;
+}
+
 inline float MM_PlayerStats_FfaActualScore(
 	const int32_t *scores, size_t count, size_t player_index) noexcept
 {

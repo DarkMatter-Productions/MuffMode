@@ -175,6 +175,58 @@ MM_TEST(player_stats_kfactor_threshold_boundary) {
 	MM_CHECK_EQ(MM_PlayerStats_KFactor(1000), MM_PLAYER_STATS_ELO_K);
 }
 
+MM_TEST(player_stats_team_contribution_share_clamps_and_defaults) {
+	// Zero team total: no-op, matches today's flat split.
+	MM_CHECK_EQ(MM_PlayerStats_TeamContributionShare(0, 0, 2), 1.0f);
+	MM_CHECK_EQ(MM_PlayerStats_TeamContributionShare(5, 0, 2), 1.0f);
+	// Single-player team always lands on 1.0.
+	MM_CHECK_EQ(MM_PlayerStats_TeamContributionShare(30, 30, 1), 1.0f);
+	// All-equal scores: everyone gets exactly their even split.
+	MM_CHECK_EQ(MM_PlayerStats_TeamContributionShare(10, 20, 2), 1.0f);
+	// A dominant scorer clamps at the max weight.
+	MM_CHECK_EQ(MM_PlayerStats_TeamContributionShare(30, 40, 2),
+		MM_PLAYER_STATS_TEAM_WEIGHT_MAX);
+	// A team-killer (score <= 0) on a positive-total team clamps at the floor,
+	// not zero -- a genuine team result should still move their rating some.
+	MM_CHECK_EQ(MM_PlayerStats_TeamContributionShare(-2, 40, 2),
+		MM_PLAYER_STATS_TEAM_WEIGHT_MIN);
+	MM_CHECK_EQ(MM_PlayerStats_TeamContributionShare(10, 40, 2),
+		MM_PLAYER_STATS_TEAM_WEIGHT_MIN);
+}
+
+MM_TEST(player_stats_team_contribution_weight_is_direction_aware) {
+	// Same contribution profile (30/10 split, shares 1.5/0.5), opposite outcome.
+	const float high_share = MM_PlayerStats_TeamContributionShare(30, 40, 2);
+	const float low_share = MM_PlayerStats_TeamContributionShare(10, 40, 2);
+
+	// Favorable outcome (actual >= expected): high contributor gains more.
+	const float high_win_weight =
+		MM_PlayerStats_TeamContributionWeight(high_share, 1.0f, 0.5f);
+	const float low_win_weight =
+		MM_PlayerStats_TeamContributionWeight(low_share, 1.0f, 0.5f);
+	MM_CHECK(high_win_weight > low_win_weight);
+	MM_CHECK_EQ(high_win_weight, MM_PLAYER_STATS_TEAM_WEIGHT_MAX);
+	MM_CHECK_EQ(low_win_weight, MM_PLAYER_STATS_TEAM_WEIGHT_MIN);
+
+	// Unfavorable outcome (actual < expected): high contributor is shielded,
+	// low contributor takes the bigger hit -- the inequality flips.
+	const float high_loss_weight =
+		MM_PlayerStats_TeamContributionWeight(high_share, 0.0f, 0.5f);
+	const float low_loss_weight =
+		MM_PlayerStats_TeamContributionWeight(low_share, 0.0f, 0.5f);
+	MM_CHECK(high_loss_weight < low_loss_weight);
+	MM_CHECK_EQ(high_loss_weight, MM_PLAYER_STATS_TEAM_WEIGHT_MIN);
+	MM_CHECK_EQ(low_loss_weight, MM_PLAYER_STATS_TEAM_WEIGHT_MAX);
+}
+
+MM_TEST(player_stats_provisional_k_change_stays_within_persistence_ceiling) {
+	// Mirrors mm_client_profile.cpp's private k_max_skill_rating_change (80):
+	// the worst-case |delta| is provisional K times the max team weight, and
+	// that product must never exceed what the profile layer will persist.
+	MM_CHECK(MM_PLAYER_STATS_ELO_K_PROVISIONAL *
+		MM_PLAYER_STATS_TEAM_WEIGHT_MAX <= 80.0f);
+}
+
 MM_TEST(player_stats_ffa_scores_ties_pairwise) {
 	const int32_t scores[] = { 10, 10, 0 };
 	MM_CHECK_EQ(MM_PlayerStats_FfaActualScore(scores, 3, 0), 0.75f);

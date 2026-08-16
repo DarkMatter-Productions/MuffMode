@@ -871,13 +871,30 @@ void SettleTeams(std::vector<player_stats_participant_t> &participants,
 	const bool draw = level.team_scores[TEAM_RED] == level.team_scores[TEAM_BLUE];
 	const bool red_won = level.team_scores[TEAM_RED] > level.team_scores[TEAM_BLUE];
 
+	// Individual contribution share, so a carried player does not gain exactly
+	// as much as their best teammate. See MM_PlayerStats_TeamContributionWeight.
+	int32_t red_score_total = 0;
+	int32_t blue_score_total = 0;
+	for (const auto &participant : participants) {
+		if (participant.team == TEAM_RED)
+			red_score_total += std::max(participant.score, 0);
+		else if (participant.team == TEAM_BLUE)
+			blue_score_total += std::max(participant.score, 0);
+	}
+
 	for (auto &participant : participants) {
 		const bool red = participant.team == TEAM_RED;
 		const float actual = draw ? 0.5f :
 			(red == red_won ? 1.0f : 0.0f);
 		const float expected = red ? expected_red : 1.0f - expected_red;
+		const float share = MM_PlayerStats_TeamContributionShare(
+			participant.score, red ? red_score_total : blue_score_total,
+			red ? red_count : blue_count);
+		const float weight = MM_PlayerStats_TeamContributionWeight(
+			share, actual, expected);
+		const float k = MM_PlayerStats_KFactor(participant.matches_played) * weight;
 		const auto update = ratings_allowed
-			? MM_PlayerStats_ApplyRating(participant.rating, actual, expected)
+			? MM_PlayerStats_ApplyRating(participant.rating, actual, expected, k)
 			: mm_player_stats_rating_update_t{ participant.rating, 0 };
 		const auto outcome = draw ? mm_player_stats_outcome_t::draw :
 			(actual > 0.5f ? mm_player_stats_outcome_t::win :
