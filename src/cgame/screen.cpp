@@ -1577,7 +1577,7 @@ void CG_DrawHUD(int32_t isplit, const cg_server_data_t *data, vrect_t hud_vrect,
 	CG_CheckDrawCenterString(ps, hud_vrect, hud_safe, isplit, scale);
 
 	// draw notify
-	CG_DrawNotify(isplit, hud_vrect, hud_safe, scale);
+	CG_DrawNotify(isplit, hud_vrect, hud_safe, scale, ps);
 
 	if (!cl_skipHud->integer && !(ps->stats[STAT_LAYOUTS] & LAYOUTS_HIDE_HUD))
 		CG_DrawMuffModeHudEnhancements(ps, hud_vrect, hud_safe, scale, playernum);

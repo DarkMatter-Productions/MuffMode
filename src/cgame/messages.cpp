@@ -281,8 +281,17 @@ void CG_NotifyMessage(int32_t isplit, const char *msg, bool is_chat)
 	AddNotify(hud_messages[isplit], msg, is_chat);
 }
 
-void CG_DrawNotify(int32_t isplit, vrect_t hud_vrect, vrect_t hud_safe, int32_t scale)
+void CG_DrawNotify(int32_t isplit, vrect_t hud_vrect, vrect_t hud_safe, int32_t scale, const player_state_t *ps)
 {
+	// [MuffMode] The intermission scoreboard footer (mm_scoreboard_layout.h) draws
+	// "Score Limit" / "Total Match Time" cstring2 lines in this same top band, and
+	// MM_MatchStats_End's per-player summary print lands in the notify queue at the
+	// exact moment intermission begins. Left undrawn here, the two blocks render on
+	// top of each other. The message itself still reaches the console scrollback via
+	// the engine's own print handling, so hiding the transient overlay costs nothing.
+	if (InIntermission(ps))
+		return;
+
 	auto &data = hud_messages[isplit];
 
 	CheckNotifyExpire(data);

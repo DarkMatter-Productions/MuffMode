@@ -7,7 +7,7 @@
 
 void CG_InitMessages();
 
-void CG_DrawNotify(int32_t isplit, vrect_t hud_vrect, vrect_t hud_safe, int32_t scale);
+void CG_DrawNotify(int32_t isplit, vrect_t hud_vrect, vrect_t hud_safe, int32_t scale, const player_state_t *ps);
 void CG_CheckDrawCenterString(const player_state_t *ps, const vrect_t &hud_vrect, const vrect_t &hud_safe, int isplit, int scale);
 
 void CG_ClearCenterprint(int32_t isplit);
