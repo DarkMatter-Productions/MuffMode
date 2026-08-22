@@ -181,6 +181,9 @@
     <ClInclude Include="..\..\src\sgame\muffmode\mm_announcer_rules.h">
       <Filter>sgame\muffmode</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_bans_rules.h">
+      <Filter>sgame\muffmode</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\src\sgame\muffmode\mm_debug.h">
       <Filter>sgame\muffmode</Filter>
     </ClInclude>

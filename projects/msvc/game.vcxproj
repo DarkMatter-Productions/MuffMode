@@ -171,6 +171,7 @@
     <ClInclude Include="..\..\src\sgame\muffmode\mm_admin.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_announcer.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_announcer_rules.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_bans_rules.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_captain.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_command_contracts.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_hud_stat_contracts.h" />

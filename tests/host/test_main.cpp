@@ -3,6 +3,7 @@
 
 #include "fake_game_import.h"
 #include "muffmode/mm_announcer_rules.h"
+#include "muffmode/mm_bans_rules.h"
 #include "muffmode/mm_command_contracts.h"
 #include "muffmode/mm_freezetag_rules.h"
 #include "muffmode/mm_hud_stat_contracts.h"
@@ -784,6 +785,74 @@ MM_TEST(announcer_decision_on_null_stem_without_use_backup_is_silent) {
 }
 
 } // namespace
+
+MM_TEST(bans_parse_and_format_roundtrip) {
+	muffmode::bans::BanRecord rec;
+	MM_CHECK(muffmode::bans::ParseBanLine("STEAM_123|Grunt|spawn camping", rec));
+	MM_CHECK_EQ(rec.social_id, std::string("STEAM_123"));
+	MM_CHECK_EQ(rec.name, std::string("Grunt"));
+	MM_CHECK_EQ(rec.reason, std::string("spawn camping"));
+	MM_CHECK_EQ(muffmode::bans::FormatBanLine(rec), std::string("STEAM_123|Grunt|spawn camping"));
+}
+
+MM_TEST(bans_parse_rejects_blank_comment_and_empty_id) {
+	muffmode::bans::BanRecord rec;
+	MM_CHECK_FALSE(muffmode::bans::ParseBanLine("", rec));
+	MM_CHECK_FALSE(muffmode::bans::ParseBanLine("   ", rec));
+	MM_CHECK_FALSE(muffmode::bans::ParseBanLine("# a comment", rec));
+	MM_CHECK_FALSE(muffmode::bans::ParseBanLine("|noid|x", rec));
+}
+
+MM_TEST(bans_parse_id_only_and_extra_pipes_fold_into_reason) {
+	muffmode::bans::BanRecord rec;
+	MM_CHECK(muffmode::bans::ParseBanLine("ONLYID", rec));
+	MM_CHECK_EQ(rec.social_id, std::string("ONLYID"));
+	MM_CHECK(rec.name.empty());
+	MM_CHECK(rec.reason.empty());
+	MM_CHECK(muffmode::bans::ParseBanLine("ID|Bob|a|b|c", rec));
+	MM_CHECK_EQ(rec.reason, std::string("a|b|c"));
+}
+
+MM_TEST(bans_sanitize_strips_separators_and_newlines) {
+	muffmode::bans::BanRecord rec{ "ID", "Bad|Name", "line1\nline2\r" };
+	MM_CHECK_EQ(muffmode::bans::FormatBanLine(rec), std::string("ID|Bad Name|line1 line2 "));
+}
+
+MM_TEST(bans_add_dedupes_and_updates_by_social_id) {
+	std::vector<muffmode::bans::BanRecord> list;
+	MM_CHECK(muffmode::bans::AddOrUpdateBan(list, { "A", "Al", "r1" }));
+	MM_CHECK(muffmode::bans::AddOrUpdateBan(list, { "B", "Bo", "r2" }));
+	MM_CHECK_EQ(list.size(), size_t(2));
+	MM_CHECK_FALSE(muffmode::bans::AddOrUpdateBan(list, { "A", "Al2", "r3" })); // update, not add
+	MM_CHECK_EQ(list.size(), size_t(2));
+	MM_CHECK_EQ(list[0].name, std::string("Al2"));
+	MM_CHECK_EQ(list[0].reason, std::string("r3"));
+	MM_CHECK_FALSE(muffmode::bans::AddOrUpdateBan(list, { "", "x", "y" })); // empty id rejected
+	MM_CHECK_EQ(list.size(), size_t(2));
+}
+
+MM_TEST(bans_is_banned_and_remove) {
+	std::vector<muffmode::bans::BanRecord> list;
+	muffmode::bans::AddOrUpdateBan(list, { "A", "Al", "" });
+	MM_CHECK(muffmode::bans::IsBanned(list, "A"));
+	MM_CHECK_FALSE(muffmode::bans::IsBanned(list, "B"));
+	MM_CHECK_FALSE(muffmode::bans::IsBanned(list, "")); // empty never banned
+	MM_CHECK(muffmode::bans::RemoveBan(list, "A"));
+	MM_CHECK_FALSE(muffmode::bans::IsBanned(list, "A"));
+	MM_CHECK_FALSE(muffmode::bans::RemoveBan(list, "A")); // already gone
+}
+
+MM_TEST(bans_file_roundtrip_and_dedupe_on_load) {
+	std::vector<muffmode::bans::BanRecord> list;
+	muffmode::bans::AddOrUpdateBan(list, { "A", "Al", "r1" });
+	muffmode::bans::AddOrUpdateBan(list, { "B", "Bo", "" });
+	std::vector<muffmode::bans::BanRecord> loaded = muffmode::bans::ParseBanFile(muffmode::bans::FormatBanFile(list));
+	MM_CHECK_EQ(loaded.size(), size_t(2));
+	MM_CHECK(muffmode::bans::IsBanned(loaded, "A"));
+	MM_CHECK(muffmode::bans::IsBanned(loaded, "B"));
+	std::vector<muffmode::bans::BanRecord> dd = muffmode::bans::ParseBanFile("A|x|y\n# c\n\nA|z|w\nB|b|\n");
+	MM_CHECK_EQ(dd.size(), size_t(2)); // duplicate + comment + blank collapse
+}
 
 int main() {
 	int failures = 0;
