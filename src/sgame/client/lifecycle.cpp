@@ -4,6 +4,7 @@
 #include "userinfo.h"
 #include "monsters/m_player.h"
 #include "bots/bot_includes.h"
+#include "muffmode/mm_bans.h"
 #include "muffmode/mm_captain.h"
 #include "muffmode/mm_freezetag.h"
 #include "muffmode/mm_ghost.h"
@@ -1501,6 +1502,24 @@ loadgames will.
 ============
 */
 bool ClientConnect(gentity_t *ent, char *userinfo, const char *social_id, bool is_bot) {
+	// Reject banned players up front, keyed by the engine's stable social_id.
+	// Bots carry no social_id and are never banned. Refusing here returns
+	// false before any client setup runs.
+	if (!is_bot && MM_IsBanned(social_id)) {
+		gi.Info_SetValueForKey(userinfo, "rejmsg", "You are banned from this server.");
+		// Also drop the engine-side lobby user. The platform chat control is
+		// registered when the device joins the lobby, before ClientConnect runs,
+		// so a refused player can otherwise keep talking in lobby chat until the
+		// join attempt times out. P_GetLobbyUserNum only does pointer arithmetic,
+		// so it is safe before the client is set up, but it clamps an
+		// out-of-range entity to 0 - hence the explicit slot check, so a bad
+		// pointer can never target the host.
+		const ptrdiff_t slot = ent - g_entities;
+		if (slot >= 1 && slot <= static_cast<ptrdiff_t>(game.maxclients))
+			gi.AddCommandString(G_Fmt("kick {}\n", P_GetLobbyUserNum(ent)).data());
+		return false;
+	}
+
 	ent->client->sess.team = deathmatch->integer ? TEAM_NONE : TEAM_FREE;
 
 	// they can connect

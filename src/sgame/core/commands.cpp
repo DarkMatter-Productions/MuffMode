@@ -3,6 +3,7 @@
 #include "g_local.h"
 #include "debug_log.h"
 #include "muffmode/mm_admin.h"
+#include "muffmode/mm_bans.h"
 #include "muffmode/mm_captain.h"
 #include "muffmode/mm_command_contracts.h"
 #include "muffmode/mm_duel.h"
@@ -1992,7 +1993,78 @@ static void Cmd_Boot_f(gentity_t *ent) {
 		return;
 	}
 
-	gi.AddCommandString(G_Fmt("kick {}\n", targ - g_entities).data());
+	gi.AddCommandString(G_Fmt("kick {}\n", P_GetLobbyUserNum(targ)).data());
+}
+
+static void Cmd_Ban_f(gentity_t *ent) {
+	if (gi.argc() < 2) {
+		gi.LocClient_Print(ent, PRINT_HIGH, "Usage: {} [client num] [reason]\n", gi.argv(0));
+		return;
+	}
+
+	// Target by slot number only, resolved directly rather than through
+	// ClientEntFromString: that helper matches an exact display name before it
+	// parses a slot, so a player calling themselves "3" would shadow slot 3.
+	// A kick aimed at the wrong player is transient; a ban persists.
+	const std::optional<uint32_t> slot = MM_ParseUInt32Arg(gi.argv(1));
+	if (!slot || game.maxclients == 0 || *slot >= game.maxclients) {
+		gi.LocClient_Print(ent, PRINT_HIGH, "Specify the player number to ban.\n");
+		return;
+	}
+
+	gentity_t *targ = &g_entities[static_cast<size_t>(*slot) + 1];
+
+	if (!targ->inuse || !targ->client) {
+		gi.LocClient_Print(ent, PRINT_HIGH, "Invalid client number.\n");
+		return;
+	}
+
+	if (targ == &g_entities[1]) {
+		gi.LocClient_Print(ent, PRINT_HIGH, "You cannot ban the lobby owner.\n");
+		return;
+	}
+
+	if (targ->client->sess.admin) {
+		gi.LocClient_Print(ent, PRINT_HIGH, "You cannot ban an admin.\n");
+		return;
+	}
+
+	std::string reason;
+	for (int i = 2; i < gi.argc(); ++i) {
+		if (!reason.empty())
+			reason += ' ';
+		reason += gi.argv(i);
+	}
+
+	// Bans are keyed by social_id, so a target without one cannot be recorded.
+	const char *sid = targ->client->pers.social_id;
+	if (targ->client->sess.is_a_bot || sid == nullptr || sid[0] == '\0') {
+		gi.LocClient_Print(ent, PRINT_HIGH, "That player has no social ID (bot or unauthenticated); kicking instead.\n");
+		// The engine "kick" command takes the lobby user number, not the
+		// entity index; P_GetLobbyUserNum is the accessor for it.
+		gi.AddCommandString(G_Fmt("kick {}\n", P_GetLobbyUserNum(targ)).data());
+		return;
+	}
+
+	MM_Bans_Add(sid, targ->client->resp.netname, reason);
+	gi.LocBroadcast_Print(PRINT_HIGH, "{} was banned.\n", targ->client->resp.netname);
+	gi.AddCommandString(G_Fmt("kick {}\n", P_GetLobbyUserNum(targ)).data());
+}
+
+static void Cmd_Unban_f(gentity_t *ent) {
+	if (gi.argc() < 2) {
+		gi.LocClient_Print(ent, PRINT_HIGH, "Usage: {} [social_id]  (see 'banlist')\n", gi.argv(0));
+		return;
+	}
+
+	if (MM_Bans_Remove(gi.argv(1)))
+		gi.LocClient_Print(ent, PRINT_HIGH, "Removed ban for {}.\n", gi.argv(1));
+	else
+		gi.LocClient_Print(ent, PRINT_HIGH, "No ban found for {}.\n", gi.argv(1));
+}
+
+static void Cmd_BanList_f(gentity_t *ent) {
+	MM_Bans_Print(ent);
 }
 
 static void Cmd_Doctor_f(gentity_t *ent) {
@@ -2328,6 +2400,8 @@ cmds_t client_cmds[] = {
 	{"alertall",		Cmd_AlertAll_f,			CF_ALLOW_SPEC | CF_CHEAT_PROTECT},
 	{"announcer",		Cmd_Announcer_f,		CF_ALLOW_SPEC | CF_ALLOW_DEAD},
 	{"balance",			Cmd_BalanceTeams_f,		CF_ADMIN_ONLY | CF_ALLOW_INT | CF_ALLOW_SPEC},
+	{"ban",				Cmd_Ban_f,				CF_ADMIN_ONLY | CF_ALLOW_INT | CF_ALLOW_SPEC},
+	{"banlist",			Cmd_BanList_f,			CF_ADMIN_ONLY | CF_ALLOW_INT | CF_ALLOW_SPEC},
 	{"boot",			Cmd_Boot_f,				CF_ADMIN_ONLY | CF_ALLOW_INT | CF_ALLOW_SPEC},
 	{"callvote",		Cmd_CallVote_f,			CF_ALLOW_DEAD | CF_ALLOW_SPEC},
 	{"captain",			Cmd_Captain_f,			CF_ALLOW_DEAD},
@@ -2413,6 +2487,7 @@ cmds_t client_cmds[] = {
 	{"time-in",			Cmd_TimeIn_f,			CF_ALLOW_DEAD | CF_ALLOW_SPEC},
 	{"timer",			Cmd_Timer_f,			CF_ALLOW_SPEC | CF_ALLOW_DEAD},
 	{"infohud",			Cmd_InfoHud_f,			CF_ALLOW_SPEC | CF_ALLOW_DEAD},
+	{"unban",			Cmd_Unban_f,			CF_ADMIN_ONLY | CF_ALLOW_INT | CF_ALLOW_SPEC},
 	{"unhook",			Cmd_UnHook_f,			CF_NONE},
 	{"unlockteam",		Cmd_UnlockTeam_f,		CF_ALLOW_DEAD},
 	{"unreadyall",		Cmd_UnReadyAll_f,		CF_ADMIN_ONLY | CF_ALLOW_INT | CF_ALLOW_SPEC},

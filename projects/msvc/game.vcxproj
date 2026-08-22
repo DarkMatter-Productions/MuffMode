@@ -171,6 +171,8 @@
     <ClInclude Include="..\..\src\sgame\muffmode\mm_admin.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_announcer.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_announcer_rules.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_bans.h" />
+    <ClInclude Include="..\..\src\sgame\muffmode\mm_bans_rules.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_captain.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_command_contracts.h" />
     <ClInclude Include="..\..\src\sgame\muffmode\mm_hud_stat_contracts.h" />
@@ -300,6 +302,7 @@
     <ClCompile Include="..\..\src\sgame\monsters\m_widow2.cpp" />
     <ClCompile Include="..\..\src\sgame\muffmode\mm_admin.cpp" />
     <ClCompile Include="..\..\src\sgame\muffmode\mm_announcer.cpp" />
+    <ClCompile Include="..\..\src\sgame\muffmode\mm_bans.cpp" />
     <ClCompile Include="..\..\src\sgame\muffmode\mm_captain.cpp" />
     <ClCompile Include="..\..\src\sgame\muffmode\mm_combat_heatmap.cpp" />
     <ClCompile Include="..\..\src\sgame\muffmode\mm_debug.cpp" />
