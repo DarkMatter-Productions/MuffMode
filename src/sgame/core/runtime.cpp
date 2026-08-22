@@ -5,6 +5,7 @@
 #include "debug_log.h"
 #include "entities/shadow_lights.h"
 #include "muffmode/mm_announcer.h"
+#include "muffmode/mm_bans.h"
 #include "muffmode/mm_captain.h"
 #include "muffmode/mm_combat_heatmap.h"
 #include "muffmode/mm_duel.h"
@@ -494,6 +495,7 @@ static void InitGame() {
 	gi.Com_Print("==== InitGame ====\n");
 
 	InitSave();
+	MM_Bans_Load();
 
 	// seed RNG
 	mt_rand.seed((uint32_t)std::chrono::system_clock::now().time_since_epoch().count());
