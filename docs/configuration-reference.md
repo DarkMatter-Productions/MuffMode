@@ -32,8 +32,27 @@ Use commands in the form `command [arg]`.
 | `loadmotd` | Reload the message of the day file. |
 | `doctor` | Print diagnostics for risky or inconsistent cvar combinations. |
 | `boot <player>` | Remove a player, depending on server admin configuration. |
+| `ban <client num> [reason]` | Ban a player by their social ID and remove them from the server. Takes a client slot number only; unlike `boot` it does not match display names. See [Ban List](#ban-list). |
+| `unban <social_id>` | Remove a stored ban. Use `banlist` to look up the ID. |
+| `banlist` | Print the stored bans with their social IDs. |
 | `handicap <player> <weapon> <on|off>` | Apply duel weapon restrictions. |
 | `handicap_clear` | Clear duel weapon restrictions. |
+
+## Ban List
+
+Bans are keyed by the engine-provided `social_id`, a stable per-account identifier. Because it does not change when a player renames or reconnects from a different address, a ban survives both.
+
+The list is stored in `baseq2/bans.cfg` and is written atomically whenever it changes. It is read once during `InitGame`, and enforced at the top of `ClientConnect`, so a banned player is refused before any client setup runs.
+
+Each line holds three pipe-delimited fields:
+
+```
+social_id|name|reason
+```
+
+Only `social_id` is required; `name` is recorded for readability and `reason` may be empty. Blank lines and lines beginning with `#` are ignored, and duplicate IDs collapse to the last entry read. Note that the file is rewritten from the in-memory list whenever it changes, so hand-written comments are not preserved. The `|` character and newlines are stripped from `name` and `reason` on write, so a record is always exactly one line.
+
+Bots and unauthenticated clients carry no `social_id` and therefore can never be banned; `ban` kicks them instead and says so.
 
 ## Client Commands
 
