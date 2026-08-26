@@ -1701,7 +1701,11 @@ void Use_Adrenaline(gentity_t *ent, gitem_t *item) {
 	if (MM_RulesetHealthArmorCap() && ent->health > MM_RULESET_HEALTH_CAP)
 		ent->health = MM_RULESET_HEALTH_CAP;
 
-	gi.sound(ent, CHAN_ITEM, gi.soundindex("items/m_health.wav"), 1, ATTN_NORM, 0);
+	// [MuffMode] Default plays the megahealth pickup sound instead of stock's
+	// n_health.wav; g_adrenaline_legacy_sound restores the original for anyone
+	// who wants it back.
+	gi.sound(ent, CHAN_ITEM, gi.soundindex(g_adrenaline_legacy_sound->integer
+		? "items/n_health.wav" : "items/m_health.wav"), 1, ATTN_NORM, 0);
 
 	ent->client->pu_regen_time_blip = level.time + 100_ms;
 

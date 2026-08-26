@@ -1034,6 +1034,7 @@ dedicated console can use `sv load_mappool` and `sv load_mapcycle`.
 | `g_arena_start_armor` | `200` | Global MuffMode Arena starting-armor default; also used by Freeze Tag when `g_freezetag_arena_loadout` is enabled. |
 | `g_arena_start_health` | `200` | Shared arena-loadout starting-health default; also used by Freeze Tag when `g_freezetag_arena_loadout` is enabled. The shipped Arena factories override it to `100`. |
 | `g_arena_dmg_armor` | `0` | Legacy arena-loadout self-armor switch used outside multi-room MuffMode Arena; GT_ARENA uses each room's independent `armorprotect` setting. |
+| `g_adrenaline_legacy_sound` | `0` | Plays Adrenaline's original `n_health.wav` pickup sound instead of the current default (`m_health.wav`, shared with Mega Health). |
 | `g_coop_health_scaling` | `0` | Scales co-op health by player count. |
 | `g_corpse_sink_time` | `15` | Seconds before corpses sink and disappear. |
 | `g_damage_scale` | `1` | Global damage scale. |
@@ -1041,7 +1042,7 @@ dedicated console can use `sv load_mappool` and `sv load_mapcycle`.
 | `g_gib_impact_effects` | `2` | Feedback when a gib hits something. `0` disables it, `1` emits the blood or spark burst only, `2` also plays the stock `player/gibimp*` impact sounds. Effects are rate-limited per gib and server-wide, and gibs that reach a sky brush are removed instead of bouncing off it. |
 | `g_gib_max` | `192` | Ceiling on live gibs across the server. Once reached, the oldest gib is retired so the newest death always looks right. `0` removes the cap; the tracking ring bounds it to `1024` either way. A single deepest-overkill death costs at most 58 entities. |
 | `g_dm_explosive_respawn_time` | `60` | Seconds before a destroyed `misc_explobox` or `func_explosive` returns in deathmatch; `0` disables prop respawning entirely. Values are clamped to `1`-`3600`. A prop only returns once no player can see its spot, nothing is standing in it, and no player is within 128 units, so the wait can exceed this time on a busy map. |
-| `g_dm_holdable_adrenaline` | `1` | Allows holdable Adrenaline in deathmatch. |
+| `g_dm_holdable_adrenaline` | `0` | Allows holdable Adrenaline in deathmatch. |
 | `g_dm_instant_items` | `1` | Makes holdable items activate instantly in deathmatch. |
 | `g_dm_item_respawn_rate` | `1.0` | Global multiplier on every item's respawn time (weapons included). |
 | `g_dm_no_fall_damage` | `0` | Disables deathmatch fall damage. |

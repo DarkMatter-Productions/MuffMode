@@ -1411,7 +1411,7 @@ model="models/items/adrenal/tris.md2"
 		/* vwep_model */ nullptr,
 		/* armor_info */ nullptr,
 		/* tag */ POWERUP_ADRENALINE,
-		/* precache */ "items/n_health.wav"
+		/* precache */ "items/n_health.wav items/m_health.wav"
 	},
 
 /*QUAKED item_bandolier (.3 .3 1) (-16 -16 -16) (16 16 16) TRIGGER_SPAWN x x SUSPENDED x x x x NOT_EASY NOT_MEDIUM NOT_HARD NOT_DM NOT_COOP

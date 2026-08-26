@@ -18,7 +18,7 @@
 constexpr const char *GAMEVERSION = "baseq2";
 
 constexpr const char *GAMEMOD_TITLE = "Muff Mode";
-constexpr const char *GAMEMOD_VERSION = "0.85.19";
+constexpr const char *GAMEMOD_VERSION = "0.85.20";
 
 //==================================================================
 
@@ -2367,6 +2367,7 @@ extern cvar_t *gun_x, *gun_y, *gun_z;
 extern cvar_t *run_pitch;
 extern cvar_t *run_roll;
 
+extern cvar_t *g_adrenaline_legacy_sound;
 extern cvar_t *g_airaccelerate;
 extern cvar_t *g_allow_admin;
 extern cvar_t *g_allow_custom_skins;

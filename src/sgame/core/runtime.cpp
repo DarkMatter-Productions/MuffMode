@@ -134,6 +134,7 @@ cvar_t *gun_x, *gun_y, *gun_z;
 cvar_t *run_pitch;
 cvar_t *run_roll;
 
+cvar_t *g_adrenaline_legacy_sound;
 cvar_t *g_airaccelerate;
 cvar_t *g_allow_admin;
 cvar_t *g_allow_custom_skins;
@@ -852,6 +853,7 @@ static void InitGame() {
 	ai_model_scale = gi.cvar("ai_model_scale", "0", CVAR_NOFLAGS);
 	ai_movement_disabled = gi.cvar("ai_movement_disabled", "0", CVAR_NOFLAGS);
 
+	g_adrenaline_legacy_sound = gi.cvar("g_adrenaline_legacy_sound", "0", CVAR_NOFLAGS);
 	g_airaccelerate = gi.cvar("g_airaccelerate", "0", CVAR_NOFLAGS);
 	g_allow_admin = gi.cvar("g_allow_admin", "1", CVAR_NOFLAGS);
 	g_allow_custom_skins = gi.cvar("g_allow_custom_skins", "1", CVAR_NOFLAGS);
@@ -915,7 +917,7 @@ static void InitGame() {
 	g_dm_force_join = gi.cvar("g_dm_force_join", "0", CVAR_NOFLAGS);
 	g_dm_force_respawn = gi.cvar("g_dm_force_respawn", "1", CVAR_NOFLAGS);
 	g_dm_force_respawn_time = gi.cvar("g_dm_force_respawn_time", "3", CVAR_NOFLAGS);
-	g_dm_holdable_adrenaline = gi.cvar("g_dm_holdable_adrenaline", "1", CVAR_NOFLAGS);
+	g_dm_holdable_adrenaline = gi.cvar("g_dm_holdable_adrenaline", "0", CVAR_NOFLAGS);
 	g_dm_instant_items = gi.cvar("g_dm_instant_items", "1", CVAR_NOFLAGS);
 	g_dm_intermission_shots = gi.cvar("g_dm_intermission_shots", "0", CVAR_NOFLAGS);
 	g_dm_item_respawn_rate = gi.cvar("g_dm_item_respawn_rate", "1.0", CVAR_NOFLAGS);
